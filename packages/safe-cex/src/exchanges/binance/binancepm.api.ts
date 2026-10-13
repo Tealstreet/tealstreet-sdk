@@ -7,6 +7,11 @@ import qs from 'qs';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { installTransportAdapter, safeCexAxiosCreate, safeCexAxiosCreateNoProxy } from '../../safeCexAxiosCreate';
 import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import {
+  isBinanceStyleSignatureRejection,
+  resendOnSignatureRejection,
+  signatureRejectedResponse,
+} from '../../utils/signatureRejection';
 import { BaseExchange } from '../base';
 import { signBinanceRequest } from './binance.signing';
 import { BASE_FAPI_URL, BASE_PAPI_URL, ENDPOINTS, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binancepm.types';
@@ -33,7 +38,12 @@ export const createBinanceAPI = (options: ExchangeOptions, exchange: BaseExchang
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY)) });
+  retry(xhr, {
+    retries: 3,
+    retryCondition: (error) =>
+      networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY))(error) ||
+      signatureRejectedResponse(isBinanceStyleSignatureRejection)(error),
+  });
 
   xhr.interceptors.request.use((config) => {
     // on livenet, don't sign listen key requests (they don't need it)
@@ -58,6 +68,11 @@ export const createBinanceAPI = (options: ExchangeOptions, exchange: BaseExchang
   if (options.tealstreetTunnel) {
     installTransportAdapter(xhr, options, exchange.name);
   }
+
+  // Last, so a resend is not put through any later interceptor twice.
+  xhr.interceptors.response.use(
+    (response) => resendOnSignatureRejection(xhr, response, isBinanceStyleSignatureRejection) ?? response,
+  );
 
   return xhr;
 };

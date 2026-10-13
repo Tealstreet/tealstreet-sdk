@@ -2,12 +2,13 @@ import type { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import type { PayloadSignerRequest } from '../types';
 
 import createHmac from 'create-hmac';
-import { describe, expect, it } from 'vitest';
+import { describe, expect, it, vi } from 'vitest';
 
 import { createAPI as createBinanceAPI } from '../exchanges/binance/binance.api';
 import { createPAPI as createBinancePmAPI } from '../exchanges/binance/binancepm.api';
 import { createAPI as createBinanceSpotAPI } from '../exchanges/binance/binancespot.api';
 import { createAPI as createBybitAPI } from '../exchanges/bybit/bybit.api';
+import { virtualClock } from '../utils/virtualClock';
 
 const stubExchange = (name: string) =>
   ({
@@ -123,5 +124,27 @@ describe('payloadSigner on binance', () => {
     const { signature, ...rest } = config.params;
 
     expect(signature).toBe(createHmac('sha256', 's').update(sentQuery({ ...config, params: rest })).digest('hex'));
+  });
+});
+
+// A resend replays the config the first attempt went out with, its signer headers
+// included; the replay's signer headers must be the ones made for the replay.
+describe('payloadSigner headers on a replayed request', () => {
+  it.each([
+    ['bybit', (signer: any) => createBybitAPI({ testnet: false, key: 'api-key', payloadSigner: signer } as any, stubExchange('bybit')), '/v5/position/list'],
+    ['binance', (signer: any) => createBinanceAPI({ testnet: false, key: 'api-key', payloadSigner: signer } as any, stubExchange('binance')), '/fapi/v3/balance'],
+  ])('%s', async (_, create, url) => {
+    let now = 1_800_000_000_000;
+    const clock = vi.spyOn(virtualClock, 'getCurrentTimeMs').mockImplementation(() => (now += 1_000));
+    const { calls, signer } = recordingSigner();
+    const xhr = create(signer);
+
+    const first = await capture(xhr, { method: 'get', url, params: { a: '1' } });
+    const replay = await capture(xhr, first as any);
+
+    expect(calls).toHaveLength(2);
+    expect(calls[1].payload).not.toBe(calls[0].payload);
+    expect(replay.headers['X-Signer-Header']).toBe(Buffer.from(calls[1].payload).toString('base64'));
+    clock.mockRestore();
   });
 });

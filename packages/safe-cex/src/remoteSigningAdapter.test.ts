@@ -1,8 +1,9 @@
 import type { AxiosAdapter, InternalAxiosRequestConfig } from 'axios';
 import type { RemoteSigner } from './types';
 
-import { AxiosHeaders } from 'axios';
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import axios, { AxiosError, AxiosHeaders } from 'axios';
+import axiosRetry from 'axios-retry';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { createRemoteSigningAdapter, markSkipRemoteSigning } from './remoteSigningAdapter';
 
@@ -173,5 +174,89 @@ describe('createRemoteSigningAdapter', () => {
     await build()(config);
 
     expect(sign).toHaveBeenCalledTimes(1);
+  });
+
+  // No inner adapter is the hosted shape without the HOW tunnel: the request
+  // executes through axios' default adapter LIST. Every resend — axios-retry
+  // after a network error, a venue's own retry — must come back here to be
+  // re-signed, or it goes out with the previous attempt's signature.
+  describe('resends without an inner adapter', () => {
+    const originalDefaultAdapter = axios.defaults.adapter;
+    afterEach(() => {
+      axios.defaults.adapter = originalDefaultAdapter;
+    });
+
+    const signingInstance = () => {
+      let signatures = 0;
+      sign.mockImplementation(async (request: { id: string }) => ({
+        id: request.id,
+        config: { headers: { 'X-Signed': `sig-${++signatures}` }, params: undefined, data: undefined },
+      }));
+      const instance = axios.create({ baseURL: 'https://api.bybit.com' });
+      instance.defaults.adapter = createRemoteSigningAdapter(remoteSigner, 'bybit' as never, () => undefined, 'K');
+      return instance;
+    };
+
+    it('re-signs an axios-retry resend after a network error', async () => {
+      const sent: string[] = [];
+      axios.defaults.adapter = [
+        async (config: InternalAxiosRequestConfig) => {
+          sent.push(String(new AxiosHeaders(config.headers).get('X-Signed')));
+          if (sent.length === 1) throw new AxiosError('socket hang up', AxiosError.ERR_NETWORK, config);
+          return { data: { ok: true }, status: 200, statusText: 'OK', headers: {}, config };
+        },
+      ] as never;
+      const instance = signingInstance();
+      axiosRetry(instance, { retries: 1, retryDelay: () => 0, retryCondition: () => true });
+
+      await instance.get('/v5/position/list');
+
+      expect(sign).toHaveBeenCalledTimes(2);
+      expect(sent).toEqual(['sig-1', 'sig-2']);
+    });
+
+    it('re-signs an axios-retry resend after an HTTP error status', async () => {
+      const sent: string[] = [];
+      axios.defaults.adapter = [
+        async (config: InternalAxiosRequestConfig) => {
+          sent.push(String(new AxiosHeaders(config.headers).get('X-Signed')));
+          const status = sent.length === 1 ? 503 : 200;
+          const response = { data: {}, status, statusText: '', headers: {}, config };
+          if (status >= 400) throw new AxiosError('unavailable', AxiosError.ERR_BAD_RESPONSE, config, null, response);
+          return response;
+        },
+      ] as never;
+      const instance = signingInstance();
+      axiosRetry(instance, { retries: 1, retryDelay: () => 0, retryCondition: () => true });
+
+      await instance.get('/v5/position/list');
+
+      expect(sent).toEqual(['sig-1', 'sig-2']);
+    });
+
+    it('still stops at the retry limit when every attempt fails', async () => {
+      axios.defaults.adapter = [
+        async (config: InternalAxiosRequestConfig) => {
+          throw new AxiosError('socket hang up', AxiosError.ERR_NETWORK, config);
+        },
+      ] as never;
+      const instance = signingInstance();
+      axiosRetry(instance, { retries: 2, retryDelay: () => 0, retryCondition: () => true });
+
+      await expect(instance.get('/v5/position/list')).rejects.toThrow('socket hang up');
+      expect(sign).toHaveBeenCalledTimes(3);
+    });
+
+    it('hands back a config that routes a venue resend through the signer again', async () => {
+      axios.defaults.adapter = [
+        async (config: InternalAxiosRequestConfig) => ({ data: {}, status: 200, statusText: 'OK', headers: {}, config }),
+      ] as never;
+      const instance = signingInstance();
+
+      const first = await instance.get('/v5/position/list');
+      await instance.request(first.config);
+
+      expect(sign).toHaveBeenCalledTimes(2);
+    });
   });
 });

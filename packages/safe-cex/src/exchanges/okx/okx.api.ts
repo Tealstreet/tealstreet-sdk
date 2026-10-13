@@ -1,4 +1,5 @@
 import type { ExchangeOptions } from '../../types';
+import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
 import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
@@ -9,6 +10,7 @@ import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
+import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
 import { BaseExchange } from '../base';
 import type { OKXExchange } from './okx.exchange';
 import { BASE_URLS, RECV_WINDOW } from './okx.types';
@@ -17,6 +19,9 @@ import { BASE_URLS, RECV_WINDOW } from './okx.types';
 // and so misses tickers and both candle endpoints under `/api/v5/market/`.
 // Used only to skip the hosted signing round trip, never to decide signing.
 const isPublicEndpoint = (url?: string) => Boolean(url && (url.includes('/public/') || url.includes('/market/')));
+
+export const isOkxSignatureRejection: IsSignatureRejection = (data) =>
+  String(data?.code) === '50113' || /invalid sign/i.test(String(data?.msg ?? ''));
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const { passphrase } = options;
@@ -41,11 +46,17 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, {
+    retries: 3,
+    retryCondition: (error) => networkErrorOnRead()(error) || signatureRejectedResponse(isOkxSignatureRejection)(error),
+  });
 
   // Check OKX API-level errors (non-zero code) and convert to thrown errors
   // so they surface properly instead of crashing on missing `data` field
   xhr.interceptors.response.use((response) => {
+    const signatureResend = resendOnSignatureRejection(xhr, response, isOkxSignatureRejection);
+    if (signatureResend) return signatureResend;
+
     const code = response.data?.code;
     if (code && code !== '0') {
       const msg = response.data?.msg || `OKX API error (code ${code})`;

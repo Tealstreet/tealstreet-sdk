@@ -1,5 +1,6 @@
 import type { AxiosRequestConfig } from 'axios';
 import type { ExchangeOptions } from '../../types';
+import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
 import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
@@ -11,6 +12,7 @@ import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { virtualClock } from '../../utils/virtualClock';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
+import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
 import { BaseExchange } from '../base';
 import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './mexc.types';
 
@@ -48,6 +50,9 @@ const getQueryString = (config: AxiosRequestConfig): string => {
   return query;
 };
 
+export const isMexcSignatureRejection: IsSignatureRejection = (data) =>
+  Number(data?.code) === 602 || /signature verification failed/i.test(String(data?.message ?? data?.msg ?? ''));
+
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const xhr = safeCexAxiosCreate(
     {
@@ -65,7 +70,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, {
+    retries: 3,
+    retryCondition: (error) => networkErrorOnRead()(error) || signatureRejectedResponse(isMexcSignatureRejection)(error),
+  });
 
   xhr.interceptors.request.use((config) => {
     const nextConfig = { ...config };
@@ -105,6 +113,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   });
 
   xhr.interceptors.response.use((response) => {
+    const signatureResend = resendOnSignatureRejection(xhr, response, isMexcSignatureRejection);
+    if (signatureResend) return signatureResend;
+
     const data = response.data;
     if (data && typeof data === 'object') {
       const code = data.code;

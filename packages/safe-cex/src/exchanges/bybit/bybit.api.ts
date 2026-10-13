@@ -1,4 +1,5 @@
 import type { HOWRegion } from '../../httpOverWebsocket/axiosHttpOverWebsocketAdapter';
+import type { IsSignatureRejection } from '../../utils/signatureRejection';
 import type { ExchangeOptions } from '../../types';
 
 import { AxiosHeaders } from 'axios';
@@ -16,6 +17,7 @@ import { getBybitResponseMeta } from './bybit.response';
 import { getBybitSiteHeaders } from './bybit.site';
 import { BASE_URL, BROKER_ID, DEMO_URL, ENDPOINTS, RECV_WINDOW } from './bybit.types';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
+import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
 
 // Credential failures that will not self-heal on retry, so the tick backoff
 // should treat them like a 401.
@@ -63,15 +65,21 @@ export const parseBybitServerTimestamp = (retMsg: string): number | undefined =>
 const hasRetriedClockSync = (config: unknown) =>
   Boolean((config as Record<string, unknown> | undefined)?.[CLOCK_SYNC_RETRY_CONFIG_KEY]);
 
+// Bybit has said both "error sign!" and "Error sign, please check your signature
+// generation algorithm"; 10004 is the code behind either.
+const BYBIT_SIGN_REJECTION = /error sign/i;
+
+export const isBybitSignRejection: IsSignatureRejection = (data) => {
+  const { retCode, retMsg } = getBybitResponseMeta(data);
+  return retCode === 10004 || BYBIT_SIGN_REJECTION.test(retMsg ?? '');
+};
+
 const isBybitEnvProbeRequest = (config: unknown) =>
   Boolean((config as Record<string, unknown> | undefined)?.[BYBIT_ENV_PROBE_CONFIG_KEY]);
 
 export const shouldRetryBybitRequest = (error: any) => {
   const isNetwork = networkErrorOnRead()(error);
-  const isErrSign = Boolean(
-    error?.response?.data?.ret_msg?.includes('error sign!') || error?.response?.data?.retMsg?.includes('error sign!'),
-  );
-  if (!isNetwork) return isErrSign;
+  if (!isNetwork) return signatureRejectedResponse(isBybitSignRejection)(error);
   return !isInstrumentsInfoRequest(error);
 };
 
@@ -220,7 +228,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     }
 
     // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
-    const data = nextConfig.method === 'get' ? qs.stringify(nextConfig.params) : JSON.stringify(nextConfig.data);
+    // A resent config carries the body axios already serialized; stringifying
+    // it again would sign a quoted copy of what actually goes out.
+    const body = typeof nextConfig.data === 'string' ? nextConfig.data : JSON.stringify(nextConfig.data);
+    const data = nextConfig.method === 'get' ? qs.stringify(nextConfig.params) : body;
 
     const timestamp = virtualClock.getCurrentTimeMs();
     const { signature, headers: signerHeaders } = await signPayload(
@@ -231,8 +242,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     );
 
     const headers = new AxiosHeaders({
-      ...signerHeaders,
+      // Signer headers last: a replayed config still carries the previous signature's.
       ...nextConfig.headers,
+      ...signerHeaders,
       'X-BAPI-SIGN': signature,
       'X-BAPI-API-KEY': options.key,
       'X-BAPI-TIMESTAMP': timestamp,
@@ -280,6 +292,11 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     }
 
     if (isEnvProbeResponse) return response;
+
+    // Re-signed once before it may count as a bad key: these arrive in bursts right
+    // after a reconnect, on keys that work.
+    const signatureResend = resendOnSignatureRejection(xhr, response, isBybitSignRejection);
+    if (signatureResend) return signatureResend;
 
     // Bybit also returns credential failures inside a normal envelope, both on
     // 4xx and on HTTP 200, so status alone under-counts the streak.

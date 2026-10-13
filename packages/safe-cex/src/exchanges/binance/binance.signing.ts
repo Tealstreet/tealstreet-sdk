@@ -35,7 +35,8 @@ export const signBinanceRequest = async (
   data.signature = signature;
 
   const nextConfig = { ...config, params: data };
-  if (headers) nextConfig.headers = new AxiosHeaders({ ...headers, ...config.headers });
+  // Last: a replayed config still carries the previous signature's headers.
+  if (headers) nextConfig.headers = new AxiosHeaders({ ...config.headers, ...headers });
 
   // Binance takes POST/PUT/DELETE data as query params.
   return omit(nextConfig, 'data') as InternalAxiosRequestConfig;

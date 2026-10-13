@@ -7,16 +7,21 @@ import qs from 'qs';
 
 import { installTransportAdapter, safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import {
+  isBinanceStyleSignatureRejection,
+  resendOnSignatureRejection,
+  signatureRejectedResponse,
+} from '../../utils/signatureRejection';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './bitrue.types';
 
-const isErrorSignature = (error: any) => {
-  const isNetwork = networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY))(error);
-  const isErrSign =
-    error?.response?.data?.ret_msg?.includes('error sign!') || error?.response?.data?.retMsg?.includes('error sign!');
-  return isNetwork || isErrSign;
-};
+// Binance-style -1022; Bitrue sends codes as numbers or strings.
+export const isBitrueSignatureRejection = isBinanceStyleSignatureRejection;
+
+const isRetryable = (error: any) =>
+  networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY))(error) ||
+  signatureRejectedResponse(isBitrueSignatureRejection)(error);
 
 // only works with worker shim...
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
@@ -43,11 +48,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     installTransportAdapter(xhr, options, exchange.name, 'bigInt');
   }
 
-  // retry requests on network errors instead of throwing
-  // and some signature errors
+  // retry reads on network errors, and a signature rejection once
   retry(xhr, {
     retries: 3,
-    retryCondition: isErrorSignature,
+    retryCondition: isRetryable,
   });
 
   xhr.interceptors.request.use((config) => {
@@ -98,6 +102,11 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     return { ...nextConfig, headers };
   });
+
+  // The HOW tunnel resolves a 4xx, so a rejection over it never reaches axios-retry.
+  xhr.interceptors.response.use(
+    (response) => resendOnSignatureRejection(xhr, response, isBitrueSignatureRejection) ?? response,
+  );
 
   return xhr;
 };

@@ -597,7 +597,7 @@ realizedPnl = achievedProfits + totalFee - deductedFee
   - Algo order placement and updates
 - **Batch size**: Orders are chunked into groups of 50 per symbol for batch operations
 - **Recv window**: 20,000ms default timeout (`RECV_WINDOW`), configurable via `options.extra.recvWindow`
-- **Network retry**: 3 retries on network errors via `axios-retry` (`bitget.api.ts:36`)
+- **Network retry**: 3 retries on network errors via `axios-retry` — reads only; a signature rejection (`40009`) is re-signed and resent once, writes included (`utils/signatureRejection.ts`)
 - **Tunnel support**: When `options.tealstreetTunnel` is set, the `axiosHttpOverWebsocketAdapter` is used (`bitget.api.ts:85-87`)
 
 ## State Reconciliation
@@ -720,7 +720,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 18. **One-way mode isolated leverage mismatch warning**: `fetchPositionMetadata()` (`bitget.exchange.ts:326-332`) warns if isolated long and short leverages differ in one-way mode.
 
-19. **Response interceptor error logging**: The response interceptor in `bitget.api.ts` fires `emitAndLogError` (user-facing toast) when `code !== '00000'` and data has no `data` field; it does not throw, so the caller still receives the response. Codes in the file-scope `SILENT_ERROR_CODES` set are skipped — currently `'40084'` ("Classic Account mode"), because `_detectAccountType` deliberately probes a v3 endpoint expecting that exact response on Classic accounts, and `'40085'` ("Unified Account mode ... Classic Account API is not supported"), because supported linear callers can promote to UTA and retry while unsupported variants surface scoped variant guidance. The interceptor also suppresses raw `"environment is incorrect"` messages because validation/position callers replace them with a Testnet-vs-Live recovery message. During `validateAccount()`, Bitget sets a validation-scope flag so expected bad-key, bad-secret, passphrase, IP whitelist, UTA-mode, and signature failures are returned to the add-account UI without Sentry/toast emission; runtime polling/trading requests outside that scope still emit. **Add new codes or message guards when you have a probe / fallback path that legitimately expects an error or a caller-owned translation**; do not relax the interceptor itself.
+19. **Response interceptor error logging**: The response interceptor in `bitget.api.ts` fires `emitAndLogError` (user-facing toast) when `code !== '00000'` and data has no `data` field; it does not throw, so the caller still receives the response. Codes in the file-scope `SILENT_ERROR_CODES` set are skipped — currently `'40084'` ("Classic Account mode"), because `_detectAccountType` deliberately probes a v3 endpoint expecting that exact response on Classic accounts, and `'40085'` ("Unified Account mode ... Classic Account API is not supported"), because supported linear callers can promote to UTA and retry while unsupported variants surface scoped variant guidance. The interceptor also suppresses raw `"environment is incorrect"` messages because validation/position callers replace them with a Testnet-vs-Live recovery message. During `validateAccount()`, Bitget sets a validation-scope flag so expected bad-key, bad-secret, passphrase, IP whitelist, UTA-mode, and signature failures (a `40009` only after its one re-signed resend fails too) are returned to the add-account UI without Sentry/toast emission; runtime polling/trading requests outside that scope still emit. **Add new codes or message guards when you have a probe / fallback path that legitimately expects an error or a caller-owned translation**; do not relax the interceptor itself.
 
 20. **Trailing stop orders response format**: `fetchTrailingStopOrders()` handles both array and `{ entrustedList }` response formats (`bitget.exchange.ts:824-828`).
 
@@ -754,7 +754,7 @@ Testnet support exists in code but is **disabled** in metadata (`supportsTestnet
 
 ### Network Retry
 
-- `axios-retry` configured with 3 retries on network errors (`bitget.api.ts:36`)
+- `axios-retry` configured with 3 retries on network errors; `40009` is re-signed and resent once
 
 ### WebSocket Error Recovery
 

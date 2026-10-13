@@ -4,7 +4,7 @@ import type { AsterDEXAPIVersion } from './asterdex.types';
 
 import * as crypto from 'crypto';
 
-import axios, { AxiosInstance } from 'axios';
+import axios, { AxiosInstance, InternalAxiosRequestConfig } from 'axios';
 import axiosRateLimit from 'axios-rate-limit';
 import axiosRetry from 'axios-retry';
 import { ethers } from 'ethers';
@@ -14,6 +14,11 @@ import { installTransportAdapter, safeCexAxiosCreate } from '../../safeCexAxiosC
 import { ExchangeOptions, LogSeverity } from '../../types';
 import { appendHttpFailure } from '../../utils/httpFailure';
 import { isReadOnlyMethod, onlyReads } from '../../utils/retryReadsOnly';
+import {
+  SIGNATURE_RETRY_CONFIG_KEY,
+  hasRetriedSignature,
+  isBinanceStyleSignatureRejection,
+} from '../../utils/signatureRejection';
 import {
   ASTERDEX_ENDPOINTS,
   isAsterDEXV3PrivateKey,
@@ -244,6 +249,13 @@ export const createPublicAPI = (exchange?: AsterDEXExchange): AxiosInstance => {
   return rateLimitedAPI;
 };
 
+const SIGNING_FIELDS = ['signature', 'timestamp', 'recvWindow', 'user', 'signer', 'nonce'];
+
+const withoutSigningFields = (params: unknown): Record<string, any> =>
+  params && typeof params === 'object'
+    ? Object.fromEntries(Object.entries(params).filter(([key]) => !SIGNING_FIELDS.includes(key)))
+    : {};
+
 export const createAPI = (
   exchange: AsterDEXExchange,
   options: AsterDEXAPIOptions = {},
@@ -302,7 +314,9 @@ export const createAPI = (
 
         // Prepare parameters for signature
         // Binance-style APIs send all parameters as query params, even for POST/PUT
-        const data = mutableConfig.__asterUnsignedParams || config.data || config.params || {};
+        // A resend whose unsigned params were never recorded (hosted, where the server
+        // returns before this) still carries the previous attempt's signing fields.
+        const data = mutableConfig.__asterUnsignedParams || withoutSigningFields(config.data || config.params || {});
         mutableConfig.__asterUnsignedParams = { ...data };
 
         // Add timestamp and recvWindow at the end (order matters)
@@ -381,9 +395,20 @@ export const createAPI = (
     },
   );
 
+  // V1 only: V3 signs with a wallet key, where a rejection is not drift a resend fixes.
+  // The request interceptor rebuilds the signature from `__asterUnsignedParams`.
+  const resendV1SignatureRejection = (config: InternalAxiosRequestConfig | undefined, data: unknown) => {
+    if (!config || config.url?.includes('/fapi/v3/') || hasRetriedSignature(config)) return undefined;
+    if (!isBinanceStyleSignatureRejection(data)) return undefined;
+    return api.request({ ...config, [SIGNATURE_RETRY_CONFIG_KEY]: true } as InternalAxiosRequestConfig);
+  };
+
   // Add response interceptor for error handling
   api.interceptors.response.use(
     async (response) => {
+      const signatureResend = resendV1SignatureRejection(response.config, response.data);
+      if (signatureResend) return signatureResend;
+
       // Check if response contains an error (Binance-style API returns errors with 200 status)
       if (response.data?.code && response.data.code < 0) {
         const detail = getAsterDEXErrorDetail(response.data.msg, response.data.code);
@@ -401,6 +426,9 @@ export const createAPI = (
     async (error) => {
       if (error.response) {
         const { status, data } = error.response;
+
+        const signatureResend = resendV1SignatureRejection(error.config, data);
+        if (signatureResend) return signatureResend;
 
         // Check for timestamp error
         if (data?.code === -1021 && data?.msg?.includes('Timestamp')) {

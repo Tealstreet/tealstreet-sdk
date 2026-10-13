@@ -7,6 +7,7 @@ import {
   createAPI,
 } from '../../exchanges/bybit/bybit.api';
 import { BASE_URL, DEMO_URL, ENDPOINTS } from '../../exchanges/bybit/bybit.types';
+import { SIGNATURE_RETRY_CONFIG_KEY } from '../../utils/signatureRejection';
 import { virtualClock } from '../../utils/virtualClock';
 
 /**
@@ -307,11 +308,15 @@ describe('bybit response interceptor auth handling', () => {
     expect(exchange.recordAuthSuccess).not.toHaveBeenCalled();
   });
 
-  it('counts 10004 error-sign, which is what a wrong secret returns', async () => {
-    const { exchange, handler } = makeApi();
+  it('counts 10004 error-sign, which is what a wrong secret returns, once the re-signed resend fails too', async () => {
+    const { exchange, handler, requestSpy } = makeApi();
 
     await handler({ status: 200, data: { retCode: 10004, retMsg: 'error sign!' }, config: signed });
+    expect(requestSpy).toHaveBeenCalledWith(expect.objectContaining({ [SIGNATURE_RETRY_CONFIG_KEY]: true }));
+    expect(exchange.recordAuthFailure).not.toHaveBeenCalled();
 
+    const resent = { ...signed, [SIGNATURE_RETRY_CONFIG_KEY]: true };
+    await handler({ status: 200, data: { retCode: 10004, retMsg: 'error sign!' }, config: resent });
     expect(exchange.recordAuthFailure).toHaveBeenCalledTimes(1);
   });
 

@@ -379,7 +379,7 @@ Uses ticker's last price from store.
 - **Rate-limited client** (`xhr`): `maxRPS: 5` (5 requests per second via `axios-rate-limit`, `bitrue.exchange.ts:81`)
 - **Unlimited client** (`unlimitedXHR`): No rate limit, used for urgent order writes and public market fetching; authenticated open-order reads use `xhr`
 - **Request timeout**: Configurable via `recvWindow` (default 20,000ms, `bitrue.types.ts:3`)
-- **Axios retry**: 3 retries on network errors (reads only) OR `error sign!` responses (`isErrorSignature`)
+- **Axios retry**: 3 retries on network errors (reads only); a signature rejection (`-1022`) is re-signed and resent once (`isRetryable`, plus a response interceptor for the HOW tunnel, which resolves 4xx)
 - **Order batch placement**: Chunks of 5 orders placed in parallel (`bitrue.exchange.ts:942-964`)
 - **Order cancellation**: Chunks of 50 cancelled in parallel (`bitrue.exchange.ts:1023`)
 - **Async order fetch delay**: 100ms `sleep()` between per-symbol fetches (`bitrue.exchange.ts:500`)
@@ -518,13 +518,11 @@ order downsizing".
 - Axios errors: `err?.response?.data?.msg || err?.message` pattern used throughout
 - `emitAndLogError()` used to surface errors to user
 
-### Retry Strategy (`isErrorSignature`)
+### Retry Strategy (`isRetryable`)
 
-Custom retry condition (`isErrorSignature`):
-
-- Network errors on reads only (`networkErrorOnRead()`): a write whose response was lost may already be live
-- OR responses containing `error sign!` in `ret_msg` or `retMsg` field
-- 3 retries on either condition
+- Network errors on reads only (`networkErrorOnRead()`): a write whose response was lost may already be live. Up to 3 retries.
+- A signature rejection (`isBitrueSignatureRejection`: `-1022` / "Signature for this request is not valid", code as number or string) is re-signed and resent ONCE, writes included — a rejection executed nothing. It arrives rejected directly, or resolved over the HOW tunnel, so both `signatureRejectedResponse` (axios-retry) and `resendOnSignatureRejection` (last response interceptor) are wired. See `utils/signatureRejection.ts`.
+- The old `isErrorSignature` matched Bybit's `ret_msg`/`retMsg` fields, which Bitrue never sends, so it never fired.
 
 ### Specific Error Codes
 

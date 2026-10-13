@@ -1,4 +1,5 @@
 import type { ExchangeOptions } from '../../types';
+import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
 import retry from 'axios-retry';
 import createHash from 'create-hash';
@@ -7,6 +8,7 @@ import qs from 'qs';
 
 import { safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, ENDPOINTS, PUBLIC_ENDPOINTS } from './krakenspot.types';
@@ -14,6 +16,17 @@ import { BASE_URL, ENDPOINTS, PUBLIC_ENDPOINTS } from './krakenspot.types';
 // Kraken Spot REST API Authentication:
 // Signature: base64(HMAC_SHA512(base64_decode(secret), URI_path + SHA256(nonce + POST_body)))
 // This differs from Kraken Futures which signs: SHA256(postData + nonce + '/api/' + endpoint)
+
+const unsignedFormParams = (data: unknown): Record<string, unknown> => {
+  if (typeof data === 'string') {
+    const { nonce: _previous, ...rest } = qs.parse(data);
+    return rest;
+  }
+  return data && typeof data === 'object' ? (data as Record<string, unknown>) : {};
+};
+
+export const isKrakenSpotSignatureRejection: IsSignatureRejection = (data) =>
+  Array.isArray(data?.error) && data.error.some((error: unknown) => String(error).includes('EAPI:Invalid signature'));
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   let nonceCounter = 0;
@@ -30,18 +43,19 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   retry(xhr, {
     retries: 3,
-    retryCondition: networkErrorOnRead(
-      readsAndPosted(
-        ENDPOINTS.BALANCE,
-        ENDPOINTS.EXTENDED_BALANCE,
-        ENDPOINTS.TRADE_BALANCE,
-        ENDPOINTS.OPEN_ORDERS,
-        ENDPOINTS.CLOSED_ORDERS,
-        ENDPOINTS.TRADES_HISTORY,
-        ENDPOINTS.OPEN_POSITIONS,
-        ENDPOINTS.WS_TOKEN,
-      ),
-    ),
+    retryCondition: (error) =>
+      networkErrorOnRead(
+        readsAndPosted(
+          ENDPOINTS.BALANCE,
+          ENDPOINTS.EXTENDED_BALANCE,
+          ENDPOINTS.TRADE_BALANCE,
+          ENDPOINTS.OPEN_ORDERS,
+          ENDPOINTS.CLOSED_ORDERS,
+          ENDPOINTS.TRADES_HISTORY,
+          ENDPOINTS.OPEN_POSITIONS,
+          ENDPOINTS.WS_TOKEN,
+        ),
+      )(error) || signatureRejectedResponse(isKrakenSpotSignatureRejection)(error),
   });
 
   xhr.interceptors.request.use((config) => {
@@ -56,7 +70,8 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     // Build the POST body as form-encoded data
     const nonce = String(virtualClock.getCurrentTimeMs() * 1000 + (nonceCounter++ % 1000));
 
-    const dataObj = config.data && typeof config.data === 'object' ? config.data : {};
+    // A replayed config carries the form body it sent: re-sign its params under a new nonce.
+    const dataObj = unsignedFormParams(config.data);
     const postBody = qs.stringify({ ...dataObj, nonce }, { arrayFormat: 'repeat' });
 
     // Kraken Spot auth:
@@ -89,6 +104,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   xhr.interceptors.response.use(
     async (response) => {
+      const signatureResend = resendOnSignatureRejection(xhr, response, isKrakenSpotSignatureRejection);
+      if (signatureResend) return signatureResend;
+
       if (response.data) {
         const errors = response.data.error;
         if (errors && Array.isArray(errors) && errors.length > 0) {

@@ -1,4 +1,5 @@
 import type { ExchangeOptions } from '../../types';
+import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
 import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
@@ -13,6 +14,10 @@ import { BaseExchange } from '../base';
 import { BASE_URL } from './bitunix.types';
 import { sha256Hex } from './bitunix.utils';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
+import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
+
+export const isBitunixSignatureRejection: IsSignatureRejection = (data) =>
+  Number(data?.code) === 10007 || /sign signature error/i.test(String(data?.msg ?? ''));
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const xhr = safeCexAxiosCreate(
@@ -26,7 +31,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, {
+    retries: 3,
+    retryCondition: (error) => networkErrorOnRead()(error) || signatureRejectedResponse(isBitunixSignatureRejection)(error),
+  });
 
   if (!options.publicDataOnly) {
     installTransportAdapter(xhr, options, exchange.name);
@@ -47,7 +55,8 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
           }),
         )
       : null;
-    const data = config.data ? JSON.stringify(config.data) : null;
+    // A replayed config carries the body axios already serialized: sign those bytes.
+    const data = typeof config.data === 'string' ? config.data : config.data ? JSON.stringify(config.data) : null;
 
     const timestamp = +virtualClock.getCurrentTime();
     const nonce = uuid();
@@ -80,7 +89,14 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     return { ...nextConfig, headers };
   });
 
+  const seenResponses = new WeakSet<object>();
   xhr.interceptors.response.use(async (response) => {
+    const signatureResend = resendOnSignatureRejection(xhr, response, isBitunixSignatureRejection);
+    if (signatureResend) return signatureResend;
+    // An axios-retry resend reaches here twice (its chain, then the original's): emit once.
+    if (seenResponses.has(response)) return response;
+    seenResponses.add(response);
+
     const config = response?.config as any;
     const getHeaderValue = (name: string) => {
       const headers = config?.headers;

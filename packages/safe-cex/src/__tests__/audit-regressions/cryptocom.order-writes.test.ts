@@ -3,6 +3,7 @@ import { afterEach, describe, expect, it, vi } from 'vitest';
 import { privateProxyIpsSingapore, privateProxyIpsTokyo } from '@tealstreet/proxy-ips-lists/src';
 import { createAPI, formatCryptocomApiError } from '../../exchanges/cryptocom/cryptocom.api';
 import { CryptocomExchange } from '../../exchanges/cryptocom/cryptocom.exchange';
+import { generateSignature } from '../../exchanges/cryptocom/cryptocom.signing';
 import { ENDPOINTS } from '../../exchanges/cryptocom/cryptocom.types';
 import { getExchangeMetadata } from '../../exchangeMetadata';
 import { DefaultStore } from '../../store/store.base';
@@ -120,7 +121,7 @@ describe('audit regression: Crypto.com order writes', () => {
     expect(emitAndLogError).toHaveBeenCalledWith('Crypto.com API Error 40101: Synthetic auth failure');
   });
 
-  it('does not re-sign a serialized private envelope when axios retries a request', async () => {
+  it('re-signs a replayed private envelope over its own params, with a fresh nonce and no nesting', async () => {
     const exchange = createExchange();
     const api = createAPI({ key: 'key', secret: 'secret' } as any, exchange);
     const adapter = vi.fn(async () => ({
@@ -131,7 +132,8 @@ describe('audit regression: Crypto.com order writes', () => {
       config: {},
     }));
     api.defaults.adapter = adapter as any;
-    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockReturnValue(1_785_019_621_981);
+    let now = 1_785_019_621_981;
+    vi.spyOn(virtualClock, 'getCurrentTimeMs').mockImplementation(() => (now += 1_000));
 
     const params = {
       instrument_name: MARKET.id,
@@ -150,8 +152,11 @@ describe('audit regression: Crypto.com order writes', () => {
     expect(retryRequest).toBeDefined();
     const retryPayload = JSON.parse(retryRequest.data);
 
-    expect(retryPayload).toEqual(firstPayload);
     expect(retryPayload.params).toEqual(params);
+    expect(retryPayload.nonce).toBeGreaterThan(firstPayload.nonce);
+    expect(retryPayload.sig).toBe(
+      generateSignature(retryPayload.method, retryPayload.id, 'key', 'secret', params, retryPayload.nonce),
+    );
   });
 
   it('does not retry ambiguous private order writes after network errors', async () => {

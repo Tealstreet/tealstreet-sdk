@@ -462,7 +462,7 @@ Malformed or missing numeric fields are treated as `0` so a payload drift cannot
 - **Primary `xhr`**: 5 requests/second (`maxRPS: 5` via `axios-rate-limit`)
 - **`unlimitedXHR`**: No rate limit (used for order placement to avoid delays)
 - **Default timeout**: 20,000ms (comment notes this is needed for leverage batch operations)
-- **Retry**: 3 retries on network errors via `axios-retry`
+- **Retry**: 3 retries on network errors via `axios-retry` — reads only; a signature rejection (`10007`) is re-signed and resent once, writes included (`utils/signatureRejection.ts`)
 - **HTTP adapter**: Uses `axiosHttpOverWebsocketAdapter` for proxy support
 - **Subscription batching**: Public subscriptions are grouped by 20, paced every 250ms, and sharded at 300 topics per connection.
 

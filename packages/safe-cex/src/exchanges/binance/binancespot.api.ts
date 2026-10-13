@@ -10,6 +10,11 @@ import { BaseExchange } from '../base';
 import { signBinanceRequest } from './binance.signing';
 import { BASE_URL, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binancespot.types';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
+import {
+  isBinanceStyleSignatureRejection,
+  resendOnSignatureRejection,
+  signatureRejectedResponse,
+} from '../../utils/signatureRejection';
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URL[options.testnet ? 'testnet' : 'livenet'];
@@ -31,7 +36,11 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, {
+    retries: 3,
+    retryCondition: (error) =>
+      networkErrorOnRead()(error) || signatureRejectedResponse(isBinanceStyleSignatureRejection)(error),
+  });
 
   xhr.interceptors.request.use((config) => {
     const isPublicEndPoint = PUBLIC_ENDPOINTS.includes(`${config.url}`);
@@ -47,6 +56,11 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     return signBinanceRequest(config, options, exchange.name, options?.extra?.recvWindow ?? RECV_WINDOW);
   });
+
+  // Last, so a resend is not put through any later interceptor twice.
+  xhr.interceptors.response.use(
+    (response) => resendOnSignatureRejection(xhr, response, isBinanceStyleSignatureRejection) ?? response,
+  );
 
   return xhr;
 };

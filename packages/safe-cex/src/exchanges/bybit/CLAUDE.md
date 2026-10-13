@@ -122,7 +122,9 @@ Beta validation checklist:
 - Do not assume Brazil accounts are spot-only. Product availability is a venue/account-permission question; let Bybit errors prove unsupported derivatives before hiding perps/inverse in the UI.
 - Regression-check a normal non-Brazil Bybit account to ensure the unset `bybitSiteId` remains a no-op and does not cause reload/sync churn.
 
-**Retry logic** (`shouldRetryBybitRequest`): Retries up to 3 times on network errors **on reads only** (a lost response may hide an accepted order, so writes are never resent; this replaced a HyroTrader-only `CREATE_ORDER` carve-out) or `"error sign!"` responses (a rejection, so safe to resend), except `MARKETS` (`/v5/market/instruments-info`) network errors, which are not retried by the shared axios retry interceptor. Linear startup owns a single delayed retry for transient Trading-market failures (`timeout`, `network`, `408`, and `5xx`) and deliberately does not retry rate-limit or blocked responses. The `shouldRetryBybitRequest()` function checks both `ret_msg` and `retMsg` response fields for signature drift.
+**Retry logic** (`shouldRetryBybitRequest`): Retries up to 3 times on network errors **on reads only** (a lost response may hide an accepted order, so writes are never resent; this replaced a HyroTrader-only `CREATE_ORDER` carve-out) or, ONCE, a rejected signature (`signatureRejectedResponse(isBybitSignRejection)`; a rejection, so safe to resend, writes included), except `MARKETS` (`/v5/market/instruments-info`) network errors, which are not retried by the shared axios retry interceptor. Linear startup owns a single delayed retry for transient Trading-market failures (`timeout`, `network`, `408`, and `5xx`) and deliberately does not retry rate-limit or blocked responses. `isBybitSignRejection` reads the body through `getBybitResponseMeta`, so it matches `retCode`/`ret_code` 10004 and the message in any of the envelope shapes Bybit uses.
+
+**Signature rejections are re-signed once, on whichever path they arrive.** A rejected 4xx goes through axios-retry (`signatureRejectedResponse`, above); the usual case goes through the response interceptor, because Bybit sends `10004` ("error sign!" or, now, "Error sign, please check your signature generation algorithm") enveloped on HTTP 200, which axios-retry never sees. `isBybitSignRejection` matches it and the shared `resendOnSignatureRejection` (`utils/signatureRejection.ts`) resends under `SIGNATURE_RETRY_CONFIG_KEY`, so the request interceptor (or, hosted, the remote signer) signs afresh. Only the resend's failure counts toward the auth streak. In hosted mode the resend reaches the device for a new signature because `remoteSigningAdapter` hands back the config with itself still as its adapter — see `packages/safe-cex/src/exchanges/CLAUDE.md` → "A resend must be re-signed".
 
 **Trading market startup telemetry** (`bybit.exchange.ts`): `BybitTradingMarketsRequestError` must keep the underlying cause classified with a fixed vocabulary (`rate-limited`, `blocked`, `timeout`, `network`, `HTTP <status>`, `unknown`) so Sentry gets real signal without raw Bybit `retMsg` values, proxy IPs, or ban timestamps. The error carries a worker Sentry cooldown key; repeated same-reason startup failures are suppressed for five minutes and the next reported event includes a suppressed-count summary. Keep this scoped to the required Trading markets request, not optional PreLaunch markets.
 
@@ -1547,7 +1549,7 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 
 | Error Message / Code                          | Handling                                                                               | Location                           |
 | --------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------- |
-| `"error sign!"`                               | Auto-retry up to 3 times (via `axios-retry`)                                           | `bybit.api.ts:17-22`               |
+| `10004` / `/error sign/i`                     | Re-signed and resent once (response interceptor); a rejected 4xx also via `axios-retry` | `isBybitSignRejection`             |
 | `"timestamp and recv_window param"`           | Auto time sync via `virtualClock.syncBybitClientServerTime()`, then one retry          | `bybit.api.ts:92-96`               |
 | `"accountType only support UNIFIED."`         | Set `forceUnifiedBalance=true`, `unifiedMarginStatus=6`, retry                         | `bybit.exchange.ts:380-383`        |
 | Account margin-mode failure                   | Surface `result.reasons[].reasonMsg`, then throw                                       | `changeMarginType`                 |
@@ -1667,8 +1669,8 @@ Two rules for calling them:
 - **Record failure from the transport layer**, which is the only place that sees
   the HTTP status. Also record on the `BYBIT_AUTH_RET_CODES` set, because bybit
   returns credential failures inside a normal envelope too — sometimes on HTTP
-  200 — so status alone under-counts. `10004` ("error sign") is deliberately
-  excluded: it is usually clock drift and is already retried.
+  200 — so status alone under-counts. `10004` ("error sign") counts — it is
+  what a wrong secret returns — but only once the re-signed resend fails too.
 - **Only a signed request may record success.** `KLINE` is fetched unsigned and
   shares the same client, so a chart fetch would otherwise reset the streak
   while the credentials are still rejected.
@@ -1726,7 +1728,7 @@ yarn test-ci
 
 ## Common Issues and Solutions
 
-1. **"error sign!" on requests**: Signature mismatch. Check time sync, recv_window. The API retries 3x automatically.
+1. **"error sign" on requests**: Signature mismatch. Check time sync, recv_window. The API re-signs and resends once automatically.
 2. **"timestamp and recv_window param"**: Local clock is out of sync. Auto-resolved by `virtualClock.syncBybitClientServerTime()` plus one signed-request retry.
 3. **"accountType only support UNIFIED."**: Defensive fallback for an unexpected stale account status; normal requests are UNIFIED-first.
 4. **Margin-mode switch rejected**: Surface Bybit's returned reason; the integration uses the UTA account-level margin-mode endpoint.

@@ -43,13 +43,6 @@ const serializeApexPayloadLegacy = (payload: unknown) =>
     },
   });
 
-const isErrorSignature = (error: any) => {
-  const isNetwork = networkErrorOnRead()(error);
-  const isErrSign =
-    error?.response?.data?.ret_msg?.includes('error sign!') || error?.response?.data?.retMsg?.includes('error sign!');
-  return isNetwork || isErrSign;
-};
-
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;
   const baseURL = BASE_URL[options.testnet ? 'testnet' : 'livenet'];
@@ -68,11 +61,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  // retry requests on network errors instead of throwing
-  // and some signature errors
+  // retry reads on network errors; a signature failure in a 200 envelope gets the legacy-signing resend below
   retry(xhr, {
     retries: 3,
-    retryCondition: isErrorSignature,
+    retryCondition: networkErrorOnRead(),
   });
 
   xhr.interceptors.request.use((config) => {

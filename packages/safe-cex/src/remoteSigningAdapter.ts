@@ -83,6 +83,25 @@ const serializeHeaders = (headers: InternalAxiosRequestConfig['headers']): Recor
   return result;
 };
 
+// Hands back the config it came in with: axios-retry and venue retries replay that
+// config, and one carrying the default adapters skips the re-sign and resends the
+// old signature over a changed request (Bybit's fresh requestId -> 10004).
+const executeThroughDefaultAdapters = async (
+  finalConfig: InternalAxiosRequestConfig,
+  defaultAdapters: unknown[],
+): Promise<AxiosResponse> => {
+  try {
+    const response = await axios({ ...finalConfig, adapter: defaultAdapters as never });
+    return { ...response, config: finalConfig };
+  } catch (error) {
+    if (axios.isAxiosError(error)) {
+      error.config = finalConfig;
+      if (error.response) error.response.config = finalConfig;
+    }
+    throw error;
+  }
+};
+
 /**
  * Creates an axios adapter that delegates request signing to a remote client.
  *
@@ -115,8 +134,7 @@ export const createRemoteSigningAdapter = (
     }
 
     if (Array.isArray(executeAdapter)) {
-      finalConfig.adapter = executeAdapter;
-      return axios(finalConfig);
+      return executeThroughDefaultAdapters(finalConfig, executeAdapter);
     }
 
     return (executeAdapter as AxiosAdapter)(finalConfig);

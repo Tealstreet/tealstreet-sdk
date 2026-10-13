@@ -1,4 +1,5 @@
 import type { ExchangeOptions } from '../../types';
+import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
 import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
@@ -7,12 +8,18 @@ import qs from 'qs';
 
 import { installTransportAdapter, safeCexAxiosCreate } from '../../safeCexAxiosCreate';
 import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
+import { isSigningCaptureRequest } from '../../utils/signingCapture';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { addKucoinBrokerHeaders, getKucoinRequestTimestamp } from './kucoin.broker';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './kucoin.types';
 
 const stringifyQuery = (params: Record<string, any>, encode: boolean) => qs.stringify(params, { encode });
+
+// Shared with KuCoin spot.
+export const isKucoinSignatureRejection: IsSignatureRejection = (data) =>
+  String(data?.code) === '400005' || /invalid kc-api-sign/i.test(String(data?.msg ?? ''));
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;
@@ -50,7 +57,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   retry(xhr, {
     retries: 3,
-    retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.GET_PUBLIC_WS_TOKEN, ENDPOINTS.GET_PRIVATE_WS_TOKEN)),
+    retryCondition: (error) =>
+      networkErrorOnRead(readsAndPosted(ENDPOINTS.GET_PUBLIC_WS_TOKEN, ENDPOINTS.GET_PRIVATE_WS_TOKEN))(error) ||
+      signatureRejectedResponse(isKucoinSignatureRejection)(error),
   });
 
   if (shouldAuthenticate) {
@@ -64,8 +73,13 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       return nextConfig;
     }
 
-    const timestamp = getKucoinRequestTimestamp(nextConfig.headers) ?? `${virtualClock.getCurrentTimeMs()}`;
+    // Only the device's signing pass keeps the server's timestamp, which the broker
+    // signature was made over; a replay must not reuse the previous attempt's.
+    const incomingTimestamp = isSigningCaptureRequest(config) ? getKucoinRequestTimestamp(nextConfig.headers) : undefined;
+    const timestamp = incomingTimestamp ?? `${virtualClock.getCurrentTimeMs()}`;
     const headersWithBroker = addKucoinBrokerHeaders(new AxiosHeaders(nextConfig.headers), options, timestamp);
+    // Set even without a broker config, so a hosted replay cannot hand the device the old one.
+    headersWithBroker.set('KC-API-TIMESTAMP', timestamp);
 
     if (options.remoteSigner) {
       return { ...nextConfig, headers: headersWithBroker };
@@ -79,7 +93,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       url = `${url}?${query}`;
     }
 
-    const stringifiedBody = config.data ? JSON.stringify(config.data) : '';
+    const stringifiedBody = typeof config.data === 'string' ? config.data : config.data ? JSON.stringify(config.data) : '';
     const toSign = [timestamp, method, url, stringifiedBody].join('');
 
     const signature = createHmac('sha256', secret).update(toSign).digest('base64');
@@ -91,6 +105,11 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     return { ...nextConfig, headers };
   });
+
+  // Last, and over the tunnel any status resolves.
+  xhr.interceptors.response.use(
+    (response) => resendOnSignatureRejection(xhr, response, isKucoinSignatureRejection) ?? response,
+  );
 
   return xhr;
 };

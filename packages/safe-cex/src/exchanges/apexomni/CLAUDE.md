@@ -516,7 +516,7 @@ Position leverage (`apexomni.exchange.ts:1218-1225`):
 
 - **Rate-limited client** (`this.xhr`): 5 RPS via `axios-rate-limit` -- used for polling (balance, positions, account, symbols).
 - **Unlimited client** (`this.unlimitedXHR`): No rate limit -- used for time-critical operations (order placement, cancellation, leverage changes).
-- **Retry logic**: 3 retries on network errors or `'error sign!'` responses (`apexomni.api.ts:41-44`).
+- **Retry logic**: 3 retries on network errors (reads only). Signature failures (`20016`, `401`, or a message mentioning sign/signature) are handled by the one-shot legacy-signing resend in the response interceptor, not axios-retry.
 - **Recv window**: 20,000ms default timeout (configurable via `options.extra.recvWindow`).
 - **Cancel batching**: Orders cancelled in chunks of 10, 1-second sleep between batches (`apexomni.exchange.ts:1087-1090`).
 - **Subscribe batching**: WebSocket topics subscribed in chunks of 50 (`apexomni.ws-public.ts:71`).
@@ -675,8 +675,9 @@ The axios response interceptor (`apexomni.api.ts:107-115`) checks for non-zero `
 
 The API client retries up to 3 times on:
 
-- Network errors (detected by `axios-retry`'s `isNetworkError`)
-- Signature errors (response body contains `'error sign!'` in `ret_msg` or `retMsg`)
+- Network errors on reads (detected by `axios-retry`'s `isNetworkError`)
+
+Signature errors are not an axios-retry case: Apex reports them in a 200 envelope (`code`/`msg`), and the response interceptor resends once with legacy signing. The removed `isErrorSignature` read Bybit's `ret_msg`/`retMsg`, which Apex never sends.
 
 ### Cancel Reason Error Emission
 

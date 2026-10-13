@@ -663,6 +663,57 @@ Two related traps in the same area:
     Apex's own tolerance for a pre-login subscribe is still unmeasured because there
     is no funded Apex test key.
 
+### Signature rejections get one re-signed resend
+
+A venue rejecting a request's SIGNATURE (Bybit 10004, Binance -1022, …) refused
+it, so nothing executed and a write is as safe to resend as a read. These come in
+bursts after a reconnect on keys that work, so `utils/signatureRejection.ts`
+resends once before anything counts it as a bad key. Wire BOTH paths with the
+venue's `IsSignatureRejection`: `signatureRejectedResponse` in the axios-retry
+condition (a rejected non-2xx), and `resendOnSignatureRejection` in the LAST
+response interceptor (a 200 envelope, or any status over the HOW tunnel, which
+resolves 4xx). Before wiring, make the signer resend-safe: `config.data` is a
+string by then, and the first pass's signature/timestamp are still on the config.
+Skip venues whose rejection cannot be told apart from a bad key, and wallet/Stark
+signers, where a rejection is not signature drift.
+
+| Venue | Rejection | Notes |
+| --- | --- | --- |
+| Bybit family, HyroTrader | `10004` / `/error sign/i` | 200 envelope |
+| Binance USD-M / PM / spot, Bitrue | `-1022` (`isBinanceStyleSignatureRejection`) | 4xx; Bitrue also over the tunnel |
+| AsterDEX | `-1022`, V1 (HMAC) paths only | V3 is a wallet signature; rebuilt from `__asterUnsignedParams` |
+| MEXC | `602` "Signature verification failed!" | 200 envelope |
+| BingX | `100001` | 200 envelope, tunnel by default |
+| OKX | `50113` "Invalid Sign" | 401 or 200 |
+| Bitget | `40009` "sign signature error" | 4xx |
+| KuCoin futures / spot | `400005` "Invalid KC-API-SIGN" | 401; tunnel when authenticated |
+| Bitunix | `10007` "Sign signature error" | 200 envelope |
+| Kraken spot | `EAPI:Invalid signature` in `error[]` | 200 envelope; replay re-signs its form params under a new nonce |
+| Crypto.com | `40101` | Shared with a bad key, so a bad key costs one extra request |
+
+Not wired: Coinbase (JWT; a 401 does not say which half failed), Kraken futures
+(`authenticationError` covers a bad key too), BloFin and WEEX (no documented REST
+signature code — their signers are still resend-safe), and the wallet, Stark and
+Ed25519 signers (Hyperliquid, Lighter, Paradex, GRVT, Polymarket, Orderly,
+AsterDEX V3, Backpack).
+
+A venue whose response interceptor is registered after axios-retry sees a retried
+response twice: once in the resend's chain, then in the original's. Keep it
+idempotent — Crypto.com's result unwrap and Binance's error emit both had to be.
+
+### A resend must be re-signed
+
+Retries replay a config: axios-retry calls `instance(error.config)`, and venue
+interceptors resend `response.config` (Bybit's clock-sync and sign retries). In
+hosted mode that config must still name `createRemoteSigningAdapter` as its
+adapter, or the resend skips the device and goes out under the previous
+attempt's signature while the request interceptors change the request around it
+— Bybit adds a fresh `requestId` per pass, so it answers 10004 "Error sign".
+Without an inner (HOW) adapter the signer executes through axios' default
+adapter list; `executeThroughDefaultAdapters` hands back the incoming config on
+both the response and the error for exactly this reason. Do not "simplify" it
+back to mutating `finalConfig.adapter`.
+
 ### Public endpoints MUST be tagged so hosted mode skips the signing round trip
 
 The hosted exchange-server holds no secrets, so `createRemoteSigningAdapter`

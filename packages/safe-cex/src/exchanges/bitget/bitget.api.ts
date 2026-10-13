@@ -1,4 +1,5 @@
 import type { ExchangeOptions } from '../../types';
+import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
 import { AxiosHeaders } from 'axios';
 import retry from 'axios-retry';
@@ -12,6 +13,7 @@ import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, BROKER_ID, ENDPOINTS, RECV_WINDOW } from './bitget.types';
 import { networkErrorOnRead } from '../../utils/retryReadsOnly';
+import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
 
 // Bitget error codes that must NOT surface as raw user-facing toasts. The
 // `_detectAccountType` probe in bitget.exchange.ts intentionally calls a
@@ -32,6 +34,9 @@ const shouldSilenceBitgetResponseError = (code: string, message: unknown, url?: 
 
 const shouldSuppressValidationErrorEmission = (exchange: BaseExchange): boolean =>
   (exchange as { suppressBitgetValidationErrorEmission?: boolean }).suppressBitgetValidationErrorEmission === true;
+
+export const isBitgetSignatureRejection: IsSignatureRejection = (data) =>
+  String(data?.code) === '40009' || /sign signature error/i.test(String(data?.msg ?? ''));
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;
@@ -56,7 +61,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     exchange,
   );
 
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead() });
+  retry(xhr, {
+    retries: 3,
+    retryCondition: (error) => networkErrorOnRead()(error) || signatureRejectedResponse(isBitgetSignatureRejection)(error),
+  });
 
   xhr.interceptors.request.use((config) => {
     const nextConfig = { ...config };
@@ -84,12 +92,16 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       signingUrl = `${signingUrl}?${signingQuery}`;
     }
 
-    const stringifiedBody = config.data
-      ? toJsonString({
-          ...config.data,
-          ...(config.data.symbol ? { symbol: config.data.symbol.replace('$', '') } : {}),
-        })
-      : '';
+    // A replayed config carries the body axios already serialized: sign those bytes.
+    const stringifiedBody =
+      typeof config.data === 'string'
+        ? config.data
+        : config.data
+          ? toJsonString({
+              ...config.data,
+              ...(config.data.symbol ? { symbol: config.data.symbol.replace('$', '') } : {}),
+            })
+          : '';
     const toSign = [timestamp, method, signingUrl, stringifiedBody].join('');
     const signature = createHmac('sha256', options.secret).update(toSign).digest().toString('base64');
 
@@ -102,7 +114,14 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     return { ...nextConfig, headers };
   });
 
+  const seenResponses = new WeakSet<object>();
   xhr.interceptors.response.use(async (response) => {
+    const signatureResend = resendOnSignatureRejection(xhr, response, isBitgetSignatureRejection);
+    if (signatureResend) return signatureResend;
+    // An axios-retry resend reaches here twice (its chain, then the original's): emit once.
+    if (seenResponses.has(response)) return response;
+    seenResponses.add(response);
+
     if (response.data && !v(response.data, 'data') && v(response.data, 'code') !== '00000') {
       const code = String(v(response.data, 'code') ?? '');
       const message = v(response.data, 'msg');

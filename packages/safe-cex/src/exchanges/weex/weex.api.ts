@@ -158,7 +158,8 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     const method = config.method?.toUpperCase?.() || 'GET';
     const queryString = config.params ? serializeWeexParams(config.params) : '';
-    const bodyString = config.data ? JSON.stringify(config.data) : '';
+    // A replayed config carries the body axios already serialized: sign those bytes.
+    const bodyString = typeof config.data === 'string' ? config.data : config.data ? JSON.stringify(config.data) : '';
     const requestPath = `${url}${queryString ? `?${queryString}` : ''}`;
     const timestamp = `${virtualClock.getCurrentTimeMs()}`;
     const signature = signWeexMessage(options.secret, `${timestamp}${method}${requestPath}${bodyString}`);

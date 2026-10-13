@@ -678,7 +678,7 @@ path here.
 - **Primary API** (`xhr`): Rate-limited to 3 requests/second via `axios-rate-limit` (`kucoin.exchange.ts:68`)
 - **Unlimited API** (`unlimitedXHR`): No rate limit, used for order placement/cancellation (`kucoin.exchange.ts:69`)
 - **Timeout**: 20,000ms (configurable via `options.extra.recvWindow`, default `RECV_WINDOW = 20_000`)
-- **Retry**: 3 retries on network errors via `axios-retry` (`kucoin.api.ts:41`)
+- **Retry**: 3 retries on network errors via `axios-retry` — reads only; a signature rejection (`400005`) is re-signed and resent once, writes included (`utils/signatureRejection.ts`)
 - **Tick interval**: 500ms (from exchange metadata), configurable via `options.extra.tickInterval`
 
 ### Dual Axios Instances

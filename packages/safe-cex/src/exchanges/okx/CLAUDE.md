@@ -698,7 +698,7 @@ OKX candle timestamps are in **milliseconds**. They are divided by 1000 for inte
 
 ### REST API
 
-- **Retry policy**: 3 retries on network errors via `axios-retry`
+- **Retry policy**: 3 retries on network errors via `axios-retry` — reads only; a signature rejection (`50113`) is re-signed and resent once, writes included (`utils/signatureRejection.ts`)
 - **Receive window (timeout)**: `RECV_WINDOW = 20_000` ms (20 seconds), overridable via `options.extra.recvWindow`
 
 ### Leverage Fetch Batching
@@ -1038,7 +1038,7 @@ Most methods follow the same error handling pattern:
 
 ### Retry Strategy
 
-- **REST**: 3 automatic retries on network errors via `axios-retry`
+- **REST**: 3 automatic retries on network errors via `axios-retry`; `50113` is re-signed and resent once
 - **WebSocket reconnection**: Up to 100 reconnect attempts with randomized delay (1-3 seconds)
 - **`fetchAndSetPrivateSnapshot`**: Up to 10 retry attempts on WS reconnect
 

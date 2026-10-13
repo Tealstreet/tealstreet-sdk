@@ -69,8 +69,14 @@ Authenticated request body format:
 }
 ```
 
-The REST signing interceptor is idempotent for already-signed envelopes because
-axios may re-enter request interceptors during transport retries. Private write
+Axios re-enters the request interceptors on a retry with the envelope it already
+sent. The interceptor unwraps it and re-signs its `params` with a fresh nonce —
+never nests it, and never resends the stale `sig`.
+
+A `40101` ("Not authenticated, or key/signature incorrect") is re-signed and resent
+once, writes included (`isCryptocomSignatureRejection`), so a genuinely bad key costs
+one extra request before the error surfaces. The result unwrap is idempotent: an
+axios-retry resend runs the response interceptor twice. Private write
 endpoints (`create/amend/cancel/close/change-leverage`) are not retried on
 network/CORS errors: the exchange may have accepted the mutation even if the
 browser could not read the response.

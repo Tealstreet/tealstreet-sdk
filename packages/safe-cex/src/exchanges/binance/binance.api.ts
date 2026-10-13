@@ -8,6 +8,11 @@ import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { markSkipRemoteSigning } from '../../remoteSigningAdapter';
 import { installTransportAdapter, safeCexAxiosCreate, safeCexAxiosCreateNoProxy } from '../../safeCexAxiosCreate';
 import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import {
+  isBinanceStyleSignatureRejection,
+  resendOnSignatureRejection,
+  signatureRejectedResponse,
+} from '../../utils/signatureRejection';
 import { BaseExchange } from '../base';
 import { signBinanceRequest } from './binance.signing';
 import { BASE_URL, ENDPOINTS, PUBLIC_ENDPOINTS, RECV_WINDOW } from './binance.types';
@@ -75,7 +80,12 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY)) });
+  retry(xhr, {
+    retries: 3,
+    retryCondition: (error) =>
+      networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY))(error) ||
+      signatureRejectedResponse(isBinanceStyleSignatureRejection)(error),
+  });
 
   xhr.interceptors.request.use((config) => {
     // on livenet, don't sign listen key requests (they don't need it)
@@ -113,6 +123,9 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
   xhr.interceptors.response.use(
     (response) => {
+      const signatureResend = resendOnSignatureRejection(xhr, response, isBinanceStyleSignatureRejection);
+      if (signatureResend) return signatureResend;
+
       // Check if response contains an error code (Binance error format: { code: negative number, msg: string })
       // Negative codes are errors (e.g., -2011 "Unknown order sent", -4130 "closePosition order exists")
       if (response.data && typeof response.data === 'object' && 'code' in response.data && response.data.code < 0) {
@@ -125,14 +138,17 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
         const error = new Error(errorMsg);
         (error as any).code = errorCode;
         (error as any).response = response;
+        (error as any).__binanceEmitted = true;
         return Promise.reject(error);
       }
       return response;
     },
     (error) => {
-      // Handle errors from non-200 responses
+      // Handle errors from non-200 responses. A retried request's rejection comes back
+      // through this handler twice (its own chain, then the original's): emit it once.
       const errorCode = error.response?.data?.code;
-      if (error.response?.data?.msg && !SILENT_ERROR_CODES.includes(errorCode)) {
+      if (error.response?.data?.msg && !SILENT_ERROR_CODES.includes(errorCode) && !error.__binanceEmitted) {
+        error.__binanceEmitted = true;
         exchange.emitAndLogError(error.response.data.msg);
       }
       return Promise.reject(error);

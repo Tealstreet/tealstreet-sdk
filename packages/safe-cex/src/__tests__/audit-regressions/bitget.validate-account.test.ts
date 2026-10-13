@@ -129,7 +129,7 @@ describe('audit regression: Bitget account validation', () => {
       exchange,
     );
 
-    api.defaults.adapter = vi.fn(async (config: any) => ({
+    const adapter = vi.fn(async (config: any) => ({
       data: {
         code: '40009',
         msg: 'sign signature error',
@@ -140,26 +140,37 @@ describe('audit regression: Bitget account validation', () => {
       headers: {},
       config,
     }));
+    api.defaults.adapter = adapter;
     exchange.xhr = api;
 
     await expect(exchange.validateAccount()).resolves.toEqual({ error: 'sign signature error' });
     expect(emitAndLogError).not.toHaveBeenCalled();
+    // Re-signed and resent once before the validation reports it.
+    expect(adapter).toHaveBeenCalledTimes(2);
   });
 
   it('still emits resolved Bitget API errors outside account validation', async () => {
     const exchange = createExchange();
     const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => {});
 
-    await runResponseInterceptor(exchange, {
-      data: {
-        code: '40009',
-        msg: 'sign signature error',
-      },
+    const api = createAPI(
+      { key: 'test-key', secret: 'test-secret', passphrase: 'test-passphrase', tuning: { consoleLogging: false } },
+      exchange,
+    );
+    const adapter = vi.fn(async (config: any) => ({
+      data: { code: '40009', msg: 'sign signature error' },
       status: 400,
       statusText: 'Bad Request',
-      config: { url: ENDPOINTS.BALANCE },
-    });
+      headers: {},
+      config,
+    }));
+    api.defaults.adapter = adapter;
 
+    await api.get(ENDPOINTS.BALANCE);
+
+    // The first rejection is re-signed and resent; only the resend's failure is emitted.
+    expect(adapter).toHaveBeenCalledTimes(2);
+    expect(emitAndLogError).toHaveBeenCalledTimes(1);
     expect(emitAndLogError).toHaveBeenCalledWith('sign signature error (HTTP 400)');
   });
 });

@@ -10,6 +10,7 @@ import { createKucoinSpotAPI } from '../exchanges/kucoin/kucoinspot.api';
 import { KUCOIN_SPOT_ENDPOINTS } from '../exchanges/kucoin/kucoinspot.types';
 import { KucoinPublicWebsocket } from '../exchanges/kucoin/kucoin.ws-public';
 import { DefaultStore } from '../store/store.base';
+import { SIGNING_CAPTURE_FLAG } from '../utils/signingCapture';
 import {
   MarginType,
   OrderSide,
@@ -161,7 +162,8 @@ describe('KucoinExchange current futures docs compatibility', () => {
     await api.post(
       ENDPOINTS.PLACE_ORDER,
       { symbol: 'XBTUSDTM', side: 'buy', type: 'limit', size: '1' },
-      { headers: { 'KC-API-TIMESTAMP': '123456789' } },
+      // The device's signing pass: the server's timestamp is kept for the broker signature.
+      { headers: { 'KC-API-TIMESTAMP': '123456789' }, [SIGNING_CAPTURE_FLAG]: true } as any,
     );
 
     const headers = adapter.mock.calls[0][0].headers;

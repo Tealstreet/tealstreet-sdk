@@ -61,7 +61,8 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
     const params = config.params ? decodeURIComponent(qs.stringify(config.params)) : null;
     const url = `${config.url}${params ? `?${params}` : ''}`;
-    const data = config.data ? JSON.stringify(config.data) : null;
+    // A replayed config carries the body axios already serialized: sign those bytes.
+    const data = typeof config.data === 'string' ? config.data : config.data ? JSON.stringify(config.data) : null;
 
     const timestamp = +virtualClock.getCurrentTime();
     const nonce = uuid();

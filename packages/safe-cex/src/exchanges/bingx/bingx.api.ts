@@ -1,4 +1,5 @@
 import type { ExchangeOptions } from '../../types';
+import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
 import retry from 'axios-retry';
 import createHmac from 'create-hmac';
@@ -7,14 +8,28 @@ import qs from 'qs';
 
 import { bigIntAsStringJsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
+import { tryParseJson } from '../../utils/tryParseJson';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
 import { BASE_URL, ENDPOINTS, RECV_WINDOW } from './bingx.types';
 import { networkErrorOnRead, readsAndPosted } from '../../utils/retryReadsOnly';
+import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
 
 const sort = function alphabeticalSort(a: string, b: string) {
   return a.localeCompare(b);
 };
+
+// A copy without the previous pass's signature. A replayed POST arrives with the body
+// axios serialized, and a replayed GET with the signed params it sent.
+const unsignedPayload = (payload: unknown): Record<string, any> => {
+  const parsed = tryParseJson(payload);
+  if (!parsed || typeof parsed !== 'object') return {};
+  const { signature: _previous, ...rest } = parsed as Record<string, any>;
+  return rest;
+};
+
+export const isBingxSignatureRejection: IsSignatureRejection = (data) =>
+  Number(data?.code) === 100001 || /signature verification failed/i.test(String(data?.msg ?? ''));
 
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const recvWindow = options?.extra?.recvWindow ?? RECV_WINDOW;
@@ -39,7 +54,12 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   );
 
   // retry requests on network errors instead of throwing
-  retry(xhr, { retries: 3, retryCondition: networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY)) });
+  retry(xhr, {
+    retries: 3,
+    retryCondition: (error) =>
+      networkErrorOnRead(readsAndPosted(ENDPOINTS.LISTEN_KEY))(error) ||
+      signatureRejectedResponse(isBingxSignatureRejection)(error),
+  });
 
   // Browser callers go through the HTTP-over-WebSocket tunnel by default
   // (BingX requires CORS + the tunnel hops through tealstreet's proxy IPs).
@@ -71,7 +91,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     // TODO: Audit whether HOW proxy re-serialization can break this signature (see bitmex.api.ts).
     if (config.method !== 'post') {
-      const data = config.data || config.params || {};
+      const data = unsignedPayload(config.data || config.params);
       data.timestamp = timestamp;
       //data.recvWindow = recvWindow;
 
@@ -96,7 +116,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       // Binance API takes data as query params
       return omit(nextConfig, 'data');
     } else {
-      const data = config.data || config.params || {};
+      const data = unsignedPayload(config.data || config.params);
       data.timestamp = timestamp;
       //data.recvWindow = recvWindow;
 
@@ -127,9 +147,16 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
       // remove data from POST/PUT/DELETE requests
       // Binance API takes data as query params
-      return { ...nextConfig, data: sortedData };
+      // Serialized here: axios-retry resends with an identity transformRequest, which
+      // would otherwise send this object unserialized.
+      return { ...nextConfig, data: JSON.stringify(sortedData) };
     }
   });
+
+  // BingX answers on HTTP 200, and over the tunnel any status resolves.
+  xhr.interceptors.response.use(
+    (response) => resendOnSignatureRejection(xhr, response, isBingxSignatureRejection) ?? response,
+  );
 
   return xhr;
 };

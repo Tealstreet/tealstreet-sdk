@@ -1,11 +1,13 @@
 import type { ExchangeOptions } from '../../types';
 import type { CryptocomApiResponse } from './cryptocom.types';
+import type { IsSignatureRejection } from '../../utils/signatureRejection';
 
 import retry, { isNetworkError } from 'axios-retry';
 
 import { safeCexAxiosCreate, installTransportAdapter } from '../../safeCexAxiosCreate';
 import { BaseExchange } from '../base';
 import { generateAuthenticatedRequest } from './cryptocom.signing';
+import { resendOnSignatureRejection, signatureRejectedResponse } from '../../utils/signatureRejection';
 import { BASE_URLS, ENDPOINTS, PUBLIC_ENDPOINTS } from './cryptocom.types';
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
@@ -93,6 +95,9 @@ const shouldSuppressValidationAuthErrorEmission = (exchange: BaseExchange, code:
   isCryptocomAuthenticationErrorCode(code) &&
   (exchange as { suppressCryptocomValidationErrorEmission?: boolean }).suppressCryptocomValidationErrorEmission === true;
 
+// "Not authenticated, or key/signature incorrect": a bad key costs one extra request.
+export const isCryptocomSignatureRejection: IsSignatureRejection = (data) => Number(data?.code) === 40101;
+
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const baseURL = BASE_URLS[options.testnet ? 'TESTNET' : 'PRODUCTION'];
 
@@ -113,7 +118,10 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   // mutation even though the browser could not read the response.
   retry(xhr, {
     retries: 3,
-    retryCondition: (error) => isNetworkError(error) && !isNonRetryablePrivateWrite(error.config?.url),
+    // A signature rejection is a refusal, so unlike a lost response it is safe to resend a write.
+    retryCondition: (error) =>
+      (isNetworkError(error) && !isNonRetryablePrivateWrite(error.config?.url)) ||
+      signatureRejectedResponse(isCryptocomSignatureRejection)(error),
   });
 
   // Only use HTTP-over-WebSocket adapter when tealstreetTunnel is enabled (browser/production)
@@ -135,15 +143,15 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       // Private: POST with signed JSON envelope
       nextConfig.method = 'POST';
       try {
-        if (isAuthenticatedEnvelope(rawParams, method, options.key)) {
-          nextConfig.data = rawParams;
-          return nextConfig;
-        }
-
-        const params = isRecord(rawParams) ? rawParams : {};
+        // A replay re-enters with the envelope it sent; re-sign its params with a
+        // fresh nonce rather than resending the stale signature.
+        const unsigned = isAuthenticatedEnvelope(rawParams, method, options.key) ? rawParams.params : rawParams;
+        const params = isRecord(unsigned) ? unsigned : {};
         const authenticatedRequest = generateAuthenticatedRequest(method, params, options.key, options.secret);
 
-        nextConfig.data = authenticatedRequest;
+        // Serialized here: axios-retry resends with an identity transformRequest, which
+        // would otherwise send this object unserialized.
+        nextConfig.data = JSON.stringify(authenticatedRequest);
       } catch (error) {
         exchange.emitAndLogError(`Failed to generate auth request: ${error}`);
         throw error;
@@ -160,9 +168,18 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     return nextConfig;
   });
 
+  const unwrappedResponses = new WeakSet<object>();
+
   // Response interceptor to handle errors and unwrap results
   xhr.interceptors.response.use(
     async (response) => {
+      // An axios-retry resend comes back through here twice (its own chain, then the
+      // original's), and the second pass would read the unwrapped result as an error.
+      if (unwrappedResponses.has(response)) return response;
+
+      const signatureResend = resendOnSignatureRejection(xhr, response, isCryptocomSignatureRejection);
+      if (signatureResend) return signatureResend;
+
       const data = response.data as CryptocomApiResponse<unknown>;
 
       // Check for API errors (code !== 0)
@@ -178,6 +195,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
       if (data.result !== undefined) {
         response.data = data.result;
       }
+      unwrappedResponses.add(response);
 
       return response;
     },
