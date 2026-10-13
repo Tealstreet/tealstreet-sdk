@@ -27,6 +27,15 @@ describe('loop', () => {
     });
   });
 
+  it('never schedules the function when minInterval is Infinity', async () => {
+    const fn = vi.fn();
+
+    await loop(fn, Number.POSITIVE_INFINITY);
+    await vi.runAllTimersAsync();
+
+    expect(fn).not.toHaveBeenCalled();
+  });
+
   describe('with minInterval', () => {
     it('should wait for minInterval before scheduling function', async () => {
       const fn = vi.fn();

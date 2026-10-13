@@ -47,6 +47,13 @@ describe('auth failure tick backoff', () => {
     expect(exchange.tickInterval()).toBe(4000);
   });
 
+  it('keeps polling off through auth failures when the interval is Infinity', () => {
+    const exchange = makeExchange(Number.POSITIVE_INFINITY);
+    exchange.recordAuthFailure();
+
+    expect(exchange.tickInterval()).toBe(Number.POSITIVE_INFINITY);
+  });
+
   it('caps the backoff so recovery latency stays bounded', () => {
     const exchange = makeExchange(500);
     for (let i = 0; i < 50; i += 1) exchange.recordAuthFailure();

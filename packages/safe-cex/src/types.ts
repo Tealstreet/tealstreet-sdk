@@ -131,6 +131,7 @@ export type ExchangeOptions = {
     readonly consoleLogging?: boolean;
   };
   readonly extra?: {
+    /** `Infinity` turns periodic REST polling off, for callers that fetch on demand. */
     tickInterval?: number;
     recvWindow?: number;
     // Optional AsterDEX REST API version override.

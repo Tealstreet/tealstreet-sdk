@@ -18,6 +18,7 @@ const warnMissingInterval = (fn: () => void) => {
 };
 
 export const loop = async (fn: () => void, minInterval?: number) => {
+  if (minInterval === Number.POSITIVE_INFINITY) return;
   const effectiveInterval =
     minInterval && minInterval > 0 ? minInterval : (warnMissingInterval(fn), FALLBACK_MIN_INTERVAL_MS);
 
