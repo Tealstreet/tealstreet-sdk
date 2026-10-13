@@ -43,6 +43,34 @@ describe('market filters', () => {
 });
 
 describe('order tools', () => {
+  it('rounds the price to the tick with fresh positions and orders before placing', async () => {
+    const placeOrder = vi.fn(async () => ['id']);
+    const market = {
+      symbol: 'BTCUSDT',
+      base: 'BTC',
+      quote: 'USDT',
+      precision: { amount: 0.001, price: 0.1 },
+      limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+    };
+    const exchange = {
+      name: 'bybit',
+      store: { markets: [market] },
+      fetchPositions: async () => [],
+      fetchOrders: async () => [],
+      fetchTickers: async () => [],
+      placeOrder,
+    } as any;
+
+    await run('place_order', exchange, {
+      symbol: 'BTCUSDT',
+      side: 'buy',
+      type: 'limit',
+      amount: 0.001,
+      price: 79530.94,
+    });
+    expect(placeOrder).toHaveBeenCalledWith(expect.objectContaining({ price: 79530.9, amount: 0.001 }));
+  });
+
   it('names the ids that are not open and cancels nothing', async () => {
     const cancelOrders = vi.fn();
     const exchange = { fetchOrders: async () => [order('1', 'BTCUSDT')], cancelOrders };

@@ -1,5 +1,6 @@
+import type { ExchangeLike } from '@tealstreet/cli-core/src/types';
 import type { BaseCapabilityMethod, Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
-import type { Order } from '@tealstreet/safe-cex/src/types';
+import type { Order, PlaceOrderOpts } from '@tealstreet/safe-cex/src/types';
 
 import {
   OrderSide,
@@ -10,6 +11,7 @@ import {
 } from '@tealstreet/safe-cex/src/types';
 import { z } from 'zod';
 
+import { prepareCliAmendPrice, prepareCliOrder } from '@tealstreet/cli-core/src/order/prepareCliOrder';
 import { isInertCapability } from '@tealstreet/safe-cex/src/exchanges/base';
 
 type Shape = z.ZodRawShape;
@@ -39,6 +41,20 @@ const openOrders = async (exchange: Exchange, ids: string[]): Promise<Order[]> =
   const missing = ids.filter((id) => !orders.some((o) => o.id === id));
   if (missing.length) throw new Error(`No open order with id ${missing.join(', ')}`);
   return orders;
+};
+
+/** The shared order policy reads positions and orders from the store, which nothing polls here. */
+const prepare = async (exchange: Exchange, opts: PlaceOrderOpts): Promise<PlaceOrderOpts> => {
+  const [positions, orders, tickers] = await Promise.all([
+    exchange.fetchPositions(),
+    exchange.fetchOrders(),
+    exchange.fetchTickers?.(),
+  ]);
+  const like = exchange as unknown as ExchangeLike;
+  return prepareCliOrder(
+    { ...like, name: like.name, store: { markets: exchange.store.markets, positions, orders, tickers } },
+    opts,
+  );
 };
 
 export const tools: Tool[] = [
@@ -163,7 +179,7 @@ export const tools: Tool[] = [
       timeInForce: z.enum(OrderTimeInForce).optional().describe('PostOnly makes a limit order maker-only'),
       clientOrderId: z.string().optional(),
     },
-    run: (exchange, args) => exchange.placeOrder(args),
+    run: async (exchange, args) => exchange.placeOrder(await prepare(exchange, args)),
   }),
   tool({
     name: 'amend_order',
@@ -177,7 +193,11 @@ export const tools: Tool[] = [
     run: async (exchange, { orderId, price, amount }) => {
       if ((price === undefined) === (amount === undefined)) throw new Error('Set exactly one of price and amount');
       const [order] = await openOrders(exchange, [orderId]);
-      return exchange.updateOrder({ order, update: price !== undefined ? { price } : { amount: amount! } });
+      const update =
+        price !== undefined
+          ? { price: prepareCliAmendPrice(exchange as unknown as ExchangeLike, order.symbol, price) }
+          : { amount: amount! };
+      return exchange.updateOrder({ order, update });
     },
   }),
   tool({

@@ -105,6 +105,7 @@ const ENTRY_POINTS: Readonly<Record<string, string>> = Object.freeze({
   'packages/script-api-core/src/proxy/InProcessProxy.ts': 'the SDK’s own proxy seam',
   'apps/web/src/components/agent/executeOemsCommands.ts': 'the Agent, through createWebCoreAdapter',
   'packages/safe-cex/src/crossTrade/runtime/crossTradePlaceOrder.ts': 'the cross-trade copier',
+  'packages/exchange-mcp/src/tools.ts': 'the MCP server’s place_order, prepared with `prepareCliOrder`',
 
   /**
    * The long-running managers. A chaser replaces its order up to 1000 times
