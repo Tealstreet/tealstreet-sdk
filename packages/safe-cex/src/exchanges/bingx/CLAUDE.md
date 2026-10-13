@@ -583,7 +583,7 @@ Position mode (hedge/one-way) is cached in `_accountPositionMode` to avoid repea
 
 19. **Misleading error context strings**: Several `emitAndLogError` calls pass unrelated context strings (e.g., "Failed to update leverage" when handling order placement, "Failed to switch position mode" / "Failed to switch margin type" for batch order errors) -- these are copy-paste artifacts.
 
-20. **Candle data sorting**: `fetchOHLCV` explicitly sorts candles by timestamp after parsing, indicating BingX may not return them in chronological order.
+20. **Candle data sorting and empty payloads**: `fetchOHLCV` explicitly sorts candles by timestamp after parsing, indicating BingX may not return them in chronological order. If the kline response omits the candle array, return `[]` with a warning log instead of emitting a Sentry-captured exchange error; chart candle misses should not surface as generic `data.map` TypeErrors.
 
 21. **Position side in one-way mode**: When account is not in hedge mode, position side is determined by contract amount sign: `contracts > 0 -> Long`, else `Short`.
 

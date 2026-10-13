@@ -4,7 +4,7 @@ import { BingxExchange } from '../../exchanges/bingx/bingx.exchange';
 import { ENDPOINTS } from '../../exchanges/bingx/bingx.types';
 import { BingxPublicWebsocket } from '../../exchanges/bingx/bingx.ws-public';
 import { DefaultStore } from '../../store/store.base';
-import { MarginType, Order, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
+import { LogSeverity, MarginType, Order, OrderSide, OrderStatus, OrderType, PositionMode, PositionSide } from '../../types';
 import { getExchangeMetadata } from '../../exchangeMetadata';
 
 const createExchange = () => new BingxExchange('bingx', { key: 'key', secret: 'secret' }, new DefaultStore());
@@ -230,6 +230,33 @@ describe('audit regression: BingX', () => {
       bid: 0.2079,
       ask: 0.2081,
     });
+  });
+
+  it('returns no candles instead of emitting when the BingX kline response has no array payload', async () => {
+    const exchange = createExchange();
+    exchange.store.update({
+      markets: [
+        {
+          id: 'BTC-USDT',
+          symbol: 'BTCUSDT',
+          base: 'BTC',
+          quote: 'USDT',
+          active: true,
+          precision: { amount: 0.001, price: 0.1 },
+          limits: { amount: { min: 0.001, max: 100 }, leverage: { min: 1, max: 100 } },
+        },
+      ],
+    });
+    exchange.xhr = {
+      get: vi.fn().mockResolvedValue({ data: { code: 0, msg: '', data: undefined } }),
+    } as any;
+    const emitAndLogError = vi.spyOn(exchange, 'emitAndLogError').mockImplementation(() => undefined);
+    const log = vi.spyOn(exchange, 'log').mockImplementation(() => undefined);
+
+    await expect(exchange.fetchOHLCV({ symbol: 'BTCUSDT', interval: '1m', limit: 10 })).resolves.toEqual([]);
+
+    expect(emitAndLogError).not.toHaveBeenCalled();
+    expect(log).toHaveBeenCalledWith('BingX kline response did not include candles for BTCUSDT', LogSeverity.Warning);
   });
 
   it('continues individual cancels and marks only confirmed or already-absent orders canceled', async () => {

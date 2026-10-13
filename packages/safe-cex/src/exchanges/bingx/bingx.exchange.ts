@@ -616,9 +616,7 @@ export class BingxExchange extends BaseExchange {
 
     if (market) {
       try {
-        const {
-          data: { data },
-        } = await this.xhr.get<{ data: any[][] }>(ENDPOINTS.KLINE, {
+        const { data: response } = await this.xhr.get<{ code?: number; msg?: string; data?: any[] }>(ENDPOINTS.KLINE, {
           params: {
             symbol: market.id,
             interval,
@@ -631,6 +629,17 @@ export class BingxExchange extends BaseExchange {
             //   : {}),
           },
         });
+
+        if (response.code !== undefined && response.code !== 0) {
+          this.log(`BingX kline request failed: ${response.msg || `code ${response.code}`}`, LogSeverity.Warning);
+          return [];
+        }
+
+        const data = response.data;
+        if (!Array.isArray(data)) {
+          this.log(`BingX kline response did not include candles for ${opts.symbol}`, LogSeverity.Warning);
+          return [];
+        }
 
         const candles: Candle[] = data.map(({ time, open, high, low, close, volume }: any) => {
           return {
