@@ -1,6 +1,5 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { getExchangeMetadata } from '../../exchangeMetadata';
 import { BackpackExchange } from '../../exchanges/backpack/backpack.exchange';
 import { ENDPOINTS } from '../../exchanges/backpack/backpack.types';
 import { DefaultStore } from '../../store/store.base';
@@ -99,15 +98,5 @@ describe('Backpack execution history audit regression', () => {
         commissionAsset: 'USDC',
       },
     ]);
-  });
-
-  // The subject here is the production-validation GATE, not a capability claim.
-  // backpack has a real `fetchHistoricalFills` above, and the flag stays false until
-  // an authenticated request is verified end-to-end through the production
-  // proxy — so a working implementation must NOT be enough to flip it.
-  it('keeps the production-validation gate closed despite a real implementation', () => {
-    expect(getExchangeMetadata('backpack')).toMatchObject({
-      supportsExecutionsHistory: false,
-    });
   });
 });

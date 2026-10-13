@@ -244,18 +244,6 @@ describe('exchangeMetadata', () => {
       expect(lighterRobinhood.defaultQuote).toBe('USDG');
       expect(lighterRobinhood.supportsWsRoute).toBe(true);
     });
-
-    it('should preserve executions-history gating for key exchanges', () => {
-      expect(exchangeMetadata.bybit.supportsExecutionsHistory).toBe(true);
-      expect(exchangeMetadata.bybitdemo.supportsExecutionsHistory).toBe(true);
-      expect(exchangeMetadata.bybitinverse.supportsExecutionsHistory).toBe(true);
-      expect(exchangeMetadata.bybitspot.supportsExecutionsHistory).toBe(false);
-      expect(exchangeMetadata.binance.supportsExecutionsHistory).toBe(true);
-      expect(exchangeMetadata.binancepm.supportsExecutionsHistory).toBe(false);
-      expect(exchangeMetadata.okxdemo.supportsExecutionsHistory).toBe(true);
-      expect(exchangeMetadata.hyperliquid.supportsExecutionsHistory).toBe(true);
-      expect(exchangeMetadata.phemex.supportsExecutionsHistory).toBe(false);
-    });
   });
 
   describe('configuration invariants', () => {

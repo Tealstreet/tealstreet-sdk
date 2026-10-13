@@ -107,10 +107,11 @@ against a venue-supplied balance column is how bitget's gross-vs-net convention 
 without guessing. Do that before assuming a profile.
 
 **Probing hazard, separate from all of the above and still live:** an earlier probe of the
-executions route wedged unrelated REST on this venue, including public `/products`. That is
-also why `supportsExecutionsHistory` is a deliberate opt-**out** here (`FillsModule` and
-`tradeHistoryController` both gate on it) — phemex must not be invoked through the shared HOW
-tunnel. Probe narrowly, one route at a time, and expect to need a fresh connection after.
+executions route wedged unrelated REST on this venue, including public `/products`. Phemex
+is symbol-scoped for fills and has no enumerable income ledger, so ingestion reports the
+fills axis as `unsupported` and does not invoke `fetchHistoricalFills`. Do not add a new
+metadata bypass for this; fix either the symbol source or the tunnel/proxy behavior first.
+Probe narrowly, one route at a time, and expect to need a fresh connection after.
 
 ## REST API Endpoints
 
@@ -146,15 +147,17 @@ Execution-history behavior (`fetchHistoricalFills`):
 - Filters non-trade execution rows (`execType !== trade`) before mapping
 - Normalizes symbol/side/timestamp and returns Unix-second execution timestamps
 
-**⚠️ Currently opted out via `supportsExecutionsHistory: false` in `exchangeMetadata.ts`.**
+**Currently not collected by ingestion.**
 
-The implementation exists and is correct, but invoking it from `tradeHistoryController` /
-`FillsModule` was observed to wedge the shared Singapore HOW WebSocket tunnel for
-users in restricted jurisdictions or with incomplete proxy whitelisting. Symptoms:
-unrelated public REST endpoints (`/public/products`) time out at 20s, markets fail
-to load, chart subscriptions get dropped after 30s. Disabling Phemex's `fetchHistoricalFills`
-restores normal behavior. The exact upstream tunnel/proxy interaction has not yet been
-isolated; flip the flag back to `true` after a production canary confirms no regression.
+The implementation exists, but invoking it was observed to wedge the shared
+Singapore HOW WebSocket tunnel for users in restricted jurisdictions or with
+incomplete proxy whitelisting. Symptoms: unrelated public REST endpoints
+(`/public/products`) time out at 20s, markets fail to load, chart subscriptions
+get dropped after 30s. The current protection is that Phemex is symbol-scoped
+for fills and cannot enumerate traded symbols from an income ledger, so
+`isAxisSupported` reports fills as `unsupported` and never calls the route. The
+exact upstream tunnel/proxy interaction has not yet been isolated; do not make
+Phemex collectible until a production canary confirms no regression.
 
 ## WebSocket Implementation
 

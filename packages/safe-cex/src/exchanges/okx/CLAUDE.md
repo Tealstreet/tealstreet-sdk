@@ -189,7 +189,8 @@ Execution-history behavior (`fetchHistoricalFills`):
 - Fetches `/trade/fills` first, then `/trade/fills-history` if needed
 - Converts contract-size amounts to base qty using `contractsToBase(...)`
 - Normalizes fill timestamps to Unix seconds and resolves symbol from `instId`
-- The corresponding metadata capability is `supportsExecutionsHistory: true`.
+- Ingestion gates this through the real `fetchHistoricalFills` override and the
+  journal axis tables, not through exchange metadata.
 
 ## WebSocket Implementation
 
@@ -527,20 +528,20 @@ mark/index value is finite and differs from the seeded `last` placeholder.
 
 ### Candle Intervals (`INTERVAL`)
 
-| Internal | OKX   |
-| -------- | ----- |
-| `1m`     | `1m`  |
-| `3m`     | `3m`  |
-| `5m`     | `5m`  |
-| `15m`    | `15m` |
-| `30m`    | `30m` |
-| `1h`     | `1H`  |
-| `2h`     | `2H`  |
-| `4h`     | `4H`  |
-| `6h`     | `6H`  |
-| `12h`    | `12H` |
-| `1d`     | `1D`  |
-| `1w`     | `1W`  |
+| Internal | OKX     |
+| -------- | ------- |
+| `1m`     | `1m`    |
+| `3m`     | `3m`    |
+| `5m`     | `5m`    |
+| `15m`    | `15m`   |
+| `30m`    | `30m`   |
+| `1h`     | `1H`    |
+| `2h`     | `2H`    |
+| `4h`     | `4H`    |
+| `6h`     | `6H`    |
+| `12h`    | `12H`   |
+| `1d`     | `1D`    |
+| `1w`     | `1W`    |
 | `1M`     | `1Mutc` |
 
 Note: Minutes use lowercase (e.g., `1m`), hours and days use uppercase (e.g., `1H`, `1D`).
@@ -772,7 +773,6 @@ Key metadata values from `exchangeMetadata.ts`:
 | `positionModeIsGlobal`            | `true`                                                                |
 | `unifiedMargin`                   | `false`                                                               |
 | `supportsTestnet`                 | `false`                                                               |
-| `supportsExecutionsHistory`       | `true`                                                                |
 | `supportsChaser`                  | `true`                                                                |
 | `supportsTrailingStopLoss`        | `false` (disabled at metadata level despite code support)             |
 | `hasEmptyPositions`               | `false`                                                               |

@@ -404,24 +404,18 @@ replace the branded function during construction. The deterministic capability
 suite in `src/__tests__/audit-regressions/exchange-metadata-capabilities.test.ts`
 loads the real registry and enforces the following minimum contracts:
 
-- `supportsExecutionsHistory` requires a real `fetchHistoricalFills` override;
 - trailing-stop, partial/full TP/SL, or trigger-type advertising requires a
   non-fallback `placeOrder` and `features.orders: true`;
 - `supportsPublicOnly` requires construction with `publicDataOnly: true` and a
   non-fallback `start` implementation;
 - TP/SL trigger defaults must belong to the unique advertised trigger set.
 
-**"Inert" means the branded base fallback OR an unconditional `return []`.**
-`isBaseCapabilityFallback` alone answers "was this never implemented", which is
-only half the question — an override whose entire body is `return []` is
-unbranded and used to pass as a real implementation. `coinbase` and `phemex`
-both shipped exactly that, so a flag could point at
-nothing and still satisfy the contract. Use `isInertCapability` when checking
-whether a capability _does_ anything; `isBaseCapabilityFallback` remains correct
-when the question really is "is there an override at all". The stub test is
-strict on purpose: real implementations routinely OPEN with
-`if (this.isPublicDataOnly) return [];`, so only a body that is _entirely_ that
-one statement counts.
+The fills-history runtime gate is deliberately not metadata. Ingestion checks
+the capability brand on `fetchHistoricalFills` and then applies
+`symbolScopedFills.ts` to decide whether the venue can be asked account-wide or
+must be walked by symbols discovered from the income ledger. A branded fallback,
+an unenumerable symbol-scoped venue, and an empty result are three different
+states; do not collapse them into a capability boolean.
 
 **There is ONE fills axis, and it is `fetchHistoricalFills`.** `fetchHistoricalTrades`
 and the `supportsTradesHistory` flag were deleted 2026-08-16. They were never a
@@ -437,18 +431,19 @@ removed, so nothing was lost in the fold.
 `supportsTradesHistory` went with it because it never gated anything: only test
 fixtures read it, and it had drifted to advertising `true` on `phemex`,
 `backpack` and `lighter` — all of which always returned empty — while advertising
-`false` on `woo`, which worked. **`supportsExecutionsHistory` is the load-bearing
-flag**; `FillsModule` and `tradeHistoryController` gate on it. Do not
-reintroduce a second history method: if a venue needs a different route, it
-belongs behind `fetchHistoricalFills`, not beside it.
+`false` on `woo`, which worked. `supportsExecutionsHistory` was later removed for
+the same reason: no UI or ingestion path consumes a metadata fills-history gate.
+Do not reintroduce a second history method or a second capability manifest; if a
+venue needs a different route, it belongs behind `fetchHistoricalFills`, not
+beside it.
 
-This baseline proves only that metadata does not point at a known inert base
-method. It cannot prove that an override maps every advertised order type or
-trigger correctly, that a history endpoint returns valid rows, or that public
-startup succeeds end-to-end. Those claims need venue-specific deterministic
-request/response regressions; live startup and authentication additionally need
-network or credentialed probes. Do not replace that evidence with source-text
-grep, and do not add a second capability manifest that duplicates metadata.
+This baseline proves only that metadata capability flags still in use do not
+point at inert base methods. It cannot prove that an override maps every order
+type or trigger correctly, that a history endpoint returns valid rows, or that
+public startup succeeds end-to-end. Those claims need venue-specific
+deterministic request/response regressions; live startup and authentication
+additionally need network or credentialed probes. Do not replace that evidence
+with source-text grep.
 
 ## `payloadSigner` (Bybit, Binance, Paradex)
 

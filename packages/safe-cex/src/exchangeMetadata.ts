@@ -75,25 +75,6 @@ export type ExchangeMetadata = {
   supportsSpotToggle?: boolean;
   /** Whether the exchange supports testnet/paper trading */
   supportsTestnet: boolean;
-  /** Whether the exchange API supports fetching trade history */
-  /**
-   * Whether the exchange's `fetchHistoricalFills(opts)` REST path is safe to invoke
-   * from the executions controller / FillsModule.
-   *
-   * Default: false. Opt-in per exchange by setting this to true once the
-   * fetchHistoricalFills implementation has been validated end-to-end through the
-   * production tunnel/proxy infrastructure.
-   *
-   * Why this exists (not duck-typed on `exchange.fetchHistoricalFills`):
-   * Some exchanges with `enforceWsTunnel`/`requiresCors` (e.g. Phemex via the
-   * Singapore HOW tunnel) can have their public REST endpoints (e.g.
-   * `/public/products`) wedged when fetchHistoricalFills hits a geo-restricted
-   * private endpoint and the upstream proxy / tunnel state machine doesn't
-   * recover cleanly. Gating on an explicit metadata flag lets us keep the
-   * implementation in place but disable invocation per-exchange without
-   * losing the feature for everyone.
-   */
-  supportsExecutionsHistory: boolean;
   /** Predefined leverage values for quick selection in the UI */
   leverageMagnets: number[];
   /** Delay in milliseconds between orderbook data updates */
@@ -271,7 +252,6 @@ const defaultMetaData: Omit<ExchangeMetadata, 'exchangeName' | 'features'> = {
   enableInPreview: true,
   supportedOnMobile: false,
   supportsTestnet: false,
-  supportsExecutionsHistory: false,
   orderbookTickDelay: 60,
   prettyName: '',
   leverageMagnets: [1, 10, 20, 50, 100, 125, 150],
@@ -349,7 +329,6 @@ const BybitMetadata: ExchangeMetadata = {
   enabledInDev: true,
   supportedOnMobile: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'Bybit',
   supportsTrailingStopLoss: true,
@@ -430,11 +409,8 @@ const BybitSpotMetadata: ExchangeMetadata = {
   prettyName: 'Bybit Spot',
   supportedOnMobile: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: false,
-  // Inherits `true` from BybitMetadata via the spread above. Spot has no position-based
-  // closed PnL, and this flag is a SOURCE SWITCH for the Closed Positions tab, not a
-  // capability advertisement — leaving it true sends spot down the endpoint branch and
-  // renders the tab permanently empty.
+  // Spot has no position-based closed PnL. This flag is a SOURCE SWITCH for the
+  // Closed Positions tab, not a generic capability advertisement.
   supportsClosedPnLEndpoint: false,
   supportsOpeningTriggerOrders: false,
   forbidCors: true,
@@ -480,7 +456,6 @@ const BinanceMetadata: ExchangeMetadata = {
   enabledInDev: true,
   supportedOnMobile: true,
   supportsTestnet: true,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'Binance',
   privateProxyIps: privateProxyIpsTokyo,
@@ -562,7 +537,6 @@ const BitunixMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'Bitunix',
   privateProxyIps: privateProxyIpsTokyo,
@@ -606,7 +580,6 @@ const WeexMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: false,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'WEEX',
   privateProxyIps: privateProxyIpsTokyo,
@@ -657,7 +630,6 @@ const MexcMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: false,
   orderbookTickDelay: 60,
   prettyName: 'MEXC',
   requiresCors: true,
@@ -809,7 +781,6 @@ const BitgetMetadata: ExchangeMetadata = {
   enabledInDev: true,
   supportedOnMobile: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   supportsTrailingStopLoss: false,
   orderbookTickDelay: 60,
   prettyName: 'Bitget',
@@ -960,7 +931,6 @@ const BingxMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'BingX',
   privateProxyIps: privateProxyIpsSingapore,
@@ -1014,7 +984,6 @@ const BitrueMetadata: ExchangeMetadata = {
   enabledInDev: false,
   enableInPreview: false,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 60,
   prettyName: 'Bitrue',
   privateProxyIps: privateProxyIpsTokyo,
@@ -1116,7 +1085,6 @@ const BlofinMetadata: ExchangeMetadata = {
   enabledInDev: true,
   supportedOnMobile: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 250,
   prettyName: 'BloFin',
   privateProxyIps: privateProxyIpsSingapore,
@@ -1162,7 +1130,6 @@ const OkxMetadata: ExchangeMetadata = {
   enabledInDev: true,
   supportedOnMobile: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 250,
   prettyName: 'OKX',
   tvMaxGetBarFetches: 5,
@@ -1241,7 +1208,6 @@ const WooMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50],
   orderbookTickDelay: 60,
   prettyName: 'WOO X',
@@ -1533,7 +1499,6 @@ const HyperliquidMetadata: ExchangeMetadata = {
   enabledInDev: true,
   supportedOnMobile: true,
   supportsTestnet: true,
-  supportsExecutionsHistory: true,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50],
   orderbookTickDelay: 60,
   prettyName: 'Hyperliquid',
@@ -1693,7 +1658,6 @@ const ApexOmniMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   leverageMagnets: [1, 2, 3, 4, 5, 10, 15, 20, 50],
   orderbookTickDelay: 60,
   prettyName: 'ApeX Omni',
@@ -1740,14 +1704,6 @@ const PhemexMetadata: ExchangeMetadata = {
   enabled: true,
   enabledInDev: true,
   supportsTestnet: false,
-  // Phemex's fetchHistoricalFills implementation exists in phemex.exchange.ts but invoking
-  // it (e.g. /exchange/order/v2/tradingList via the Singapore HOW tunnel) has been
-  // observed to wedge unrelated REST traffic — including the public /public/products
-  // markets endpoint — for users in restricted jurisdictions or with incomplete proxy
-  // whitelisting. Until the upstream tunnel/proxy interaction is validated end-to-end
-  // for Phemex, keep this opt-out so the FillsModule and tradeHistoryController don't
-  // invoke it. Flip to true after a production canary confirms no regression.
-  supportsExecutionsHistory: false,
   orderbookTickDelay: 60,
   prettyName: 'Phemex',
   supportsTunnel: true,
@@ -1998,7 +1954,6 @@ const ParadexMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: true,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 100,
   prettyName: 'Paradex',
   privateProxyIps: privateProxyIpsSingapore,
@@ -2073,7 +2028,6 @@ const AsterDEXMetadata: ExchangeMetadata = {
   enabledInDev: true,
   enableInPreview: true,
   supportsTestnet: true,
-  supportsExecutionsHistory: true,
   leverageMagnets: [1, 2, 5, 10, 20, 50, 100, 125],
   orderbookTickDelay: 60,
   prettyName: 'Aster',
@@ -2192,7 +2146,6 @@ const LighterMetadata: ExchangeMetadata = {
   enableInPreview: true,
   supportedOnMobile: true,
   supportsTestnet: false,
-  supportsExecutionsHistory: true,
   orderbookTickDelay: 100,
   prettyName: 'Lighter',
   defaultQuote: 'USDC',

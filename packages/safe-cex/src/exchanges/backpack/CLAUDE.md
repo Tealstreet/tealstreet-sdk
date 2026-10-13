@@ -154,9 +154,9 @@ their subscription refcount plus the matching REST snapshot/delta lifecycle.
 - `GET /wapi/v1/history/fills` - Fill history (instruction: `fillHistoryQueryAll`); `fetchHistoricalFills()` maps this response into Tealstreet execution records
 - `GET /wapi/v1/history/orders` - Order history (instruction: `orderHistoryQueryAll`)
 
-`supportsExecutionsHistory` is accurate now that `fetchHistoricalFills()` is implemented.
-The stricter `supportsExecutionsHistory` controller gate remains off until an
-authenticated request is verified end-to-end through the production proxy.
+Backpack has a real `fetchHistoricalFills()` implementation. Runtime collection
+is gated by the capability brand and journal axis support, not by exchange
+metadata.
 
 ## WebSocket Implementation
 
@@ -252,10 +252,10 @@ Handled by `BaseWebSocket.onClose()`:
 
 Backpack's API supports two native order types: `Limit` and `Market`. Stop-loss and take-profit orders are implemented as **trigger orders** using `Market` type with a `triggerPrice`.
 
-| Tealstreet Type | API `orderType` | Key Fields                                                                  |
-| --------------- | --------------- | --------------------------------------------------------------------------- |
-| Market          | `Market`        | `quantity`                                                                  |
-| Limit           | `Limit`         | `price`, `quantity`, `timeInForce`, `postOnly`                              |
+| Tealstreet Type | API `orderType` | Key Fields                                                        |
+| --------------- | --------------- | ----------------------------------------------------------------- |
+| Market          | `Market`        | `quantity`                                                        |
+| Limit           | `Limit`         | `price`, `quantity`, `timeInForce`, `postOnly`                    |
 | StopLoss        | `Market`        | `triggerPrice`, `triggerQuantity`, `triggerBy`, `reduceOnly=true` |
 | TakeProfit      | `Market`        | `triggerPrice`, `triggerQuantity`, `triggerBy`, `reduceOnly=true` |
 
