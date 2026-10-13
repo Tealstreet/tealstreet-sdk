@@ -369,6 +369,76 @@ describe('Blofin contract scaling regression', () => {
     });
   });
 
+  it('patches confirmed margin mode metadata before follow-up refetches settle', async () => {
+    const { exchange, store } = makeExchange();
+    const flatArbPosition = {
+      id: createPositionId('ARBUSDT', PositionSide.Long, PositionMode.OneWay),
+      symbol: 'ARBUSDT',
+      side: PositionSide.Long,
+      entryPrice: 0,
+      notional: 0,
+      leverage: 75,
+      liquidationPrice: 0,
+      marginType: MarginType.Cross,
+      positionMode: PositionMode.OneWay,
+      unrealizedPnl: 0,
+      contracts: 0,
+      info: {},
+    };
+    const openSolPosition = {
+      ...flatArbPosition,
+      id: createPositionId('SOLUSDT', PositionSide.Long, PositionMode.OneWay),
+      symbol: 'SOLUSDT',
+      contracts: 1,
+    };
+    store.update({
+      fetchedLeverage: {
+        ARBUSDT: {
+          buyLeverage: 75,
+          sellLeverage: 75,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.OneWay,
+        },
+        SOLUSDT: {
+          buyLeverage: 20,
+          sellLeverage: 20,
+          marginType: MarginType.Cross,
+          positionMode: PositionMode.OneWay,
+        },
+      },
+      positions: [flatArbPosition, openSolPosition],
+    });
+    const post = vi.fn().mockResolvedValue({
+      data: {
+        code: '0',
+        msg: 'success',
+        data: { marginMode: 'isolated' },
+      },
+    });
+    const getOrFetchMarginType = vi.spyOn(exchange, 'getOrFetchMarginType').mockImplementation(async () => {
+      expect((exchange as any)._accountMarginType).toBe(MarginType.Isolated);
+      expect(store.fetchedLeverage.ARBUSDT.marginType).toBe(MarginType.Isolated);
+      expect(store.fetchedLeverage.SOLUSDT.marginType).toBe(MarginType.Isolated);
+      expect(store.positions.find((position) => position.symbol === 'ARBUSDT')?.marginType).toBe(MarginType.Isolated);
+      expect(store.positions.find((position) => position.symbol === 'SOLUSDT')?.marginType).toBe(MarginType.Cross);
+      return MarginType.Isolated;
+    });
+    const fetchPositions = vi.spyOn(exchange, 'fetchPositions').mockResolvedValue([]);
+    exchange.xhr = { post } as any;
+
+    await exchange.changeMarginType(true, 'ARBUSDT');
+
+    expect(post).toHaveBeenCalledWith(ENDPOINTS.SET_MARGIN_MODE, {
+      marginMode: 'isolated',
+    });
+    expect(getOrFetchMarginType).toHaveBeenCalledWith(undefined, true);
+    expect(fetchPositions).toHaveBeenCalledWith(['ARBUSDT']);
+    expect(store.fetchedLeverage.ARBUSDT.marginType).toBe(MarginType.Isolated);
+    expect(store.fetchedLeverage.SOLUSDT.marginType).toBe(MarginType.Isolated);
+    expect(store.positions.find((position) => position.symbol === 'ARBUSDT')?.marginType).toBe(MarginType.Isolated);
+    expect(store.positions.find((position) => position.symbol === 'SOLUSDT')?.marginType).toBe(MarginType.Cross);
+  });
+
   it('includes attachAlgoOrders compatibility payload when TP/SL are attached to normal orders', async () => {
     const { exchange, store } = makeExchange();
     const markets = await (async () => {

@@ -1842,6 +1842,16 @@ export class BlofinExchange extends BaseExchange {
       throw new Error(data.msg);
     }
 
+    const confirmedMarginType =
+      data.data?.marginMode === 'isolated'
+        ? MarginType.Isolated
+        : data.data?.marginMode === 'cross'
+          ? MarginType.Cross
+          : isolated
+            ? MarginType.Isolated
+            : MarginType.Cross;
+    this.applyConfirmedMarginType(confirmedMarginType);
+
     await this.getOrFetchMarginType(undefined, true);
     if (symbol) {
       const positions = await this.fetchPositions([symbol]);
@@ -1874,8 +1884,38 @@ export class BlofinExchange extends BaseExchange {
             : PositionMode.OneWay;
       this.applyConfirmedPositionMode(confirmedMode);
     } else if (method === 'changeMarginType') {
-      this._accountMarginType = args[0] ? MarginType.Isolated : MarginType.Cross;
+      this.applyConfirmedMarginType(args[0] ? MarginType.Isolated : MarginType.Cross);
     }
+  };
+
+  private applyConfirmedMarginType = (marginType: MarginType) => {
+    this._accountMarginType = marginType;
+
+    const fetchedLeverageEntries = Object.entries(this.store.fetchedLeverage);
+    const positions = this.store.positions;
+    const hasFlatPositionUpdates = positions.some(
+      (position) => Number(position.contracts) === 0 && position.marginType !== marginType,
+    );
+    if (!fetchedLeverageEntries.length && !hasFlatPositionUpdates) {
+      return;
+    }
+
+    this.store.update({
+      ...(fetchedLeverageEntries.length
+        ? {
+            fetchedLeverage: Object.fromEntries(
+              fetchedLeverageEntries.map(([symbol, leverage]) => [symbol, { ...leverage, marginType }]),
+            ),
+          }
+        : {}),
+      ...(hasFlatPositionUpdates
+        ? {
+            positions: positions.map((position) =>
+              Number(position.contracts) === 0 ? { ...position, marginType } : position,
+            ),
+          }
+        : {}),
+    });
   };
 
   private applyConfirmedPositionMode = (positionMode: PositionMode) => {
