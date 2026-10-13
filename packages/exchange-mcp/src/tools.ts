@@ -1,0 +1,239 @@
+import type { BaseCapabilityMethod, Exchange } from '@tealstreet/safe-cex/src/exchanges/base';
+import type { Order } from '@tealstreet/safe-cex/src/types';
+
+import {
+  OrderSide,
+  OrderStopTriggerType,
+  OrderTimeInForce,
+  OrderType,
+  PositionSide,
+} from '@tealstreet/safe-cex/src/types';
+import { z } from 'zod';
+
+import { isInertCapability } from '@tealstreet/safe-cex/src/exchanges/base';
+
+type Shape = z.ZodRawShape;
+
+export type Tool<S extends Shape = Shape> = {
+  name: string;
+  description: string;
+  /** The adapter method the tool calls. Adapters that leave it unimplemented get no tool. */
+  method: keyof Exchange | 'fetchBalance';
+  input: S;
+  run: (exchange: Exchange, args: z.infer<z.ZodObject<S>>) => Promise<unknown>;
+};
+
+const tool = <S extends Shape>(t: Tool<S>): Tool => t as unknown as Tool;
+
+const symbol = z.string().describe('Market symbol as get_markets lists it');
+const symbols = z.array(z.string()).optional().describe('Market symbols; omit for all');
+const from = z.number().int().optional().describe('Start time, ms since epoch');
+const to = z.number().int().optional().describe('End time, ms since epoch');
+const limit = z.number().int().positive().optional();
+
+const inMarkets = <T extends { symbol: string }>(rows: T[], wanted?: string[]): T[] =>
+  wanted ? rows.filter((r) => wanted.includes(r.symbol)) : rows;
+
+const openOrders = async (exchange: Exchange, ids: string[]): Promise<Order[]> => {
+  const orders = (await exchange.fetchOrders()).filter((o) => ids.includes(o.id));
+  const missing = ids.filter((id) => !orders.some((o) => o.id === id));
+  if (missing.length) throw new Error(`No open order with id ${missing.join(', ')}`);
+  return orders;
+};
+
+export const tools: Tool[] = [
+  tool({
+    name: 'get_markets',
+    description:
+      'Markets on this exchange with precision, size limits and leverage limits. With no filter, returns symbols only.',
+    method: 'start',
+    input: {
+      symbols,
+      search: z.string().optional().describe('Case-insensitive substring of the symbol or base asset'),
+    },
+    run: async (exchange, { symbols: wanted, search }) => {
+      const markets = exchange.store.markets;
+      if (!wanted && !search) return markets.map((m) => m.symbol);
+      const needle = search?.toLowerCase();
+      return markets
+        .filter(
+          (m) =>
+            wanted?.includes(m.symbol) ||
+            (needle && (m.symbol.toLowerCase().includes(needle) || m.base.toLowerCase().includes(needle))),
+        )
+        .map(({ info: _venueResponse, ...market }) => market);
+    },
+  }),
+  tool({
+    name: 'get_tickers',
+    description: 'Last, mark, index, bid and ask prices, 24h volume and funding rate.',
+    method: 'fetchTickers',
+    input: { symbols },
+    run: async (exchange, { symbols: wanted }) => {
+      const tickers = (await exchange.fetchTickers?.()) ?? [];
+      return inMarkets(tickers, wanted);
+    },
+  }),
+  tool({
+    name: 'get_candles',
+    description: 'OHLCV candles.',
+    method: 'fetchOHLCV',
+    input: {
+      symbol,
+      interval: z.enum(['1m', '3m', '5m', '15m', '30m', '1h', '2h', '4h', '6h', '12h', '1d', '1w']),
+      from,
+      to,
+      limit,
+    },
+    run: (exchange, args) => exchange.fetchOHLCV(args),
+  }),
+  tool({
+    name: 'get_balance',
+    description: 'Account balance: total, free, used and unrealised PnL.',
+    method: 'fetchBalance',
+    input: {},
+    run: (exchange) => (exchange as Exchange & { fetchBalance: () => Promise<unknown> }).fetchBalance(),
+  }),
+  tool({
+    name: 'get_positions',
+    description: 'Open positions.',
+    method: 'fetchPositions',
+    input: { symbols },
+    run: async (exchange, { symbols: wanted }) => inMarkets(await exchange.fetchPositions(wanted), wanted),
+  }),
+  tool({
+    name: 'get_open_orders',
+    description: 'Open orders, including conditional orders.',
+    method: 'fetchOrders',
+    input: { symbols },
+    run: async (exchange, { symbols: wanted }) => inMarkets(await exchange.fetchOrders(wanted), wanted),
+  }),
+  tool({
+    name: 'get_order_history',
+    description: 'Past orders, including filled and cancelled ones.',
+    method: 'fetchHistoricalOrders',
+    input: { symbol: symbol.optional(), orderId: z.string().optional(), from, to, limit },
+    run: (exchange, args) => exchange.fetchHistoricalOrders(args),
+  }),
+  tool({
+    name: 'get_fills',
+    description: 'Trade executions (fills).',
+    method: 'fetchHistoricalFills',
+    input: { symbol: symbol.optional(), orderId: z.string().optional(), from, to, limit },
+    run: (exchange, args) => exchange.fetchHistoricalFills(args),
+  }),
+  tool({
+    name: 'get_closed_pnl',
+    description: 'Realised PnL of closed positions for one market.',
+    method: 'fetchClosedPnl',
+    input: { symbol, from, to, limit },
+    run: (exchange, args) => exchange.fetchClosedPnl(args),
+  }),
+  tool({
+    name: 'get_income',
+    description: 'Account income records: funding, fees, realised PnL and transfers.',
+    method: 'fetchIncomeHistory',
+    input: {
+      symbol: symbol.optional(),
+      incomeType: z.string().optional().describe('Filter by the type field of returned records'),
+      startTime: from,
+      endTime: to,
+      limit,
+    },
+    run: (exchange, args) => exchange.fetchIncomeHistory(args),
+  }),
+  tool({
+    name: 'place_order',
+    description:
+      'Place an order. Returns the new order ids. Size is in the units of the market\'s limits.amount from get_markets.',
+    method: 'placeOrder',
+    input: {
+      symbol,
+      side: z.enum(OrderSide),
+      type: z.enum(OrderType),
+      amount: z.number().positive(),
+      price: z.number().positive().optional().describe('Limit price; required for limit orders'),
+      triggerPrice: z.number().positive().optional().describe('Trigger price for conditional and stop orders'),
+      triggerType: z.enum(OrderStopTriggerType).optional(),
+      stopLoss: z.number().positive().optional(),
+      takeProfit: z.number().positive().optional(),
+      reduceOnly: z.boolean().optional(),
+      timeInForce: z.enum(OrderTimeInForce).optional().describe('PostOnly makes a limit order maker-only'),
+      clientOrderId: z.string().optional(),
+    },
+    run: (exchange, args) => exchange.placeOrder(args),
+  }),
+  tool({
+    name: 'amend_order',
+    description: 'Change the price or the size of one open order. Returns the order ids after the change.',
+    method: 'updateOrder',
+    input: {
+      orderId: z.string(),
+      price: z.number().positive().optional(),
+      amount: z.number().positive().optional(),
+    },
+    run: async (exchange, { orderId, price, amount }) => {
+      if ((price === undefined) === (amount === undefined)) throw new Error('Set exactly one of price and amount');
+      const [order] = await openOrders(exchange, [orderId]);
+      return exchange.updateOrder({ order, update: price !== undefined ? { price } : { amount: amount! } });
+    },
+  }),
+  tool({
+    name: 'cancel_orders',
+    description: 'Cancel open orders by id.',
+    method: 'cancelOrders',
+    input: { orderIds: z.array(z.string()).min(1) },
+    run: async (exchange, { orderIds }) => {
+      await exchange.cancelOrders(await openOrders(exchange, orderIds));
+      return { cancelled: orderIds };
+    },
+  }),
+  tool({
+    name: 'cancel_all_orders',
+    description: 'Cancel every open order, or every open order on one market.',
+    method: 'cancelOrders',
+    input: { symbol: symbol.optional() },
+    run: async (exchange, { symbol: market }) => {
+      const wanted = market ? [market] : undefined;
+      const orders = inMarkets(await exchange.fetchOrders(wanted), wanted);
+      if (orders.length) await exchange.cancelOrders(orders);
+      return { cancelled: orders.map((o) => o.id) };
+    },
+  }),
+  tool({
+    name: 'set_leverage',
+    description: 'Set leverage on one market.',
+    method: 'setLeverage',
+    input: { symbol, leverage: z.number().positive(), side: z.enum(PositionSide).optional() },
+    run: async (exchange, { symbol: market, leverage, side }) => {
+      await exchange.setLeverage(market, leverage, side);
+      return { symbol: market, leverage };
+    },
+  }),
+  tool({
+    name: 'set_position_mode',
+    description: 'Switch between hedged and one-way position mode.',
+    method: 'changePositionMode',
+    input: { hedged: z.boolean(), symbol: symbol.optional() },
+    run: async (exchange, { hedged, symbol: market }) => {
+      await exchange.changePositionMode(hedged, market);
+      return { hedged };
+    },
+  }),
+  tool({
+    name: 'set_margin_type',
+    description: 'Switch between isolated and cross margin.',
+    method: 'changeMarginType',
+    input: { isolated: z.boolean(), symbol: symbol.optional() },
+    run: async (exchange, { isolated, symbol: market }) => {
+      await exchange.changeMarginType(isolated, market);
+      return { isolated };
+    },
+  }),
+];
+
+export const supportedTools = (exchange: Exchange): Tool[] =>
+  tools.filter((t) => {
+    const fn = (exchange as unknown as Record<string, unknown>)[t.method];
+    return typeof fn === 'function' && !isInertCapability(fn, t.method as BaseCapabilityMethod);
+  });

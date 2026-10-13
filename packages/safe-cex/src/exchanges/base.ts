@@ -508,6 +508,7 @@ export class BaseExchange implements Exchange {
    */
   protected getTickInterval(): number | undefined {
     const override = this.options.extra?.tickInterval;
+    if (override === Number.POSITIVE_INFINITY) return override;
     const configured = override && override > 0 ? override : getExchangeMetadata(this._exchangeName).tickInterval;
 
     // Server-pushed slowdown for a venue that is rate-limiting us. Applied to the
