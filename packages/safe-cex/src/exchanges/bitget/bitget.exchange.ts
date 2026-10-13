@@ -53,7 +53,7 @@ import { BaseExchange } from '../base';
 import { patternClientOrderIdRule } from '../clientOrderId';
 import { paginateIncomeRange } from '../income-paging';
 import { createAPI, isBitgetUtaStrategyOrderNotFound } from './bitget.api';
-import { mapBitgetFills } from './bitget.fills';
+import { mapBitgetFills, mapBitgetUtaFills } from './bitget.fills';
 import { mapBitgetBills } from './bitget.income';
 import {
   BITGET_UTA_CATEGORY,
@@ -64,6 +64,7 @@ import {
   FETCH_SINGLE_ACCOUNT_RESPONSE,
   FETCH_UTA_ACCOUNT_ASSETS_RESPONSE,
   FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE,
+  FETCH_UTA_FILLS_RESPONSE,
   FETCH_UTA_ORDERS_RESPONSE,
   FETCH_UTA_POSITIONS_RESPONSE,
   GRAFANA_ENDPOINTS_EVERY,
@@ -89,6 +90,8 @@ const BILL_PAGE_LIMIT = 100;
 const BITGET_FILLS_PAGE_LIMIT = 100;
 /** Bitget REJECTS a fills window wider than 90 days — it does not clamp it. */
 const BITGET_FILLS_MAX_WINDOW_MS = 89 * 24 * 60 * 60 * 1000;
+/** Bitget UTA fill history rejects windows wider than 30 days. Use a sub-30-day inclusive span. */
+const BITGET_UTA_FILLS_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000 - 1;
 /** Backstop only; the cursor is what actually terminates the walk. */
 const BITGET_FILLS_MAX_PAGES = 100;
 const BILL_MAX_WINDOW_MS = 30 * 24 * 60 * 60 * 1000;
@@ -1105,6 +1108,80 @@ export class BitgetExchange extends BaseExchange {
     };
   };
 
+  /** One cursor page of UTA fills. Rethrows so a failed page can never read as an empty one. */
+  private _fetchUtaFillsPage = async (params: Record<string, any>): Promise<{ rows: any[]; cursor?: string }> => {
+    const { data } = await this.xhr.get<FETCH_UTA_FILLS_RESPONSE>(ENDPOINTS.UTA_ORDER_FILLS, { params });
+    if (data?.code && !isBitgetSuccessCode(data.code)) {
+      throw new Error(getBitgetApiErrorMessage(data, 'Bitget UTA fills request failed'));
+    }
+
+    return {
+      rows: Array.isArray(data?.data?.list) ? data.data.list : [],
+      cursor: data?.data?.cursor ? String(data.data.cursor) : undefined,
+    };
+  };
+
+  private _fetchHistoricalUtaFills = async (opts: ExecutionsOptions): Promise<Execution[]> => {
+    const { symbol, orderId, from, to, limit = BITGET_FILLS_PAGE_LIMIT } = opts;
+
+    let normalizedSymbol: string | undefined;
+    if (symbol) {
+      const market = this._resolveMarket(symbol);
+      if (!market) return [];
+      normalizedSymbol = market.symbol;
+    }
+
+    const deps = {
+      resolveSymbol: (raw: string) => this._resolveMarket(raw)?.symbol,
+      toTimestamp: (ms: number) => Math.floor(ms / 1000),
+    };
+
+    const windows =
+      from !== undefined && to !== undefined ? splitTimeRange(from, to, BITGET_UTA_FILLS_MAX_WINDOW_MS) : [undefined];
+
+    const executions: Execution[] = [];
+    const seen = new Set<string>();
+
+    try {
+      for (const window of windows) {
+        let cursor: string | undefined;
+
+        for (let page = 0; page < BITGET_FILLS_MAX_PAGES; page += 1) {
+          const params: Record<string, any> = {
+            category: this.apiUtaCategory,
+            limit: Math.min(limit, BITGET_FILLS_PAGE_LIMIT),
+          };
+          if (orderId) params.orderId = orderId;
+          if (window) {
+            params.startTime = window.startTime;
+            params.endTime = window.endTime;
+          }
+          if (cursor) params.cursor = cursor;
+
+          const { rows, cursor: nextCursor } = await this._fetchUtaFillsPage(params);
+          if (!rows.length) break;
+
+          for (const execution of mapBitgetUtaFills(rows, deps)) {
+            if (normalizedSymbol && execution.symbol !== normalizedSymbol) continue;
+            const id = execution.id ?? `${execution.symbol}|${execution.timestamp}|${execution.qty}|${execution.price}`;
+            if (seen.has(id)) continue;
+            seen.add(id);
+            executions.push(execution);
+          }
+
+          // Terminate on cursor exhaustion or non-advancement, never on a short page.
+          if (!nextCursor || nextCursor === cursor) break;
+          cursor = nextCursor;
+        }
+      }
+    } catch (err: any) {
+      this.emitAndLogError(err?.response?.data?.msg || err?.message);
+      return executions;
+    }
+
+    return executions;
+  };
+
   /**
    * Per-fill executions from `/api/v2/mix/order/fills`.
    *
@@ -1132,8 +1209,7 @@ export class BitgetExchange extends BaseExchange {
     if (this.isPublicDataOnly) return [];
     await this.ensureAccountTypeDetected();
     if (this.usesUtaRouting) {
-      // UTA fill history needs `/api/v3/trade/fills`; do not fall through to Classic v2.
-      return [];
+      return this._fetchHistoricalUtaFills(opts);
     }
 
     const { symbol, from, to, limit = BITGET_FILLS_PAGE_LIMIT } = opts;

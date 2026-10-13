@@ -58,25 +58,26 @@ in-flight `ACCOUNT_SETTINGS_V3` probe and then memoizes the result on the
 exchange instance, so unstarted main-thread instances can still route UTA
 orders/reads correctly without racing multiple probes.
 
-Still out of scope for this slice: `bitgetinverse`, testnet UTA, trade/fill
-history, bills, trailing stops, and in-place modify of UTA strategy orders.
-UTA TP/SL updates use cancel-and-replace through the v3 strategy cancel/place
-endpoints instead. The other paths must keep using Classic v2 behavior until
-their own slices land.
+Still out of scope for this slice: `bitgetinverse`, testnet UTA, bills,
+trailing stops, and in-place modify of UTA strategy orders. UTA TP/SL updates
+use cancel-and-replace through the v3 strategy cancel/place endpoints instead.
+The other paths must keep using Classic v2 behavior until their own slices land.
 
-UTA historical fills are intentionally short-circuited to an empty result for
-now, before any Classic v2 request is sent. Bitget's documented replacement is
-`GET /api/v3/trade/fills`, which has a 30-day max start/end window and cursor
-pagination; implement and map that endpoint before claiming UTA history support
-or treating the empty result as collected UTA history.
+UTA historical fills route through `GET /api/v3/trade/fills` after account-type
+detection marks the instance as UTA. Bitget documents this route as 90-day
+lookback only, with each request capped to a 30-day start/end window and cursor
+pagination. The adapter splits requested windows into sub-30-day spans, follows
+the response `cursor`, maps `execId`, `execPrice`, `execQty`, `execPnl`,
+`feeDetail[]`, `tradeScope`, `side`, and `tradeSide`, and filters requested
+symbols client-side because the official request parameters do not include a
+symbol filter. Do not fall through from UTA to Classic `/api/v2/mix/order/fills`.
 
 CCXT's current Bitget UTA support uses the same credential model (`key`,
 `secret`, `passphrase`) and does not suggest an extra account-linking key. The
 remaining useful comparison items are additional UTA slices: map
-`GET /api/v3/trade/fills` with `execId`, `execPrice`, `execQty`, `execValue`,
-`execPnl`, `createdTime`, `feeDetail[]`, `tradeScope`, `side`, and `tradeSide`;
-add cursor pagination and the documented 30-day window; add UTA history-orders;
-add UTA strategy-order history and modify endpoints; add UTA trailing-stop
+`GET /api/v3/trade/fills` against live accounts for any undocumented fields
+such as explicit `posSide`; add UTA history-orders; add UTA strategy-order
+history and modify endpoints; add UTA trailing-stop
 strategy placement; add UTA batch place/modify/cancel; and revisit v3 public
 market/WS streams only if we decide to move public data off Classic v2. Keep
 coin-margined and testnet UTA disabled until each has its own confirmed Bitget
@@ -231,6 +232,7 @@ below. UTA routing is gated by `usesUtaRouting` (`isUta && supportsUtaRouting &&
 | `UTA_CANCEL_STRATEGY_ORDER` | `/api/v3/trade/cancel-strategy-order`   | UTA standalone strategy order cancellation         |
 | `UTA_CANCEL_BATCH`          | `/api/v3/trade/cancel-batch`            | UTA batch cancellation constant, not preferred yet |
 | `UTA_MODIFY_ORDER`          | `/api/v3/trade/modify-order`            | UTA modify-order constant, not preferred yet       |
+| `UTA_ORDER_FILLS`           | `/api/v3/trade/fills`                   | UTA historical per-fill executions                 |
 
 ### Algo/Stop Orders
 

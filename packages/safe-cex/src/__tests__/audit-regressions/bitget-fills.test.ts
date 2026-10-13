@@ -1,6 +1,11 @@
 import { describe, expect, it } from 'vitest';
 
-import { mapBitgetFill, mapBitgetFills } from '../../exchanges/bitget/bitget.fills';
+import {
+  mapBitgetFill,
+  mapBitgetFills,
+  mapBitgetUtaFill,
+  mapBitgetUtaFills,
+} from '../../exchanges/bitget/bitget.fills';
 import { OrderSide, PositionSide } from '../../types';
 
 /** The exact shape measured live on sheet row 36. */
@@ -22,8 +27,29 @@ const fill = {
 };
 
 const deps = {
-  resolveSymbol: (s: string) => (s === 'TRXUSDT' ? 'TRXUSDT' : undefined),
+  resolveSymbol: (s: string) => (s === 'TRXUSDT' || s === 'BTCUSDT' ? s : undefined),
   toTimestamp: (ms: number) => Math.floor(ms / 1000),
+};
+
+const utaFill = {
+  execId: '131111111111111111',
+  execLinkId: '131111111111111111',
+  orderId: '131111111111111112',
+  clientOid: 'client-1',
+  category: 'USDT-FUTURES',
+  symbol: 'BTCUSDT',
+  orderType: 'market',
+  side: 'sell',
+  execPrice: '106950.1',
+  execQty: '0.01',
+  execValue: '1069.501',
+  tradeScope: 'taker',
+  tradeSide: 'open',
+  feeDetail: [{ feeCoin: 'USDT', fee: '0.6417006' }],
+  createdTime: '1750141421721',
+  updatedTime: '1750141421728',
+  execPnl: '-0.002',
+  isRPI: 'no',
 };
 
 describe('mapBitgetFill', () => {
@@ -90,5 +116,55 @@ describe('mapBitgetFill', () => {
 
   it('skips unmappable rows in a batch without losing the rest', () => {
     expect(mapBitgetFills([fill, { ...fill, symbol: 'NOPE' }, fill], deps)).toHaveLength(2);
+  });
+});
+
+describe('mapBitgetUtaFill', () => {
+  it('maps documented v3 fill fields into an Execution', () => {
+    const execution = mapBitgetUtaFill(utaFill, deps)!;
+
+    expect(execution).toEqual(
+      expect.objectContaining({
+        id: '131111111111111111',
+        orderId: '131111111111111112',
+        symbol: 'BTCUSDT',
+        timestamp: 1750141421,
+        price: 106950.1,
+        qty: 0.01,
+        commission: 0.6417006,
+        commissionAsset: 'USDT',
+        realizedPnl: -0.002,
+        side: OrderSide.Sell,
+        positionSide: PositionSide.Short,
+        maker: false,
+      }),
+    );
+  });
+
+  it('derives UTA hedge legs from order direction plus open/close semantics', () => {
+    expect(mapBitgetUtaFill({ ...utaFill, side: 'buy', tradeSide: 'open' }, deps)!.positionSide).toBe(
+      PositionSide.Long,
+    );
+    expect(mapBitgetUtaFill({ ...utaFill, side: 'sell', tradeSide: 'close' }, deps)!.positionSide).toBe(
+      PositionSide.Long,
+    );
+    expect(mapBitgetUtaFill({ ...utaFill, side: 'buy', tradeSide: 'close' }, deps)!.positionSide).toBe(
+      PositionSide.Short,
+    );
+  });
+
+  it('prefers explicit UTA posSide when the venue includes it', () => {
+    expect(mapBitgetUtaFill({ ...utaFill, side: 'buy', tradeSide: 'close', posSide: 'long' }, deps)!.positionSide).toBe(
+      PositionSide.Long,
+    );
+  });
+
+  it('leaves realizedPnl absent when v3 omits execPnl instead of fabricating zero', () => {
+    const execution = mapBitgetUtaFill({ ...utaFill, execPnl: undefined }, deps)!;
+    expect(execution.realizedPnl).toBeUndefined();
+  });
+
+  it('skips unmappable UTA rows without losing the rest', () => {
+    expect(mapBitgetUtaFills([utaFill, { ...utaFill, symbol: 'NOPE' }, utaFill], deps)).toHaveLength(2);
   });
 });

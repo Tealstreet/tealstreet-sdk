@@ -40,6 +40,7 @@ export const ENDPOINTS = {
   UTA_POSITIONS: '/api/v3/position/current-position',
   UTA_ORDERS: '/api/v3/trade/unfilled-orders',
   UTA_STRATEGY_ORDERS: '/api/v3/trade/unfilled-strategy-orders',
+  UTA_ORDER_FILLS: '/api/v3/trade/fills',
   UTA_PLACE_ORDER: '/api/v3/trade/place-order',
   UTA_PLACE_STRATEGY_ORDER: '/api/v3/trade/place-strategy-order',
   UTA_CANCEL_ORDER: '/api/v3/trade/cancel-order',
@@ -92,6 +93,7 @@ export const GRAFANA_ENDPOINTS_PERIODIC = [
   ENDPOINTS.UTA_POSITIONS,
   ENDPOINTS.UTA_ORDERS,
   ENDPOINTS.UTA_STRATEGY_ORDERS,
+  ENDPOINTS.UTA_ORDER_FILLS,
   ENDPOINTS.POSITIONS,
   ENDPOINTS.POSITIONS_V2,
   ENDPOINTS.ORDERS,
@@ -378,6 +380,38 @@ export type FETCH_UTA_ORDERS_RESPONSE = {
   requestTime: number;
   data: {
     list?: BITGET_UTA_ORDER[];
+    cursor?: string;
+  } | null;
+};
+
+export type BITGET_UTA_FILL = {
+  category?: string;
+  symbol?: string;
+  execId?: string;
+  execLinkId?: string;
+  orderId?: string;
+  clientOid?: string;
+  orderType?: string;
+  side?: string;
+  posSide?: string;
+  execPrice?: string;
+  execQty?: string;
+  execValue?: string;
+  tradeScope?: string;
+  tradeSide?: string;
+  feeDetail?: Array<{ feeCoin?: string; fee?: string; totalFee?: string }>;
+  createdTime?: string;
+  updatedTime?: string;
+  execPnl?: string;
+  isRPI?: string;
+};
+
+export type FETCH_UTA_FILLS_RESPONSE = {
+  code: string;
+  msg: string;
+  requestTime: number;
+  data: {
+    list?: BITGET_UTA_FILL[];
     cursor?: string;
   } | null;
 };

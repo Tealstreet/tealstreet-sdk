@@ -114,6 +114,119 @@ const createUtaStopLossOrder = (overrides: Record<string, any> = {}) => ({
 });
 
 describe('audit regression: Bitget UTA routing', () => {
+  it('routes UTA fill history through v3 fills with cursor pagination', async () => {
+    const exchange = createExchange();
+    const from = 1_750_000_000_000;
+    const to = from + 60_000;
+    const firstFill = {
+      execId: '131111111111111111',
+      orderId: 'order-1',
+      category: 'USDT-FUTURES',
+      symbol: 'BTCUSDT',
+      side: 'sell',
+      execPrice: '106950.1',
+      execQty: '0.01',
+      tradeScope: 'taker',
+      tradeSide: 'open',
+      feeDetail: [{ feeCoin: 'USDT', fee: '0.6417006' }],
+      createdTime: '1750141421721',
+      execPnl: '-0.002',
+    };
+    const secondFill = {
+      ...firstFill,
+      execId: '131111111111111112',
+      orderId: 'order-2',
+      side: 'buy',
+      tradeSide: 'close',
+      execPrice: '106900',
+      execPnl: '0.5',
+    };
+
+    (exchange.xhr.get as any).mockImplementation((endpoint: string, config?: { params?: Record<string, any> }) => {
+      if (endpoint !== ENDPOINTS.UTA_ORDER_FILLS) {
+        throw new Error(`Unexpected endpoint ${endpoint}`);
+      }
+      if (config?.params?.cursor === 'cursor-1') {
+        return Promise.resolve({
+          data: { code: '00000', msg: 'success', data: { list: [secondFill], cursor: undefined } },
+        });
+      }
+      return Promise.resolve({
+        data: { code: '00000', msg: 'success', data: { list: [firstFill], cursor: 'cursor-1' } },
+      });
+    });
+
+    const fills = await exchange.fetchHistoricalFills({ symbol: 'BTCUSDT', orderId: 'order-1', from, to, limit: 1000 });
+
+    expect(fills).toEqual([
+      expect.objectContaining({
+        id: '131111111111111111',
+        orderId: 'order-1',
+        symbol: 'BTCUSDT',
+        side: OrderSide.Sell,
+        positionSide: PositionSide.Short,
+        realizedPnl: -0.002,
+      }),
+      expect.objectContaining({
+        id: '131111111111111112',
+        side: OrderSide.Buy,
+        positionSide: PositionSide.Short,
+        realizedPnl: 0.5,
+      }),
+    ]);
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(1, ENDPOINTS.UTA_ORDER_FILLS, {
+      params: {
+        category: 'USDT-FUTURES',
+        orderId: 'order-1',
+        startTime: from,
+        endTime: to,
+        limit: 100,
+      },
+    });
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, ENDPOINTS.UTA_ORDER_FILLS, {
+      params: {
+        category: 'USDT-FUTURES',
+        orderId: 'order-1',
+        startTime: from,
+        endTime: to,
+        limit: 100,
+        cursor: 'cursor-1',
+      },
+    });
+    expect(
+      (exchange.xhr.get as any).mock.calls.some(([endpoint]: [string]) => endpoint === ENDPOINTS.ORDER_FILLS),
+    ).toBe(false);
+  });
+
+  it('splits UTA fill history requests into sub-30-day windows', async () => {
+    const exchange = createExchange();
+    const from = 1_750_000_000_000;
+    const thirtyDaysMinusOne = 30 * 24 * 60 * 60 * 1000 - 1;
+    const to = from + 40 * 24 * 60 * 60 * 1000;
+    (exchange.xhr.get as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { list: [], cursor: undefined } },
+    });
+
+    await exchange.fetchHistoricalFills({ from, to });
+
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(1, ENDPOINTS.UTA_ORDER_FILLS, {
+      params: {
+        category: 'USDT-FUTURES',
+        startTime: from,
+        endTime: from + thirtyDaysMinusOne,
+        limit: 100,
+      },
+    });
+    expect(exchange.xhr.get).toHaveBeenNthCalledWith(2, ENDPOINTS.UTA_ORDER_FILLS, {
+      params: {
+        category: 'USDT-FUTURES',
+        startTime: from + thirtyDaysMinusOne + 1,
+        endTime: to,
+        limit: 100,
+      },
+    });
+  });
+
   it('validates UTA accounts through v3 account assets after detection', async () => {
     const exchange = createExchange({ accountTypeDetected: false });
     (exchange.xhr.get as any)
@@ -343,11 +456,24 @@ describe('audit regression: Bitget UTA routing', () => {
 
   it('does not fall back to Classic v2 fill history for UTA accounts', async () => {
     const exchange = createExchange();
+    (exchange.xhr.get as any).mockResolvedValue({
+      data: { code: '00000', msg: 'success', data: { list: [], cursor: undefined } },
+    });
 
-    await expect(
-      exchange.fetchHistoricalFills({ from: 1_700_000_000_000, to: 1_700_086_400_000 }),
-    ).resolves.toEqual([]);
-    expect(exchange.xhr.get).not.toHaveBeenCalled();
+    await expect(exchange.fetchHistoricalFills({ from: 1_700_000_000_000, to: 1_700_086_400_000 })).resolves.toEqual(
+      [],
+    );
+    expect(exchange.xhr.get).toHaveBeenCalledWith(ENDPOINTS.UTA_ORDER_FILLS, {
+      params: {
+        category: 'USDT-FUTURES',
+        startTime: 1_700_000_000_000,
+        endTime: 1_700_086_400_000,
+        limit: 100,
+      },
+    });
+    expect(
+      (exchange.xhr.get as any).mock.calls.some(([endpoint]: [string]) => endpoint === ENDPOINTS.ORDER_FILLS),
+    ).toBe(false);
   });
 
   it('lazily detects UTA before placing normal limit orders with v3 fields only', async () => {

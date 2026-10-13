@@ -31,6 +31,11 @@ const num = (value: unknown) => {
   return Number.isFinite(parsed) ? parsed : 0;
 };
 
+const optionalNum = (value: unknown): number | undefined => {
+  const parsed = parseFloat(String(value ?? ''));
+  return Number.isFinite(parsed) ? parsed : undefined;
+};
+
 /**
  * `feeDetail` is an ARRAY of per-coin fee entries, not a scalar. Summing it is deliberate:
  * a fill can be charged in more than one coin (fee-coin deduction), and reading only `[0]`
@@ -42,6 +47,22 @@ const totalFeeOf = (row: Record<string, any>): number => {
   let total = 0;
   for (const entry of detail) total += num(entry?.totalFee);
   return total;
+};
+
+const totalUtaFeeOf = (row: Record<string, any>): number | undefined => {
+  const detail = row?.feeDetail;
+  if (!Array.isArray(detail)) return optionalNum(row?.fee);
+
+  let total = 0;
+  let found = false;
+  for (const entry of detail) {
+    const fee = optionalNum(entry?.fee ?? entry?.totalFee);
+    if (fee === undefined) continue;
+    total += fee;
+    found = true;
+  }
+
+  return found ? total : undefined;
 };
 
 /**
@@ -117,6 +138,43 @@ const legAndDirectionOf = (row: Record<string, any>): BitgetLeg | null => {
   return { positionSide: leg, direction };
 };
 
+const utaLegAndDirectionOf = (row: Record<string, any>): BitgetLeg | null => {
+  const tradeSide = String(row?.tradeSide ?? '').toLowerCase();
+  const rawSide = String(row?.side ?? '').toLowerCase();
+  if (rawSide !== 'buy' && rawSide !== 'sell') return null;
+
+  const direction = rawSide === 'buy' ? OrderSide.Buy : OrderSide.Sell;
+  const explicitLeg =
+    String(row?.posSide ?? row?.holdSide ?? '').toLowerCase() === 'long'
+      ? PositionSide.Long
+      : String(row?.posSide ?? row?.holdSide ?? '').toLowerCase() === 'short'
+        ? PositionSide.Short
+        : tradeSide.includes('long')
+          ? PositionSide.Long
+          : tradeSide.includes('short')
+            ? PositionSide.Short
+            : undefined;
+
+  if (explicitLeg) {
+    return { positionSide: explicitLeg, direction };
+  }
+
+  const opening = tradeSide.startsWith('open');
+  const closing = tradeSide.startsWith('close');
+  if (!opening && !closing) return null;
+
+  const positionSide =
+    direction === OrderSide.Buy
+      ? opening
+        ? PositionSide.Long
+        : PositionSide.Short
+      : opening
+        ? PositionSide.Short
+        : PositionSide.Long;
+
+  return { positionSide, direction };
+};
+
 export type BitgetFillDeps = {
   /** Venue symbol -> normalized symbol. `undefined` drops the row rather than guessing. */
   resolveSymbol: (venueSymbol: string) => string | undefined;
@@ -168,6 +226,49 @@ export const mapBitgetFills = (rows: Array<Record<string, any>>, deps: BitgetFil
   const executions: Execution[] = [];
   for (const row of rows) {
     const execution = mapBitgetFill(row, deps);
+    if (execution) executions.push(execution);
+  }
+  return executions;
+};
+
+export const mapBitgetUtaFill = (row: Record<string, any>, deps: BitgetFillDeps): Execution | null => {
+  const venueSymbol = String(row?.symbol ?? '');
+  const symbol = deps.resolveSymbol(venueSymbol);
+  if (!symbol) return null;
+
+  const ms = parseInt(String(row?.createdTime ?? '0'), 10);
+  if (!Number.isFinite(ms) || ms <= 0) return null;
+
+  const qty = num(row?.execQty);
+  const price = num(row?.execPrice);
+  if (!(qty > 0) || !(price > 0)) return null;
+
+  const leg = utaLegAndDirectionOf(row);
+  if (!leg) return null;
+
+  const fee = totalUtaFeeOf(row);
+  const commissionAsset = row?.feeDetail?.[0]?.feeCoin ? String(row.feeDetail[0].feeCoin) : undefined;
+
+  return {
+    timestamp: deps.toTimestamp(ms),
+    symbol,
+    id: row?.execId ? String(row.execId) : row?.execLinkId ? String(row.execLinkId) : undefined,
+    orderId: row?.orderId ? String(row.orderId) : undefined,
+    price,
+    qty,
+    side: leg.direction,
+    commission: fee,
+    commissionAsset,
+    realizedPnl: optionalNum(row?.execPnl),
+    positionSide: leg.positionSide,
+    maker: row?.tradeScope ? String(row.tradeScope).toLowerCase() === 'maker' : undefined,
+  } as Execution;
+};
+
+export const mapBitgetUtaFills = (rows: Array<Record<string, any>>, deps: BitgetFillDeps): Execution[] => {
+  const executions: Execution[] = [];
+  for (const row of rows) {
+    const execution = mapBitgetUtaFill(row, deps);
     if (execution) executions.push(execution);
   }
   return executions;
