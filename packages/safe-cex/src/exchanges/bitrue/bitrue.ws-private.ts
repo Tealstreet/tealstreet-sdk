@@ -5,7 +5,7 @@ import { LogSeverity, Order, OrderSide, OrderStatus, OrderType } from '../../typ
 import { BaseWebSocket } from '../base.ws';
 import { BASE_WS_URL, ENDPOINTS, ORDER_SIDE, ORDER_STATUS, ORDER_TYPE, WS_ORDER_TRADE_UPDATE } from './bitrue.types';
 import { reverseWsSymbol } from './bitrue.utils';
-import { createIncrementalFills } from '../../utils/incrementalFills';
+import { cleanFloat, createIncrementalFills } from '../../utils/incrementalFills';
 
 export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
   private readonly incrementalFills = createIncrementalFills();
@@ -160,7 +160,7 @@ export class BitruePrivateWebsocket extends BaseWebSocket<BitrueExchange> {
       // since the raw-vs-scaled choice below can flip mid-order.
       const fillAmountRaw = Number(update.z ?? 0);
       const executedRaw = this.incrementalFills(String(orderId), fillAmountRaw).qty;
-      const fillAmount = amount > 0 && fillAmountRaw <= amount ? executedRaw : executedRaw * multiplier;
+      const fillAmount = amount > 0 && fillAmountRaw <= amount ? executedRaw : cleanFloat(executedRaw * multiplier);
       if (fillAmount > 0) {
         this.emitter.emit('fill', {
           id: String(orderId),

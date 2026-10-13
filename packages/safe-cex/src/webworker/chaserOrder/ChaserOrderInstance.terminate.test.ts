@@ -148,3 +148,20 @@ describe('ChaserOrderInstance.shouldTerminate', () => {
     });
   });
 });
+
+describe('ChaserOrderInstance fill tracking', () => {
+  // 0.001 + 0.009 is 0.009999999999999998 in floats: the order is filled.
+  it('counts summed fills a float hair under the size as filled', () => {
+    const inst = new ChaserOrderInstance(exchange, {
+      symbol: 'BTCUSDT',
+      size: 0.01,
+      side: OrderSide.Buy,
+      maxAttempts: 1000,
+      delay: 1000,
+    });
+    inst.addFillAmount('o1', 0.001);
+    expect(inst.state.isStopped).toBe(false);
+    inst.addFillAmount('o1', 0.009);
+    expect(inst.state.isStopped).toBe(true);
+  });
+});

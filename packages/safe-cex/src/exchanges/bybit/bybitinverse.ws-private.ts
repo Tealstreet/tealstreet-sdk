@@ -10,7 +10,7 @@ import { getTransport, resolveTransportRouting } from '../../transport/registry'
 import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { isWsRelayEnabled } from '../../transport/tealstreet/wsRelay';
 import { OrderStatus, Position, Writable } from '../../types';
-import { createIncrementalFills } from '../../utils/incrementalFills';
+import { cleanFloat, createIncrementalFills } from '../../utils/incrementalFills';
 import { resolveBybitExecution } from './bybit.fill-event';
 import { v } from '../../utils/get-key';
 import { virtualClock } from '../../utils/virtualClock';
@@ -201,7 +201,7 @@ export class BybitInversePrivateWebsocket extends BaseWebSocket<BybitInverseExch
             side: orders[0].side,
             symbol: orders[0].symbol,
             // Inverse value is in BASE coin per USD contracts, so the price is qty / value.
-            price: fill.value ? fill.qty / fill.value : executed.price,
+            price: fill.value ? cleanFloat(fill.qty / fill.value) : executed.price,
             amount: fill.qty,
           });
         }

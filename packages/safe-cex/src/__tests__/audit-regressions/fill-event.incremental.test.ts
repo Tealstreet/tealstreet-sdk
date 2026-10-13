@@ -38,6 +38,14 @@ describe('createIncrementalFills', () => {
     expect(executed('o2', 5)).toEqual({ qty: 5 });
   });
 
+  it('subtracts running totals without float noise, even far apart in size', () => {
+    const executed = createIncrementalFills();
+    executed('big', 100000, 1);
+    expect(executed('big', 100000.1, 1.001)).toEqual({ qty: 0.1, value: 0.001 });
+    executed('val', 1, 123456.788);
+    expect(executed('val', 2, 123456.789)).toEqual({ qty: 1, value: 0.001 });
+  });
+
   it('forgets the oldest orders past its bound', () => {
     const executed = createIncrementalFills(2);
     executed('a', 1);
@@ -84,6 +92,28 @@ describe('Bybit fill events', () => {
     expect(fills.reduce((sum, fill) => sum + fill.amount, 0)).toBe(3);
     // The second execution's own price, not the order's running average.
     expect(fills[1].price).toBe(50200);
+  });
+
+  // 4847.5704 / 0.058 is 83578.79999999999 in floats — the price a user saw in
+  // the fill toast. Differences of cumulative fields carry the same noise.
+  it('reports price and size without float noise', () => {
+    const store = new DefaultStore();
+    store.update({ markets: [MARKET] });
+    const exchange = new BybitExchange('bybit' as any, { key: 'k', secret: 's' } as any, store);
+    exchanges.push(exchange);
+    const fills: OrderFillEvent[] = [];
+    exchange.on('fill', (fill: OrderFillEvent) => fills.push(fill));
+
+    const socket = (exchange as any).privateWebsocket;
+    socket.handleOrderTopic([{ ...frame('Filled', '0.058', '4847.5704'), orderId: 'noise-1' }]);
+    socket.handleOrderTopic([{ ...frame('PartiallyFilled', '0.1', '8357.88'), orderId: 'noise-2' }]);
+    socket.handleOrderTopic([{ ...frame('Filled', '0.158', '13205.4504'), orderId: 'noise-2' }]);
+
+    expect(fills.map((fill) => [fill.amount, fill.price])).toEqual([
+      [0.058, 83578.8],
+      [0.1, 83578.8],
+      [0.058, 83578.8],
+    ]);
   });
 });
 
@@ -165,7 +195,20 @@ describe('AsterDEX fill events', () => {
     const handler = socket.handleOrderUpdate ?? socket.handleOrderTradeUpdate;
 
     handler.call(socket, {
-      o: { i: 8, s: 'BTCUSDT', S: 'BUY', X: 'PARTIALLY_FILLED', x: 'AMENDMENT', l: '0', L: '0', ap: '50000', z: '0.4', q: '1', o: 'LIMIT', p: '50000' },
+      o: {
+        i: 8,
+        s: 'BTCUSDT',
+        S: 'BUY',
+        X: 'PARTIALLY_FILLED',
+        x: 'AMENDMENT',
+        l: '0',
+        L: '0',
+        ap: '50000',
+        z: '0.4',
+        q: '1',
+        o: 'LIMIT',
+        p: '50000',
+      },
     });
 
     expect(fills).toEqual([]);

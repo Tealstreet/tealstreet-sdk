@@ -97,7 +97,10 @@ export class ChaserOrderInstance {
   }
 
   recalculateRemainingSize() {
-    this._remainingSize = this.options.size - Object.values(this._filledByOrderId).reduce((a, b) => a + b, 0);
+    const remaining = this.options.size - Object.values(this._filledByOrderId).reduce((a, b) => a + b, 0);
+    // Summed fills land a float hair off the size (0.1 + 0.058 vs 0.158); that
+    // is filled, not a remainder to chase.
+    this._remainingSize = Math.abs(remaining) <= Math.abs(this.options.size) * 1e-9 ? 0 : remaining;
   }
 
   subtractFilledSize(order: Order) {

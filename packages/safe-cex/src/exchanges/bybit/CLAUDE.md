@@ -176,9 +176,7 @@ the failure message must never contain the words "auth failed".
 Gated by `../../__tests__/audit-regressions/bybit.private-ws-auth-ordering.test.ts`
 (ordering, the signer REQUEST shape, exact subscribe args per variant, the
 local-HMAC path, both signer failure modes, `onOpen` wiring, and that a disposed
-exchange never asks the signer). Note root `test:ci` EXCLUDES
-`@tealstreet/safe-cex`, so that gate runs in the 4-hourly
-`scheduled-tests.yaml`, not on a PR.
+exchange never asks the signer). It runs on every PR via root `test:ci`.
 
 ## Startup Sequence
 
