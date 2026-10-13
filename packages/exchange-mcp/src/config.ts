@@ -1,0 +1,60 @@
+import type { ExchangeName, ExchangeOptions, PayloadSigner } from '@tealstreet/safe-cex/src/types';
+
+import { getRegisteredExchangeNames } from '@tealstreet/safe-cex/src/exchanges/registry';
+
+export type ServerConfig = {
+  exchange: ExchangeName;
+  options: ExchangeOptions;
+};
+
+/**
+ * Sends the bytes to sign, base64, in `header`, and `placeholder` as the signature,
+ * for a signing proxy that holds the secret to replace.
+ */
+export const proxySigner =
+  (header: string, placeholder: string): PayloadSigner =>
+  (request) => {
+    if (request.scheme !== 'hmac-sha256') {
+      throw new Error(`EXCHANGE_SIGNER_HEADER cannot sign ${request.scheme} payloads yet`);
+    }
+    return { signature: placeholder, headers: { [header]: Buffer.from(request.payload, 'utf8').toString('base64') } };
+  };
+
+const optional = (env: NodeJS.ProcessEnv, name: string): string | undefined => env[name]?.trim() || undefined;
+
+export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
+  const exchange = optional(env, 'EXCHANGE');
+  const names = getRegisteredExchangeNames();
+  if (!exchange || !names.includes(exchange as ExchangeName)) {
+    throw new Error(`EXCHANGE must be one of: ${names.join(', ')}`);
+  }
+
+  const testnet = optional(env, 'EXCHANGE_TESTNET');
+  if (testnet !== undefined && testnet !== 'true' && testnet !== 'false') {
+    throw new Error('EXCHANGE_TESTNET must be true or false');
+  }
+
+  const secret = optional(env, 'EXCHANGE_API_SECRET');
+  const header = optional(env, 'EXCHANGE_SIGNER_HEADER');
+  const placeholder = optional(env, 'EXCHANGE_SIGNER_SIGNATURE');
+  if (!header !== !placeholder) {
+    throw new Error('EXCHANGE_SIGNER_HEADER and EXCHANGE_SIGNER_SIGNATURE must be set together');
+  }
+  if (header && secret) {
+    throw new Error('EXCHANGE_API_SECRET and EXCHANGE_SIGNER_HEADER are both set; set one');
+  }
+
+  return {
+    exchange: exchange as ExchangeName,
+    options: {
+      key: optional(env, 'EXCHANGE_API_KEY') ?? '',
+      secret: secret ?? '',
+      passphrase: optional(env, 'EXCHANGE_API_PASSPHRASE'),
+      testnet: testnet === 'true',
+      payloadSigner: header && placeholder ? proxySigner(header, placeholder) : undefined,
+      // Tools fetch on demand, so the adapter's background polling would only add signed requests.
+      extra: { tickInterval: Number.POSITIVE_INFINITY },
+      tuning: { consoleLogging: false },
+    },
+  };
+};

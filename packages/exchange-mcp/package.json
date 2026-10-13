@@ -1,0 +1,39 @@
+{
+  "name": "@tealstreet/exchange-mcp",
+  "version": "0.1.0",
+  "description": "MCP server that trades on one exchange through safe-cex",
+  "type": "module",
+  "bin": {
+    "exchange-mcp": "dist/index.js"
+  },
+  "files": [
+    "dist"
+  ],
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "build": "tsup",
+    "start": "node dist/index.js",
+    "lint": "eslint . --ext .ts --cache --cache-location ../../.cache/eslint/exchange-mcp.eslintcache",
+    "test": "vitest run",
+    "test-ci": "vitest run",
+    "typecheck": "node ../../scripts/tsc-ts6.mjs --noEmit"
+  },
+  "devDependencies": {
+    "@modelcontextprotocol/sdk": "1.30.1",
+    "@tealstreet/cli-core": "*",
+    "@tealstreet/safe-cex": "*",
+    "@tealstreet/script-api-core": "*",
+    "@types/node": "^22.15.3",
+    "tsup": "^8.5.1",
+    "typescript": "^6.0.3",
+    "vite-tsconfig-paths": "^5.1.4",
+    "vitest": "^5.0.2",
+    "zod": "^4.6.5"
+  },
+  "license": "MIT"
+}
