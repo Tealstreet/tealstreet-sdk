@@ -640,6 +640,7 @@ follow-up, not an oversight.
 | `hiddenFromNewAccountPicker` | `false` | Hide from the add-API-key picker while keeping saved accounts running |
 | `supportedOnMobile`          | `false` | Allow this exchange to run in the React Native mobile app             |
 | `supportsSpotToggle`         | `false` | Venue serves spot + derivatives from one connection; offer the opt-in |
+| `supportsOptionsToggle`      | `false` | Venue trades options in the derivatives account; offer the opt-in     |
 
 `hiddenFromNewAccountPicker` is deliberately **not** `enabled: false`:
 availability gates also decide whether a _saved_ account may register at
@@ -663,6 +664,15 @@ they do not inherit mobile availability accidentally.
 `ExchangeOptions.enableSpotMarkets` (forwarded in `createExchangeFromAccount`
 only when the venue advertises the toggle). Default-off, and the exchange must
 return **before** issuing any request when off, so opting out costs nothing.
+
+`supportsOptionsToggle` does the same for `enableOptionMarkets`. Options join the
+existing connection only where the venue keeps them in the same account as its
+derivatives, so balance, margin and positions stay one view. A venue with a separate
+options account gets its own exchange name instead. Option markets carry
+`Market.option`; chains, expiries and account greeks come from `fetchOptionChain`,
+`fetchOptionExpiries` and `fetchAccountGreeks`, which are branded, so check them with
+`isInertCapability`. Chains are fetched on demand and never enter the store, so the
+perp ticker path is unchanged when options are on.
 
 ### Decision Flow
 

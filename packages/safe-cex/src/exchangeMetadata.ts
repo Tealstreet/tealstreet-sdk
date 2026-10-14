@@ -73,6 +73,12 @@ export type ExchangeMetadata = {
    * toggle in the add-account form (`ExchangeAccountConfig.enableSpotMarkets`).
    */
   supportsSpotToggle?: boolean;
+  /**
+   * Whether this exchange trades options in the same account as its derivatives, and
+   * therefore offers a per-account "also trade options" toggle
+   * (`ExchangeAccountConfig.enableOptionMarkets`).
+   */
+  supportsOptionsToggle?: boolean;
   /** Whether the exchange supports testnet/paper trading */
   supportsTestnet: boolean;
   /** Predefined leverage values for quick selection in the UI */
@@ -318,6 +324,7 @@ const BybitMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
   exchangeName: 'bybit' as ExchangeName,
+  supportsOptionsToggle: true,
   logo: '/static/exchanges/logos/BYBIT/logo.svg',
   lightLogo: '/static/exchanges/logos/BYBIT/light.png',
   darkLogo: '/static/exchanges/logos/BYBIT/dark.png',
@@ -369,6 +376,8 @@ const BybitMetadata: ExchangeMetadata = {
 const BybitDemoMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitdemo' as ExchangeName,
+  // Not confirmed that the demo environment lists options.
+  supportsOptionsToggle: false,
   prettyName: 'Bybit Demo',
   supportedOnMobile: true,
   supportsTestnet: false,
@@ -405,6 +414,8 @@ const HyrotraderMetadata: ExchangeMetadata = {
 
 const BybitSpotMetadata: ExchangeMetadata = {
   ...BybitMetadata,
+  // Options trade on the `bybit` connection.
+  supportsOptionsToggle: false,
   exchangeName: 'bybitspot' as ExchangeName,
   prettyName: 'Bybit Spot',
   supportedOnMobile: true,
@@ -430,6 +441,8 @@ const BybitUnifiedMetadata: ExchangeMetadata = {
 
 const BybitInverseMetadata: ExchangeMetadata = {
   ...BybitMetadata,
+  // Options trade on the `bybit` connection.
+  supportsOptionsToggle: false,
   exchangeName: 'bybitinverse' as ExchangeName,
   prettyName: 'Bybit Inverse',
   supportedOnMobile: true,
