@@ -24,11 +24,13 @@ Copybara carries it across. Never edit it on the mirror.
    smoke-tests the bundle, checks the pack, and publishes by OIDC with
    provenance. Re-running a published version skips the publish.
 
-npm trusts `Tealstreet/tealstreet-sdk` + `exchange-mcp-release.yml`; set once
-by a `@tealstreet` maintainer with
-`npm trust github @tealstreet/exchange-mcp --file exchange-mcp-release.yml --repo Tealstreet/tealstreet-sdk`.
-0.1.0 was published by hand, because npm cannot trust a package that does not
-exist yet.
+npm trusts `Tealstreet/tealstreet-sdk` + `exchange-mcp-release.yml`, set on
+the package's npm **Settings** page under Trusted Publisher with **Allow npm
+publish** checked. Without that box a trusted publisher may only stage a
+release. **Do not use `npm trust github`:** npm 11.13 sends no allowed actions
+and the registry answers with a bare 400. 0.1.0 was published by hand, because
+npm cannot trust a package that does not exist yet; 0.1.1 was the first
+release from the workflow, with SLSA provenance.
 
 ## The bundle
 
