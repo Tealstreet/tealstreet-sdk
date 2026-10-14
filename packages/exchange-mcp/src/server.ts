@@ -25,7 +25,7 @@ export const createServer = async ({ exchange: name, options }: ServerConfig, ve
   const ready = startOnce(exchange);
 
   const server = new McpServer({ name: `exchange-mcp-${name}`, version });
-  for (const tool of supportedTools(exchange)) {
+  for (const tool of supportedTools(exchange, { options: Boolean(options.enableOptionMarkets) })) {
     server.registerTool(tool.name, { description: tool.description, inputSchema: tool.input }, async (args) => {
       const result = await tool.run(await ready(), args as never);
       return { content: [{ type: 'text', text: JSON.stringify(result) }] };

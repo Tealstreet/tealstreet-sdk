@@ -22,17 +22,22 @@ export type Tool<S extends Shape = Shape> = {
   description: string;
   /** The adapter method the tool calls. Adapters that leave it unimplemented get no tool. */
   method: keyof Exchange | 'fetchBalance';
+  /** Listed only when the server runs with options on. */
+  requiresOptions?: true;
   input: S;
   run: (exchange: Exchange, args: z.infer<z.ZodObject<S>>) => Promise<unknown>;
 };
 
 const tool = <S extends Shape>(t: Tool<S>): Tool => t as unknown as Tool;
 
-const symbol = z.string().describe('Market symbol as get_markets lists it');
+const symbol = z.string().describe('Market symbol as get_markets or get_option_chain lists it');
 const symbols = z.array(z.string()).optional().describe('Market symbols; omit for all');
 const from = z.number().int().optional().describe('Start time, ms since epoch');
 const to = z.number().int().optional().describe('End time, ms since epoch');
 const limit = z.number().int().positive().optional();
+
+const optionRight = z.enum(['call', 'put']);
+const isoDate = (ms: number) => new Date(ms).toISOString();
 
 const inMarkets = <T extends { symbol: string }>(rows: T[], wanted?: string[]): T[] =>
   wanted?.length ? rows.filter((r) => wanted.includes(r.symbol)) : rows;
@@ -73,14 +78,14 @@ export const tools: Tool[] = [
   tool({
     name: 'get_markets',
     description:
-      'Markets on this exchange with precision, size limits and leverage limits. With no filter, returns symbols only.',
+      'Markets on this exchange with precision, size limits and leverage limits. With no filter, returns symbols only. Options are left out unless named in symbols; use get_option_chain for them.',
     method: 'start',
     input: {
       symbols,
       search: z.string().optional().describe('Case-insensitive substring of the symbol or base asset'),
     },
     run: async (exchange, { symbols: wanted, search }) => {
-      const markets = exchange.store.markets;
+      const markets = exchange.store.markets.filter((m) => !m.option || wanted?.includes(m.symbol));
       if (!wanted?.length && !search) return markets.map((m) => m.symbol);
       const needle = search?.toLowerCase();
       return markets
@@ -94,7 +99,7 @@ export const tools: Tool[] = [
   }),
   tool({
     name: 'get_tickers',
-    description: 'Last, mark, index, bid and ask prices, 24h volume and funding rate.',
+    description: 'Last, mark, index, bid and ask prices, 24h volume and funding rate. Options are in get_option_chain.',
     method: 'fetchTickers',
     input: { symbols },
     run: async (exchange, { symbols: wanted }) => {
@@ -173,6 +178,65 @@ export const tools: Tool[] = [
     run: (exchange, args) => exchange.fetchIncomeHistory(args),
   }),
   tool({
+    name: 'get_option_expiries',
+    description: 'Expiries of the tradable options on one underlying, oldest first.',
+    method: 'fetchOptionExpiries',
+    requiresOptions: true,
+    input: { underlying: z.string().describe('Underlying asset, such as BTC') },
+    run: async (exchange, { underlying }) =>
+      (await exchange.fetchOptionExpiries(underlying)).map((expiry) => ({ expiry, date: isoDate(expiry) })),
+  }),
+  tool({
+    name: 'get_option_chain',
+    description:
+      'Option chain for one underlying: prices, implied volatilities as fractions, and greeks where the venue publishes them. units says how the greeks are scaled. Filter by expiry or a strike range: one underlying can have hundreds of options.',
+    method: 'fetchOptionChain',
+    requiresOptions: true,
+    input: {
+      underlying: z.string().describe('Underlying asset, such as BTC'),
+      expiry: z.number().int().optional().describe('Exact expiry in ms, as get_option_expiries returns it'),
+      right: optionRight.optional(),
+      strikeMin: z.number().optional(),
+      strikeMax: z.number().optional(),
+    },
+    run: async (exchange, query) => {
+      const rows = await exchange.fetchOptionChain(query);
+      return {
+        units: rows.find((r) => r.quote.greeks)?.quote.greeks?.units,
+        rows: rows.map(({ market, quote }) => ({
+          symbol: market.symbol,
+          strike: market.option!.strike,
+          right: market.option!.right,
+          expiry: market.option!.expiry,
+          date: isoDate(market.option!.expiry),
+          bid: quote.bid,
+          ask: quote.ask,
+          mark: quote.mark,
+          markIv: quote.markIv,
+          bidIv: quote.bidIv,
+          askIv: quote.askIv,
+          underlyingPrice: quote.underlyingPrice,
+          ...(quote.greeks
+            ? {
+                delta: quote.greeks.delta,
+                gamma: quote.greeks.gamma,
+                vega: quote.greeks.vega,
+                theta: quote.greeks.theta,
+              }
+            : {}),
+        })),
+      };
+    },
+  }),
+  tool({
+    name: 'get_account_greeks',
+    description: 'Option greeks summed across the account, per underlying. units says how they are scaled.',
+    method: 'fetchAccountGreeks',
+    requiresOptions: true,
+    input: {},
+    run: (exchange) => exchange.fetchAccountGreeks(),
+  }),
+  tool({
     name: 'place_order',
     description:
       "Place an order. Returns the new order ids. Size is in the units of the market's limits.amount from get_markets.",
@@ -182,7 +246,11 @@ export const tools: Tool[] = [
       side: z.enum(OrderSide),
       type: z.enum(OrderType),
       amount: z.number().positive(),
-      price: z.number().positive().optional().describe('Limit price; required for limit orders'),
+      price: z
+        .number()
+        .positive()
+        .optional()
+        .describe('Limit price; required for limit orders unless an option order gives impliedVolatility'),
       triggerPrice: z.number().positive().optional().describe('Trigger price for conditional and stop orders'),
       triggerType: z.enum(OrderStopTriggerType).optional(),
       stopLoss: z.number().positive().optional(),
@@ -190,6 +258,11 @@ export const tools: Tool[] = [
       reduceOnly: z.boolean().optional(),
       timeInForce: z.enum(OrderTimeInForce).optional().describe('PostOnly makes a limit order maker-only'),
       clientOrderId: z.string().optional(),
+      impliedVolatility: z
+        .number()
+        .positive()
+        .optional()
+        .describe('Option orders only: price by implied volatility as a fraction, 0.5 for 50%. price is not sent then'),
     },
     run: async (exchange, args) => exchange.placeOrder(await prepare(exchange, args)),
   }),
@@ -266,8 +339,9 @@ export const tools: Tool[] = [
   }),
 ];
 
-export const supportedTools = (exchange: Exchange): Tool[] =>
+export const supportedTools = (exchange: Exchange, { options = false }: { options?: boolean } = {}): Tool[] =>
   tools.filter((t) => {
+    if (t.requiresOptions && !options) return false;
     const fn = (exchange as unknown as Record<string, unknown>)[t.method];
     return typeof fn === 'function' && !isInertCapability(fn, t.method as BaseCapabilityMethod);
   });

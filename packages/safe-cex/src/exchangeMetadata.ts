@@ -414,6 +414,8 @@ const HyrotraderMetadata: ExchangeMetadata = {
 
 const BybitSpotMetadata: ExchangeMetadata = {
   ...BybitMetadata,
+  // Options trade on the `bybit` connection.
+  supportsOptionsToggle: false,
   exchangeName: 'bybitspot' as ExchangeName,
   prettyName: 'Bybit Spot',
   supportedOnMobile: true,
@@ -439,6 +441,8 @@ const BybitUnifiedMetadata: ExchangeMetadata = {
 
 const BybitInverseMetadata: ExchangeMetadata = {
   ...BybitMetadata,
+  // Options trade on the `bybit` connection.
+  supportsOptionsToggle: false,
   exchangeName: 'bybitinverse' as ExchangeName,
   prettyName: 'Bybit Inverse',
   supportedOnMobile: true,
