@@ -324,6 +324,7 @@ const BybitMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
   exchangeName: 'bybit' as ExchangeName,
+  supportsOptionsToggle: true,
   logo: '/static/exchanges/logos/BYBIT/logo.svg',
   lightLogo: '/static/exchanges/logos/BYBIT/light.png',
   darkLogo: '/static/exchanges/logos/BYBIT/dark.png',
@@ -375,6 +376,8 @@ const BybitMetadata: ExchangeMetadata = {
 const BybitDemoMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   exchangeName: 'bybitdemo' as ExchangeName,
+  // Not confirmed that the demo environment lists options.
+  supportsOptionsToggle: false,
   prettyName: 'Bybit Demo',
   supportedOnMobile: true,
   supportsTestnet: false,
