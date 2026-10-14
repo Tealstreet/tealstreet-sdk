@@ -1,6 +1,6 @@
 {
   "name": "@tealstreet/exchange-mcp",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "MCP server that trades on one exchange through safe-cex",
   "keywords": [
     "mcp",
@@ -38,7 +38,8 @@
     "lint": "eslint . --ext .ts --cache --cache-location ../../.cache/eslint/exchange-mcp.eslintcache",
     "test": "vitest run",
     "test-ci": "vitest run",
-    "typecheck": "node ../../scripts/tsc-ts6.mjs --noEmit"
+    "typecheck": "node ../../scripts/tsc-ts6.mjs --noEmit",
+    "release:tag": "bash scripts/tag-release.sh"
   },
   "devDependencies": {
     "@modelcontextprotocol/sdk": "1.31.0",

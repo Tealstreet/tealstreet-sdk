@@ -1,0 +1,127 @@
+# Publishes @tealstreet/exchange-mcp to npm when an `exchange-mcp-vX.Y.Z` tag is
+# pushed. Source of truth is the monorepo (mirrors/tealstreet-sdk/.github/);
+# Copybara carries it here. Authenticates by npm trusted publishing (OIDC), so
+# there is no token secret, and npm attaches provenance because this repo is
+# public. Release steps: packages/exchange-mcp/CLAUDE.md.
+name: exchange-mcp release
+
+on:
+  push:
+    tags:
+      - 'exchange-mcp-v*'
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  PACKAGE_DIR: packages/exchange-mcp
+  PACKAGE_NAME: '@tealstreet/exchange-mcp'
+
+jobs:
+  release:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # No `registry-url`: it writes an .npmrc expecting NODE_AUTH_TOKEN, which
+      # nothing sets; the publish authenticates by OIDC. check-latest because
+      # trusted publishing needs Node >= 22.14.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          check-latest: true
+          cache: yarn
+
+      - run: yarn install --frozen-lockfile --network-timeout 600000
+
+      - name: Resolve release metadata
+        id: meta
+        run: |
+          set -euo pipefail
+          TAG="${GITHUB_REF_NAME}"
+          VERSION="${TAG#exchange-mcp-v}"
+          if [ "$TAG" = "$VERSION" ] || [ -z "$VERSION" ]; then
+            echo "Expected tag format exchange-mcp-vX.Y.Z, got ${TAG}" >&2
+            exit 1
+          fi
+          PACKAGE_VERSION="$(node -p "require('./${PACKAGE_DIR}/package.json').version")"
+          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
+            echo "Tag ${TAG} does not match ${PACKAGE_DIR}/package.json version ${PACKAGE_VERSION}" >&2
+            exit 1
+          fi
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      - name: Typecheck
+        run: yarn --cwd "$PACKAGE_DIR" typecheck
+
+      - name: Test
+        run: yarn --cwd "$PACKAGE_DIR" test-ci
+
+      # Also writes dist/THIRD_PARTY_LICENSES.md, and fails on a bundled
+      # dependency whose licence is not allowed.
+      - name: Build
+        run: yarn --cwd "$PACKAGE_DIR" build
+
+      # Boots dist/index.js over stdio, then loads the Poseidon WASM that
+      # Lighter signs through from the same dist/ directory.
+      - name: Smoke-test the bundle
+        run: yarn --cwd "$PACKAGE_DIR" smoke
+
+      - name: Use npm with trusted publishing support
+        run: npm install -g npm@^11.5.1 && npm --version
+
+      # The bundle is self-contained: a runtime dependency on an unpublished
+      # @tealstreet/* workspace is what broke `npm install -g @tealstreet/cli`.
+      - name: Verify the npm package contents
+        working-directory: ${{ env.PACKAGE_DIR }}
+        run: |
+          set -euo pipefail
+          npm pack --dry-run --json --registry https://registry.npmjs.org > npm-pack.json
+          node - <<'NODE'
+          const fs = require('fs');
+          const raw = fs.readFileSync('npm-pack.json', 'utf8');
+          const jsonStart = raw.lastIndexOf('\n[');
+          const pack = JSON.parse(jsonStart >= 0 ? raw.slice(jsonStart + 1) : raw)[0];
+          const files = pack.files.map((file) => file.path).sort();
+          const expected = [
+            'LICENSE',
+            'README.md',
+            'dist/THIRD_PARTY_LICENSES.md',
+            'dist/index.js',
+            'dist/wasm/poseidon_crypto.wasm',
+            'package.json',
+          ];
+          const manifest = JSON.parse(fs.readFileSync('package.json', 'utf8'));
+          const problems = [];
+          if (JSON.stringify(files) !== JSON.stringify(expected)) {
+            problems.push(`files ${JSON.stringify(files)} != ${JSON.stringify(expected)}`);
+          }
+          for (const field of ['dependencies', 'peerDependencies', 'optionalDependencies']) {
+            if (manifest[field] && Object.keys(manifest[field]).length) problems.push(`package.json has ${field}`);
+          }
+          if (!fs.readFileSync('dist/index.js', 'utf8').startsWith('#!/usr/bin/env node')) {
+            problems.push('dist/index.js has no node shebang');
+          }
+          if (manifest.repository?.url !== `git+https://github.com/${process.env.GITHUB_REPOSITORY}.git`) {
+            problems.push(`repository.url ${manifest.repository?.url} is not this repo; npm rejects the trusted publish`);
+          }
+          if (problems.length) {
+            console.error(problems.map((p) => `- ${p}`).join('\n'));
+            process.exit(1);
+          }
+          console.log(`npm package: ${files.length} files, ${pack.size} bytes packed`);
+          NODE
+          rm npm-pack.json
+
+      - name: Publish npm package
+        working-directory: ${{ env.PACKAGE_DIR }}
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          set -euo pipefail
+          if npm view "${PACKAGE_NAME}@${VERSION}" version --registry https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "${PACKAGE_NAME}@${VERSION} already published; skipping npm publish."
+            exit 0
+          fi
+          npm publish --access public --provenance --registry https://registry.npmjs.org

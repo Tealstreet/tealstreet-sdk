@@ -8,24 +8,27 @@ never on the mirror.
 
 ## Releasing to npm
 
-**Publishing runs from the monorepo, not the mirror.** Tags do not cross
-Copybara, a release commit authored on the mirror would collide with the next
-export, and `@tealstreet/cli` already publishes from here by trusted publishing.
-The cost: npm generates provenance only from a public repo, so packages
-published from this private one carry none.
+**Publishing runs on the public tealstreet-sdk mirror.** npm attaches
+provenance only to packages published from a public repo, and the
+`repository` field in `package.json` must name the repo that publishes:
+npm rejected trust for `tealstreet-next` with a bare 400 because this field
+names the mirror. The workflow is authored here, at
+`mirrors/tealstreet-sdk/.github/workflows/exchange-mcp-release.yml`, and
+Copybara carries it across. Never edit it on the mirror.
 
 1. Bump `version` in `package.json` and merge to `master`.
-2. Tag that commit `exchange-mcp-vX.Y.Z` and push the tag.
-   `.github/workflows/exchange-mcp-release.yml` typechecks, tests, builds,
-   smoke-tests the bundle, checks the pack, and publishes by OIDC. Re-running a
-   published version skips the publish.
+2. Wait for the Copybara export (about 20 minutes), then run
+   `yarn release:tag` from this package. It checks that mirror `master`
+   carries the new version and tags that commit `exchange-mcp-vX.Y.Z`, which
+   fires the workflow there. The workflow typechecks, tests, builds,
+   smoke-tests the bundle, checks the pack, and publishes by OIDC with
+   provenance. Re-running a published version skips the publish.
 
-**First-time setup, once per package:** npm must trust the workflow. A
-maintainer of the `@tealstreet` scope runs
-`npm trust github @tealstreet/exchange-mcp --file exchange-mcp-release.yml --repo Tealstreet/tealstreet-next`.
-If npm refuses because the package does not exist yet, they publish the first
-version by hand (`yarn build && npm publish --access public` from this
-directory), then run the trust command.
+npm trusts `Tealstreet/tealstreet-sdk` + `exchange-mcp-release.yml`; set once
+by a `@tealstreet` maintainer with
+`npm trust github @tealstreet/exchange-mcp --file exchange-mcp-release.yml --repo Tealstreet/tealstreet-sdk`.
+0.1.0 was published by hand, because npm cannot trust a package that does not
+exist yet.
 
 ## The bundle
 
