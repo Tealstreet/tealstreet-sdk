@@ -1,13 +1,29 @@
 {
   "name": "@tealstreet/exchange-mcp",
-  "version": "0.1.0",
+  "version": "0.0.0-development",
   "description": "MCP server that trades on one exchange through safe-cex",
+  "keywords": [
+    "mcp",
+    "model-context-protocol",
+    "crypto",
+    "trading",
+    "exchange",
+    "safe-cex"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Tealstreet/tealstreet-sdk.git",
+    "directory": "packages/exchange-mcp"
+  },
+  "homepage": "https://github.com/Tealstreet/tealstreet-sdk/tree/master/packages/exchange-mcp#readme",
   "type": "module",
   "bin": {
     "exchange-mcp": "dist/index.js"
   },
   "files": [
-    "dist"
+    "dist/index.js",
+    "dist/wasm/poseidon_crypto.wasm",
+    "dist/THIRD_PARTY_LICENSES.md"
   ],
   "publishConfig": {
     "access": "public"
@@ -16,16 +32,18 @@
     "node": ">=20"
   },
   "scripts": {
-    "build": "tsup",
+    "build": "tsup && node scripts/third-party-licenses.mjs",
     "start": "node dist/index.js",
+    "smoke": "node scripts/smoke.mjs && node dist/poseidon-probe.js",
     "lint": "eslint . --ext .ts --cache --cache-location ../../.cache/eslint/exchange-mcp.eslintcache",
     "test": "vitest run",
     "test-ci": "vitest run",
     "typecheck": "node ../../scripts/tsc-ts6.mjs --noEmit"
   },
   "devDependencies": {
-    "@modelcontextprotocol/sdk": "1.30.1",
+    "@modelcontextprotocol/sdk": "1.31.0",
     "@tealstreet/cli-core": "*",
+    "@tealstreet/poseidon-crypto": "*",
     "@tealstreet/safe-cex": "*",
     "@tealstreet/script-api-core": "*",
     "@types/node": "^22.15.3",

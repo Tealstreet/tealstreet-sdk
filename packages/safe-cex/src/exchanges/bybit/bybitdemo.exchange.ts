@@ -6,4 +6,8 @@ export class BybitDemoExchange extends BybitExchange {
   get supportedCategories() {
     return ['linear'];
   }
+
+  protected optionsEnabled() {
+    return false;
+  }
 }

@@ -5,6 +5,7 @@ import { roundCloseSize, roundMarketOrderSize as roundMarketOrderSizeToStep } fr
 import { exchangeMetadata, getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { OrderType as OrderTypes } from '@tealstreet/safe-cex/src/types';
 import { DEFAULT_AMOUNT_PRECISION, DEFAULT_PRICE_PRECISION } from '@tealstreet/utils/src/currency/currencyUtils';
+import { ScriptValidationError } from './ScriptValidationError';
 import { shouldRoundSizeDown } from './shouldRoundSizeDown';
 
 /**
@@ -41,6 +42,14 @@ import { shouldRoundSizeDown } from './shouldRoundSizeDown';
 
 export const roundOrderPrice = (rawPrice: number, market: Market): number =>
   roundToNearestMultiple(rawPrice, market.precision.price || DEFAULT_PRICE_PRECISION);
+
+/** Refuses a price under the venue's published minimum. Markets with no minimum pass. */
+export const assertMinimumPrice = (price: number, market: Market): void => {
+  const min = market.limits?.price?.min;
+  if (min !== undefined && price < min) {
+    throw new ScriptValidationError(`price ${price} is below the minimum ${min} for '${market.symbol}'`);
+  }
+};
 
 const amountStep = (market: Market): number => market.precision.amount || DEFAULT_AMOUNT_PRECISION;
 

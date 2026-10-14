@@ -273,7 +273,6 @@ export class BackpackExchange extends BaseExchange {
             spot: !isPerpetual,
             swap: isPerpetual,
             future: false,
-            option: false,
             contract: isPerpetual,
             linear: isPerpetual,
             inverse: false,

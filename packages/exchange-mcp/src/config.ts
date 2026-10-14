@@ -1,5 +1,6 @@
 import type { ExchangeName, ExchangeOptions, PayloadSigner } from '@tealstreet/safe-cex/src/types';
 
+import { getExchangeMetadata } from '@tealstreet/safe-cex/src/exchangeMetadata';
 import { getRegisteredExchangeNames } from '@tealstreet/safe-cex/src/exchanges/registry';
 
 export type ServerConfig = {
@@ -34,6 +35,14 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
     throw new Error('EXCHANGE_TESTNET must be true or false');
   }
 
+  const options = optional(env, 'EXCHANGE_OPTIONS');
+  if (options !== undefined && options !== 'true' && options !== 'false') {
+    throw new Error('EXCHANGE_OPTIONS must be true or false');
+  }
+  if (options === 'true' && !getExchangeMetadata(exchange as ExchangeName).supportsOptionsToggle) {
+    throw new Error(`EXCHANGE_OPTIONS is not available on ${exchange}`);
+  }
+
   const secret = optional(env, 'EXCHANGE_API_SECRET');
   const header = optional(env, 'EXCHANGE_SIGNER_HEADER');
   const placeholder = optional(env, 'EXCHANGE_SIGNER_SIGNATURE');
@@ -51,6 +60,7 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
       secret: secret ?? '',
       passphrase: optional(env, 'EXCHANGE_API_PASSPHRASE'),
       testnet: testnet === 'true',
+      enableOptionMarkets: options === 'true',
       payloadSigner: header && placeholder ? proxySigner(header, placeholder) : undefined,
       // Tools fetch on demand, so the adapter's background polling would only add signed requests.
       extra: { tickInterval: Number.POSITIVE_INFINITY },

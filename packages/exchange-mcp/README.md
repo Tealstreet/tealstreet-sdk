@@ -12,6 +12,7 @@ EXCHANGE=bybit EXCHANGE_API_KEY=... EXCHANGE_API_SECRET=... npx @tealstreet/exch
 |---|---|
 | `EXCHANGE` | safe-cex exchange name, such as `bybit` or `bybitdemo`. Required |
 | `EXCHANGE_TESTNET` | `true` for the exchange's testnet |
+| `EXCHANGE_OPTIONS` | `true` to trade the exchange's options, where it offers them on the same account (`bybit` today) |
 | `EXCHANGE_API_KEY` | API key |
 | `EXCHANGE_API_SECRET` | API secret, to sign in this process |
 | `EXCHANGE_API_PASSPHRASE` | passphrase, on exchanges that use one |
@@ -23,6 +24,8 @@ Set `EXCHANGE_API_SECRET` or the two signer variables. Signer mode needs an adap
 ## Tools
 
 `get_markets`, `get_tickers`, `get_candles`, `get_balance`, `get_positions`, `get_open_orders`, `get_order_history`, `get_fills`, `get_closed_pnl`, `get_income`, `place_order`, `amend_order`, `cancel_orders`, `cancel_all_orders`, `set_leverage`, `set_position_mode`, `set_margin_type`.
+
+With `EXCHANGE_OPTIONS=true`: `get_option_expiries`, `get_option_chain` and `get_account_greeks`. `place_order` takes option symbols and an optional `impliedVolatility`. `get_markets` leaves options out unless they are named.
 
 The server starts the exchange as soon as it connects, and fetches everything else when asked. It opens no public websockets and turns periodic polling off. Starting still fetches one snapshot of positions, orders and balance, and with a local `EXCHANGE_API_SECRET` most adapters also open their private websocket; signer mode does not, because the websocket login needs the secret.
 

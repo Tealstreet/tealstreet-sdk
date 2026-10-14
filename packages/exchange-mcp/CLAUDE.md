@@ -1,0 +1,72 @@
+# CLAUDE.md — packages/exchange-mcp
+
+`@tealstreet/exchange-mcp`: a stdio MCP server that trades on one exchange
+through safe-cex. Built for the Paradigm team's DIME Terminal, which signs
+through a proxy holding the API secret (`EXCHANGE_SIGNER_*`, see `README.md`).
+It is in the tealstreet-sdk Copybara slice, so edit it HERE in the monorepo,
+never on the mirror.
+
+## Releasing to npm
+
+**Publishing runs on the public tealstreet-sdk mirror.** npm attaches
+provenance only to packages published from a public repo, and the
+`repository` field in `package.json` names that repo, which the release job
+checks. The workflow is authored here, at
+`mirrors/tealstreet-sdk/.github/workflows/exchange-mcp-release.yml`, and
+Copybara carries it across. Never edit it on the mirror.
+
+**To release: tealstreet-sdk → Actions → "exchange-mcp release" → Run
+workflow → patch, minor or major.** The job takes npm's `latest`, bumps it,
+stamps the result into `package.json` for that build only, typechecks, tests,
+builds, smoke-tests, checks the pack, publishes by OIDC with provenance, and
+only then pushes the `exchange-mcp-vX.Y.Z` tag on the commit it built.
+
+**The version lives on npm and in tags, never in a commit.** `package.json`
+holds `0.0.0-development` on purpose: mirror `master` is protected
+(`mirror-maintainers` only, reviewed PR plus green `ci`), so the workflow's
+token cannot commit a bump, and a committed bump would also have to
+round-trip through Copybara. Do not "fix" the placeholder. Pushing an
+`exchange-mcp-vX.Y.Z` tag by hand also releases exactly that version; a
+dispatched run refuses a version that already has a tag or is already on npm.
+
+npm trusts `Tealstreet/tealstreet-sdk` + `exchange-mcp-release.yml`, set on
+the package's npm **Settings** page under Trusted Publisher with **Allow npm
+publish** checked. Without that box a trusted publisher may only stage a
+release. **Do not use `npm trust github`:** npm 11.13 sends no allowed actions
+and the registry answers with a bare 400. 0.1.0 was published by hand, because
+npm cannot trust a package that does not exist yet; 0.1.1 was the first
+release from the workflow, with SLSA provenance.
+
+## The bundle
+
+- **One file, no runtime dependencies.** `tsup` inlines everything, including
+  every `@tealstreet/*` workspace. Those are not on npm, and a runtime
+  dependency on one is what made `npm install -g @tealstreet/cli` fail with
+  E404. The release workflow refuses any `dependencies` field.
+- **Licences ship beside it.** `scripts/third-party-licenses.mjs` reads the
+  esbuild metafile and writes `dist/THIRD_PARTY_LICENSES.md`. It fails the build
+  on any licence outside its allowlist, evaluating SPDX `AND`/`OR`/`WITH`
+  properly. A package that ships no licence file gets the canonical text from
+  `scripts/licenses/`. MPL-2.0 is allowed because the files ship
+  unmodified and the output names their source. `@tealstreet/grvt-client` is
+  UNLICENSED and allowed by Sam's 2026-10-08 decision, the same one recorded in
+  the mirror's `scripts/check-licenses.mjs`. Add to the allowlist only with a
+  decision behind it.
+- **gitleaks flags the bundle; that is expected.** The hits are third-party
+  default public keys inside bundled dependencies (ethers' provider defaults),
+  Polymarket contract addresses and a PEM-parsing regex. The source tree scans
+  clean, and the sdk-secret-scan workflow covers it.
+- **`yarn smoke` boots `dist/index.js`** with `EXCHANGE=bybit` and no
+  credentials, and requires `initialize` and `tools/list` to answer. It also
+  fails on any non-protocol line on stdout, which would corrupt the MCP stream.
+- **Lighter needs `dist/wasm/poseidon_crypto.wasm`.** poseidon-crypto's node
+  loader reads it from `__dirname`, which ESM lacks, so the tsup banner defines
+  `__dirname` and `onSuccess` copies the file beside the bundle. Without both,
+  Lighter fails with "Failed to initialize WASM" while every other venue works.
+  `scripts/poseidon-probe.ts` is bundled into `dist/` the same way, and
+  `yarn smoke` runs it, because the stdio check never touches signing. The Go
+  runtime prints through `console.log`, which `src/stdio.ts` sends to stderr.
+- **Third-party code inside our own workspaces** (CCXT in `ccxt-compat`, the
+  RingBuffer in `data-structures`, Go's `wasm_exec.js` in `poseidon-crypto`) is
+  listed from its `THIRD_PARTY_NOTICES.md` section. A workspace that gains
+  vendored code needs a section there, or the licence file omits it.

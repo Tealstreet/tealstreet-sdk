@@ -1,7 +1,8 @@
 import type { Axios } from 'axios';
 import type { ManipulateType } from 'dayjs';
 import type { Store } from '../../store/store.interface';
-import type { ExchangeName } from '../../types';
+import type { AccountGreeks, ExchangeName, OptionChainQuery, OptionChainRow } from '../../types';
+import type { ClientOrderIdRule } from '../clientOrderId';
 import type { BybitIncomeContext } from './bybit.income';
 import type { BybitPlaceOrderOpts } from './bybit.order-params';
 
@@ -57,14 +58,24 @@ import { loop } from '../../utils/loop';
 import { mergeUpdatesUsingLastUpdate } from '../../utils/mergeUpdatesUsingLastUpdate';
 import { omitUndefined } from '../../utils/omitUndefined';
 import { adjust, subtract } from '../../utils/safe-math';
-import { isUnknownOutcome } from '../../utils/unknownSendOutcome';
 import { splitTimeRange } from '../../utils/splitTimeRange';
+import { isUnknownOutcome } from '../../utils/unknownSendOutcome';
 import { virtualClock } from '../../utils/virtualClock';
 import { BaseExchange } from '../base';
-import { patternClientOrderIdRule, type ClientOrderIdRule } from '../clientOrderId';
+import { patternClientOrderIdRule } from '../clientOrderId';
 import { createAPI } from './bybit.api';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
+import { bybitFeeOverlay } from './bybit.fee-overlay';
 import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange } from './bybit.income';
+import {
+  buildOptionChain,
+  isBybitOptionSymbol,
+  mapBybitCoinGreeks,
+  mapBybitOptionGreeks,
+  mapBybitOptionInstrument,
+  mapBybitOptionTicker,
+  optionExpiries,
+} from './bybit.options';
 import { mapBybitHistoricalOrder } from './bybit.order-history';
 import { getBybitOrderExecutionParams, hasBybitSingleOrderParams } from './bybit.order-params';
 import { BYBIT_RATE_LIMIT_TABLE, BybitAccountType, BybitProductType, BybitVipLevel } from './bybit.rateLimits';
@@ -93,7 +104,6 @@ import {
 import { BybitPrivateWebsocket } from './bybit.ws-private';
 import { BybitPublicWebsocket } from './bybit.ws-public';
 import { syncUnifiedBalanceUpnlFromPositions } from './syncUnifiedBalanceUpnlFromPositions';
-import { bybitFeeOverlay } from './bybit.fee-overlay';
 
 const REINIT_RETRY_MS = 15_000;
 const REINIT_RETRY_MAX_MS = 5 * 60_000;
@@ -160,10 +170,7 @@ const getBybitErrorField = (payload: unknown, ...keys: string[]): unknown => {
   return undefined;
 };
 
-export const formatBybitTradingAgreementError = (
-  payload: unknown,
-  exchangeName?: ExchangeName,
-): string | undefined => {
+export const formatBybitTradingAgreementError = (payload: unknown, exchangeName?: ExchangeName): string | undefined => {
   const retCode = numberOrUndefined(getBybitErrorField(payload, 'retCode', 'ret_code', 'code'));
   const retMsg =
     stringFromUnknown(payload) ?? stringFromUnknown(getBybitErrorField(payload, 'retMsg', 'ret_msg', 'message', 'msg'));
@@ -532,13 +539,19 @@ export class BybitExchange extends BaseExchange {
     throw new Error(`Unknown category ${category}`);
   }
 
-  getCategoryForSymbol = (_symbol: string) => {
-    return 'linear';
+  getCategoryForSymbol = (symbol: string) => {
+    return isBybitOptionSymbol(symbol) ? 'option' : 'linear';
   };
+
+  /** Options join this connection only when the account opted in; subclasses that cannot trade them return false. */
+  protected optionsEnabled() {
+    return Boolean(this.options.enableOptionMarkets);
+  }
 
   getTickerSymbolsForCategory(category: 'linear' | 'inverse') {
     const marketSymbols = this.store.markets
       .filter((market) => {
+        if (market.option) return false;
         if (category === 'linear') {
           return market.quote === 'USDT' || market.quote === 'USDC';
         }
@@ -673,7 +686,11 @@ export class BybitExchange extends BaseExchange {
     }
   };
 
-  protected recordRecentlyPlacedOrderFromOpts = (orderId: string, opts: PlaceOrderOpts, payload: Record<string, any>) => {
+  protected recordRecentlyPlacedOrderFromOpts = (
+    orderId: string,
+    opts: PlaceOrderOpts,
+    payload: Record<string, any>,
+  ) => {
     const qty = parseFloat(payload.qty as string) || opts.amount || 0;
     const price = parseFloat((payload.price ?? payload.triggerPrice) as string) || opts.price || opts.triggerPrice || 0;
 
@@ -924,7 +941,9 @@ export class BybitExchange extends BaseExchange {
     // Awaited here rather than inside the branch above: it must run on both
     // public-data paths, and it is what stamps margin mode onto positions.
     const privateProbeFailure = marginAccountInfos
-      ? await marginAccountInfos.then(() => undefined).catch((err: any) => String(err?.message || err) || 'request failed')
+      ? await marginAccountInfos
+          .then(() => undefined)
+          .catch((err: any) => String(err?.message || err) || 'request failed')
       : undefined;
 
     // A rejected key comes back as HTTP 200 with a non-OK retMsg, so the probe is the
@@ -1095,9 +1114,7 @@ export class BybitExchange extends BaseExchange {
         this.needsReinit = false;
         this.lastReinitAt = Date.now();
         await this.fetchOrdersPositionsAndBalance();
-        this.reinitRetryMs = this.needsReinit
-          ? Math.min(this.reinitRetryMs * 2, REINIT_RETRY_MAX_MS)
-          : REINIT_RETRY_MS;
+        this.reinitRetryMs = this.needsReinit ? Math.min(this.reinitRetryMs * 2, REINIT_RETRY_MAX_MS) : REINIT_RETRY_MS;
       }
 
       try {
@@ -1277,9 +1294,24 @@ export class BybitExchange extends BaseExchange {
     const orders = await mapSeries(settleCoins, async (settleCoin) => {
       return this.fetchOrdersHelper('linear', settleCoin);
     });
+    if (this.optionsEnabled())
+      orders.push(await this.fetchOptionRowsOrKeep('orders', () => this.fetchOrdersHelper('option')));
     // Every consumer of this result wholesale-replaces store.orders, so shield
     // just-placed orders REST hasn't indexed yet (worst on api-demo).
     return this.preserveRecentlyPlacedOrders(orders.flat());
+  };
+
+  /** A failed option read keeps the option rows the store holds, so one bad poll does not wipe them. */
+  private fetchOptionRowsOrKeep = async <T extends { symbol: string }>(
+    what: 'orders' | 'positions',
+    fetch: () => Promise<T[]>,
+  ): Promise<T[]> => {
+    try {
+      return await fetch();
+    } catch (err: any) {
+      this.log(`Failed to refresh Bybit option ${what}: ${err?.message ?? err}`, LogSeverity.Warning);
+      return (this.store[what] as unknown as T[]).filter((row) => isBybitOptionSymbol(row.symbol));
+    }
   };
 
   fetchOrdersHelper = async (category: string, settleCoin?: string) => {
@@ -1331,6 +1363,13 @@ export class BybitExchange extends BaseExchange {
       const positions = await mapSeries(settleCoins, async (settleCoin) => {
         return this.fetchPositionsHelper(undefined, 'linear', settleCoin);
       });
+      if (this.optionsEnabled()) {
+        positions.push(
+          await this.fetchOptionRowsOrKeep('positions', () =>
+            this.fetchPositionsHelper(undefined, 'option', undefined, true),
+          ),
+        );
+      }
       return positions.flat();
     }
   };
@@ -1390,7 +1429,7 @@ export class BybitExchange extends BaseExchange {
     return ids.map((id) => positionsById.get(id)!.position);
   };
 
-  fetchPositionsHelper = async (symbols?: string[], category?: string, settleCoin?: string) => {
+  fetchPositionsHelper = async (symbols?: string[], category?: string, settleCoin?: string, failClosed = false) => {
     const fetchAllPages = async (
       params: Record<string, unknown>,
       failClosed: boolean,
@@ -1425,7 +1464,7 @@ export class BybitExchange extends BaseExchange {
       });
       return positions.flat();
     } else {
-      const bybitPositions = await fetchAllPages({ category, settleCoin }, false);
+      const bybitPositions = await fetchAllPages({ category, settleCoin }, failClosed);
       return this.dedupePositionsById(bybitPositions.map(this.mapPosition.bind(this)));
     }
   };
@@ -1499,7 +1538,8 @@ export class BybitExchange extends BaseExchange {
 
   fetchMarkets = async () => {
     try {
-      return await this.fetchMarketsHelper('linear');
+      const markets = await this.fetchMarketsHelper('linear');
+      return this.optionsEnabled() ? [...markets, ...(await this.fetchOptionMarkets())] : markets;
     } catch (e) {
       if (e instanceof BybitTradingMarketsRequestError && this.store.markets.length > 0) {
         this.log('Failed to refresh Bybit markets, using cached markets', LogSeverity.Warning);
@@ -1508,6 +1548,65 @@ export class BybitExchange extends BaseExchange {
       throw e;
     }
   };
+
+  /** Best-effort: a failed refresh keeps the option markets already loaded, so positions keep their market. */
+  fetchOptionMarkets = async (): Promise<Market[]> => {
+    try {
+      const { data: coins } = await this.xhr.get(ENDPOINTS.OPTION_BASE_COINS);
+      if (+v(coins, 'retCode') !== 0) throw new Error(v(coins, 'retMsg'));
+      const baseCoins: string[] = (coins.result?.list ?? []).map((c: Record<string, any>) => c.baseCoin);
+      const markets = await mapSeries(baseCoins, async (baseCoin) => {
+        const rows: Array<Record<string, any>> = [];
+        let cursor = '';
+        do {
+          const { data } = await this.xhr.get(ENDPOINTS.MARKETS, {
+            params: { category: 'option', baseCoin, limit: 1000, cursor },
+          });
+          if (+v(data, 'retCode') !== 0) throw new Error(v(data, 'retMsg'));
+          rows.push(...(data.result?.list ?? []));
+          cursor = data.result?.nextPageCursor ?? '';
+        } while (cursor);
+        return rows.flatMap((row) => mapBybitOptionInstrument(row) ?? []);
+      });
+      return markets.flat();
+    } catch (err: any) {
+      this.log(
+        `Failed to load Bybit option markets, keeping the last ones: ${err?.message ?? err}`,
+        LogSeverity.Warning,
+      );
+      return this.store.markets.filter((m) => m.option);
+    }
+  };
+
+  fetchOptionChain = async (query: OptionChainQuery): Promise<OptionChainRow[]> => {
+    this.assertOptionsEnabled();
+    const { data } = await this.xhr.get(ENDPOINTS.TICKERS, {
+      params: { category: 'option', baseCoin: query.underlying },
+    });
+    if (+v(data, 'retCode') !== 0) throw new Error(v(data, 'retMsg'));
+    const quotes = (data.result?.list ?? []).map(mapBybitOptionTicker);
+    return buildOptionChain(this.store.markets, quotes, query);
+  };
+
+  fetchOptionExpiries = async (underlying: string): Promise<number[]> => {
+    this.assertOptionsEnabled();
+    return optionExpiries(this.store.markets, underlying);
+  };
+
+  fetchAccountGreeks = async (): Promise<AccountGreeks[]> => {
+    this.assertOptionsEnabled();
+    const { data } = await this.xhr.get(ENDPOINTS.COIN_GREEKS);
+    if (+v(data, 'retCode') !== 0) throw new Error(v(data, 'retMsg'));
+    return (data.result?.list ?? []).map(mapBybitCoinGreeks);
+  };
+
+  private assertOptionsEnabled() {
+    if (!this.optionsEnabled()) throw new Error('Options are not enabled on this Bybit account');
+  }
+
+  private refuseOptionSymbol(symbol: string | undefined, what: string) {
+    if (symbol && isBybitOptionSymbol(symbol)) throw new Error(`Bybit has no ${what} for options (${symbol})`);
+  }
 
   fetchFees = async (
     category: string,
@@ -1650,6 +1749,7 @@ export class BybitExchange extends BaseExchange {
    */
   fetchClosedPositionRows = async (opts: HistoricalTradeOptions): Promise<Array<Record<string, any>>> => {
     if (this.isPublicDataOnly) return [];
+    this.refuseOptionSymbol(opts.symbol, 'closed PnL');
 
     const category = this.getCategoryForSymbol(opts.symbol);
     const to = opts.to ?? virtualClock.getCurrentTimeMs();
@@ -1731,6 +1831,7 @@ export class BybitExchange extends BaseExchange {
     if (this.isPublicDataOnly) {
       return [];
     }
+    this.refuseOptionSymbol(opts.symbol, 'closed PnL');
 
     const category = this.getCategoryForSymbol(opts.symbol);
     const to = opts.to ?? virtualClock.getCurrentTimeMs();
@@ -2298,7 +2399,7 @@ export class BybitExchange extends BaseExchange {
           // reassigned FROM the response, so letting omitUndefined's generic carry cursor's
           // type into the request makes `data` circular (TS7022).
           const params: Record<string, any> = omitUndefined({
-            category: 'linear',
+            category: opts?.symbol ? this.getCategoryForSymbol(opts.symbol) : 'linear',
             symbol: opts?.symbol,
             startTime: window.startTime,
             endTime: window.endTime,
@@ -2401,6 +2502,7 @@ export class BybitExchange extends BaseExchange {
     const clientOrderId = this.resolveCallerClientOrderId(opts);
     this.validateOrderCapabilities(opts);
     const category = this.getCategoryForSymbol(opts.symbol);
+    if (category === 'option') return this.placeOptionOrder(opts, clientOrderId);
     const orderExecutionParams = this.getOrderExecutionParams(opts);
 
     if (
@@ -2531,6 +2633,69 @@ export class BybitExchange extends BaseExchange {
     });
   };
 
+  /**
+   * Bybit option orders: limit or market only, no triggers or attached TP/SL, and
+   * `orderLinkId` is required. `orderIv` takes precedence over `price` at Bybit, so the
+   * price is left out when an implied volatility is given.
+   */
+  /**
+   * Every refusal an option order can meet before a request. `placeOrders` runs it for
+   * the whole batch first, so one unplaceable option rejects the batch before any write.
+   */
+  private assertOptionOrderPlaceable = (opts: BybitPlaceOrderOpts) => {
+    if (!this.optionsEnabled()) this.rejectPreflight('Options are not enabled on this Bybit account');
+    if (hasBybitSingleOrderParams(opts)) {
+      this.rejectPreflight(`Bybit execution parameters are not supported on option orders (${opts.symbol})`);
+    }
+    if (opts.type !== OrderType.Limit && opts.type !== OrderType.Market) {
+      this.rejectPreflight(`Bybit options take limit and market orders only, not ${opts.type} (${opts.symbol})`);
+    }
+    for (const field of ['triggerPrice', 'stopLoss', 'takeProfit'] as const) {
+      if (opts[field] !== undefined) this.rejectPreflight(`Bybit options do not support ${field} (${opts.symbol})`);
+    }
+    if (!this.store.marketsBySymbol[opts.symbol]) this.rejectPreflight(`Market ${opts.symbol} not found`);
+    const byIv = opts.impliedVolatility !== undefined;
+    if (opts.type === OrderType.Market && byIv) {
+      this.rejectPreflight(`Bybit takes impliedVolatility on limit option orders only (${opts.symbol})`);
+    }
+    if (opts.type === OrderType.Limit && !byIv && !opts.price) {
+      this.rejectPreflight(`A limit option order needs a price or an impliedVolatility (${opts.symbol})`);
+    }
+  };
+
+  private placeOptionOrder = async (opts: BybitPlaceOrderOpts, clientOrderId: string | undefined) => {
+    this.assertOptionOrderPlaceable(opts);
+    const market = this.store.marketsBySymbol[opts.symbol]!;
+    const isLimit = opts.type === OrderType.Limit;
+    const byIv = opts.impliedVolatility !== undefined;
+    const payload = omitUndefined({
+      category: 'option',
+      symbol: opts.symbol,
+      side: inverseObj(ORDER_SIDE)[opts.side],
+      orderType: inverseObj(ORDER_TYPE)[opts.type],
+      qty: `${adjust(opts.amount, market.precision.amount)}`,
+      price: isLimit && !byIv ? `${adjust(opts.price!, market.precision.price)}` : undefined,
+      orderIv: byIv ? `${opts.impliedVolatility}` : undefined,
+      timeInForce: isLimit
+        ? ORDER_TIME_IN_FORCE_OUTBOUND[opts.timeInForce || OrderTimeInForce.GoodTillCancel]
+        : undefined,
+      reduceOnly: opts.reduceOnly || false,
+      orderLinkId: clientOrderId ?? nanoid(),
+    });
+
+    const [resp] = await this.submitCreateOrders([payload], opts);
+    if (!resp) throw new Error(`Bybit did not answer the option order for ${opts.symbol}`);
+    if (v(resp.data, 'retMsg') !== 'OK') {
+      const formattedError = this.formatBybitVenueError(resp.data);
+      this.emitAndLogError(formattedError);
+      throw new Error(formattedError);
+    }
+    const orderId = resp.data.result.orderId;
+    if (orderId && !resp.terminal && !resp.recorded)
+      this.recordRecentlyPlacedOrderFromOpts(orderId, opts, resp.payload);
+    return [orderId];
+  };
+
   protected async submitCreateOrders(
     payloads: Record<string, any>[],
     opts: PlaceOrderOpts,
@@ -2654,7 +2819,8 @@ export class BybitExchange extends BaseExchange {
     // before any request; the special-order loop continues after transport errors.
     this.assertCallerClientOrderIds(orders);
     for (const order of orders) {
-      this.getOrderExecutionParams(order);
+      if (isBybitOptionSymbol(order.symbol)) this.assertOptionOrderPlaceable(order);
+      else this.getOrderExecutionParams(order);
     }
 
     // Separate orders that need special handling
@@ -2667,7 +2833,8 @@ export class BybitExchange extends BaseExchange {
         (this._hasFullSizedPositionOppositeSide(order.symbol, order.side, order.amount) &&
           (order.type === OrderType.StopLoss || order.type === OrderType.TakeProfit)) ||
         order.type === OrderType.TrailingStopLoss ||
-        hasBybitSingleOrderParams(order)
+        hasBybitSingleOrderParams(order) ||
+        isBybitOptionSymbol(order.symbol)
       ) {
         specialOrders.push(order);
       } else {
@@ -3161,6 +3328,7 @@ export class BybitExchange extends BaseExchange {
   };
 
   setLeverage = async (symbol: string, inputLeverage: number, _side?: PositionSide) => {
+    this.refuseOptionSymbol(symbol, 'leverage');
     const market = this.store.marketsBySymbol[symbol];
     if (!market) throw new Error(`Market ${symbol} not found`);
 
@@ -3192,6 +3360,7 @@ export class BybitExchange extends BaseExchange {
   };
 
   changePositionMode = async (hedged: boolean, symbol?: string) => {
+    this.refuseOptionSymbol(symbol, 'position mode');
     symbol = undefined;
     if (symbol) {
       // linear only supports USDT for changing pos modes
@@ -3308,6 +3477,11 @@ export class BybitExchange extends BaseExchange {
       info: p,
       lastUpdate: virtualClock.getCurrentTimeMs(),
     };
+    if (isBybitOptionSymbol(p.symbol)) {
+      const greeks = mapBybitOptionGreeks(p);
+      // Options carry no leverage; 1 (not 0) keeps notional / leverage finite for margin math.
+      return { ...position, leverage: 1, liquidationPrice: 0, option: greeks ? { greeks } : {} };
+    }
 
     return position;
   }
@@ -3356,8 +3530,7 @@ export class BybitExchange extends BaseExchange {
       type === OrderType.StopLoss ||
       type === OrderType.TakeProfit ||
       type === OrderType.TrailingStopLoss;
-    const side =
-      ORDER_SIDE[o.side] ?? (isProtectiveOrder ? this.inferProtectiveOrderSide(o) : undefined);
+    const side = ORDER_SIDE[o.side] ?? (isProtectiveOrder ? this.inferProtectiveOrderSide(o) : undefined);
     const timeInForce = ORDER_TIME_IN_FORCE[o.timeInForce];
 
     let remaining = o.leavesQty ? parseFloat(o.leavesQty) : subtract(o.qty ?? 0, v(o, 'cumExecQty') ?? 0);

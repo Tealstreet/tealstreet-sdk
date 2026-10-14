@@ -9,6 +9,6 @@
     "noEmit": true,
     "types": ["node"]
   },
-  "include": ["src/**/*", "tsup.config.ts", "vitest.config.ts"],
+  "include": ["src/**/*", "scripts/**/*.ts", "tsup.config.ts", "vitest.config.ts"],
   "exclude": ["node_modules", "dist"]
 }

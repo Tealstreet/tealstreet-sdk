@@ -270,16 +270,24 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
     // the status so every caller reports something real and the health
     // monitor's auth_invalid classification can actually match.
     if (!responseMeta.hasExplicitStatus && response.status >= 400) {
-      const isAuthStatus = response.status === 401 || response.status === 403;
+      // CloudFront refusing the egress address answers 403 before Bybit sees the
+      // request: not the key, so it must not feed the auth backoff.
+      // The tunnel wraps a non-JSON body as `{ raw_response }`; a direct adapter hands the string.
+      const rawBody = typeof response.data === 'string' ? response.data : response.data?.raw_response;
+      const blockedByCdn = typeof rawBody === 'string' && /cloudfront/i.test(rawBody);
+      const isAuthStatus = !blockedByCdn && (response.status === 401 || response.status === 403);
       // Spell out the reason rather than a bare `HTTP 401`: the tunnel frame
       // carries no statusText, and both the health monitor's `auth_invalid`
       // patterns and the e2e toast assertion match on words like
       // "unauthorized"/"api key", not on the numeric status.
-      const reason = isAuthStatus
-        ? `${response.status === 401 ? 'Unauthorized' : 'Forbidden'} — API key rejected`
-        : response.statusText;
+      const reason = blockedByCdn
+        ? "Forbidden — blocked by Bybit's CDN before reaching Bybit"
+        : isAuthStatus
+          ? `${response.status === 401 ? 'Unauthorized' : 'Forbidden'} — API key rejected`
+          : response.statusText;
       response.data = {
-        ...(response.data ?? {}),
+        // A string body (CloudFront's HTML page) would spread into one key per character.
+        ...(response.data && typeof response.data === 'object' ? response.data : {}),
         retCode: response.status,
         retMsg: `HTTP ${response.status}${reason ? ` ${reason}` : ''}`,
       };
