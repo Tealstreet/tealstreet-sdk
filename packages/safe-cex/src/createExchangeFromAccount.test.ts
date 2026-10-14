@@ -19,8 +19,6 @@ interface TestMetadata {
   supportsSubaccount: boolean;
   enforceWsTunnel: boolean;
   privateProxyRegions: Record<string, string[]>;
-  supportsSpotToggle?: boolean;
-  supportsOptionsToggle?: boolean;
 }
 
 // Mock the exchangeMetadata module. Keep the real `exchangeMetadata` record (the routing
@@ -43,8 +41,6 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
         supportsSubaccount: true,
         enforceWsTunnel: false,
         privateProxyRegions: { SG: ['1.2.3.4'], TK: ['5.6.7.8'] },
-        supportsSpotToggle: true,
-        supportsOptionsToggle: true,
       },
       okx: {
         exchangeName: 'okx',
@@ -163,34 +159,6 @@ vi.mock('./index', () => ({
 describe('accountToExchangeOptions', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
-  });
-
-  describe('product toggles', () => {
-    const account = (exchange: string, toggles: Partial<ExchangeAccountConfig>): ExchangeAccountConfig => ({
-      exchange: exchange as ExchangeAccountConfig['exchange'],
-      name: 'toggles',
-      apiKey: 'k',
-      apiSecret: 's',
-      ...toggles,
-    });
-
-    it.each(['enableSpotMarkets', 'enableOptionMarkets'] as const)(
-      'forwards %s when the venue offers the toggle and the account turned it on',
-      (toggle) => {
-        expect(accountToExchangeOptions(account('bybit', { [toggle]: true }))[toggle]).toBe(true);
-      },
-    );
-
-    it.each(['enableSpotMarkets', 'enableOptionMarkets'] as const)(
-      'drops %s on a venue that does not offer the toggle',
-      (toggle) => {
-        expect(accountToExchangeOptions(account('okx', { [toggle]: true }))[toggle]).toBeUndefined();
-      },
-    );
-
-    it.each(['enableSpotMarkets', 'enableOptionMarkets'] as const)('leaves %s off by default', (toggle) => {
-      expect(accountToExchangeOptions(account('bybit', {}))[toggle]).toBeUndefined();
-    });
   });
 
   describe('basic credentials mapping', () => {

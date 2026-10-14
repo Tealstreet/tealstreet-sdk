@@ -3,7 +3,6 @@ import type { ExchangeName, Market } from '@tealstreet/safe-cex/src/types';
 import { describe, expect, it } from 'vitest';
 
 import {
-  assertMinimumPrice,
   roundMarketCloseSize,
   roundOrderPrice,
   roundOrderSize,
@@ -111,17 +110,5 @@ describe('venueAutoDownsizesReduceOrders', () => {
     expect(() => venueAutoDownsizesReduceOrders('not-a-venue' as ExchangeName)).not.toThrow();
     expect(venueAutoDownsizesReduceOrders('not-a-venue' as ExchangeName)).toBe(false);
     expect(() => venueSupportsInfinityStops('not-a-venue' as ExchangeName)).toThrow();
-  });
-});
-
-describe('assertMinimumPrice', () => {
-  it('refuses a price under the venue minimum and names it', () => {
-    const m = market({ limits: { price: { min: 5 } } } as Partial<Market>);
-    expect(() => assertMinimumPrice(4, m)).toThrow('below the minimum 5');
-    expect(() => assertMinimumPrice(5, m)).not.toThrow();
-  });
-
-  it('passes any price on a market with no minimum', () => {
-    expect(() => assertMinimumPrice(0.0001, market({ limits: {} } as Partial<Market>))).not.toThrow();
   });
 });

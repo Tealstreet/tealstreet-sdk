@@ -138,7 +138,6 @@ export function accountToExchangeOptions(
     // connection. Only forwarded when the venue actually offers the toggle,
     // so a stale flag on an unrelated account can't turn anything on.
     ...(metadata.supportsSpotToggle && account.enableSpotMarkets ? { enableSpotMarkets: true } : {}),
-    ...(metadata.supportsOptionsToggle && account.enableOptionMarkets ? { enableOptionMarkets: true } : {}),
 
     // Exchange-specific fields based on metadata
     ...(shouldForwardApplicationId && account.applicationId ? { applicationId: account.applicationId } : {}),

@@ -5,8 +5,9 @@ discussion.
 
 ## Reporting a vulnerability
 
-Use GitHub's private vulnerability reporting: the repository's **Security**
-tab, then **Report a vulnerability**.
+- **Once this repository is public:** use GitHub's private vulnerability
+  reporting (the repository's **Security** tab, then **Report a vulnerability**).
+- **Until then:** contact a Tealstreet maintainer privately.
 
 Include the affected package or file, how to reproduce the problem, and what an
 attacker could do with it. We will acknowledge the report and keep you updated

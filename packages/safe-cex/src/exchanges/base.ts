@@ -17,7 +17,6 @@ import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { buildFoldedPositionRecords } from '../journal/buildRecords';
 import {
-  AccountGreeks,
   Candle,
   ClosedPnlEntry,
   ExchangeAccount,
@@ -34,8 +33,6 @@ import {
   Market,
   OHLCVOptions,
   OHLCVSOptions,
-  OptionChainQuery,
-  OptionChainRow,
   Order,
   OrderBook,
   OrderHistoryOptions,
@@ -153,10 +150,7 @@ export type BaseCapabilityMethod =
   | 'fetchIncomeHistoryRange'
   | 'fetchHistoricalOrders'
   | 'placeOrder'
-  | 'start'
-  | 'fetchOptionChain'
-  | 'fetchOptionExpiries'
-  | 'fetchAccountGreeks';
+  | 'start';
 
 type BrandedCapabilityFallback = {
   [baseCapabilityFallback]?: BaseCapabilityMethod;
@@ -319,9 +313,6 @@ export interface Exchange {
   fetchClosedPnl: (opts: HistoricalTradeOptions) => Promise<ClosedPnlEntry[]>;
   fetchIncomeHistory: (opts?: IncomeHistoryOptions) => Promise<IncomeRecord[]>;
   fetchHistoricalOrders: (opts?: OrderHistoryOptions) => Promise<HistoricalOrder[]>;
-  fetchOptionChain: (query: OptionChainQuery) => Promise<OptionChainRow[]>;
-  fetchOptionExpiries: (underlying: string) => Promise<number[]>;
-  fetchAccountGreeks: () => Promise<AccountGreeks[]>;
   fetchIncomeHistoryRange: (startTime: number, endTime: number, incomeType?: string) => Promise<IncomeRecord[]>;
   fetchPublicTrades: (symbol: string, limit?: number) => Promise<PublicTrade[]>;
   getActiveTickerSymbols: () => string[];
@@ -1114,26 +1105,6 @@ export class BaseExchange implements Exchange {
       return await Promise.resolve([] as HistoricalOrder[]);
     },
   );
-
-  // Options are opt-in per venue. These reject, so a caller that skipped the capability
-  // check gets an error naming the venue, never an empty chain that reads as "no options".
-  fetchOptionChain = markBaseCapabilityFallback(
-    'fetchOptionChain',
-    async (_query: OptionChainQuery): Promise<OptionChainRow[]> => {
-      throw new Error(`Option chains are not supported on ${this._exchangeName}`);
-    },
-  );
-
-  fetchOptionExpiries = markBaseCapabilityFallback(
-    'fetchOptionExpiries',
-    async (_underlying: string): Promise<number[]> => {
-      throw new Error(`Option expiries are not supported on ${this._exchangeName}`);
-    },
-  );
-
-  fetchAccountGreeks = markBaseCapabilityFallback('fetchAccountGreeks', async (): Promise<AccountGreeks[]> => {
-    throw new Error(`Account greeks are not supported on ${this._exchangeName}`);
-  });
 
   fetchPublicTrades = async (_symbol: string, _limit?: number): Promise<PublicTrade[]> => {
     await Promise.reject(new Error('Not implemented'));

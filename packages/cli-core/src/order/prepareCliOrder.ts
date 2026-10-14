@@ -3,7 +3,7 @@ import type { ExchangeName, PlaceOrderOpts } from '@tealstreet/safe-cex/src/type
 
 import { tradfiPreflightMessage } from '@tealstreet/safe-cex/src/instrument-class/describe';
 import { classifyMarket } from '@tealstreet/safe-cex/src/instrument-class/resolve';
-import { assertMinimumPrice, roundOrderPrice } from '@tealstreet/script-api-core/src/order/orderPricing';
+import { roundOrderPrice } from '@tealstreet/script-api-core/src/order/orderPricing';
 import { nativePositionSize } from '@tealstreet/script-api-core/src/order/positionSizing';
 import { clampReduceOnlyOrder, prepareOrder } from '@tealstreet/script-api-core/src/order/prepareOrder';
 import { ScriptValidationError } from '@tealstreet/script-api-core/src/order/ScriptValidationError';
@@ -96,7 +96,6 @@ export const prepareCliAmendPrice = (exchange: ExchangeLike, symbol: string, pri
   if (!Number.isFinite(rounded) || rounded <= 0) {
     throw new ScriptValidationError(`price ${price} rounds to ${rounded} for '${symbol}' — below the venue tick`);
   }
-  assertMinimumPrice(rounded, market);
   return rounded;
 };
 

@@ -454,10 +454,6 @@ export class HyrotraderExchange extends BybitExchange {
     throw new Error(`Unknown category ${category}`);
   }
 
-  protected optionsEnabled() {
-    return false;
-  }
-
   protected requiresOrderLinkId() {
     return true;
   }

@@ -88,20 +88,6 @@ describe('exchange metadata runtime non-fallback invariants', () => {
     }
   });
 
-  it('an advertised options toggle has real option methods behind it', async () => {
-    const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(
-      (name) => exchangeMetadata[name].supportsOptionsToggle,
-    );
-
-    expect(advertised).toEqual(['bybit']);
-    for (const name of advertised) {
-      const exchange = await createImplementation(name);
-      for (const method of ['fetchOptionChain', 'fetchOptionExpiries', 'fetchAccountGreeks'] as const) {
-        expectImplemented(exchange, method, name);
-      }
-    }
-  });
-
   it('advertised public-only support constructs in public mode and overrides startup', async () => {
     const advertised = (Object.keys(exchangeMetadata) as ExchangeName[]).filter(
       (name) => exchangeMetadata[name].supportsPublicOnly,

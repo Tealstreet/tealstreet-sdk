@@ -17,7 +17,7 @@ const construct = async (name: 'bybit' | 'binancepm') => {
   return exchange as unknown as Exchange;
 };
 
-const run = (name: string, exchange: object, args: object) =>
+const run = (name: string, exchange: Partial<Exchange>, args: object) =>
   tools.find((t) => t.name === name)!.run(exchange as Exchange, args as never);
 
 const order = (id: string, symbol: string) => ({ id, symbol }) as any;
@@ -32,75 +32,6 @@ describe('supportedTools', () => {
   it('offers the history tools where the adapter implements them', async () => {
     const names = supportedTools(await construct('bybit')).map((t) => t.name);
     expect(names).toEqual(expect.arrayContaining(['get_closed_pnl', 'get_income', 'get_order_history', 'get_balance']));
-  });
-});
-
-describe('option tools', () => {
-  const OPTION_TOOLS = ['get_option_chain', 'get_option_expiries', 'get_account_greeks'];
-  const names = (exchange: Exchange, options: boolean) => supportedTools(exchange, { options }).map((t) => t.name);
-
-  it('lists option tools only when the server runs with options on', async () => {
-    const bybit = await construct('bybit');
-    expect(names(bybit, true)).toEqual(expect.arrayContaining(OPTION_TOOLS));
-    for (const name of OPTION_TOOLS) expect(names(bybit, false)).not.toContain(name);
-  });
-
-  it('lists none on a venue without option methods, even with options on', async () => {
-    const listed = names(await construct('binancepm'), true);
-    for (const name of OPTION_TOOLS) expect(listed).not.toContain(name);
-  });
-
-  it('leaves option markets out of get_markets unless named', async () => {
-    const markets = [
-      { symbol: 'BTCUSDT', base: 'BTC' },
-      { symbol: 'BTC-6NOV26-84000-C-USDT', base: 'BTC', option: { strike: 84000 } },
-    ];
-    const exchange = { store: { markets } };
-    expect(await run('get_markets', exchange, {})).toEqual(['BTCUSDT']);
-    expect(await run('get_markets', exchange, { search: 'btc' })).toHaveLength(1);
-    expect(await run('get_markets', exchange, { symbols: ['BTC-6NOV26-84000-C-USDT'] })).toHaveLength(1);
-  });
-
-  it('flattens the chain and states the greek units once', async () => {
-    const market = {
-      symbol: 'BTC-6NOV26-84000-C-USDT',
-      option: { strike: 84000, right: 'call', expiry: 1793952000000 },
-    };
-    const quote = {
-      bid: 2865,
-      ask: 2895,
-      mark: 2897,
-      markIv: 0.35,
-      bidIv: 0.34,
-      askIv: 0.35,
-      underlyingPrice: 83893,
-      greeks: { delta: 0.51, gamma: 0.00005, vega: 84.2, theta: -63.7, units: 'per 1 vol point' },
-    };
-    const exchange = { fetchOptionChain: async () => [{ market, quote }] };
-
-    expect(await run('get_option_chain', exchange, { underlying: 'BTC' })).toEqual({
-      units: 'per 1 vol point',
-      rows: [
-        {
-          symbol: market.symbol,
-          strike: 84000,
-          right: 'call',
-          expiry: 1793952000000,
-          date: '2026-11-06T08:00:00.000Z',
-          bid: 2865,
-          ask: 2895,
-          mark: 2897,
-          markIv: 0.35,
-          bidIv: 0.34,
-          askIv: 0.35,
-          underlyingPrice: 83893,
-          delta: 0.51,
-          gamma: 0.00005,
-          vega: 84.2,
-          theta: -63.7,
-        },
-      ],
-    });
   });
 });
 

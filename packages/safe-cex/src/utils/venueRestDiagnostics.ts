@@ -15,8 +15,6 @@
  * and are for the container's authenticated Sentry path only.
  */
 
-import { isUnsentSigningFailure } from './unknownSendOutcome';
-
 /** Config keys, string-named to match the existing `safeCex*` config-tag convention. */
 const T0 = 'safeCexRestDiagStartedAt';
 const SIGN_MS = 'safeCexRestDiagSignMs';
@@ -89,8 +87,6 @@ export interface VenueRestFailureSample {
   restProxyHeaderSent?: 'bearer' | 'malformed' | 'absent';
   errorName?: string;
   errorMessage?: string;
-  /** Failed while getting its signature, so it never reached the venue. */
-  unsentSigning: boolean;
   endpoint?: string;
   headers: Record<string, string>;
 }
@@ -99,8 +95,6 @@ interface ExchangeDiagnostics {
   requests: number;
   ok: number;
   failures: number;
-  /** Hosted requests that failed while signing, so never reached the venue. Not failures OF the venue. */
-  unsentSigning: number;
   timestamps: number[];
   totalMs: number[];
   signMs: number[];
@@ -121,7 +115,6 @@ const emptyDiagnostics = (): ExchangeDiagnostics => ({
   requests: 0,
   ok: 0,
   failures: 0,
-  unsentSigning: 0,
   timestamps: [],
   totalMs: [],
   signMs: [],
@@ -227,16 +220,6 @@ const readHeaders = (source: unknown, names: string[]): Record<string, string> =
  * needs no snippet. An HTML body means something in front of the venue
  * answered instead, and its text is the only thing that says which.
  */
-// An error page's reason line sits past its <head> and styles, beyond the snippet cut.
-const visibleText = (html: string): string =>
-  html
-    // Bounded: the style/script strip rescans to the end for each unclosed tag.
-    .slice(0, 64_000)
-    .replace(/<(style|script)[\s\S]*?<\/\1>/gi, ' ')
-    .replace(/<[^>]+>/g, ' ')
-    .replace(/\s+/g, ' ')
-    .trim();
-
 const classifyBody = (data: unknown): { bodyKind: string; bodySnippet?: string } => {
   if (data == null || data === '') return { bodyKind: 'empty' };
   if (typeof data === 'object') {
@@ -246,8 +229,8 @@ const classifyBody = (data: unknown): { bodyKind: string; bodySnippet?: string }
   }
   const text = String(data);
   const lower = text.toLowerCase();
-  if (lower.includes('cloudfront')) return { bodyKind: 'cloudfront', bodySnippet: scrub(visibleText(text)) };
-  if (lower.includes('<html') || lower.includes('<!doctype')) return { bodyKind: 'html', bodySnippet: scrub(visibleText(text)) };
+  if (lower.includes('cloudfront')) return { bodyKind: 'cloudfront', bodySnippet: scrub(text) };
+  if (lower.includes('<html') || lower.includes('<!doctype')) return { bodyKind: 'html', bodySnippet: scrub(text) };
   return { bodyKind: 'text', bodySnippet: scrub(text) };
 };
 
@@ -425,31 +408,23 @@ export const noteRestFailure = (exchange: string, error: unknown, now = Date.now
     const status = typed?.response?.status;
     const code = typeof typed?.code === 'string' ? typed.code : undefined;
 
-    const rawMessage = (typed as { message?: unknown } | undefined)?.message;
-    const message = typeof rawMessage === 'string' ? rawMessage : undefined;
-    // A signer that is asleep or gone is the device's state, not the venue's: counted
-    // and sampled, but not as a venue failure, and its sample says so.
-    const unsentSigning = !typed?.response && isUnsentSigningFailure(message);
-    if (unsentSigning) {
-      diagnostics.unsentSigning += 1;
-    } else {
-      // Rate and latency describe the venue, which an unsent request never reached.
-      diagnostics.requests += 1;
-      diagnostics.failures += 1;
-      noteTimestamp(diagnostics, now);
-      if (totalMs !== undefined) push(diagnostics.totalMs, totalMs);
-      if (signMs !== undefined) push(diagnostics.signMs, signMs);
-      if (signatureAgeMs !== undefined) {
-        diagnostics.maxSignatureAgeMs = Math.max(diagnostics.maxSignatureAgeMs ?? 0, signatureAgeMs);
-      }
-      bump(diagnostics.statusCounts, status === undefined ? 'none' : String(status));
-      if (code) bump(diagnostics.codeCounts, code);
+    diagnostics.requests += 1;
+    diagnostics.failures += 1;
+    noteTimestamp(diagnostics, now);
+    if (totalMs !== undefined) push(diagnostics.totalMs, totalMs);
+    if (signMs !== undefined) push(diagnostics.signMs, signMs);
+    if (signatureAgeMs !== undefined) {
+      diagnostics.maxSignatureAgeMs = Math.max(diagnostics.maxSignatureAgeMs ?? 0, signatureAgeMs);
     }
+    bump(diagnostics.statusCounts, status === undefined ? 'none' : String(status));
+    if (code) bump(diagnostics.codeCounts, code);
 
     // No response AND no code means nothing axios produced — a bare `throw`
     // from inside the adapter chain, where the message is the only identifier
     // there is. 408 bybit failures in the first 11 hours landed in exactly this
     // shape and the record named none of them.
+    const rawMessage = (typed as { message?: unknown } | undefined)?.message;
+    const message = typeof rawMessage === 'string' ? rawMessage : undefined;
     const errorName = (typed as { name?: unknown } | undefined)?.name;
     const isUnshapedFailure = !typed?.response && !code;
     if (isUnshapedFailure && message) bumpBounded(diagnostics.errorCounts, normalizeErrorKey(message));
@@ -470,7 +445,6 @@ export const noteRestFailure = (exchange: string, error: unknown, now = Date.now
       endpoint: endpointOf(typed?.config),
       errorName: typeof errorName === 'string' ? errorName : undefined,
       errorMessage: message ? scrub(message) : undefined,
-      unsentSigning,
       headers: {
         ...readHeaders(typed?.response?.headers, ORIGIN_HEADERS),
         ...readHeaders(typed?.response?.headers, QUOTA_HEADERS),
@@ -502,7 +476,6 @@ export const getVenueRestStats = (now = Date.now()): Record<string, unknown> => 
       requests: diagnostics.requests,
       ok: diagnostics.ok,
       failures: diagnostics.failures,
-      unsentSigning: diagnostics.unsentSigning,
       perMinute: Math.round((recent.length / (WINDOW_MS / 60_000)) * 10) / 10,
       // The retained count, not the in-window count. Publishing it is what
       // makes the write-time prune observable — this is the one structure that

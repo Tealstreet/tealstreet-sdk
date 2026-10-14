@@ -95,7 +95,6 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
       // add instrument_info topics to subscribe on
       this.topics.tickers = this.parent.store.markets
         .filter((m) => {
-          if (m.option) return false;
           if (this.category === 'linear') {
             return m.quote === 'USDT' || m.quote === 'USDC';
           } else {
@@ -199,11 +198,10 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
     });
   };
 
-  private onMarketsChanged = async ({ added }: { added: Array<{ symbol: string; quote: string; option?: unknown }> }) => {
+  private onMarketsChanged = async ({ added }: { added: Array<{ symbol: string; quote: string }> }) => {
     if (added.length === 0 || !this.ws || this.isDisposed) return;
 
     const filtered = added.filter((m) => {
-      if (m.option) return false;
       if (this.category === 'linear') return m.quote === 'USDT' || m.quote === 'USDC';
       return m.quote !== 'USDT' && m.quote !== 'USDC';
     });

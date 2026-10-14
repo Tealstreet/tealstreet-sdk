@@ -25,12 +25,7 @@ import type { CoreAdapter } from './AdapterContext';
 import type { HostBindings, HostExchange } from './HostBindings';
 
 import { clampReduceOnlyOrder, prepareOrder } from '../order/prepareOrder';
-import {
-  assertMinimumPrice,
-  roundMarketCloseSize,
-  roundOrderPrice,
-  roundOrderSizeToNearest,
-} from '../order/orderPricing';
+import { roundMarketCloseSize, roundOrderPrice, roundOrderSizeToNearest } from '../order/orderPricing';
 import { nativePositionSize } from '../order/positionSizing';
 import { ScriptValidationError } from '../order/ScriptValidationError';
 import { bySymbol } from './HostBindings';
@@ -368,7 +363,6 @@ export const createCoreAdapter = (host: HostBindings): CoreAdapter => {
           if (!Number.isFinite(price) || price <= 0) {
             throw new ScriptValidationError(`updateOrder: invalid price for '${order.symbol}': ${update.price}`);
           }
-          assertMinimumPrice(price, market);
           rounded.price = price;
         }
         if ('amount' in update && update.amount !== undefined) {

@@ -22,9 +22,6 @@ const BRANDED_STUBS = [
   'fetchIncomeHistoryRange',
   'fetchHistoricalOrders',
   'fetchClosedPnl',
-  'fetchOptionChain',
-  'fetchOptionExpiries',
-  'fetchAccountGreeks',
 ] as const;
 
 const options: ExchangeOptions = {

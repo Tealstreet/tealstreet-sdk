@@ -93,8 +93,6 @@ export const ENDPOINTS = {
   UNFILLED_ORDERS: '/v5/order/realtime',
   TICKERS: '/v5/market/tickers',
   MARKETS: '/v5/market/instruments-info',
-  OPTION_BASE_COINS: '/v5/market/option-base-coins',
-  COIN_GREEKS: '/v5/asset/coin-greeks',
   CANCEL_ORDER: '/v5/order/cancel',
   CANCEL_ORDERS: '/v5/order/cancel-batch',
   CANCEL_SYMBOL_ORDERS: '/v5/order/cancel-all',

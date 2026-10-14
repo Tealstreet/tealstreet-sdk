@@ -40,11 +40,6 @@ describe('readConfig', () => {
     expect(signed).toContain('category=linear');
   });
 
-  it('turns options on only when asked', () => {
-    expect(readConfig({ ...signerEnv, EXCHANGE_OPTIONS: 'true' }).options.enableOptionMarkets).toBe(true);
-    expect(readConfig(signerEnv).options.enableOptionMarkets).toBe(false);
-  });
-
   it('turns polling off', () => {
     expect(readConfig(signerEnv).options.extra?.tickInterval).toBe(Number.POSITIVE_INFINITY);
   });
@@ -54,8 +49,6 @@ describe('readConfig', () => {
     [{ ...signerEnv, EXCHANGE_SIGNER_SIGNATURE: '' }, 'must be set together'],
     [{ ...signerEnv, EXCHANGE_API_SECRET: 'secret' }, 'set one'],
     [{ EXCHANGE: 'bybit', EXCHANGE_TESTNET: 'yes' }, 'EXCHANGE_TESTNET'],
-    [{ EXCHANGE: 'bybit', EXCHANGE_OPTIONS: 'yes' }, 'EXCHANGE_OPTIONS must be true or false'],
-    [{ EXCHANGE: 'bybitspot', EXCHANGE_OPTIONS: 'true' }, 'EXCHANGE_OPTIONS is not available on bybitspot'],
   ])('refuses %j', (env, message) => {
     expect(() => readConfig(env)).toThrow(message);
   });
