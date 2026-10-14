@@ -253,7 +253,6 @@ export class CryptocomExchange extends BaseExchange {
             spot: false,
             swap: true,
             future: false,
-            option: false,
             contract: true,
             linear: true,
             inverse: false,

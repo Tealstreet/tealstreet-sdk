@@ -3,6 +3,7 @@ import type { ExchangeName, Market } from '@tealstreet/safe-cex/src/types';
 import { describe, expect, it } from 'vitest';
 
 import {
+  assertMinimumPrice,
   roundMarketCloseSize,
   roundOrderPrice,
   roundOrderSize,
@@ -110,5 +111,31 @@ describe('venueAutoDownsizesReduceOrders', () => {
     expect(() => venueAutoDownsizesReduceOrders('not-a-venue' as ExchangeName)).not.toThrow();
     expect(venueAutoDownsizesReduceOrders('not-a-venue' as ExchangeName)).toBe(false);
     expect(() => venueSupportsInfinityStops('not-a-venue' as ExchangeName)).toThrow();
+  });
+});
+
+describe('price bands', () => {
+  const banded = market({
+    precision: { price: 0.0001, amount: 0.1, priceBands: [{ from: 0.005, tick: 0.0005 }] },
+  } as Partial<Market>);
+
+  it('uses the base tick below the first band', () => {
+    expect(roundOrderPrice(0.00412, banded)).toBeCloseTo(0.0041, 10);
+  });
+
+  it('uses the band tick at and above its start', () => {
+    expect(roundOrderPrice(0.0123, banded)).toBeCloseTo(0.0125, 10);
+  });
+});
+
+describe('assertMinimumPrice', () => {
+  it('refuses a price under the venue minimum and names it', () => {
+    const m = market({ limits: { price: { min: 5 } } } as Partial<Market>);
+    expect(() => assertMinimumPrice(4, m)).toThrow('below the minimum 5');
+    expect(() => assertMinimumPrice(5, m)).not.toThrow();
+  });
+
+  it('passes any price on a market with no minimum', () => {
+    expect(() => assertMinimumPrice(0.0001, market({ limits: {} } as Partial<Market>))).not.toThrow();
   });
 });

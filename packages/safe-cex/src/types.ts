@@ -110,6 +110,8 @@ export type ExchangeOptions = {
   readonly testnet?: boolean;
   /** See `ExchangeAccountConfig.enableSpotMarkets`. Default off. */
   readonly enableSpotMarkets?: boolean;
+  /** See `ExchangeAccountConfig.enableOptionMarkets`. Default off. */
+  readonly enableOptionMarkets?: boolean;
   /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
   readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
@@ -276,6 +278,15 @@ export interface ExchangeAccountConfig {
   enableSpotMarkets?: boolean;
 
   /**
+   * Opt this account into the exchange's option markets, for venues that trade options
+   * in the same account as their derivatives (`supportsOptionsToggle` metadata).
+   *
+   * Default off, for the same reason as `enableSpotMarkets`: a perp trader's market list
+   * and request volume must be unchanged unless they ask for options.
+   */
+  enableOptionMarkets?: boolean;
+
+  /**
    * Bybit Brazil accounts use the global Bybit hosts but require
    * `x-site-id: BRA_BTL` on REST and WebSocket connection requests.
    */
@@ -370,6 +381,70 @@ export type Balance = {
   readonly coins?: { [coin: string]: CoinBalance };
 };
 
+export type OptionRight = 'call' | 'put';
+
+/** What makes a market an option. Absent on every other market. */
+export type OptionTerms = {
+  readonly underlying: string;
+  /** Expiry, ms since epoch. */
+  readonly expiry: number;
+  readonly strike: number;
+  readonly right: OptionRight;
+  readonly style: 'european';
+  readonly settlement: 'cash';
+  /** The asset the premium is quoted in, which is the unit of `price` on an option order. */
+  readonly premiumAsset: string;
+  readonly settleAsset: string;
+};
+
+/**
+ * Greeks as the venue publishes them. `units` records what was measured, because venues
+ * do not agree on scale (per 1 vol point or per 100%, per day or per year, coin or quote).
+ */
+export type OptionGreeks = {
+  readonly delta: number;
+  readonly gamma: number;
+  readonly vega: number;
+  readonly theta: number;
+  readonly units: string;
+};
+
+/** One option's prices and implied volatilities. IVs are fractions; 0 means unavailable. */
+export type OptionQuote = {
+  readonly symbol: string;
+  readonly bid: number;
+  readonly ask: number;
+  readonly mark: number;
+  readonly markIv: number;
+  readonly bidIv: number;
+  readonly askIv: number;
+  readonly underlyingPrice: number;
+  readonly forwardPrice?: number;
+  readonly greeks?: OptionGreeks;
+};
+
+export type OptionChainQuery = {
+  readonly underlying: string;
+  readonly expiry?: number;
+  readonly right?: OptionRight;
+  readonly strikeMin?: number;
+  readonly strikeMax?: number;
+};
+
+export type OptionChainRow = {
+  readonly market: Market;
+  readonly quote: OptionQuote;
+};
+
+export type AccountGreeks = {
+  readonly underlying: string;
+  readonly delta: number;
+  readonly gamma: number;
+  readonly vega: number;
+  readonly theta: number;
+  readonly units: string;
+};
+
 export type Market = {
   readonly id: string;
   readonly symbol: string;
@@ -380,6 +455,12 @@ export type Market = {
   readonly precision: {
     readonly amount: number;
     readonly price: number;
+    /**
+     * Tiered ticks, ascending by `from`: at a price >= `from` the tick is `tick`, and below the
+     * first band it is `price`. Each tick must be a multiple of the ticks below it, so rounding
+     * across a band edge still lands on a valid price.
+     */
+    readonly priceBands?: Array<{ from: number; tick: number }>;
   };
   readonly limits: {
     readonly amount: {
@@ -390,7 +471,11 @@ export type Market = {
       readonly min: number;
       readonly max: number;
     };
+    readonly price?: {
+      readonly min: number;
+    };
   };
+  readonly option?: OptionTerms;
   readonly contractSize?: number;
   readonly isExpiring?: boolean;
   readonly isInverse?: boolean;
@@ -578,6 +663,9 @@ export type Position = {
     readonly unrealizedPnlNative?: number;
   };
   readonly lastUpdate?: number;
+  readonly option?: {
+    readonly greeks?: OptionGreeks;
+  };
 };
 
 export type DisplayedPosition = Position & {
@@ -734,6 +822,8 @@ export type PlaceOrderOpts = {
   readonly clientOrderId?: string;
   readonly maxSlippagePct?: number;
   readonly close?: boolean;
+  /** Price an option order by implied volatility, as a fraction. Option markets only. */
+  readonly impliedVolatility?: number;
 };
 
 export type UpdateOrderOpts = {

@@ -237,6 +237,21 @@ describe('prepareCliAmendPrice', () => {
     expect(prepareCliAmendPrice(exchange(), 'BTCUSDT', 60_000.27)).toBe(60_000.5);
   });
 
+  it('refuses an amend below the venue minimum price', () => {
+    const option = exchange({
+      store: {
+        markets: [
+          { symbol: 'BTC-C', precision: { amount: 0.01, price: 5 }, limits: { price: { min: 10 } }, isSpot: false },
+        ],
+        tickers: [],
+        orders: [],
+        positions: [],
+      },
+    });
+    expect(() => prepareCliAmendPrice(option, 'BTC-C', 5)).toThrow('below the minimum 10');
+    expect(prepareCliAmendPrice(option, 'BTC-C', 10)).toBe(10);
+  });
+
   it('refuses an amend on a symbol with no market', () => {
     expect(() => prepareCliAmendPrice(exchange(), 'ETHUSDT', 3000)).toThrow(/Market not found/);
   });

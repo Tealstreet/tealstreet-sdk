@@ -3,6 +3,7 @@ import type { ExchangeName, Market, Order, PlaceOrderOpts, Position, Ticker } fr
 import { OrderType } from '@tealstreet/safe-cex/src/types';
 import { downSizeReduceOrder } from './downSizeReduceOrder';
 import {
+  assertMinimumPrice,
   isStopLikeOrderType,
   roundMarketOrderSize,
   roundOrderPrice,
@@ -86,6 +87,9 @@ export const prepareOrder = <T extends { symbol: string; type: OrderType; amount
   };
 
   const source = opts as Record<string, unknown>;
+  if (source.impliedVolatility !== undefined && !market.option) {
+    throw new ScriptValidationError(`impliedVolatility applies only to option markets, and '${opts.symbol}' is not one`);
+  }
   const out: Record<string, unknown> = { ...source, amount };
   // Every price-bearing field rounds to the venue tick, including a standalone
   // stop's trigger — see CORE_API_VERSION 1.3.0.
@@ -93,6 +97,7 @@ export const prepareOrder = <T extends { symbol: string; type: OrderType; amount
     const rounded = roundPriceField(source[field] as number | undefined, field);
     if (rounded !== undefined) out[field] = rounded;
   }
+  if (out.price !== undefined) assertMinimumPrice(out.price as number, market);
   return out as unknown as PlaceOrderOpts;
 };
 

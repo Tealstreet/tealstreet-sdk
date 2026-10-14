@@ -616,7 +616,6 @@ export class ParadexExchange extends BaseExchange {
           spot: false,
           swap: true,
           future: false,
-          option: false,
           contract: true,
           linear: true,
           inverse: false,

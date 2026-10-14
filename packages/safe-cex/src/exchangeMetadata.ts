@@ -73,6 +73,12 @@ export type ExchangeMetadata = {
    * toggle in the add-account form (`ExchangeAccountConfig.enableSpotMarkets`).
    */
   supportsSpotToggle?: boolean;
+  /**
+   * Whether this exchange trades options in the same account as its derivatives, and
+   * therefore offers a per-account "also trade options" toggle
+   * (`ExchangeAccountConfig.enableOptionMarkets`).
+   */
+  supportsOptionsToggle?: boolean;
   /** Whether the exchange supports testnet/paper trading */
   supportsTestnet: boolean;
   /** Predefined leverage values for quick selection in the UI */
