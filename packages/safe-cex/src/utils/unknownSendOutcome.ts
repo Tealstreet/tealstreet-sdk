@@ -6,7 +6,11 @@ const NETWORK_CODES = new Set(['ECONNRESET', 'ECONNABORTED', 'ETIMEDOUT', 'ERR_N
 // Binance -1007: "Timeout waiting for response from backend server. Send status unknown".
 const UNKNOWN_OUTCOME_VENUE_CODES = new Set([-1007]);
 // Hosted mode signs remotely: these fail BEFORE the send, so nothing can have landed.
-const NOT_SENT_MESSAGE = /(Signing request \S+ timed out|Remote signer unavailable|Failed to send signing request)/;
+const NOT_SENT_MESSAGE =
+  /(Signing request \S+ timed out|Remote signer unavailable|Failed to send signing request|signing aborted)/;
+
+/** A hosted request that failed while getting its signature, so it never reached the venue. */
+export const isUnsentSigningFailure = (message: string | undefined): boolean => NOT_SENT_MESSAGE.test(message ?? '');
 
 /** Whether a failed send may still have placed the order: the venue never answered, or said it does not know. */
 export const isUnknownOutcome = (error: unknown): boolean => {
@@ -17,7 +21,7 @@ export const isUnknownOutcome = (error: unknown): boolean => {
     name?: string;
     response?: { status?: number; data?: { code?: number } };
   };
-  if (NOT_SENT_MESSAGE.test(message ?? '')) return false;
+  if (isUnsentSigningFailure(message)) return false;
   if (response) {
     return (response.status ?? 0) >= 500 || UNKNOWN_OUTCOME_VENUE_CODES.has(Number(response.data?.code));
   }
