@@ -39,6 +39,22 @@ const limit = z.number().int().positive().optional();
 const optionRight = z.enum(['call', 'put']);
 const isoDate = (ms: number) => new Date(ms).toISOString();
 
+/**
+ * Adds `<field>Utc` as an ISO date next to each time field, so a reader need not know
+ * which fields safe-cex keeps in seconds and which in milliseconds.
+ */
+const withUtc = <T extends object>(rows: T[], fields: Record<string, 's' | 'ms'>): T[] =>
+  rows.map((row) => {
+    const out = { ...row } as Record<string, unknown>;
+    for (const [field, unit] of Object.entries(fields)) {
+      const value = (row as Record<string, unknown>)[field];
+      if (typeof value === 'number' && value > 0) {
+        out[`${field}Utc`] = new Date(unit === 's' ? value * 1000 : value).toISOString();
+      }
+    }
+    return out as T;
+  });
+
 const inMarkets = <T extends { symbol: string }>(rows: T[], wanted?: string[]): T[] =>
   wanted?.length ? rows.filter((r) => wanted.includes(r.symbol)) : rows;
 
@@ -118,7 +134,7 @@ export const tools: Tool[] = [
       to,
       limit,
     },
-    run: (exchange, args) => exchange.fetchOHLCV(args),
+    run: async (exchange, args) => withUtc(await exchange.fetchOHLCV(args), { timestamp: 's' }),
   }),
   tool({
     name: 'get_balance',
@@ -148,21 +164,22 @@ export const tools: Tool[] = [
     description: 'Past orders, including filled and cancelled ones.',
     method: 'fetchHistoricalOrders',
     input: { symbol: symbol.optional(), orderId: z.string().optional(), from, to, limit },
-    run: (exchange, args) => exchange.fetchHistoricalOrders(args),
+    run: async (exchange, args) =>
+      withUtc(await exchange.fetchHistoricalOrders(args), { createdTime: 'ms', updatedTime: 'ms' }),
   }),
   tool({
     name: 'get_fills',
     description: 'Trade executions (fills).',
     method: 'fetchHistoricalFills',
     input: { symbol: symbol.optional(), orderId: z.string().optional(), from, to, limit },
-    run: (exchange, args) => exchange.fetchHistoricalFills(args),
+    run: async (exchange, args) => withUtc(await exchange.fetchHistoricalFills(args), { timestamp: 's' }),
   }),
   tool({
     name: 'get_closed_pnl',
     description: 'Realised PnL of closed positions for one market.',
     method: 'fetchClosedPnl',
     input: { symbol, from, to, limit },
-    run: (exchange, args) => exchange.fetchClosedPnl(args),
+    run: async (exchange, args) => withUtc(await exchange.fetchClosedPnl(args), { time: 'ms', closedTime: 'ms' }),
   }),
   tool({
     name: 'get_income',
@@ -175,7 +192,7 @@ export const tools: Tool[] = [
       endTime: to,
       limit,
     },
-    run: (exchange, args) => exchange.fetchIncomeHistory(args),
+    run: async (exchange, args) => withUtc(await exchange.fetchIncomeHistory(args), { timestamp: 'ms' }),
   }),
   tool({
     name: 'get_option_expiries',

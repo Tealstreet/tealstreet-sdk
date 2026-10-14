@@ -27,6 +27,8 @@ Set `EXCHANGE_API_SECRET` or the two signer variables. Signer mode needs an adap
 
 With `EXCHANGE_OPTIONS=true`: `get_option_expiries`, `get_option_chain` and `get_account_greeks`. `place_order` takes option symbols and an optional `impliedVolatility`. `get_markets` leaves options out unless they are named.
 
+Results with times also carry `<field>Utc` ISO dates, because safe-cex keeps fill and candle times in seconds and the rest in milliseconds.
+
 The server starts the exchange as soon as it connects, and fetches everything else when asked. It opens no public websockets and turns periodic polling off. Starting still fetches one snapshot of positions, orders and balance, and with a local `EXCHANGE_API_SECRET` most adapters also open their private websocket; signer mode does not, because the websocket login needs the secret.
 
 ## Develop
