@@ -1,14 +1,31 @@
-# Publishes @tealstreet/exchange-mcp to npm when an `exchange-mcp-vX.Y.Z` tag is
-# pushed. Source of truth is the monorepo (mirrors/tealstreet-sdk/.github/);
-# Copybara carries it here. Authenticates by npm trusted publishing (OIDC), so
-# there is no token secret, and npm attaches provenance because this repo is
-# public. Release steps: packages/exchange-mcp/CLAUDE.md.
+# Publishes @tealstreet/exchange-mcp to npm. Source of truth is the monorepo
+# (mirrors/tealstreet-sdk/.github/); Copybara carries it here. Authenticates by
+# npm trusted publishing (OIDC), so there is no token secret, and npm attaches
+# provenance because this repo is public. Release steps:
+# packages/exchange-mcp/CLAUDE.md.
+#
+# Release from the Actions tab: "exchange-mcp release" → Run workflow → patch,
+# minor or major. The next version is npm's `latest` bumped by that much. It is
+# stamped into package.json for this build only, and the version tag is pushed
+# after a successful publish. Nothing is committed: master is protected, and a
+# committed bump would also have to round-trip through Copybara.
 name: exchange-mcp release
 
 on:
+  workflow_dispatch:
+    inputs:
+      bump:
+        description: Version bump from the latest version on npm
+        type: choice
+        options: [patch, minor, major]
+        default: patch
   push:
     tags:
       - 'exchange-mcp-v*'
+
+concurrency:
+  group: exchange-mcp-release
+  cancel-in-progress: false
 
 permissions:
   contents: read
@@ -21,6 +38,9 @@ env:
 jobs:
   release:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write # push the version tag after a dispatched release
+      id-token: write
     steps:
       - uses: actions/checkout@v4
 
@@ -33,24 +53,54 @@ jobs:
           check-latest: true
           cache: yarn
 
-      - run: yarn install --frozen-lockfile --network-timeout 600000
+      - name: Use npm with trusted publishing support
+        run: npm install -g npm@^11.5.1 && npm --version
 
-      - name: Resolve release metadata
+      - name: Resolve the release version
         id: meta
+        env:
+          BUMP: ${{ inputs.bump }}
         run: |
           set -euo pipefail
-          TAG="${GITHUB_REF_NAME}"
-          VERSION="${TAG#exchange-mcp-v}"
-          if [ "$TAG" = "$VERSION" ] || [ -z "$VERSION" ]; then
-            echo "Expected tag format exchange-mcp-vX.Y.Z, got ${TAG}" >&2
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            VERSION="${GITHUB_REF_NAME#exchange-mcp-v}"
+          else
+            LATEST="$(npm view "$PACKAGE_NAME" dist-tags.latest --registry https://registry.npmjs.org)"
+            VERSION="$(node -e '
+              const [major, minor, patch] = process.argv[1].split(".").map(Number);
+              const next = { major: [major + 1, 0, 0], minor: [major, minor + 1, 0], patch: [major, minor, patch + 1] }[process.argv[2]];
+              console.log(next.join("."));
+            ' "$LATEST" "$BUMP")"
+            echo "npm latest is ${LATEST}; releasing ${VERSION} (${BUMP})"
+          fi
+          if ! [[ "$VERSION" =~ ^[0-9]+\.[0-9]+\.[0-9]+$ ]]; then
+            echo "Release version must be X.Y.Z, got ${VERSION}" >&2
             exit 1
           fi
-          PACKAGE_VERSION="$(node -p "require('./${PACKAGE_DIR}/package.json').version")"
-          if [ "$PACKAGE_VERSION" != "$VERSION" ]; then
-            echo "Tag ${TAG} does not match ${PACKAGE_DIR}/package.json version ${PACKAGE_VERSION}" >&2
+          if npm view "${PACKAGE_NAME}@${VERSION}" version --registry https://registry.npmjs.org >/dev/null 2>&1; then
+            echo "${PACKAGE_NAME}@${VERSION} is already on npm" >&2
+            exit 1
+          fi
+          if git ls-remote --exit-code --tags origin "refs/tags/exchange-mcp-v${VERSION}" >/dev/null && [ "$GITHUB_EVENT_NAME" != "push" ]; then
+            echo "tag exchange-mcp-v${VERSION} already exists but ${VERSION} is not on npm; publish it by re-running that tag" >&2
             exit 1
           fi
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+
+      # The bundle reads its MCP serverInfo version from package.json at build time.
+      - name: Stamp the version into package.json
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
+        run: |
+          node -e '
+            const fs = require("fs");
+            const file = process.env.PACKAGE_DIR + "/package.json";
+            const manifest = JSON.parse(fs.readFileSync(file, "utf8"));
+            manifest.version = process.env.VERSION;
+            fs.writeFileSync(file, JSON.stringify(manifest, null, 2) + "\n");
+          '
+
+      - run: yarn install --frozen-lockfile --network-timeout 600000
 
       - name: Typecheck
         run: yarn --cwd "$PACKAGE_DIR" typecheck
@@ -67,9 +117,6 @@ jobs:
       # Lighter signs through from the same dist/ directory.
       - name: Smoke-test the bundle
         run: yarn --cwd "$PACKAGE_DIR" smoke
-
-      - name: Use npm with trusted publishing support
-        run: npm install -g npm@^11.5.1 && npm --version
 
       # The bundle is self-contained: a runtime dependency on an unpublished
       # @tealstreet/* workspace is what broke `npm install -g @tealstreet/cli`.
@@ -106,22 +153,29 @@ jobs:
           if (manifest.repository?.url !== `git+https://github.com/${process.env.GITHUB_REPOSITORY}.git`) {
             problems.push(`repository.url ${manifest.repository?.url} is not this repo; npm rejects the trusted publish`);
           }
+          if (pack.version !== process.env.VERSION) problems.push(`packed ${pack.version}, expected ${process.env.VERSION}`);
           if (problems.length) {
             console.error(problems.map((p) => `- ${p}`).join('\n'));
             process.exit(1);
           }
-          console.log(`npm package: ${files.length} files, ${pack.size} bytes packed`);
+          console.log(`npm package: ${pack.name}@${pack.version}, ${files.length} files, ${pack.size} bytes packed`);
           NODE
           rm npm-pack.json
+        env:
+          VERSION: ${{ steps.meta.outputs.version }}
 
       - name: Publish npm package
         working-directory: ${{ env.PACKAGE_DIR }}
+        run: npm publish --access public --provenance --registry https://registry.npmjs.org
+
+      # Pushed with GITHUB_TOKEN, so it does not trigger this workflow again.
+      - name: Tag the release
+        if: github.event_name == 'workflow_dispatch'
         env:
           VERSION: ${{ steps.meta.outputs.version }}
         run: |
           set -euo pipefail
-          if npm view "${PACKAGE_NAME}@${VERSION}" version --registry https://registry.npmjs.org >/dev/null 2>&1; then
-            echo "${PACKAGE_NAME}@${VERSION} already published; skipping npm publish."
-            exit 0
-          fi
-          npm publish --access public --provenance --registry https://registry.npmjs.org
+          git tag "exchange-mcp-v${VERSION}" "$GITHUB_SHA"
+          git push origin "refs/tags/exchange-mcp-v${VERSION}"
+          echo "### Released ${PACKAGE_NAME}@${VERSION}" >> "$GITHUB_STEP_SUMMARY"
+          echo "https://www.npmjs.com/package/${PACKAGE_NAME}/v/${VERSION}" >> "$GITHUB_STEP_SUMMARY"

@@ -10,19 +10,24 @@ never on the mirror.
 
 **Publishing runs on the public tealstreet-sdk mirror.** npm attaches
 provenance only to packages published from a public repo, and the
-`repository` field in `package.json` must name the repo that publishes:
-npm rejected trust for `tealstreet-next` with a bare 400 because this field
-names the mirror. The workflow is authored here, at
+`repository` field in `package.json` names that repo, which the release job
+checks. The workflow is authored here, at
 `mirrors/tealstreet-sdk/.github/workflows/exchange-mcp-release.yml`, and
 Copybara carries it across. Never edit it on the mirror.
 
-1. Bump `version` in `package.json` and merge to `master`.
-2. Wait for the Copybara export (about 20 minutes), then run
-   `yarn release:tag` from this package. It checks that mirror `master`
-   carries the new version and tags that commit `exchange-mcp-vX.Y.Z`, which
-   fires the workflow there. The workflow typechecks, tests, builds,
-   smoke-tests the bundle, checks the pack, and publishes by OIDC with
-   provenance. Re-running a published version skips the publish.
+**To release: tealstreet-sdk → Actions → "exchange-mcp release" → Run
+workflow → patch, minor or major.** The job takes npm's `latest`, bumps it,
+stamps the result into `package.json` for that build only, typechecks, tests,
+builds, smoke-tests, checks the pack, publishes by OIDC with provenance, and
+only then pushes the `exchange-mcp-vX.Y.Z` tag on the commit it built.
+
+**The version lives on npm and in tags, never in a commit.** `package.json`
+holds `0.0.0-development` on purpose: mirror `master` is protected
+(`mirror-maintainers` only, reviewed PR plus green `ci`), so the workflow's
+token cannot commit a bump, and a committed bump would also have to
+round-trip through Copybara. Do not "fix" the placeholder. Pushing an
+`exchange-mcp-vX.Y.Z` tag by hand also releases exactly that version; a
+dispatched run refuses a version that already has a tag or is already on npm.
 
 npm trusts `Tealstreet/tealstreet-sdk` + `exchange-mcp-release.yml`, set on
 the package's npm **Settings** page under Trusted Publisher with **Allow npm
