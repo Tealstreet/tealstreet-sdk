@@ -22,7 +22,7 @@ ships into the browser worker and must stay portable, so it cannot carry it.
 
 ## `validate()` is four passes, and the last three are the interesting ones
 
-```
+```text
 validate = typecheck  ++  checkRuntimeImports  ++  checkCapabilities  ++  checkTargetSurface
 ```
 
@@ -104,6 +104,12 @@ directive, which asks the host for an arbitrary path directly — without that
 gate, untrusted source could read any file on the box and poison the cache.
 This validator accepts untrusted source over MCP and a web route, so that is
 a real vulnerability, not tidiness.
+
+That lib-directory gate compares **normalized paths**, not raw strings. On
+Windows, native Vite/Vitest config loading can leave `require.resolve` with
+backslashes while TypeScript asks the host for forward-slash lib paths; a raw
+`startsWith(getTsLibDir())` rejects the real lib and every script fails with
+missing global types.
 
 The types SourceFile cache is keyed by **content hash**, not filename: two
 callers on different bundle versions would otherwise silently share whichever

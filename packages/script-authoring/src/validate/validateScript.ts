@@ -102,6 +102,19 @@ const tryResolve = (resolve: () => string | undefined): string | null => {
   }
 };
 
+const normalizeFsPath = (fileName: string): string => path.normalize(fileName);
+
+const normalizeForPrefixCheck = (fileName: string): string => {
+  const normalized = normalizeFsPath(fileName).replace(/\\/g, '/');
+  return process.platform === 'win32' ? normalized.toLowerCase() : normalized;
+};
+
+const isTsLibPath = (fileName: string): boolean => {
+  const normalizedFileName = normalizeForPrefixCheck(fileName);
+  const normalizedLibDir = normalizeForPrefixCheck(getTsLibDir());
+  return normalizedFileName === normalizedLibDir || normalizedFileName.startsWith(`${normalizedLibDir}/`);
+};
+
 /**
  * Lib files never change, so `fileName` is a safe key for them. The types
  * bundle is NOT safe to key that way: it arrives per call, and two callers on
@@ -116,12 +129,13 @@ const typesFileCache = new Map<string, ts.SourceFile>();
 const hash = (text: string): string => createHash('sha1').update(text).digest('hex');
 
 const getLibSourceFile = (fileName: string, target: ts.ScriptTarget): ts.SourceFile | undefined => {
-  const cached = libFileCache.get(fileName);
+  const cacheKey = normalizeForPrefixCheck(fileName);
+  const cached = libFileCache.get(cacheKey);
   if (cached) return cached;
-  const text = ts.sys.readFile(fileName);
+  const text = ts.sys.readFile(normalizeFsPath(fileName));
   if (text === undefined) return undefined;
   const file = ts.createSourceFile(fileName, text, target, true);
-  libFileCache.set(fileName, file);
+  libFileCache.set(cacheKey, file);
   return file;
 };
 
@@ -185,7 +199,7 @@ export const validateScript = (source: string, { typesBundle }: ValidateScriptOp
       // resolution but NOT `/// <reference path="/abs/any.ts" />`, which asks
       // the host for an arbitrary path directly — without this guard, untrusted
       // source could read any file on the box and poison the cache with it.
-      if (!fileName.startsWith(getTsLibDir())) return undefined;
+      if (!isTsLibPath(fileName)) return undefined;
       return getLibSourceFile(fileName, target);
     },
     getDefaultLibFileName: (options) => path.join(getTsLibDir(), ts.getDefaultLibFileName(options)),
@@ -200,13 +214,13 @@ export const validateScript = (source: string, { typesBundle }: ValidateScriptOp
     fileExists: (fileName) =>
       fileName === SCRIPT_FILE ||
       fileName === TYPES_FILE ||
-      (fileName.startsWith(getTsLibDir()) && ts.sys.fileExists(fileName)),
+      (isTsLibPath(fileName) && ts.sys.fileExists(normalizeFsPath(fileName))),
     readFile: (fileName) => {
       if (fileName === SCRIPT_FILE) return source;
       if (fileName === TYPES_FILE) return typesBundle;
-      return fileName.startsWith(getTsLibDir()) ? ts.sys.readFile(fileName) : undefined;
+      return isTsLibPath(fileName) ? ts.sys.readFile(normalizeFsPath(fileName)) : undefined;
     },
-    directoryExists: (dirName) => dirName === '/' || dirName.startsWith(getTsLibDir()),
+    directoryExists: (dirName) => dirName === '/' || isTsLibPath(dirName),
     getDirectories: () => [],
   };
 
