@@ -94,7 +94,7 @@ export const tools: Tool[] = [
   tool({
     name: 'get_markets',
     description:
-      'Markets on this exchange with precision, size limits and leverage limits. With no filter, returns symbols only. Options are left out unless named in symbols; use get_option_chain for them.',
+      'Markets on this exchange with precision, size limits and leverage limits. With no filter, returns symbols only. Options are left out unless named in symbols; use get_option_chain for them. A market with isInverse is coin-margined and sized in USD contracts: its order amounts, fills and open orders count USD, and its positions give contracts in the coin and extra.contractsNative in USD.',
     method: 'start',
     input: {
       symbols,
@@ -256,7 +256,7 @@ export const tools: Tool[] = [
   tool({
     name: 'place_order',
     description:
-      "Place an order. Returns the new order ids. Size is in the units of the market's limits.amount from get_markets.",
+      "Place an order. Returns the new order ids. Size is in the units of the market's limits.amount from get_markets: on a market with isInverse, a count of USD contracts.",
     method: 'placeOrder',
     input: {
       symbol,

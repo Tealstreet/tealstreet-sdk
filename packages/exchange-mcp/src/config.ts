@@ -35,13 +35,15 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
     throw new Error('EXCHANGE_TESTNET must be true or false');
   }
 
-  const options = optional(env, 'EXCHANGE_OPTIONS');
-  if (options !== undefined && options !== 'true' && options !== 'false') {
-    throw new Error('EXCHANGE_OPTIONS must be true or false');
-  }
-  if (options === 'true' && !getExchangeMetadata(exchange as ExchangeName).supportsOptionsToggle) {
-    throw new Error(`EXCHANGE_OPTIONS is not available on ${exchange}`);
-  }
+  const metadata = getExchangeMetadata(exchange as ExchangeName);
+  const toggle = (name: string, offered: boolean | undefined): boolean => {
+    const value = optional(env, name);
+    if (value !== undefined && value !== 'true' && value !== 'false') throw new Error(`${name} must be true or false`);
+    if (value === 'true' && !offered) throw new Error(`${name} is not available on ${exchange}`);
+    return value === 'true';
+  };
+  const options = toggle('EXCHANGE_OPTIONS', metadata.supportsOptionsToggle);
+  const inverse = toggle('EXCHANGE_INVERSE', metadata.supportsInverseToggle);
 
   const secret = optional(env, 'EXCHANGE_API_SECRET');
   const header = optional(env, 'EXCHANGE_SIGNER_HEADER');
@@ -60,7 +62,8 @@ export const readConfig = (env: NodeJS.ProcessEnv): ServerConfig => {
       secret: secret ?? '',
       passphrase: optional(env, 'EXCHANGE_API_PASSPHRASE'),
       testnet: testnet === 'true',
-      enableOptionMarkets: options === 'true',
+      enableOptionMarkets: options,
+      enableInverseMarkets: inverse,
       payloadSigner: header && placeholder ? proxySigner(header, placeholder) : undefined,
       // Tools fetch on demand, so the adapter's background polling would only add signed requests.
       extra: { tickInterval: Number.POSITIVE_INFINITY },

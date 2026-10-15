@@ -1,5 +1,7 @@
 import type { Balance, Position } from '../../types';
 
+import { positionUpnlInQuote } from './bybit.inverse';
+
 export const syncUnifiedBalanceUpnlFromPositions = (
   balance: Balance | undefined,
   positions: Position[],
@@ -9,7 +11,7 @@ export const syncUnifiedBalanceUpnlFromPositions = (
     return balance;
   }
 
-  const upnl = positions.reduce((sum, position) => sum + (position.unrealizedPnl || 0), 0);
+  const upnl = positions.reduce((sum, position) => sum + positionUpnlInQuote(position), 0);
 
   if (balance.upnl === upnl) {
     return balance;

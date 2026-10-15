@@ -21,6 +21,7 @@ interface TestMetadata {
   privateProxyRegions: Record<string, string[]>;
   supportsSpotToggle?: boolean;
   supportsOptionsToggle?: boolean;
+  supportsInverseToggle?: boolean;
 }
 
 // Mock the exchangeMetadata module. Keep the real `exchangeMetadata` record (the routing
@@ -45,6 +46,7 @@ vi.mock('./exchangeMetadata', async (importOriginal) => ({
         privateProxyRegions: { SG: ['1.2.3.4'], TK: ['5.6.7.8'] },
         supportsSpotToggle: true,
         supportsOptionsToggle: true,
+        supportsInverseToggle: true,
       },
       okx: {
         exchangeName: 'okx',
@@ -174,23 +176,26 @@ describe('accountToExchangeOptions', () => {
       ...toggles,
     });
 
-    it.each(['enableSpotMarkets', 'enableOptionMarkets'] as const)(
+    it.each(['enableSpotMarkets', 'enableOptionMarkets', 'enableInverseMarkets'] as const)(
       'forwards %s when the venue offers the toggle and the account turned it on',
       (toggle) => {
         expect(accountToExchangeOptions(account('bybit', { [toggle]: true }))[toggle]).toBe(true);
       },
     );
 
-    it.each(['enableSpotMarkets', 'enableOptionMarkets'] as const)(
+    it.each(['enableSpotMarkets', 'enableOptionMarkets', 'enableInverseMarkets'] as const)(
       'drops %s on a venue that does not offer the toggle',
       (toggle) => {
         expect(accountToExchangeOptions(account('okx', { [toggle]: true }))[toggle]).toBeUndefined();
       },
     );
 
-    it.each(['enableSpotMarkets', 'enableOptionMarkets'] as const)('leaves %s off by default', (toggle) => {
-      expect(accountToExchangeOptions(account('bybit', {}))[toggle]).toBeUndefined();
-    });
+    it.each(['enableSpotMarkets', 'enableOptionMarkets', 'enableInverseMarkets'] as const)(
+      'leaves %s off by default',
+      (toggle) => {
+        expect(accountToExchangeOptions(account('bybit', {}))[toggle]).toBeUndefined();
+      },
+    );
   });
 
   describe('basic credentials mapping', () => {
