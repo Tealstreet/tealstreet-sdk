@@ -1,0 +1,112 @@
+---
+title: Txflow
+description: Connect your Txflow account to Tealstreet.
+sidebar_position: 14
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+import IntroTealstreet from '@site/src/partials/connect/_intro-tealstreet.mdx';
+import OutroTealstreet from '@site/src/partials/connect/_outro-tealstreet.mdx';
+
+---
+
+:::caution Draft
+This Txflow guide is a draft for the upcoming integration. The Txflow referral link and Txflow-specific screenshots are still pending, so this page intentionally follows the Hyperliquid-style agent-wallet flow until the final Txflow UI is available.
+:::
+
+## Connecting Txflow to Tealstreet
+
+<IntroTealstreet exchangeName="Txflow" />
+
+---
+
+### Creating the key
+
+- Head on over to Txflow. The Tealstreet referral link is **TBD**.
+  - Login or connect your wallet when the window pops up.
+  - If a window does not automatically pop up, click the connect button at the top right of the page.
+
+:::note
+You will not be able to connect to Txflow if you are connecting from a geo-restricted region.
+:::
+
+:::caution
+Txflow is expected to follow Hyperliquid's wallet-backed API flow. Make sure your wallet has completed any required deposit, account activation, or trading enablement steps before creating the API key.
+:::
+
+- Once you are connected to your wallet, navigate to the API Key page.
+- Name your key and click the **Generate** button to begin the process. This will provide the **Agent Wallet API** we will need later.
+  - This is 1 of the 3 pieces of information we need to link your Txflow account to Tealstreet.
+- Next, click the **Generate API Wallet** button to continue the key creation process.
+- Choose how long you want your key to be active for.
+- Securely store your **Private Key**.
+  - This is the 2nd of the 3 pieces of information we need to link your Txflow account to Tealstreet.
+  - When done, click the **Authorize** button and sign the transaction with your wallet.
+- Once you have authorized the API Key, open the account dropdown near your connected wallet.
+- Copy and securely store your **Main Wallet Address**.
+  - This is the 3rd and final piece of information we need to link your Txflow account to Tealstreet.
+
+---
+
+### Connecting the key to Tealstreet
+
+Now let us proceed back to where we left the Tealstreet API page:
+
+- Fill out the form with the information you received from Txflow.
+  - Give the key a name. This can be anything you want.
+  - Choose the color you want your API to be in the terminal.
+  - Provide the **Main Wallet Address** Txflow showed you in the account window.
+    - This is the wallet or master account address.
+  - Provide the **Agent Wallet Address** Txflow created when you generated the API key.
+  - Provide the **Private Key** Txflow showed you when you authorized your API key.
+  - Provide the **Vault Key** if you will be trading from a vault account. Leave this blank if you are not using a vault account.
+    - If you are trading from a sub-account, provide the sub-account address instead of the vault address.
+  - Click **Done**.
+
+- If Tealstreet asks for a **Builder Fee Approval**, click **Approve Builder Fee** and sign the approval message with your wallet.
+  - The approval must be signed by the same wallet as your **Main Wallet Address**.
+  - On the desktop app, use **Approve in Browser**, complete the wallet signature there, then return and click **Recheck** if needed.
+
+<OutroTealstreet exchangeName="Txflow" />
+
+---
+
+### Trading from a Vault
+
+When connecting a vault, make sure the addresses go in the correct fields:
+
+- Main Wallet Address: Your EOA or master account address.
+- Agent Wallet Address: The agent/API wallet created on Txflow's API page.
+- Subkey Private Key: The private key for the agent wallet.
+- Vault: The vault contract address.
+
+How Tealstreet uses these under the hood:
+
+- Tealstreet subscribes to private data with the vault address if provided; otherwise it uses the Main Wallet Address.
+- Balances and positions are updated from Txflow's private account stream. If the account address is wrong, data can come back empty and your balance can remain 0.
+
+#### Troubleshooting: Vault shows 0 balance
+
+If your vault appears empty after linking:
+
+- Verify addresses are in the right fields.
+- Main Wallet Address should be your EOA or master account address.
+- Vault should be the vault contract address.
+- Do not put the agent wallet in the Main Wallet Address field.
+- Ensure funds are actually in the vault, not just the EOA.
+- Refresh after a few seconds while account data initializes.
+- Confirm your network connection allows Txflow private WebSocket traffic.
+
+## Frequently Asked Questions
+
+- Where is the Txflow referral link?
+  - The Txflow referral link is pending and will be added before this draft is published.
+
+- Why does this page look similar to the Hyperliquid guide?
+  - Txflow is expected to use a Hyperliquid-style wallet and agent-key flow, so this draft mirrors the Hyperliquid instructions until Txflow-specific screenshots and links are available.
+
+- I see an error that my API Wallet does not exist.
+  - If an account was previously linked and now shows `User or API Wallet does not exist`, the linked key may have expired or been revoked.
+  - Revisit your Txflow API settings, verify key status, and create a new API key if needed, then relink or update it in Tealstreet.

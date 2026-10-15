@@ -417,6 +417,11 @@ const config = {
                 label: 'Hyperliquid',
                 href: 'https://teal.link/hyperliquid',
               },
+              // Txflow support/referral link pending before the draft connect guide is published.
+              // {
+              //   label: 'Txflow',
+              //   href: 'https://teal.link/txflow',
+              // },
               // {
               //   label: 'Kucoin',
               //   href: 'https://teal.link/kucoin',
