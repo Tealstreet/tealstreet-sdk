@@ -123,6 +123,13 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     expect(balance.total).toBeCloseTo(1000);
   });
 
+  it('keeps the balance PnL a number while a closed inverse position is still in the store', () => {
+    const { exchange, store } = create(true);
+    const closed = { ...inversePosition, size: '0', positionValue: '0', unrealisedPnl: '0' };
+    store.update({ positions: [exchange.mapPosition(closed)] });
+    expect(exchange.formatBalance([{ totalEquity: '1000', coin: [] }])).toMatchObject({ upnl: 0, total: 1000 });
+  });
+
   it('sizes an inverse position at the ticker mark ahead of the last price, and values its PnL at that price', () => {
     const { exchange, store } = create(true);
     store.update({ tickers: [{ id: 'BTCUSD', symbol: 'BTCUSD', mark: 100000, last: 90000 } as any] });
