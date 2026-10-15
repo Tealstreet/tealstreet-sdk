@@ -421,7 +421,14 @@ export class BybitInverseExchange extends BaseExchange {
     // is stamped with them. They used to be fetched inside the public-data
     // branch below, so an account sourcing public data from elsewhere kept
     // reporting cross margin regardless of its real setting.
-    const marginAccountInfos = publicDataOnly ? null : this.fetchMarginAccountInfos();
+    // Handled where it is created: a rejected key fails this before the market fetch
+    // below finishes, and a rejection with no handler yet ends a Node process.
+    const privateProbe = publicDataOnly
+      ? null
+      : this.fetchMarginAccountInfos().then(
+          () => undefined,
+          (err: any) => String(err?.message || err) || 'request failed',
+        );
 
     // Fetch API key info asynchronously without blocking startup
     if (!publicDataOnly) {
@@ -460,9 +467,7 @@ export class BybitInverseExchange extends BaseExchange {
 
     // Awaited here rather than inside the branch above: it must run on both
     // public-data paths, and it is what stamps margin mode onto positions.
-    const privateProbeFailure = marginAccountInfos
-      ? await marginAccountInfos.then(() => undefined).catch((err: any) => String(err?.message || err) || 'request failed')
-      : undefined;
+    const privateProbeFailure = privateProbe ? await privateProbe : undefined;
 
     // A rejected key comes back as HTTP 200 with a non-OK retMsg, so the probe is the
     // only thing that knows. `authFailureStreak` cannot be used: markets and tickers

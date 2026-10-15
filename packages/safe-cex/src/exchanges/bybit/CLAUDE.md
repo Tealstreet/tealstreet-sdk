@@ -1545,21 +1545,21 @@ key. Recording `fullTopic`there once ballooned`messageHandlersStats`
 
 ### REST API Error Codes and Patterns
 
-| Error Message / Code                          | Handling                                                                               | Location                           |
-| --------------------------------------------- | -------------------------------------------------------------------------------------- | ---------------------------------- |
+| Error Message / Code                          | Handling                                                                                | Location                           |
+| --------------------------------------------- | --------------------------------------------------------------------------------------- | ---------------------------------- |
 | `10004` / `/error sign/i`                     | Re-signed and resent once (response interceptor); a rejected 4xx also via `axios-retry` | `isBybitSignRejection`             |
-| `"timestamp and recv_window param"`           | Auto time sync via `virtualClock.syncBybitClientServerTime()`, then one retry          | `bybit.api.ts:92-96`               |
-| `"accountType only support UNIFIED."`         | Set `forceUnifiedBalance=true`, `unifiedMarginStatus=6`, retry                         | `bybit.exchange.ts:380-383`        |
-| Account margin-mode failure                   | Surface `result.reasons[].reasonMsg`, then throw                                       | `changeMarginType`                 |
-| `"order not modified"`                        | Treated as success (no-op), no error thrown                                            | `bybit.exchange.ts:1550,1593,1633` |
-| `110043` / `"leverage not modified"`          | Treated as success (desired leverage is already active); refresh positions afterward   | `setLeverage`                      |
-| `110123` / `110125` Trading Terms agreement   | Reword as actionable order warning; never auto-sign from order placement               | order write paths                  |
-| `"Partial symbols switched successfully..."`  | Logged as error but does not throw (partial success on position mode switch)           | `bybit.exchange.ts:1787-1789`      |
-| `"All symbols switched successfully."`        | Silent success                                                                         | `bybit.exchange.ts:1786`           |
-| Network errors                                | Auto-retry up to 3 times on reads only (via `axios-retry`)                             | `shouldRetryBybitRequest`          |
-| `"too much traffic or a configuration error"` | Logged as "Server was unavailable", no automatic retry beyond axios-retry              | `bybit.api.ts:98-100`              |
-| Batch order partial failures                  | Individual errors reported via `retExtInfo.list[].code`, successful IDs still returned | `bybit.exchange.ts:1376-1401`      |
-| Batch placement failure                       | Falls back to individual `placeOrder()` per order in the failed batch                  | `bybit.exchange.ts:1336-1346`      |
+| `"timestamp and recv_window param"`           | Auto time sync via `virtualClock.syncBybitClientServerTime()`, then one retry           | `bybit.api.ts:92-96`               |
+| `"accountType only support UNIFIED."`         | Set `forceUnifiedBalance=true`, `unifiedMarginStatus=6`, retry                          | `bybit.exchange.ts:380-383`        |
+| Account margin-mode failure                   | Surface `result.reasons[].reasonMsg`, then throw                                        | `changeMarginType`                 |
+| `"order not modified"`                        | Treated as success (no-op), no error thrown                                             | `bybit.exchange.ts:1550,1593,1633` |
+| `110043` / `"leverage not modified"`          | Treated as success (desired leverage is already active); refresh positions afterward    | `setLeverage`                      |
+| `110123` / `110125` Trading Terms agreement   | Reword as actionable order warning; never auto-sign from order placement                | order write paths                  |
+| `"Partial symbols switched successfully..."`  | Logged as error but does not throw (partial success on position mode switch)            | `bybit.exchange.ts:1787-1789`      |
+| `"All symbols switched successfully."`        | Silent success                                                                          | `bybit.exchange.ts:1786`           |
+| Network errors                                | Auto-retry up to 3 times on reads only (via `axios-retry`)                              | `shouldRetryBybitRequest`          |
+| `"too much traffic or a configuration error"` | Logged as "Server was unavailable", no automatic retry beyond axios-retry               | `bybit.api.ts:98-100`              |
+| Batch order partial failures                  | Individual errors reported via `retExtInfo.list[].code`, successful IDs still returned  | `bybit.exchange.ts:1376-1401`      |
+| Batch placement failure                       | Falls back to individual `placeOrder()` per order in the failed batch                   | `bybit.exchange.ts:1336-1346`      |
 
 ### WebSocket Error Handling
 
@@ -1632,6 +1632,12 @@ instead of returning after `emitAndLogError`, and `start()` catches it into
 `privateProbeFailure`, which the readiness line reads. The message quotes that
 reason verbatim rather than classifying it, so it cannot blame the key for a
 transport failure.
+
+**Attach the probe's handler where it is created, in all three variants.** A rejected
+key answers the probe before the markets load, so a `.catch` added after those awaits
+leaves the rejection unhandled and Node exits — exchange-mcp listed its tools and died
+200ms later. Gated by `bybit.startup-auth-log.test.ts` and
+`bybit.inverse-spot.startup-rejection.test.ts`.
 
 **Do NOT gate that line on `authFailureStreak`.** It reads correctly and is a
 no-op in production: `bybit.api.ts` signs markets and tickers too, so their
