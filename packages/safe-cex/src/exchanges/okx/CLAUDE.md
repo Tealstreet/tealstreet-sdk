@@ -1036,6 +1036,10 @@ Most methods follow the same error handling pattern:
 | `getOrFetchPositionModeAndAccLevel` | Any fetch error                                     | Emits error, re-throws                                         |
 | WebSocket error event               | `"event":"error"` message                           | Emits error from `json.msg`                                    |
 
+The REST response interceptor checks the first failed row under `data[]` before
+falling back to the top-level `msg` or generic `code`; OKX batch endpoints often
+return top-level `code: "1"` while the actionable message is in row `sMsg`.
+
 ### Retry Strategy
 
 - **REST**: 3 automatic retries on network errors via `axios-retry`; `50113` is re-signed and resent once

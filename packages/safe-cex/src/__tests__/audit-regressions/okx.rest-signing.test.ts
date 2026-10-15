@@ -73,4 +73,23 @@ describe('audit regression: OKX REST signing', () => {
     expect(request.data).not.toBe(JSON.stringify(amendBody));
     expect(getHeader(request.headers, 'OK-ACCESS-SIGN')).toBe(expectedSignature(amendBody));
   });
+
+  it('surfaces row-level batch failure messages before generic top-level code errors', async () => {
+    const xhr = createAPI(options, exchange);
+    xhr.defaults.adapter = vi.fn(async (config) => ({
+      data: {
+        code: '1',
+        data: [{ ordId: '', sCode: '51000', sMsg: 'Order does not exist.' }],
+        msg: '',
+      },
+      status: 200,
+      statusText: 'OK',
+      headers: {},
+      config,
+    })) as any;
+
+    await expect(xhr.post(ENDPOINTS.UPDATE_ORDER, JSON.parse(amendBody))).rejects.toThrow(
+      'Order does not exist. (code 51000)',
+    );
+  });
 });

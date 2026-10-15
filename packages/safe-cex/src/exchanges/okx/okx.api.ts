@@ -23,6 +23,24 @@ const isPublicEndpoint = (url?: string) => Boolean(url && (url.includes('/public
 export const isOkxSignatureRejection: IsSignatureRejection = (data) =>
   String(data?.code) === '50113' || /invalid sign/i.test(String(data?.msg ?? ''));
 
+const formatOkxApiErrorMessage = (data: any): string => {
+  const firstFailedRow = Array.isArray(data?.data)
+    ? data.data.find((row: any) => row && ((row.sCode && row.sCode !== '0') || row.sMsg))
+    : undefined;
+  const rowMessage = typeof firstFailedRow?.sMsg === 'string' ? firstFailedRow.sMsg.trim() : '';
+  const rowCode = firstFailedRow?.sCode === undefined ? '' : String(firstFailedRow.sCode);
+
+  if (rowMessage) {
+    return rowCode && rowCode !== '0' ? `${rowMessage} (code ${rowCode})` : rowMessage;
+  }
+
+  const message = typeof data?.msg === 'string' ? data.msg.trim() : '';
+  if (message) return message;
+
+  const code = data?.code === undefined ? 'unknown' : String(data.code);
+  return `OKX API error (code ${code})`;
+};
+
 export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
   const { passphrase } = options;
 
@@ -59,7 +77,7 @@ export const createAPI = (options: ExchangeOptions, exchange: BaseExchange) => {
 
     const code = response.data?.code;
     if (code && code !== '0') {
-      const msg = response.data?.msg || `OKX API error (code ${code})`;
+      const msg = formatOkxApiErrorMessage(response.data);
       const err: any = new Error(msg);
       err.response = response;
       throw err;
