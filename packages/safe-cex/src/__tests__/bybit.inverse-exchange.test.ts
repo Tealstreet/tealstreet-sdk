@@ -185,34 +185,6 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     });
   });
 
-  it('puts inverse round trips in the position history, settled in the coin', async () => {
-    const { exchange, store } = create(true);
-    const now = Date.now();
-    routeGets(exchange, {
-      [`${ENDPOINTS.MARKETS}:inverse`]: [inverseRow],
-      [`${ENDPOINTS.USER_CLOSED_PNL}:inverse`]: [
-        {
-          symbol: 'BTCUSD',
-          orderId: 'c-1',
-          side: 'Sell',
-          avgEntryPrice: '80000',
-          avgExitPrice: '90000',
-          closedSize: '1000',
-          closedPnl: '0.0013',
-          cumExitValue: '0.0111',
-          openFee: '0',
-          closeFee: '0',
-          createdTime: String(now - 1000),
-          updatedTime: String(now - 1000),
-        },
-      ],
-    });
-    store.update({ markets: await exchange.fetchMarkets() });
-
-    const records = await exchange.fetchHistoricalPositions({ account: 'a', from: now - 3_600_000, to: now });
-    expect(records).toEqual([expect.objectContaining({ symbol: 'BTCUSD', settleCurrency: 'BTC' })]);
-  });
-
   it('refuses a position mode change on an inverse symbol', async () => {
     const { exchange } = create(true);
     await expect(exchange.changePositionMode(true, 'BTCUSD')).rejects.toThrow('linear markets');

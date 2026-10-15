@@ -1783,13 +1783,11 @@ export class BybitExchange extends BaseExchange {
    * than the harness scraping the URL. Bybit caps a query at 7 days, so the window walk lives
    * here once for both consumers.
    */
-  fetchClosedPositionRows = async (
-    opts: HistoricalTradeOptions,
-    category = this.getCategoryForSymbol(opts.symbol),
-  ): Promise<Array<Record<string, any>>> => {
+  fetchClosedPositionRows = async (opts: HistoricalTradeOptions): Promise<Array<Record<string, any>>> => {
     if (this.isPublicDataOnly) return [];
     this.refuseOptionSymbol(opts.symbol, 'closed PnL');
 
+    const category = this.getCategoryForSymbol(opts.symbol);
     const to = opts.to ?? virtualClock.getCurrentTimeMs();
     const from = opts.from ?? to - this.DEFAULT_EXECUTIONS_LOOKBACK_MS;
     const collected: Array<Record<string, any>> = [];
@@ -1836,12 +1834,7 @@ export class BybitExchange extends BaseExchange {
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) => {
     const to = opts.to ?? virtualClock.getCurrentTimeMs();
     const from = opts.from ?? to - this.DEFAULT_EXECUTIONS_LOOKBACK_MS;
-    const categories = this.inverseEnabled() ? ['linear', 'inverse'] : ['linear'];
-    const rows = (
-      await Promise.all(
-        categories.map((category) => this.fetchClosedPositionRows({ from, to } as HistoricalTradeOptions, category)),
-      )
-    ).flat();
+    const rows = await this.fetchClosedPositionRows({ from, to } as HistoricalTradeOptions);
 
     // LEG JOIN, and it is not optional. bybit's closed-PnL rows carry no hedge leg — only
     // the ORDER axis does, via `positionIdx`. Without it every row buckets as `both`, longs
@@ -1865,10 +1858,7 @@ export class BybitExchange extends BaseExchange {
 
     return aggregateBybitClosedPnl(rows, {
       account: opts.account,
-      resolveSettleCurrency: (symbol: string) => {
-        const market = this.store?.marketsBySymbol?.[symbol];
-        return (market?.isInverse ? market.info?.settleCoin : market?.quote) || 'USDT';
-      },
+      resolveSettleCurrency: (symbol: string) => this.store?.marketsBySymbol?.[symbol]?.quote || 'USDT',
       resolveLeg: legs.size ? (orderId: string) => legs.get(orderId) : undefined,
     });
   };
