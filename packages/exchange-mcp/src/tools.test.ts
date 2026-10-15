@@ -104,6 +104,21 @@ describe('option tools', () => {
   });
 });
 
+describe('dates', () => {
+  it('adds a UTC date next to each time field, reading seconds and milliseconds correctly', async () => {
+    const exchange = {
+      fetchHistoricalFills: async () => [{ symbol: 'BTCUSDT', timestamp: 1791860271 }],
+      fetchIncomeHistory: async () => [{ symbol: 'BTCUSDT', timestamp: 1791820800000 }],
+    };
+    expect(await run('get_fills', exchange, { symbol: 'BTCUSDT' })).toEqual([
+      { symbol: 'BTCUSDT', timestamp: 1791860271, timestampUtc: '2026-10-13T02:57:51.000Z' },
+    ]);
+    expect(await run('get_income', exchange, {})).toEqual([
+      { symbol: 'BTCUSDT', timestamp: 1791820800000, timestampUtc: '2026-10-12T16:00:00.000Z' },
+    ]);
+  });
+});
+
 describe('market filters', () => {
   it('reads an empty symbols list as every market', async () => {
     const exchange = { fetchPositions: async () => [order('1', 'BTCUSDT')] };
