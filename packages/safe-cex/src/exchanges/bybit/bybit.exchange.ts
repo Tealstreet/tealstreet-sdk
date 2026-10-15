@@ -556,6 +556,12 @@ export class BybitExchange extends BaseExchange {
     return Boolean(this.options.enableInverseMarkets) && !this.options.externalPublicData;
   }
 
+  /** Inverse quantities are USD contracts; the store holds `remaining` in the coin at `price` and the contracts in `extra`. */
+  private remainingInStoreUnits(symbol: string, remainingNative: number, price: number) {
+    if (!isBybitInverseSymbol(symbol) || !(price > 0)) return { remaining: remainingNative };
+    return { remaining: Math.round((remainingNative / price) * 1e8) / 1e8, extra: { remainingNative } };
+  }
+
   private publicSocketFor(symbol: string): BybitPublicWebsocket {
     return (this.getCategoryForSymbol(symbol) === 'inverse' && this.inversePublicWebsocket) || this.publicWebsocket;
   }
@@ -721,7 +727,7 @@ export class BybitExchange extends BaseExchange {
       price,
       amount: qty,
       filled: 0,
-      remaining: qty,
+      ...this.remainingInStoreUnits(opts.symbol, qty, price),
       reduceOnly: (opts.type === OrderType.Conditional ? false : opts.reduceOnly) || false,
       timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
       lastUpdate: virtualClock.getCurrentTimeMs(),
@@ -1777,11 +1783,13 @@ export class BybitExchange extends BaseExchange {
    * than the harness scraping the URL. Bybit caps a query at 7 days, so the window walk lives
    * here once for both consumers.
    */
-  fetchClosedPositionRows = async (opts: HistoricalTradeOptions): Promise<Array<Record<string, any>>> => {
+  fetchClosedPositionRows = async (
+    opts: HistoricalTradeOptions,
+    category = this.getCategoryForSymbol(opts.symbol),
+  ): Promise<Array<Record<string, any>>> => {
     if (this.isPublicDataOnly) return [];
     this.refuseOptionSymbol(opts.symbol, 'closed PnL');
 
-    const category = this.getCategoryForSymbol(opts.symbol);
     const to = opts.to ?? virtualClock.getCurrentTimeMs();
     const from = opts.from ?? to - this.DEFAULT_EXECUTIONS_LOOKBACK_MS;
     const collected: Array<Record<string, any>> = [];
@@ -1828,7 +1836,12 @@ export class BybitExchange extends BaseExchange {
   fetchHistoricalPositions = async (opts: { account: string; from?: number; to?: number }) => {
     const to = opts.to ?? virtualClock.getCurrentTimeMs();
     const from = opts.from ?? to - this.DEFAULT_EXECUTIONS_LOOKBACK_MS;
-    const rows = await this.fetchClosedPositionRows({ from, to } as HistoricalTradeOptions);
+    const categories = this.inverseEnabled() ? ['linear', 'inverse'] : ['linear'];
+    const rows = (
+      await Promise.all(
+        categories.map((category) => this.fetchClosedPositionRows({ from, to } as HistoricalTradeOptions, category)),
+      )
+    ).flat();
 
     // LEG JOIN, and it is not optional. bybit's closed-PnL rows carry no hedge leg — only
     // the ORDER axis does, via `positionIdx`. Without it every row buckets as `both`, longs
@@ -3593,12 +3606,9 @@ export class BybitExchange extends BaseExchange {
     const side = ORDER_SIDE[o.side] ?? (isProtectiveOrder ? this.inferProtectiveOrderSide(o) : undefined);
     const timeInForce = ORDER_TIME_IN_FORCE[o.timeInForce];
 
-    let remaining = o.leavesQty ? parseFloat(o.leavesQty) : subtract(o.qty ?? 0, v(o, 'cumExecQty') ?? 0);
-    const remainingNative = remaining;
+    const remainingNative = o.leavesQty ? parseFloat(o.leavesQty) : subtract(o.qty ?? 0, v(o, 'cumExecQty') ?? 0);
     const price = parseFloat(oPrice);
-    if (isBybitInverseSymbol(o.symbol) && price > 0) {
-      remaining = Math.round((remainingNative / price) * 1e8) / 1e8;
-    }
+    const isInverse = isBybitInverseSymbol(o.symbol);
 
     const orders: Order[] = [
       {
@@ -3607,10 +3617,8 @@ export class BybitExchange extends BaseExchange {
         symbol: o.symbol,
         type,
         side,
-        remaining,
-        extra: {
-          remainingNative,
-        },
+        ...this.remainingInStoreUnits(o.symbol, remainingNative, price),
+        extra: { remainingNative },
         price,
         amount: (oType === 'StopLoss' || oType === 'TakeProfit') && tpslMode === 'Full' ? 0 : parseFloat(o.qty ?? 0),
         filled: parseFloat(v(o, 'cumExecQty') ?? 0),
@@ -3638,7 +3646,7 @@ export class BybitExchange extends BaseExchange {
         side: inverseSide,
         price: sl,
         filled: 0,
-        remaining: orders[0].amount,
+        ...(isInverse ? this.remainingInStoreUnits(o.symbol, remainingNative, sl) : { remaining: orders[0].amount }),
         lastUpdate: virtualClock.getCurrentTimeMs(),
         slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'slTriggerBy')],
       });
@@ -3652,7 +3660,7 @@ export class BybitExchange extends BaseExchange {
         side: inverseSide,
         price: tp,
         filled: 0,
-        remaining: orders[0].amount,
+        ...(isInverse ? this.remainingInStoreUnits(o.symbol, remainingNative, tp) : { remaining: orders[0].amount }),
         lastUpdate: virtualClock.getCurrentTimeMs(),
         tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'tpTriggerBy')],
       });

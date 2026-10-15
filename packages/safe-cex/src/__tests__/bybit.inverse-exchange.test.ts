@@ -147,6 +147,72 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     );
   });
 
+  it('holds remaining in the coin on an inverse order and on its stop-loss and take-profit at their own prices', () => {
+    const { exchange } = create(true);
+    const orders = exchange.mapOrder({
+      orderId: 'o-1',
+      symbol: 'BTCUSD',
+      side: 'Buy',
+      orderType: 'Limit',
+      orderStatus: 'New',
+      price: '80000',
+      qty: '1000',
+      leavesQty: '1000',
+      cumExecQty: '0',
+      stopLoss: '50000',
+      takeProfit: '100000',
+    });
+    expect(orders.map((o) => [o.price, o.remaining])).toEqual([
+      [80000, 0.0125],
+      [50000, 0.02],
+      [100000, 0.01],
+    ]);
+  });
+
+  it('records a placed inverse order with remaining in the coin', async () => {
+    const { exchange, store } = create(true);
+    routeGets(exchange, { [`${ENDPOINTS.MARKETS}:inverse`]: [inverseRow] });
+    store.update({ markets: await exchange.fetchMarkets() });
+    (exchange as any).recordRecentlyPlacedOrderFromOpts(
+      'o-1',
+      { symbol: 'BTCUSD', side: OrderSide.Buy, type: OrderType.Limit, amount: 1000, price: 80000 },
+      { qty: '1000', price: '80000' },
+    );
+    expect((exchange as any).recentlyPlacedOrders.get('o-1').order).toMatchObject({
+      amount: 1000,
+      remaining: 0.0125,
+      extra: { remainingNative: 1000 },
+    });
+  });
+
+  it('puts inverse round trips in the position history, settled in the coin', async () => {
+    const { exchange, store } = create(true);
+    const now = Date.now();
+    routeGets(exchange, {
+      [`${ENDPOINTS.MARKETS}:inverse`]: [inverseRow],
+      [`${ENDPOINTS.USER_CLOSED_PNL}:inverse`]: [
+        {
+          symbol: 'BTCUSD',
+          orderId: 'c-1',
+          side: 'Sell',
+          avgEntryPrice: '80000',
+          avgExitPrice: '90000',
+          closedSize: '1000',
+          closedPnl: '0.0013',
+          cumExitValue: '0.0111',
+          openFee: '0',
+          closeFee: '0',
+          createdTime: String(now - 1000),
+          updatedTime: String(now - 1000),
+        },
+      ],
+    });
+    store.update({ markets: await exchange.fetchMarkets() });
+
+    const records = await exchange.fetchHistoricalPositions({ account: 'a', from: now - 3_600_000, to: now });
+    expect(records).toEqual([expect.objectContaining({ symbol: 'BTCUSD', settleCurrency: 'BTC' })]);
+  });
+
   it('refuses a position mode change on an inverse symbol', async () => {
     const { exchange } = create(true);
     await expect(exchange.changePositionMode(true, 'BTCUSD')).rejects.toThrow('linear markets');
