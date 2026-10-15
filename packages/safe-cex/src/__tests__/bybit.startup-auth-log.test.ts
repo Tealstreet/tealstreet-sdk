@@ -49,6 +49,22 @@ const mockMarginProbe = (exchange: BybitExchange, retMsg: string) => {
 };
 
 describe('Bybit startup readiness log', () => {
+  it('handles a rejected key that answers before the markets do', async () => {
+    const { exchange, logged } = createExchange({ externalPublicData: false });
+    mockMarginProbe(exchange, REJECTION);
+    vi.spyOn(exchange as any, 'fetchMarkets').mockImplementation(() => new Promise((r) => setTimeout(() => r([]), 50)));
+    const unhandled = vi.fn();
+    process.on('unhandledRejection', unhandled);
+
+    await exchange.start();
+    await new Promise((r) => setImmediate(r));
+
+    process.off('unhandledRejection', unhandled);
+    expect(unhandled).not.toHaveBeenCalled();
+    expect(logged.some((entry) => entry.message.includes(REJECTION))).toBe(true);
+    exchange.dispose();
+  });
+
   it('says ready to trade when the venue accepted the key', async () => {
     const { exchange, logged } = createExchange({ externalPublicData: false });
     mockMarginProbe(exchange, 'OK');
