@@ -60,6 +60,16 @@ The main-thread worker fallback is
 `apps/web/src/utils/shim/worker/WorkerShim.ts`; it is not part of this
 directory.
 
+## `exec` frames are untrusted bridge input
+
+`CommandHandler` must tolerate malformed `exec` payloads. Hosted
+exchange-server sessions receive frames from browser workers across reconnects
+and version skew, and a missing `payload.data` used to throw while reading
+`payload.data.reqId`, surfacing as a process-level unhandled rejection. Treat a
+bad command payload as an `exec-log` failure instead of throwing; safe-cex does
+not own the CLI layer and should not make malformed command frames page the
+service.
+
 ## Ticker delta packing is browser-worker-only
 
 `_prepareStorePayload` packs `tickerDeltas` against a mutable baseline to

@@ -6,12 +6,22 @@ export class CommandHandler extends BaseHandler {
   handle(payload: StoreWorkerPayload): void {
     switch (payload.op) {
       case 'exec': {
+        const data = payload.data && typeof payload.data === 'object' ? payload.data : undefined;
+        const reqId = data?.reqId;
+        if (!data) {
+          const message = 'Invalid command payload.';
+          this._exchange.emitter.emit('exec-log', reqId === undefined ? { message } : { message, reqId });
+          if (reqId !== undefined) {
+            this._exchange.emitter.emit('exec-result', { reqId, handled: false, success: false, error: message });
+          }
+          break;
+        }
+
         const executor = getCommandExecutor();
         if (!executor) {
           // No command executor registered for this host. Answer the reqId
           // rather than crash — safe-cex doesn't own the CLI layer.
           const message = 'Command execution is not available in this environment.';
-          const reqId = payload.data.reqId;
           this._exchange.emitter.emit('exec-log', reqId === undefined ? { message } : { message, reqId });
           if (reqId !== undefined) {
             this._exchange.emitter.emit('exec-result', { reqId, handled: false, success: false, error: message });
@@ -29,10 +39,9 @@ export class CommandHandler extends BaseHandler {
         // failures; this catches a top-level throw.)
         void (async () => {
           try {
-            await executor(this._exchange, payload.data.symbol, payload.data.command, payload.data.reqId);
+            await executor(this._exchange, data.symbol, data.command, reqId);
           } catch (err: unknown) {
             const message = `Command failed: ${err instanceof Error ? err.message : String(err)}`;
-            const reqId = payload.data.reqId;
             this._exchange.emitter.emit('exec-log', reqId === undefined ? { message } : { message, reqId });
             // A caller awaiting this reqId would otherwise wait out its timeout.
             if (reqId !== undefined) {

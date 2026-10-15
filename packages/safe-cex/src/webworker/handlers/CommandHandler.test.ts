@@ -123,6 +123,15 @@ describe('CommandHandler', () => {
       expect(mockExecutor).not.toHaveBeenCalled();
     });
 
+    it('logs and does not crash for malformed exec payloads', () => {
+      expect(() => handler.handle({ op: 'exec' } as StoreWorkerPayload)).not.toThrow();
+
+      expect(mockExecutor).not.toHaveBeenCalled();
+      expect(mockEmit).toHaveBeenCalledWith('exec-log', {
+        message: 'Invalid command payload.',
+      });
+    });
+
     it('should handle multiple exec calls', () => {
       const payload1: StoreWorkerPayload = {
         op: 'exec',
