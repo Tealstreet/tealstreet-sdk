@@ -4,6 +4,7 @@ import { BybitExchange } from '../exchanges/bybit/bybit.exchange';
 import { ENDPOINTS } from '../exchanges/bybit/bybit.types';
 import { BybitDemoExchange } from '../exchanges/bybit/bybitdemo.exchange';
 import { DefaultStore } from '../store/store.base';
+import { tealstreetTransport } from '../transport/tealstreet/tealstreetTransport';
 import { OrderSide, OrderType } from '../types';
 
 const marketRow = (symbol: string, quoteCoin: string, settleCoin: string, qtyStep: string) => ({
@@ -122,13 +123,73 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     expect(balance.total).toBeCloseTo(1000);
   });
 
-  it('reads inverse ticker volume from the fields Bybit puts the coin and USD amounts in', () => {
+  it('sizes an inverse position at the ticker mark ahead of the last price, and values its PnL at that price', () => {
+    const { exchange, store } = create(true);
+    store.update({ tickers: [{ id: 'BTCUSD', symbol: 'BTCUSD', mark: 100000, last: 90000 } as any] });
+    const position = exchange.mapPosition({ ...inversePosition, markPrice: '80000' });
+    expect(position.contracts).toBe(0.01);
+
+    store.update({ positions: [position] });
+    expect(exchange.formatBalance([{ totalEquity: '1250', coin: [] }]).upnl).toBeCloseTo(250);
+  });
+
+  it('values inverse PnL in USD when position updates refresh the balance', () => {
+    const { exchange, store } = create(true);
+    store.update({
+      balance: { total: 1000, upnl: 0, used: 0, free: 1000 } as any,
+      positions: [exchange.mapPosition(inversePosition)],
+    });
+    exchange.syncBalanceUpnlFromPositions();
+    expect(store.balance.upnl).toBeCloseTo(250);
+  });
+
+  it('reads inverse ticker volume from the fields Bybit puts the coin and USD amounts in, over REST and the socket', () => {
     const { exchange, store } = create(true);
     store.update({ markets: [{ symbol: 'BTCUSD', id: 'BTCUSD', isInverse: true } as any] });
-    const [ticker] = exchange.parseTickers([
-      { symbol: 'BTCUSD', lastPrice: '80000', volume24h: '400000000', turnover24h: '5000' },
-    ]);
-    expect(ticker).toMatchObject({ volume: 5000, quoteVolume: 400000000 });
+    // Recorded 2026-10-15: the coin volume times the last price is not the USD volume.
+    const frame = { symbol: 'BTCUSD', lastPrice: '80880', volume24h: '467074752', turnover24h: '5722' };
+    const [ticker] = exchange.parseTickers([frame]);
+    expect(ticker).toMatchObject({ volume: 5722, quoteVolume: 467074752 });
+
+    store.update({ tickers: [{ ...ticker, volume: 0, quoteVolume: 0 }] });
+    (exchange.publicWebsocketSecondary as any).handleTickersEvent({ data: frame });
+    expect(store.tickersBySymbol.BTCUSD).toMatchObject({ volume: 5722, quoteVolume: 467074752 });
+  });
+
+  it('lists inverse tickers when opted in', async () => {
+    const { exchange, store } = create(true);
+    routeGets(exchange, {
+      [`${ENDPOINTS.MARKETS}:linear`]: [linearRow],
+      [`${ENDPOINTS.MARKETS}:inverse`]: [inverseRow],
+      [`${ENDPOINTS.TICKERS}:linear`]: [{ symbol: 'BTCUSDT', lastPrice: '80000' }],
+      [`${ENDPOINTS.TICKERS}:inverse`]: [{ symbol: 'BTCUSD', lastPrice: '80000' }],
+    });
+    store.update({ markets: await exchange.fetchMarkets() });
+    expect((await exchange.fetchTickers()).map((t) => t.symbol)).toEqual(['BTCUSDT', 'BTCUSD']);
+  });
+
+  it('converts inverse closed PnL to coin contracts and USD notional', async () => {
+    const { exchange } = create(true);
+    const now = Date.now();
+    routeGets(exchange, {
+      [`${ENDPOINTS.USER_CLOSED_PNL}:inverse`]: [
+        {
+          symbol: 'BTCUSD',
+          side: 'Sell',
+          avgEntryPrice: '80000',
+          avgExitPrice: '90000',
+          closedSize: '1000',
+          closedPnl: '0.0013',
+          cumEntryValue: '0.0125',
+          cumExitValue: '0.0111',
+          createdTime: String(now - 1000),
+          updatedTime: String(now - 1000),
+        },
+      ],
+    });
+    const [entry] = await exchange.fetchClosedPnl({ symbol: 'BTCUSD', from: now - 3_600_000, to: now });
+    expect(Number(entry.notional)).toBe(1000);
+    expect(Number(entry.contracts)).toBeCloseTo(0.0111, 4);
   });
 
   it('sends an inverse order in whole USD contracts on the inverse category', async () => {
@@ -185,6 +246,29 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     });
   });
 
+  it('sends a stop-loss for a whole inverse position to the position trading stop', async () => {
+    const { exchange, store } = create(true);
+    routeGets(exchange, { [`${ENDPOINTS.MARKETS}:inverse`]: [inverseRow] });
+    store.update({ markets: await exchange.fetchMarkets() });
+    store.update({ positions: [exchange.mapPosition(inversePosition)] });
+    vi.spyOn(exchange as any, 'fetchPositionMode').mockResolvedValue('oneway');
+    const post = vi.fn(() => Promise.resolve({ data: { retCode: 0, retMsg: 'OK', result: { orderId: 'o-1' } } }));
+    (exchange.xhr.post as any) = post;
+    (exchange.unlimitedXHR.post as any) = post;
+
+    await exchange.placeOrder({
+      symbol: 'BTCUSD',
+      side: OrderSide.Sell,
+      type: OrderType.StopLoss,
+      amount: 1000,
+      price: 70000,
+    });
+    expect(post).toHaveBeenCalledWith(
+      ENDPOINTS.SET_TRADING_STOP,
+      expect.objectContaining({ category: 'inverse', symbol: 'BTCUSD', stopLoss: '70000' }),
+    );
+  });
+
   it('refuses a position mode change on an inverse symbol', async () => {
     const { exchange } = create(true);
     await expect(exchange.changePositionMode(true, 'BTCUSD')).rejects.toThrow('linear markets');
@@ -222,17 +306,83 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     ]);
   });
 
-  it('subscribes candles for inverse symbols on the inverse socket', () => {
+  it('subscribes candles and order books for inverse symbols on the inverse socket', () => {
     const { exchange } = create(true);
-    const linear = vi.spyOn(exchange.publicWebsocket, 'listenOHLCVs').mockImplementation(() => {});
-    const inverse = vi.spyOn(exchange.publicWebsocketSecondary as any, 'listenOHLCVs').mockImplementation(() => {});
+    const linear = exchange.publicWebsocket as any;
+    const inverse = exchange.publicWebsocketSecondary as any;
+    for (const method of ['listenOHLCVs', 'listenOHLCV', 'listenOrderBook']) {
+      vi.spyOn(linear, method).mockImplementation(() => () => {});
+      vi.spyOn(inverse, method).mockImplementation(() => () => {});
+    }
 
     exchange.listenOHLCVs({ symbols: ['BTCUSDT', 'BTCUSD', 'ETHUSD'], interval: '1m' as any }, () => {});
-    expect(linear).toHaveBeenCalledWith(expect.objectContaining({ symbols: ['BTCUSDT'] }), expect.any(Function));
-    expect(inverse).toHaveBeenCalledWith(
+    exchange.listenOHLCV({ symbol: 'BTCUSD', interval: '1m' as any }, () => {});
+    exchange.listenOrderBook('BTCUSD', () => {});
+    exchange.listenOrderBook('BTCUSDT', () => {});
+
+    expect(linear.listenOHLCVs).toHaveBeenCalledWith(
+      expect.objectContaining({ symbols: ['BTCUSDT'] }),
+      expect.any(Function),
+    );
+    expect(inverse.listenOHLCVs).toHaveBeenCalledWith(
       expect.objectContaining({ symbols: ['BTCUSD', 'ETHUSD'] }),
       expect.any(Function),
     );
+    expect(inverse.listenOHLCV).toHaveBeenCalledWith(
+      expect.objectContaining({ symbol: 'BTCUSD' }),
+      expect.any(Function),
+    );
+    expect(linear.listenOHLCV).not.toHaveBeenCalled();
+    expect(inverse.listenOrderBook).toHaveBeenCalledWith('BTCUSD', expect.any(Function));
+    expect(linear.listenOrderBook).toHaveBeenCalledWith('BTCUSDT', expect.any(Function));
+  });
+
+  it('opens the inverse socket once markets load and closes it with the connection', async () => {
+    const { exchange } = create(true);
+    for (const method of ['fetchAndCacheApiKeyInfo', 'tick', 'fetchOrdersPositionsAndBalance']) {
+      vi.spyOn(exchange as any, method).mockResolvedValue([]);
+    }
+    vi.spyOn(exchange as any, 'initExternalPublicData').mockResolvedValue(false);
+    vi.spyOn(exchange as any, 'fetchMarkets').mockResolvedValue([]);
+    vi.spyOn(exchange as any, 'fetchTickersWithoutParse').mockResolvedValue([]);
+    vi.spyOn(exchange as any, 'parseTickers').mockReturnValue([]);
+    routeGets(exchange, {});
+    const sockets = ['publicWebsocket', 'publicWebsocketSecondary', 'privateWebsocket'].map((name) => {
+      const socket = { connectAndSubscribe: vi.fn(), dispose: vi.fn() };
+      (exchange as any)[name] = socket;
+      return socket;
+    });
+
+    await exchange.start();
+    expect(sockets[1].connectAndSubscribe).toHaveBeenCalled();
+    exchange.dispose();
+    expect(sockets[1].dispose).toHaveBeenCalled();
+  });
+
+  it('connects a Bybit Brazil account to the Brazil inverse stream', () => {
+    const exchange = new BybitExchange(
+      'bybit',
+      {
+        key: 'k',
+        secret: 's',
+        enableInverseMarkets: true,
+        bybitSiteId: 'BRA_BTL',
+        transport: tealstreetTransport,
+        tuning: { consoleLogging: false },
+      } as any,
+      new DefaultStore(),
+    );
+    live.push(exchange);
+    const urls: string[] = [];
+    for (const socket of [exchange.publicWebsocket, exchange.publicWebsocketSecondary] as any[]) {
+      vi.spyOn(socket, 'createWebsocket').mockImplementation((url: any) => {
+        urls.push(url);
+        return { addEventListener: () => {}, close: () => {}, removeEventListener: () => {} };
+      });
+      socket.connectAndSubscribe();
+    }
+    expect(urls[0]).toContain('/bybitbra/v5/public/linear');
+    expect(urls[1]).toContain('/bybitbra/v5/public/inverse');
   });
 
   it('keeps inverse off Bybit demo even when the account asks for it', async () => {
@@ -240,6 +390,24 @@ describe('Bybit inverse contracts on the bybit connection', () => {
     const get = routeGets(exchange, { [`${ENDPOINTS.MARKETS}:linear`]: [linearRow] });
     await exchange.fetchMarkets();
     expect(categoriesAsked(get, ENDPOINTS.MARKETS)).not.toContain('inverse');
+  });
+
+  it('keeps inverse off HyroTrader, whose simulator streams linear only, even when the account asks for it', async () => {
+    vi.stubEnv('NEXT_PUBLIC_HYROTRADER_SIMULATOR_REST_URL', 'https://simulator.test');
+    vi.resetModules();
+    try {
+      const { HyrotraderExchange } = await import('../exchanges/bybit/hyrotrader.exchange');
+      const { DefaultStore: Store } = await import('../store/store.base');
+      const exchange = new HyrotraderExchange(
+        'hyrotrader',
+        { key: 'k', secret: 's', enableInverseMarkets: true, tuning: { consoleLogging: false } } as any,
+        new Store(),
+      );
+      expect(exchange.publicWebsocketSecondary).toBeUndefined();
+      exchange.dispose();
+    } finally {
+      vi.unstubAllEnvs();
+    }
   });
 
   it('keeps inverse off when public data comes from a shared source', () => {

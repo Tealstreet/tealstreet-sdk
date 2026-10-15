@@ -603,7 +603,6 @@ export class BybitExchange extends BaseExchange {
     }
     super.dispose();
     this.publicWebsocket.dispose();
-    this.inversePublicWebsocket?.dispose();
     this.privateWebsocket.dispose();
   };
 

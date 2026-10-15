@@ -63,6 +63,8 @@ describe('readConfig', () => {
     [{ EXCHANGE: 'bybitspot', EXCHANGE_OPTIONS: 'true' }, 'EXCHANGE_OPTIONS is not available on bybitspot'],
     [{ EXCHANGE: 'bybit', EXCHANGE_INVERSE: '1' }, 'EXCHANGE_INVERSE must be true or false'],
     [{ EXCHANGE: 'bybitinverse', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on bybitinverse'],
+    [{ EXCHANGE: 'bybitdemo', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on bybitdemo'],
+    [{ EXCHANGE: 'hyrotrader', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on hyrotrader'],
   ])('refuses %j', (env, message) => {
     expect(() => readConfig(env)).toThrow(message);
   });

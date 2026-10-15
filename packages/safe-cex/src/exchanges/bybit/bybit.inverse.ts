@@ -8,11 +8,11 @@ export const isBybitInverseSymbol = (symbol: string): boolean => /^[A-Z0-9]+USD(
 
 /**
  * An inverse position's `unrealizedPnl` is in the settle coin, as on `bybitinverse`. The unified balance is in
- * USD, so the coin amount is valued at the position row's mark before it joins the account sum.
+ * USD, so the coin amount is valued at the price `mapPosition` sized the position at: USD `notional` over coin
+ * `contracts`.
  */
 export const positionUpnlInQuote = (position: Position): number => {
   const upnl = position.unrealizedPnl || 0;
-  if (!isBybitInverseSymbol(position.symbol)) return upnl;
-  const mark = parseFloat(position.info?.markPrice ?? '');
-  return upnl * (mark > 0 ? mark : position.entryPrice);
+  if (!isBybitInverseSymbol(position.symbol) || !position.contracts) return upnl;
+  return (upnl * position.notional) / position.contracts;
 };
