@@ -3821,3 +3821,53 @@ with zero findings; extractor reports zero changed/added/orphaned. Registry-data
 and layers checks pass. The 1073 existing override entries are retained and the
 eight reviewed Bybit entries give a total of 1081; the incoming eight-row Binance
 repair is the owner's commit 04bfb16ccf, not an independent reclassification.
+
+## Primary batch receiver (ddi2il-40)
+
+The real `BaseExchange.place_orders` -> `Exchange::place_orders` -> JS receiver
+entrypoint previously failed with `object.placeOrders is not a function` before
+any HTTP request. `primary_batch_uses_source_batch_endpoint_regression` failed
+on the old receiver and passes on the new `/v5/order/create-batch` path.
+
+`primary_batch_binding` has five physical transport tests. Its fixed 24-case
+source composition runs the actual TS `placeOrders`, `placeBatchOrders`,
+`placeBatchOrdersForCategory`, `processBatch`, `formatOrderForBatch`,
+`getOrderExecutionParams`, `getOrderPositionIdx`, category selector and venue
+error formatter. It imports maintained execution controls, symbol classifiers,
+math and object helpers and the installed Lodash chunk implementation. Only
+HTTP, position-mode input and host recording are scripted. Native requests,
+returned IDs and diagnostics agree; native cache results are observed again
+through `fetchOrders`. The corpus covers 0/1/2/10/11/21 orders, per-request TP/SL,
+conditional limit/market and missing/rounded-zero triggers, caller IDs, hedged
+buy/sell/reduce-only indices, missing middle markets, partial agreement errors,
+and first category order. Its source-only record/sleep arrays are diagnostics,
+not a claim that raw native objects alias JS source objects.
+
+Separate real-facade cases cover whole-batch rejection before any HTTP, batch
+failure followed by a failed and a successful single write, special orders
+before regular batches (BBO and options plus a failing trailing stop), and
+cancellation during a pending inter-batch delay. Primary 23 and Spot 6 tests
+pass, including the existing 92-case maintained-source order-write comparison
+when SAFE_CEX_TYPESCRIPT_PATH names the installed compiler.
+
+`scripts/primary-batch-controls.py` compiles eight consumer faults: missing
+receiver installation, missing atomic validation, missing 1200ms delay, missing
+result IDs, missing cache publication, discarded formatter output, BBO routed
+as a regular batch, and stripped TP/SL. Each must fail a named runtime assertion;
+compiler failures do not count. Exact source bytes are restored and the five
+positive tests pass. Host all-targets and wasm library clippy pass.
+
+The reviewed override inventory retains all 1135 incoming entries, with no new
+call, removed call or delegation exemption. Exactly 13 references in the primary
+receiver installer retain their callees and change enclosing fingerprint from
+`10c6c5db2f90d512` to `0045656008997cb5`. Removing only the new batch installer call
+reproduces the complete base receiver file byte for byte. The new module installs
+live JS members and calls no BaseExchange override directly; Spot still replaces
+its own methods after common installation. Shared cancellation inventory passes;
+its creator classifications are unchanged.
+
+The async native profile retains the shared typed options/Store snapshot and
+UTF-8 boundaries, and Scope cancellation stops tails that a source Promise can
+continue after disposal. No arbitrary executable option getter/mutation claim is
+made. The dedicated Inverse formatter/submission and HyroTrader facade remain
+separate work; this change enables primary Bybit and Demo batching only.

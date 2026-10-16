@@ -552,3 +552,15 @@ from Store markets, bypassing source active-symbol selection and both live chang
 callbacks/topic retention. Public class/constructor rows remain pending. The
 existing public_ticker_topics/public_ws_lifecycle body ports do not prove that
 wiring; it is a separate production follow-up before Inverse/HyroTrader binding.
+
+Primary Bybit/Demo batch placement now installs the source `placeOrders`,
+`placeBatchOrders`, `placeBatchOrdersForCategory`, `processBatch` and
+`formatOrderForBatch` members. Validate the entire batch before writes, run
+special orders before regular category groups, preserve TP/SL on every request,
+and keep the original batch for individual fallback. Successful result indices
+refer to the filtered formatter entries. The pure formatter receives the awaited
+canonical 0/1/2 position index; other request numerics are source string fields.
+Spot keeps its own `placeOrders` override. Inverse construction remains pending.
+Native promise tails belong to Scope and stop on disposal. The batch source
+oracle executes the actual five member bodies with maintained helpers; the
+physical transport tests separately cover BBO/options, fallback and disposal.
