@@ -12,9 +12,8 @@ export const families = [
   ['woo', 'legacy_order_control', 'Host', 40, 'woo.exchange', 'WOOXExchange.fetchAlgoOrders', 'map_algo'],
   // No production algorithm caller established for nullish; its invention diagnostic stays required.
   ['woo', 'legacy_market_reads', 'Host', 38, 'woo.exchange', 'WOOXExchange.parseTickers', 'normalize_symbol', ['nullish']],
-  ['grvt', 'public_feeds', 'PublicFeedHost', 36, 'grvt.ws-public', 'GrvtPublicWebSocket#handleTickerUpdate', 'update_ticker'],
-  // number_value is used inside the test host, but no production algorithm caller is established.
-  ['grvt', 'account_runtime', 'AccountHost', 31, 'grvt.exchange', 'GrvtExchange#mapOrder', 'trigger_metadata', ['number_value']],
+  ['grvt', 'public_feeds', 'PublicFeedHost', 38, 'grvt.ws-public', 'GrvtPublicWebSocket#handleTickerUpdate', 'update_ticker'],
+  ['grvt', 'account_runtime', 'AccountHost', 31, 'grvt.exchange', 'GrvtExchange#mapOrder', 'trigger_metadata'],
   ['grvt', 'private_lifecycle', 'PrivateLifecycleHost', 28, 'grvt.ws-private', 'GrvtPrivateWebSocket.connectAndSubscribe', 'routing_host'],
   ['woo', 'legacy_metadata', 'Host', 28, 'woo.exchange', 'WOOXExchange#fetchPositionMetadataForSymbol', 'spawn_metadata'],
   ['grvt', 'session_host', 'SessionHost', 27, 'grvt.api', 'createTradingAPI', 'equals_number'],
