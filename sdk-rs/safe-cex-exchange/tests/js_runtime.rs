@@ -844,3 +844,139 @@ fn emitter_on_and_off_follow_listener_identity() {
         .unwrap();
     assert_eq!(*seen.borrow(), vec![json!([1.0]), json!([2.0])]);
 }
+
+/// A terminal RestAdapter that records requests and answers by url.
+#[derive(Default)]
+struct Terminal {
+    seen: std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>,
+}
+impl safe_cex_transport::RestAdapter for Terminal {
+    fn execute(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        use safe_cex_transport::{RestFailure, RestResponse, RestResponseBody};
+        self.seen.lock().unwrap().push(request.clone());
+        let response = |status: u16, body: &str| RestResponse {
+            status,
+            reason: None,
+            headers: [("content-type".to_owned(), "application/json".to_owned())].into(),
+            body: RestResponseBody::Encoded(body.as_bytes().to_vec()),
+        };
+        let result = match request.url.as_str() {
+            "/down" => {
+                let mut failure = RestFailure::pre_transmit("socket hang up".into(), request);
+                failure.code = Some("ECONNRESET".into());
+                Err(failure)
+            }
+            "/fail" => {
+                let mut failure = RestFailure::pre_transmit("status 500".into(), request);
+                failure.response = Some(Box::new(response(500, r#"{"code":"1"}"#)));
+                Err(failure)
+            }
+            _ => Ok(response(200, r#"{"code":"0","data":[1]}"#)),
+        };
+        Box::pin(async move { result })
+    }
+}
+
+#[test]
+fn rest_http_host_carries_config_to_the_terminal_adapter() {
+    use safe_cex_transport::RestBody;
+    let runtime = Rc::new(Runtime::default());
+    let terminal = std::sync::Arc::new(Terminal::default());
+    let host = client::rest_http_host(runtime.clone(), terminal.clone());
+    let xhr = client::create(
+        host,
+        Js::object(vec![
+            ("baseURL", Js::str("https://www.okx.com")),
+            ("timeout", Js::Number(20000.0)),
+            ("headers", Js::object(vec![("X-A", Js::str("1"))])),
+        ]),
+    );
+    let params = Js::object(vec![("instId", Js::str("BTC-USDT-SWAP"))]);
+    let response = settle(
+        &runtime,
+        xhr.call_method(
+            "get",
+            vec![Js::str("/ok"), Js::object(vec![("params", params.clone())])],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        to_json(&response.get("data").unwrap()).unwrap(),
+        json!({"code": "0", "data": [1.0]})
+    );
+    let posted = settle(
+        &runtime,
+        xhr.call_method("post", vec![Js::str("/ok"), Js::str(r#"{"a":1}"#)])
+            .unwrap(),
+    );
+    assert!(posted.is_ok());
+    {
+        let seen = terminal.seen.lock().unwrap();
+        assert_eq!(seen[0].method, "get");
+        assert_eq!(seen[0].base_url.as_deref(), Some("https://www.okx.com"));
+        assert_eq!(seen[0].params, Some(json!({"instId": "BTC-USDT-SWAP"})));
+        assert_eq!(seen[0].timeout_ms, Some(20000));
+        assert_eq!(seen[0].headers.get("X-A").map(String::as_str), Some("1"));
+        assert_eq!(seen[1].method, "post");
+        assert_eq!(
+            seen[1].body,
+            Some(RestBody::Encoded(br#"{"a":1}"#.to_vec()))
+        );
+    }
+    let failed = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/fail")]).unwrap(),
+    )
+    .unwrap_err();
+    let status = failed.value.get("response").unwrap().get("status").unwrap();
+    assert_eq!(status.as_f64(), Some(500.0));
+    let down = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/down")]).unwrap(),
+    )
+    .unwrap_err();
+    assert!(down.value.get("response").unwrap().is_undefined());
+    assert_eq!(
+        to_json(&down.value.get("code").unwrap()).unwrap(),
+        json!("ECONNRESET")
+    );
+}
+
+#[test]
+fn rest_http_host_lets_the_venue_serialize_its_query() {
+    let runtime = Rc::new(Runtime::default());
+    let terminal = std::sync::Arc::new(Terminal::default());
+    let host = client::rest_http_host(runtime.clone(), terminal.clone());
+    let sorted = Js::function("paramsSerializer", |_, a| {
+        let params = arg(&a, 0);
+        let mut keys: Vec<String> = params
+            .own_keys()
+            .iter()
+            .map(|k| String::from_utf16_lossy(k))
+            .collect();
+        keys.sort();
+        let pairs: Vec<String> = keys
+            .iter()
+            .map(|k| format!("{k}={}", params.get(k).unwrap().to_display()))
+            .collect();
+        Ok(Js::str(&pairs.join("&")))
+    });
+    let xhr = client::create(host, Js::object(vec![("paramsSerializer", sorted)]));
+    let params = Js::object(vec![("b", Js::Number(2.0)), ("a", Js::Number(1.0))]);
+    settle(
+        &runtime,
+        xhr.call_method(
+            "get",
+            vec![Js::str("/ok"), Js::object(vec![("params", params)])],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let seen = terminal.seen.lock().unwrap();
+    assert_eq!(seen[0].url, "/ok?a=1&b=2");
+    assert_eq!(seen[0].params, None);
+}
