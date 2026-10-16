@@ -84,7 +84,14 @@ module-scope `macro_rules!` is accepted only when every same-name definition in
 the target is unconditional and every arm transcribes without a declaration
 keyword or `item` fragment; each invocation's arguments get the same check. Macro binding guards still
 reject local shadowing of trusted expression/derive/attribute names and
-namespaces. A separate
+namespaces. A target-wide token proof permits module-level `core` declarations only when
+every `core` identifier in every supplied source is another such declaration
+or an AST-proven value binding/reference, and the actual compiler `core` origin
+is authenticated. Only authenticated std `vec!` operands are parsed as expressions;
+other macro tokens remain opaque. Paths, imports, aliases,
+extern declarations, block-local modules, macro tokens and inactive cfg tokens
+revoke that proof. Every other source finding remains enforced.
+A separate
 source module walk rejects doc-dependent cfg predicates before rustdoc, including
 external-module inner attributes and raw identifiers; block-local external modules
 fail closed. The control runner pins test files, named tests and executed mutation
