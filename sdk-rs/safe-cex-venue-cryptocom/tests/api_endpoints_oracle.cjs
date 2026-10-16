@@ -20,7 +20,7 @@ function execute(name, suffix, requireModule) {
 const types = execute('cryptocom.types.ts', '', name => {throw Error(`unexpected_types_import:${name}`);});
 const api = execute('cryptocom.api.ts', '\nexports.__public = isPublicEndpoint; exports.__write = isNonRetryablePrivateWrite;', name => {
   if (name === './cryptocom.types') return types;
-  if (['axios-retry', '../../safeCexAxiosCreate', './cryptocom.signing', '../../utils/signatureRejection'].includes(name)) return {};
+  if (['axios-retry', '../../safeCexAxiosCreate', './cryptocom.signing'].includes(name)) return {};
   throw Error(`unexpected_api_import:${name}`);
 });
 const inputs = [
@@ -43,6 +43,4 @@ assert.equal(inputs.length, 29, 'endpoint_source_count');
 const cases = inputs.map(input => ({
   input, public: api.__public(input ?? ''), write: api.__write(input ?? undefined),
 }));
-const signatureInputs = [{code: 40101}, {code: '40101'}, {code: ' 40101 '}, {code: '0x9CA5'}, {code: 40102}, {code: '40101x'}, {code: null}, {}, null, '40101', [40101]];
-const signature = signatureInputs.map(data => api.isCryptocomSignatureRejection(data));
-console.log(JSON.stringify({cases, signature: {inputs: signatureInputs, results: signature}}));
+console.log(JSON.stringify({cases}));

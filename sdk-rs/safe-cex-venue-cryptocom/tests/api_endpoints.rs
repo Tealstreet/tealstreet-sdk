@@ -1,6 +1,4 @@
-use safe_cex_venue_cryptocom::api::{
-    is_cryptocom_signature_rejection, is_non_retryable_private_write, is_public_endpoint,
-};
+use safe_cex_venue_cryptocom::api::{is_non_retryable_private_write, is_public_endpoint};
 use serde_json::Value;
 use std::process::Command;
 
@@ -74,19 +72,4 @@ fn live_endpoint_classifiers() {
         comparisons += 2;
     }
     assert_eq!(comparisons, 58, "endpoint_executed_comparisons");
-    // Number() trims and reads hex, so padded and 0x forms reject too; an array never does.
-    let expected = [
-        true, true, true, true, false, false, false, false, false, false, false,
-    ];
-    let inputs = corpus["signature"]["inputs"].as_array().unwrap();
-    let results = corpus["signature"]["results"].as_array().unwrap();
-    assert_eq!(inputs.len(), expected.len(), "signature_source_count");
-    for ((data, rejected), source) in inputs.iter().zip(expected).zip(results) {
-        assert_eq!(
-            is_cryptocom_signature_rejection(data).unwrap(),
-            rejected,
-            "signature_native:{data}"
-        );
-        assert_eq!(*source, Value::Bool(rejected), "signature_source:{data}");
-    }
 }

@@ -42,11 +42,3 @@ pub fn is_non_retryable_private_write_units(url: Option<&[u16]>) -> bool {
         url.windows(endpoint.len()).any(|part| part == endpoint)
     })
 }
-
-/// ts: isCryptocomSignatureRejection, `Number(data?.code) === 40101`.
-pub fn is_cryptocom_signature_rejection(
-    data: &serde_json::Value,
-) -> Result<bool, safe_cex_num::JsCoercionError> {
-    let code = data.as_object().and_then(|object| object.get("code"));
-    Ok(safe_cex_num::js_number(code)? == 40101.0)
-}
