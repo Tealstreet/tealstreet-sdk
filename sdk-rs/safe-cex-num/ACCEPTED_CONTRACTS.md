@@ -12,6 +12,14 @@ provide behavioral evidence separately. The full Num suite, including ignored
 source oracles, passed 93 tests under measured Node 24.20.0 before this batch;
 the later stock-F64 and output-invariant supplements passed independently.
 
+The full source scan also requires an explicit root re-export list for the
+finite `prototype_realm` module. Fresh rustdoc before and after the change
+confirms all eight public names, target identities and full nominal definitions
+are identical. The scanner's glob/attribute-origin guard remains enabled.
+The nested `retained` conversion body is byte-identical to its previously
+reviewed version; its whole-file source pin is reconciled after the separate
+enum-dispatch repair.
+
 The review keeps these roles distinct:
 
 - Numeric, BigInt, date and input-buffer entrypoints are decoders with actual
