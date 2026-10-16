@@ -122,8 +122,13 @@ pub trait WsProtocol {
     fn on_error(&self, _socket: &BaseWebSocket, _message: &str) -> Result<(), ExchangeError> {
         Ok(())
     }
-    /// The transport's `close` event, after the core's own close handling; TS
-    /// fires venue close listeners for it.
+    /// True when the venue replaced the base close handler (a TS subclass `onClose`
+    /// arrow field): a transport close then skips the core's close handling.
+    fn owns_close_handling(&self) -> bool {
+        false
+    }
+    /// The transport's `close` event, after the core's own close handling (if it
+    /// runs); TS fires venue close listeners for it.
     fn on_transport_close(
         &self,
         _socket: &Rc<BaseWebSocket>,
@@ -1850,7 +1855,9 @@ impl BaseWebSocket {
         code: Option<u16>,
         reason: &str,
     ) -> Result<(), ExchangeError> {
-        self.on_close(code, reason)?;
+        if !self.protocol.owns_close_handling() {
+            self.on_close(code, reason)?;
+        }
         self.protocol.on_transport_close(self, code, reason)
     }
     pub fn on_close(self: &Rc<Self>, code: Option<u16>, reason: &str) -> Result<(), ExchangeError> {

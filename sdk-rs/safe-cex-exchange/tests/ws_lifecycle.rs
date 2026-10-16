@@ -1091,4 +1091,88 @@ mod js_sockets {
         socket.call_method("handlePongEvent", vec![]).unwrap();
         assert_eq!(store.latency(), 50.0, "latency is half the ping round trip");
     }
+
+    /// A socket whose connectAndSubscribe counts redials and registers `this.onClose`.
+    fn closing_socket(
+        context: &Rc<JsSocketContext>,
+        derived_closes: Option<Rc<Cell<usize>>>,
+    ) -> (Js, Rc<Cell<usize>>) {
+        let socket = base_websocket(context, Js::object(vec![]));
+        if let Some(closes) = derived_closes {
+            // ts: a subclass `onClose` arrow field replaces the base member.
+            socket
+                .define(
+                    "onClose",
+                    Js::function("onClose", move |_, _| {
+                        closes.set(closes.get() + 1);
+                        Ok(Js::Undefined)
+                    }),
+                )
+                .unwrap();
+        }
+        let connects = Rc::new(Cell::new(0));
+        let (counter, this) = (connects.clone(), socket.clone());
+        socket
+            .define(
+                "connectAndSubscribe",
+                Js::function("connectAndSubscribe", move |_, _| {
+                    counter.set(counter.get() + 1);
+                    let ws = this.call_method("createWebsocket", vec![Js::str("wss://venue")])?;
+                    ws.call_method(
+                        "addEventListener",
+                        vec![Js::str("close"), this.get("onClose")?],
+                    )
+                }),
+            )
+            .unwrap();
+        socket.call_method("connectAndSubscribe", vec![]).unwrap();
+        (socket, connects)
+    }
+
+    fn close_transport_and_wait(runtime: &Rc<Runtime>) {
+        let io = live_socket(runtime);
+        io.events.borrow_mut().push_back(WsEvent::Close {
+            code: Some(1006),
+            reason: "gone".into(),
+        });
+        runtime.pump();
+        for _ in 0..10 {
+            runtime.advance(10_000.0);
+        }
+    }
+
+    #[test]
+    fn a_derived_on_close_owns_the_transport_close_and_the_core_does_not_reconnect() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = assembled(&runtime, &venue);
+        let derived_closes = Rc::new(Cell::new(0));
+        let (socket, connects) = closing_socket(&context, Some(derived_closes.clone()));
+        close_transport_and_wait(&runtime);
+        assert_eq!(derived_closes.get(), 1, "the derived onClose ran once");
+        assert_eq!(
+            connects.get(),
+            1,
+            "the core scheduled no reconnect of its own"
+        );
+        let base = core_of(&context, &socket).unwrap().base().unwrap();
+        assert_eq!(
+            base.diagnostics().lifetime_close_count,
+            0,
+            "no core close handling"
+        );
+    }
+
+    #[test]
+    fn without_a_derived_on_close_the_core_keeps_its_reconnect() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = assembled(&runtime, &venue);
+        let (socket, connects) = closing_socket(&context, None);
+        close_transport_and_wait(&runtime);
+        assert!(
+            connects.get() >= 2,
+            "the core reconnected through connectAndSubscribe"
+        );
+        let base = core_of(&context, &socket).unwrap().base().unwrap();
+        assert_eq!(base.diagnostics().lifetime_close_count, 1);
+    }
 }

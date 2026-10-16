@@ -406,9 +406,9 @@ note = ""
 ts = "BaseWebSocket.onClose"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::on_close", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_before_close", "safe-cex-exchange/src/websocket.rs::WsProtocol::on_transport_close" ]
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::on_close", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_before_close", "safe-cex-exchange/src/websocket.rs::WsProtocol::on_transport_close", "safe-cex-exchange/src/websocket.rs::WsProtocol::owns_close_handling" ]
 status = "ported"
-note = " Split member `safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_before_close`; the hook that replaces subclasses re-assigning the instance onClose arrow field to wrap the retained base handler (asterdex public/private streams); the registered callback runs before this base body. Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::on_transport_close`. After the core handles a transport close itself, the venue protocol receives it, as TS fires every close listener a venue registered on its socket."
+note = " Split member `safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_before_close`; the hook that replaces subclasses re-assigning the instance onClose arrow field to wrap the retained base handler (asterdex public/private streams); the registered callback runs before this base body. Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::on_transport_close`. After the core handles a transport close itself, the venue protocol receives it, as TS fires every close listener a venue registered on its socket. Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::owns_close_handling`. A venue whose subclass onClose field replaces the base handler owns the transport close, so the core skips this base body for it, as TS never runs the base onClose there."
 
 [[symbol]]
 ts = "BaseWebSocket#resetReconnectBackoff"
