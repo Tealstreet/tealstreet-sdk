@@ -212,6 +212,7 @@ fn venue_with_runtime_and_key(
         rejected: RefCell::new(BTreeMap::from([("rejected".into(), 1.0)])),
         symbol_settings: RefCell::new(BTreeMap::new()),
         account_position_mode: RefCell::new(safe_cex_types::PositionMode::Hedged),
+        public_socket: RefCell::default(),
     };
     (exchange, runtime)
 }
@@ -3583,20 +3584,11 @@ fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() 
                 "metadata native warning-log severity"
             );
         }
-        let original = error
-            .source()
-            .unwrap()
-            .downcast_ref::<safe_cex_store::StoreMutationError>()
-            .unwrap();
-        let opaque = original
-            .source()
-            .unwrap()
-            .source()
-            .unwrap()
+        let opaque = error
             .source()
             .unwrap()
             .downcast_ref::<MetadataSubscriberOrigin>()
-            .unwrap();
+            .expect("metadata native source is the original subscriber cause");
         assert_eq!(
             opaque.0,
             if public_only { 401 } else { 402 },
@@ -4447,4 +4439,346 @@ fn mexc_positions_reads_each_market_and_keeps_symbol_only_caller_lookup() {
             );
         }
     }
+}
+
+#[test]
+fn mexc_validation_keeps_raw_detail_and_error_precedence() {
+    let cases = [
+        (
+            json!({"message":"first", "msg":"second"}),
+            "transport",
+            json!("first"),
+        ),
+        (
+            json!({"message":"", "msg":"second"}),
+            "transport",
+            json!("second"),
+        ),
+        (
+            json!({"message":false, "msg":0}),
+            "transport",
+            json!("transport"),
+        ),
+        (json!({}), "", json!("Invalid MEXC key")),
+        (json!({"message":42}), "transport", json!(42)),
+        (
+            json!({"message":{"message":"object detail", "code":313}}),
+            "transport",
+            json!({"message":"object detail", "code":313}),
+        ),
+    ];
+    let mut native = Vec::new();
+    for (index, (data, message, wanted)) in cases.into_iter().enumerate() {
+        let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
+        exchange.base = reporting_values::raw_reporting_base();
+        exchange.xhr = Rc::new(AccountFailure {
+            message: message.into(),
+            response_data: Some(data),
+        });
+        let emitted = Rc::new(RefCell::new(Vec::new()));
+        let events = emitted.clone();
+        exchange.base.on(
+            "error",
+            Rc::new(move |_, event| {
+                events.borrow_mut().push(event.clone());
+                Ok(())
+            }),
+        );
+        let result = futures::executor::block_on(exchange.validate_account()).unwrap();
+        native.push(result.error.as_value().clone());
+        assert_eq!(
+            result.error.as_value(),
+            &wanted,
+            "MEXC raw validation detail case {index}"
+        );
+        assert!(
+            result.balance.is_none(),
+            "MEXC failed validation has no balance case {index}"
+        );
+        let expected = match index {
+            0 => "Exchange Error: first",
+            1 => "Exchange Error: second",
+            2 => "Exchange Error: transport",
+            3 => "Exchange Error: Invalid MEXC key",
+            4 => "42",
+            5 => "object detail",
+            _ => unreachable!(),
+        };
+        assert_eq!(
+            emitted.borrow().len(),
+            1,
+            "MEXC validation reports once case {index}"
+        );
+        assert_eq!(
+            emitted.borrow()[0][0],
+            expected,
+            "MEXC validation raw reporting case {index}"
+        );
+    }
+    assert_eq!(native.len(), 6, "MEXC independent raw validation floor");
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/account_oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "MEXC raw account oracle: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        source["rawCases"].as_array().unwrap().len(),
+        6,
+        "MEXC source raw validation floor"
+    );
+    for (index, value) in native.into_iter().enumerate() {
+        assert_eq!(
+            value, source["rawCases"][index]["error"],
+            "MEXC raw account source detail case {index}"
+        );
+        assert_eq!(
+            source["rawCases"][index]["emitted"],
+            json!([value]),
+            "MEXC source raw report input case {index}"
+        );
+    }
+}
+
+#[test]
+fn mexc_ohlcv_retains_rejected_transport_origin() {
+    let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
+    exchange.xhr = Rc::new(AccountFailure {
+        message: "original transport".into(),
+        response_data: Some(json!({"message":"server detail", "code":611})),
+    });
+    let options = OHLCVOptions {
+        symbol: "BTCUSDT".into(),
+        interval: safe_cex_types::Timeframe::M1,
+        from: None,
+        to: None,
+        limit: None,
+    };
+    let error = futures::executor::block_on(exchange.fetch_ohlcv(options)).unwrap_err();
+    assert_eq!(
+        error.message, "original transport",
+        "MEXC OHLCV original transport message"
+    );
+    assert_eq!(
+        error.response.as_ref().unwrap()["data"]["message"],
+        "server detail",
+        "MEXC OHLCV retained server response"
+    );
+    let original = error
+        .origin
+        .as_ref()
+        .unwrap()
+        .error()
+        .downcast_ref::<RestFailure>()
+        .expect("MEXC OHLCV typed RestFailure origin");
+    assert_eq!(
+        original.request.url, "/api/v1/contract/kline/BTC_USDT",
+        "MEXC OHLCV rejected original request"
+    );
+}
+
+#[test]
+fn mexc_snapshot_reporters_preserve_object_detail_and_listener_failure() {
+    let mut native = Vec::new();
+    for method in ["fetchMarkets", "fetchTickers", "fetchPositions"] {
+        for throws in [false, true] {
+            let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
+            exchange.base = reporting_values::raw_reporting_base();
+            exchange.xhr = Rc::new(AccountFailure {
+                message: "transport".into(),
+                response_data: Some(json!({"message":{"message":"inner detail","code":313}})),
+            });
+            let emitted = Rc::new(RefCell::new(Vec::new()));
+            let events = emitted.clone();
+            let mut original = ExchangeError::new("listener stopped reporting");
+            original.code = Some(json!(777));
+            let failure = original.clone();
+            exchange.base.on(
+                "error",
+                Rc::new(move |_, value| {
+                    events.borrow_mut().push(value.clone());
+                    if throws { Err(failure.clone()) } else { Ok(()) }
+                }),
+            );
+            let result = match method {
+                "fetchMarkets" => {
+                    futures::executor::block_on(exchange.fetch_markets()).map(|v| v.len())
+                }
+                "fetchTickers" => {
+                    futures::executor::block_on(exchange.fetch_tickers()).map(|v| v.len())
+                }
+                "fetchPositions" => {
+                    futures::executor::block_on(exchange.fetch_positions(None)).map(|v| v.len())
+                }
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                emitted.borrow().len(),
+                1,
+                "MEXC snapshot reporting-call floor {method}/{throws}"
+            );
+            assert_eq!(
+                emitted.borrow()[0][0],
+                "inner detail",
+                "MEXC snapshot raw object report {method}/{throws}"
+            );
+            if throws {
+                assert_eq!(
+                    result.unwrap_err(),
+                    original,
+                    "MEXC snapshot original reporting failure {method}"
+                );
+            } else {
+                assert_eq!(result.unwrap(), 0, "MEXC snapshot fallback length {method}");
+                native.push(method);
+            }
+        }
+    }
+    assert_eq!(
+        native.len(),
+        3,
+        "MEXC snapshot distinct native method floor"
+    );
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/account_oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "MEXC snapshot source oracle {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        source["snapshotCases"].as_array().unwrap().len(),
+        3,
+        "MEXC snapshot source method floor"
+    );
+    for (index, method) in native.into_iter().enumerate() {
+        assert_eq!(
+            source["snapshotCases"][index]["method"], method,
+            "MEXC snapshot source method identity"
+        );
+        assert_eq!(
+            source["snapshotCases"][index]["emitted"],
+            json!([{"message":"inner detail","code":313}]),
+            "MEXC snapshot source raw reporting argument"
+        );
+        assert_eq!(
+            source["snapshotCases"][index]["fallbackLength"], 0,
+            "MEXC snapshot source empty fallback"
+        );
+    }
+}
+
+#[test]
+fn mexc_four_borrowed_methods_price_unpolled_drop_and_first_poll() {
+    use futures::TryFutureExt;
+    let mut completed = 0;
+    for method in [
+        "fetchMarkets",
+        "fetchTickers",
+        "fetchAndSetOrders",
+        "fetchAndSetRegularOrders",
+    ] {
+        let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
+        let response = Rc::new(StaticResponse(b"[]".to_vec(), RefCell::default()));
+        exchange.xhr = response.clone();
+        let make = || -> ExchangeFuture<'_, usize> {
+            match method {
+                "fetchMarkets" => Box::pin(exchange.fetch_markets().map_ok(|v| v.len())),
+                "fetchTickers" => Box::pin(exchange.fetch_tickers().map_ok(|v| v.len())),
+                "fetchAndSetOrders" => {
+                    Box::pin(exchange.fetch_and_set_orders(None).map_ok(|v| v.len()))
+                }
+                "fetchAndSetRegularOrders" => Box::pin(
+                    exchange
+                        .fetch_and_set_regular_orders(None)
+                        .map_ok(|v| v.len()),
+                ),
+                _ => unreachable!(),
+            }
+        };
+        let future = make();
+        assert_eq!(
+            response.1.borrow().len(),
+            0,
+            "MEXC borrowed unpolled request count {method}"
+        );
+        drop(future);
+        assert_eq!(
+            response.1.borrow().len(),
+            0,
+            "MEXC borrowed dropped observer omits request {method}"
+        );
+        assert_eq!(
+            futures::executor::block_on(make()).unwrap(),
+            0,
+            "MEXC borrowed empty response output {method}"
+        );
+        let expected = if method == "fetchAndSetOrders" { 3 } else { 1 };
+        assert_eq!(
+            response.1.borrow().len(),
+            expected,
+            "MEXC borrowed polled request count {method}"
+        );
+        completed += 1;
+    }
+    assert_eq!(completed, 4, "MEXC borrowed independent method floor");
+}
+
+#[test]
+fn mexc_account_reporting_checks_enhancement_before_message_coercion() {
+    let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
+    exchange.base = reporting_values::raw_reporting_base();
+    exchange.xhr = Rc::new(AccountFailure {
+        message: "transport".into(),
+        response_data: Some(
+            json!({"message":{"context":{"x":1},"enhancedMessage":"enhanced","message":{"toString":null}}}),
+        ),
+    });
+    let events = Rc::new(RefCell::new(Vec::new()));
+    let sink = events.clone();
+    exchange.base.on(
+        "error",
+        Rc::new(move |_, value| {
+            sink.borrow_mut().push(value.clone());
+            Ok(())
+        }),
+    );
+    let validation = futures::executor::block_on(exchange.validate_account()).unwrap();
+    assert_eq!(
+        validation.error.as_value()["enhancedMessage"],
+        "enhanced",
+        "MEXC validation retains enhanced original detail"
+    );
+    assert_eq!(
+        events.borrow().len(),
+        1,
+        "MEXC enhanced reporter call floor"
+    );
+    assert_eq!(
+        events.borrow()[0][0],
+        "enhanced",
+        "MEXC enhanced reporting skips unusable message coercion"
+    );
+    exchange.xhr = Rc::new(AccountFailure {
+        message: "transport".into(),
+        response_data: Some(json!({"message":{"message":"visible","toString":null}})),
+    });
+    let error = futures::executor::block_on(exchange.get_account()).unwrap_err();
+    assert_eq!(
+        error.name, "TypeError",
+        "MEXC getAccount preserves original coercion TypeError"
+    );
 }

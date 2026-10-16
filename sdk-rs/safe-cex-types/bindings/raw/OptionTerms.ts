@@ -4,4 +4,12 @@ import type { OptionRight } from "./OptionRight";
 /**
  * What makes a market an option. Absent on every other market.
  */
-export type OptionTerms = { underlying: string, expiry: number, strike: number, right: OptionRight, style: "european", settlement: "cash", premiumAsset: string, settleAsset: string, };
+export type OptionTerms = { underlying: string, 
+/**
+ * Expiry, ms since epoch.
+ */
+expiry: number, strike: number, right: OptionRight, style: "european", settlement: "cash", 
+/**
+ * The asset the premium is quoted in, which is the unit of `price` on an option order.
+ */
+premiumAsset: string, settleAsset: string, };

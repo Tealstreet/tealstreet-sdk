@@ -1645,8 +1645,9 @@ message in `requestsLogAtom`; the actual dev/Cypress `__getRequestsLog()`
 returns it unchanged. At the split boundary the returned string has length
 4121 and unit D83D at index 4095. The helper is available in dev/Cypress, not
 plain production without Cypress. The source consumer proof is
-`safe-cex-types/tests/diagnostic_observability.test.cjs`, which executes the
-actual cap, callback and getter with real Jotai storage before serialization.
+tealstreet-next `scripts/sdk-diagnostic-observability.test.cjs`, which executes the
+actual cap, callback and getter with real Jotai storage before serialization. It
+lives in the monorepo because its consumer is apps/web, outside this slice.
 The cap row's FORCED clause must name this observation; do not classify it as
 CHOSEN merely because the event is called diagnostic. Its core owner retains
 responsibility for the native cap witness and row note.
@@ -3330,6 +3331,16 @@ constructors or facade assembly have been supplied. Source/native loader
 witnesses cover the declared finite routes and selected scheduling/value costs;
 they do not establish general JavaScript object or event-loop emulation.
 
+**Scope amendment (2026-10-16).** One exception now applies to the paragraph
+above: the names in `safe-cex-registry/src/rust_venues.rs` (`backpack`,
+`binance`) have concrete, statically linked Rust constructors. A caller reaches
+them only by choosing `ConstructionPath::Rust` for that name. They use the same
+typed `ExchangeConstructor` capability, so none of the three choices above
+changes. The default `ConstructionPath::ModuleHost` keeps every module-host route
+and its price. That is why the `exchangeRegistry.<name>` rows stay divergent and
+claim the Rust route as split members. `Rust` for any other name is a named
+error, never a fallback. The design is in `safe-cex-registry/CONSTRUCTION.md`.
+
 <a id="utility-capability-choice"></a>
 ### Utility capability choices
 
@@ -3489,3 +3500,84 @@ built-ins provide controlled ordinary object/array behavior and pinned root
 collation for the ASCII symbols; they do not prove complete JavaScript built-in
 or runtime-host implementation. No new concrete diagnostic carrier inherits
 restrictions from the earlier public_parity module.
+
+<a id="mexc-native-socket-owner-choice"></a>
+
+### MEXC native socket construction
+
+The concrete MEXC factory accepts an existing BaseExchange, configured REST
+adapter, local-time conversion, WebSocket runtime, remote account name and typed
+fill sink. It constructs and registers both native socket protocols against that
+same exchange and Store. Supplying these shared capabilities explicitly is
+CHOSEN under [§18](#divergence-taxonomy): it avoids a second implicit host factory
+inside the venue. The call shape differs from the source parent-only socket
+constructors, and the factory does not recreate createXhrWithSecondaryKey.
+The generic AssemblyHost constructor remains a separate callable body, not an
+implementation of these concrete capabilities.
+
+Native sockets retain weak parent references and own their timers and pending
+callbacks through the existing core registries. A dropped parent or disposed
+owner cannot continue updating its Store through this binding. That resource
+bound, typed fill/error callbacks, asynchronous dial installation and explicit
+host exception reporting follow
+[exchange-runtime-callback-choice](#exchange-runtime-callback-choice), rather
+than reproducing arbitrary JavaScript callback values or the complete Promise
+scheduler. Public candle/book sinks retain the shared infallible callback signatures and
+owned model values. Source callback throws cannot be returned as ExchangeError
+through these signatures; mutating a delivered book cannot change the stored
+native book or another subscriber view. These are CHOSEN callback and snapshot
+costs under [§15](#closed-typed-output-boundary) and
+[§16](#owned-snapshot-vs-live-alias), avoiding a venue-only callback/error/model
+API alongside the common Exchange interface. Cleanup uses its one-shot native
+ListenerCleanup, so repeated source cleanup invocation is unavailable. The
+source snapshot-only extra lastUpdateId is unavailable through the closed
+OrderBook callback model. Private balance-refresh failures are observable through the host
+reporter where source silently catches them; this deliberate extra observation
+prevents a failed refresh from appearing successful.
+
+<a id="mexc-borrowed-method-choice"></a>
+
+### MEXC borrowed method futures
+
+The concrete MEXC account/market/order methods keep the shared borrowed
+ExchangeFuture interface. This is CHOSEN under [§18](#divergence-taxonomy) to
+retain caller-owned borrowing and cancellation instead of introducing a second
+venue-local owner for unobserved Promises. Constructing and dropping an unpolled
+future omits the source eager child/HTTP call. Once polled, dropping the future
+can omit later normalization, reporting and Store updates. Native host adapter
+operations that have already started may survive independently; this is not a
+claim that dropping a future cancels a transmitted request. Owned socket tasks
+have their separate core owner and do not inherit observer-drop cancellation.
+
+<a id="mexc-currency-own-record-choice"></a>
+
+### MEXC currency dictionary projection
+
+MEXC keeps homogeneous own JsObjectMap<Balance> currency records. This is CHOSEN
+under [§18](#divergence-taxonomy) rather than widening every native currency
+lookup to a Balance-or-inherited-primitive union. Source assignment to __proto__
+can expose inherited free/used/total/upnl numbers that are not currency entries;
+those inherited numeric reads are unavailable in the native map. Ordinary own
+currency records and JavaScript own-key ordering remain supported. The separate
+info snapshot cost cites [§16](#owned-snapshot-vs-live-alias). This declaration is
+not supplied by the diagnostic prototype-write policy, and does not call the
+source prototype behavior repaired.
+
+<a id="mexc-report-input-choice"></a>
+
+### MEXC raw reporting projection
+
+MEXC selects admitted JSON response detail and hands the selected value to the
+shared native reporter as ExchangeErrorInput::Raw. Strings take its Message
+path and falsy values its Missing path; truthy objects/numbers reach the host as
+the original JSON snapshot, with only formatter metadata (message, name,
+context, code, url, method) projected from it. AccountValidationError separately
+retains the selected JSON value without String coercion. This is CHOSEN under
+[§18](#divergence-taxonomy): reuse ExchangeError and the required host reporting
+contract instead of adding arbitrary JavaScript thrown graphs to every sink.
+The raw console/Sentry object identity, executable getters and custom prototypes
+are unavailable. A non-string nested error.message is projected to a native
+String, so its original emitted value type is also lost. These costs are
+separate from the owned response snapshot at
+[§16](#owned-snapshot-vs-live-alias) and string ingress at
+[§14](#shared-utf8-string-boundary); they are not language limitations.

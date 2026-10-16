@@ -114,6 +114,60 @@ pub enum MarginType {
     Cross,
 }
 
+/// @ts-union
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+pub enum OptionRight {
+    #[serde(rename = "call")]
+    Call,
+    #[serde(rename = "put")]
+    Put,
+}
+
+/// @ts-union
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+pub enum OptionTermsStyle {
+    #[serde(rename = "european")]
+    European,
+}
+
+/// @ts-union
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
+pub enum OptionTermsSettlement {
+    #[serde(rename = "cash")]
+    Cash,
+}
+
+/// What makes a market an option. Absent on every other market.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct OptionTerms {
+    pub underlying: String,
+    /// Expiry, ms since epoch.
+    pub expiry: f64,
+    pub strike: f64,
+    pub right: OptionRight,
+    #[ts(inline)]
+    pub style: OptionTermsStyle,
+    #[ts(inline)]
+    pub settlement: OptionTermsSettlement,
+    /// The asset the premium is quoted in, which is the unit of `price` on an option order.
+    pub premium_asset: String,
+    pub settle_asset: String,
+}
+
+/// Greeks as the venue publishes them; `units` records what was measured.
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct OptionGreeks {
+    pub delta: f64,
+    pub gamma: f64,
+    pub vega: f64,
+    pub theta: f64,
+    pub units: String,
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -141,11 +195,25 @@ pub struct MarketLimitsLeverage {
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
+pub struct MarketLimitsPrice {
+    pub min: f64,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
 pub struct MarketLimits {
     #[ts(inline)]
     pub amount: MarketLimitsAmount,
     #[ts(inline)]
     pub leverage: MarketLimitsLeverage,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub price: Option<MarketLimitsPrice>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -167,6 +235,12 @@ pub struct Market {
     pub precision: MarketPrecision,
     #[ts(inline)]
     pub limits: MarketLimits,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub option: Option<OptionTerms>,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -317,6 +391,14 @@ pub struct Order {
     )]
     #[ts(type = "any", optional)]
     pub info: Option<serde_json::Value>,
+    // The venue client order ID where the adapter maps it to the top level
+    // (Hyperliquid's cloid): `info` is stripped before a worker posts the store.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub client_order_id: Option<String>,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -361,6 +443,18 @@ pub struct Order {
     )]
     #[ts(inline)]
     pub extra: Option<OrderExtra>,
+}
+
+#[derive(Debug, Clone, PartialEq, Serialize, TS)]
+#[serde(rename_all = "camelCase")]
+#[ts(optional_fields)]
+pub struct PositionOption {
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub greeks: Option<OptionGreeks>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -438,6 +532,13 @@ pub struct Position {
         skip_serializing_if = "Option::is_none"
     )]
     pub last_update: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(inline)]
+    pub option: Option<PositionOption>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -540,80 +641,6 @@ pub struct PublicTrade {
     pub quote_qty: Option<f64>,
     pub timestamp: f64,
     pub side: OrderSide,
-}
-
-/// @ts-union
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
-pub enum OptionRight {
-    #[serde(rename = "call")]
-    Call,
-    #[serde(rename = "put")]
-    Put,
-}
-
-/// The single-literal `'european'` option style.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct European;
-impl Serialize for European {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("european")
-    }
-}
-impl<'de> Deserialize<'de> for European {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        if String::deserialize(deserializer)? == "european" {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom("expected \"european\""))
-        }
-    }
-}
-
-/// The single-literal `'cash'` option settlement.
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub struct Cash;
-impl Serialize for Cash {
-    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-        serializer.serialize_str("cash")
-    }
-}
-impl<'de> Deserialize<'de> for Cash {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        if String::deserialize(deserializer)? == "cash" {
-            Ok(Self)
-        } else {
-            Err(serde::de::Error::custom("expected \"cash\""))
-        }
-    }
-}
-
-/// What makes a market an option. Absent on every other market.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct OptionTerms {
-    pub underlying: String,
-    pub expiry: f64,
-    pub strike: f64,
-    pub right: OptionRight,
-    #[ts(type = "\"european\"")]
-    pub style: European,
-    #[ts(type = "\"cash\"")]
-    pub settlement: Cash,
-    pub premium_asset: String,
-    pub settle_asset: String,
-}
-
-/// Greeks as the venue publishes them; `units` records what was measured.
-#[derive(Debug, Clone, PartialEq, Serialize, TS)]
-#[serde(rename_all = "camelCase")]
-#[ts(optional_fields)]
-pub struct OptionGreeks {
-    pub delta: f64,
-    pub gamma: f64,
-    pub vega: f64,
-    pub theta: f64,
-    pub units: String,
 }
 
 /// One option's prices and implied volatilities. IVs are fractions; 0 means unavailable.
@@ -880,6 +907,13 @@ pub struct PlaceOrderOpts {
         skip_serializing_if = "Option::is_none"
     )]
     pub close: Option<bool>,
+    /// Price an option order by implied volatility, as a fraction. Option markets only.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub implied_volatility: Option<f64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
@@ -1411,6 +1445,8 @@ pub enum ExchangeName {
     Salsadex,
     #[serde(rename = "tealstreet-dex")]
     TealstreetDex,
+    #[serde(rename = "txflow")]
+    Txflow,
     #[serde(rename = "what")]
     What,
     #[serde(rename = "weex")]
@@ -1514,6 +1550,22 @@ pub struct ExchangeAccountConfig {
         skip_serializing_if = "Option::is_none"
     )]
     pub enable_spot_markets: Option<bool>,
+    /// @ts-mutable
+    #[serde(rename = "enableOptionMarkets")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub enable_option_markets: Option<bool>,
+    /// @ts-mutable
+    #[serde(rename = "enableInverseMarkets")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub enable_inverse_markets: Option<bool>,
     /// @ts-mutable
     #[serde(rename = "bybitSiteId")]
     #[serde(
@@ -2121,6 +2173,20 @@ pub struct ExchangeOptions {
         skip_serializing_if = "Option::is_none"
     )]
     pub enable_spot_markets: Option<bool>,
+    #[serde(rename = "enableOptionMarkets")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub enable_option_markets: Option<bool>,
+    #[serde(rename = "enableInverseMarkets")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub enable_inverse_markets: Option<bool>,
     #[serde(rename = "bybitSiteId")]
     #[serde(
         default,
@@ -2741,6 +2807,20 @@ pub struct PublicExchangeOptions {
         skip_serializing_if = "Option::is_none"
     )]
     pub enable_spot_markets: Option<bool>,
+    #[serde(rename = "enableOptionMarkets")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub enable_option_markets: Option<bool>,
+    #[serde(rename = "enableInverseMarkets")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub enable_inverse_markets: Option<bool>,
     #[serde(rename = "bybitSiteId")]
     #[serde(
         default,
@@ -3004,11 +3084,11 @@ mod strict_codecs {
         ExchangeOptionsExternalPublicDataVariant1, Execution, ExecutionsOptions, ExtendedTimeframe,
         FetchedLeverage, HistoricalOrder, HistoricalTrade, HistoricalTradeOptions,
         IncomeHistoryOptions, IncomeRecord, Market, MessageHandlerStatsType, OHLCVOptions,
-        OHLCVSOptions, OptionChainQuery, OptionChainRow, OptionGreeks, OptionQuote, OptionRight,
-        OptionTerms, OrderBook, OrderHistoryOptions, OrderRiskProfile, PlaceOrderOpts, Position,
-        PublicExchangeOptions, PublicTrade, RequestOutcome, RequestOutcomeCounts, SecondsTimeframe,
-        StoreDataLoaded, StoreOptions, StoreUpdateIds, Ticker, UpdateOrderOpts,
-        UpdateOrderOptsUpdateVariant0, UpdateOrderOptsUpdateVariant1, ValidateAccountResult,
+        OHLCVSOptions, OptionChainQuery, OptionChainRow, OptionQuote, OrderBook,
+        OrderHistoryOptions, OrderRiskProfile, PlaceOrderOpts, Position, PublicExchangeOptions,
+        PublicTrade, RequestOutcome, RequestOutcomeCounts, SecondsTimeframe, StoreDataLoaded,
+        StoreOptions, StoreUpdateIds, Ticker, UpdateOrderOpts, UpdateOrderOptsUpdateVariant0,
+        UpdateOrderOptsUpdateVariant1, ValidateAccountResult,
     };
     use super::{
         AccountValidationError, Balance, ClosedPnlEntryContracts, ClosedPnlEntryEntryPrice,
@@ -3021,11 +3101,12 @@ mod strict_codecs {
         ExchangeOptionsExtraAsterdexApiVersion, ExchangeOptionsExtraKucoinBroker,
         ExchangeOptionsExtraLighterBuilderFeeMode, ExchangeOptionsHyperliquidBuilder,
         ExchangeOptionsTuning, ExecutionPositionSide, IncomeCategory, MarginType, MarketLimits,
-        MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision, Order, OrderBookOrders,
+        MarketLimitsAmount, MarketLimitsLeverage, MarketLimitsPrice, MarketPrecision, OptionGreeks,
+        OptionRight, OptionTerms, OptionTermsSettlement, OptionTermsStyle, Order, OrderBookOrders,
         OrderExtra, OrderRejectReason, OrderSide, OrderStatus, OrderStopTriggerType,
         OrderTimeInForce, OrderType, PayloadSignerCapability, PositionExtra, PositionMode,
-        PositionSide, PublicDataSourceCapability, RemoteSignerCapability, Timeframe,
-        TransportCapability, True, UpdateOrderOptsUpdate, deserialize_present,
+        PositionOption, PositionSide, PublicDataSourceCapability, RemoteSignerCapability,
+        Timeframe, TransportCapability, True, UpdateOrderOptsUpdate, deserialize_present,
     };
     #[derive(serde::Deserialize)]
     #[serde(remote = "super::OrderStatus")]
@@ -3259,6 +3340,130 @@ mod strict_codecs {
     struct WireMarketLimits {
         amount: MarketLimitsAmount,
         leverage: MarketLimitsLeverage,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        price: Option<MarketLimitsPrice>,
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::MarketLimitsPrice")]
+    #[serde(rename_all = "camelCase")]
+    struct WireMarketLimitsPrice {
+        min: f64,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::MarketLimitsPrice {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireMarketLimitsPrice::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OptionRight")]
+    enum WireOptionRight {
+        #[serde(rename = "call")]
+        Call,
+        #[serde(rename = "put")]
+        Put,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OptionRight {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireOptionRight::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+                value,
+            ))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OptionTermsStyle")]
+    enum WireOptionTermsStyle {
+        #[serde(rename = "european")]
+        European,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OptionTermsStyle {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireOptionTermsStyle::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OptionTermsSettlement")]
+    enum WireOptionTermsSettlement {
+        #[serde(rename = "cash")]
+        Cash,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OptionTermsSettlement {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            let value = String::deserialize(deserializer)?;
+            WireOptionTermsSettlement::deserialize(
+                serde::de::value::StringDeserializer::<D::Error>::new(value),
+            )
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OptionTerms")]
+    #[serde(rename_all = "camelCase")]
+    struct WireOptionTerms {
+        underlying: String,
+        expiry: f64,
+        strike: f64,
+        right: OptionRight,
+        style: OptionTermsStyle,
+        settlement: OptionTermsSettlement,
+        premium_asset: String,
+        settle_asset: String,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OptionTerms {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireOptionTerms::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::OptionGreeks")]
+    #[serde(rename_all = "camelCase")]
+    struct WireOptionGreeks {
+        delta: f64,
+        gamma: f64,
+        vega: f64,
+        theta: f64,
+        units: String,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::OptionGreeks {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireOptionGreeks::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::PositionOption")]
+    #[serde(rename_all = "camelCase")]
+    struct WirePositionOption {
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        greeks: Option<OptionGreeks>,
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::PositionOption {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WirePositionOption::deserialize(crate::strict_decode::object(deserializer))
+        }
     }
 
     impl<'de> serde::Deserialize<'de> for super::MarketLimits {
@@ -3284,6 +3489,12 @@ mod strict_codecs {
         active: bool,
         precision: MarketPrecision,
         limits: MarketLimits,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        option: Option<OptionTerms>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",
@@ -3449,6 +3660,12 @@ mod strict_codecs {
             deserialize_with = "deserialize_present",
             skip_serializing_if = "Option::is_none"
         )]
+        client_order_id: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
         time_in_force: Option<OrderTimeInForce>,
         last_update: f64,
         #[serde(
@@ -3574,6 +3791,12 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         last_update: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        option: Option<PositionOption>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::Position {
@@ -3695,61 +3918,6 @@ mod strict_codecs {
     impl<'de> serde::Deserialize<'de> for super::PublicTrade {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             WirePublicTrade::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::OptionRight")]
-    enum WireOptionRight {
-        #[serde(rename = "call")]
-        Call,
-        #[serde(rename = "put")]
-        Put,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::OptionRight {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            let value = String::deserialize(deserializer)?;
-            WireOptionRight::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
-                value,
-            ))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::OptionTerms")]
-    #[serde(rename_all = "camelCase")]
-    struct WireOptionTerms {
-        underlying: String,
-        expiry: f64,
-        strike: f64,
-        right: super::OptionRight,
-        style: super::European,
-        settlement: super::Cash,
-        premium_asset: String,
-        settle_asset: String,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::OptionTerms {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireOptionTerms::deserialize(crate::strict_decode::object(deserializer))
-        }
-    }
-
-    #[derive(serde::Deserialize)]
-    #[serde(remote = "super::OptionGreeks")]
-    #[serde(rename_all = "camelCase")]
-    struct WireOptionGreeks {
-        delta: f64,
-        gamma: f64,
-        vega: f64,
-        theta: f64,
-        units: String,
-    }
-
-    impl<'de> serde::Deserialize<'de> for super::OptionGreeks {
-        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-            WireOptionGreeks::deserialize(crate::strict_decode::object(deserializer))
         }
     }
 
@@ -4058,6 +4226,12 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         close: Option<bool>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        implied_volatility: Option<f64>,
     }
 
     impl<'de> serde::Deserialize<'de> for super::PlaceOrderOpts {
@@ -4662,6 +4836,8 @@ mod strict_codecs {
         Salsadex,
         #[serde(rename = "tealstreet-dex")]
         TealstreetDex,
+        #[serde(rename = "txflow")]
+        Txflow,
         #[serde(rename = "what")]
         What,
         #[serde(rename = "weex")]
@@ -4782,6 +4958,20 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         enable_spot_markets: Option<bool>,
+        #[serde(rename = "enableOptionMarkets")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        enable_option_markets: Option<bool>,
+        #[serde(rename = "enableInverseMarkets")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        enable_inverse_markets: Option<bool>,
         #[serde(rename = "bybitSiteId")]
         #[serde(
             default,
@@ -5427,6 +5617,20 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         enable_spot_markets: Option<bool>,
+        #[serde(rename = "enableOptionMarkets")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        enable_option_markets: Option<bool>,
+        #[serde(rename = "enableInverseMarkets")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        enable_inverse_markets: Option<bool>,
         #[serde(rename = "bybitSiteId")]
         #[serde(
             default,
@@ -6043,6 +6247,20 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         enable_spot_markets: Option<bool>,
+        #[serde(rename = "enableOptionMarkets")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        enable_option_markets: Option<bool>,
+        #[serde(rename = "enableInverseMarkets")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        enable_inverse_markets: Option<bool>,
         #[serde(rename = "bybitSiteId")]
         #[serde(
             default,
@@ -6840,6 +7058,11 @@ mod strict_codecs {
                         .unwrap()
                         .to_owned(),
                     serde_json::to_value(ExchangeName::TealstreetDex)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(ExchangeName::Txflow)
                         .unwrap()
                         .as_str()
                         .unwrap()

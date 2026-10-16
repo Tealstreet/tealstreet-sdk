@@ -109,6 +109,7 @@ where
                         min: 1.0,
                         max: 1.0 / tier.value,
                     },
+                    price: None,
                 },
                 contract_size: Some(row.instrument.lot_size),
                 is_expiring: Some(false),
@@ -119,6 +120,7 @@ where
                 info: Some(raw[index].clone()),
                 taker_fee: Some(0.0),
                 maker_fee: Some(0.0),
+                option: None,
             });
         }
         Ok(markets)

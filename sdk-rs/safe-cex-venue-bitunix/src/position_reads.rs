@@ -77,6 +77,7 @@ fn position(
         info: None,
         extra: None,
         last_update: None,
+        option: None,
     }
 }
 pub async fn fetch_positions<E, F>(

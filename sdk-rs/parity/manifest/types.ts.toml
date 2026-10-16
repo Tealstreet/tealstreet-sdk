@@ -64,15 +64,15 @@ kind = "type"
 layer = "mirror"
 rs = "safe-cex-types/src/lib.rs::OptionRight"
 status = "ported"
-note = ""
+note = "Literal union call/put; decoding refuses any other string."
 
 [[symbol]]
 ts = "OptionTerms"
 kind = "type"
 layer = "mirror"
-rs = [ "safe-cex-types/src/lib.rs::OptionTerms", "safe-cex-types/src/lib.rs::European", "safe-cex-types/src/lib.rs::Cash" ]
+rs = [ "safe-cex-types/src/lib.rs::OptionTerms", "safe-cex-types/src/lib.rs::OptionTermsStyle", "safe-cex-types/src/lib.rs::OptionTermsSettlement" ]
 status = "ported"
-note = "Split: the record plus one unit type per single-literal field, so style accepts and emits only 'european' and settlement only 'cash'; the bindings keep the literal types via ts(type). Explicit targets: safe-cex-types/src/lib.rs::OptionTerms safe-cex-types/src/lib.rs::European safe-cex-types/src/lib.rs::Cash"
+note = "Option market terms; expiry and strike are native f64, right/style/settlement are closed literal unions refused on any other string. Split member `safe-cex-types/src/lib.rs::OptionTermsStyle`. Named representation of the single-literal style: 'european' field; record shape only. Split member `safe-cex-types/src/lib.rs::OptionTermsSettlement`. Named representation of the single-literal settlement: 'cash' field; record shape only."
 
 [[symbol]]
 ts = "OptionGreeks"
@@ -80,7 +80,7 @@ kind = "type"
 layer = "mirror"
 rs = "safe-cex-types/src/lib.rs::OptionGreeks"
 status = "ported"
-note = ""
+note = "Venue-published greeks with the units string recording what was measured."
 
 [[symbol]]
 ts = "OptionQuote"
@@ -118,9 +118,9 @@ note = ""
 ts = "Market"
 kind = "type"
 layer = "mirror"
-rs = "safe-cex-types/src/lib.rs::Market"
+rs = [ "safe-cex-types/src/lib.rs::Market", "safe-cex-types/src/lib.rs::MarketLimitsPrice" ]
 status = "ported"
-note = "Shared optional isPerpetual boolean matches the TypeScript declaration; native Some(true), Some(false), absence and present-null refusal are asserted before wire projection. GRVT fetchMarkets uses this field directly; existing other venue constructors retain absence."
+note = "Shared optional isPerpetual boolean matches the TypeScript declaration; native Some(true), Some(false), absence and present-null refusal are asserted before wire projection. GRVT fetchMarkets uses this field directly; existing other venue constructors retain absence. Split member `safe-cex-types/src/lib.rs::MarketLimitsPrice`. Named representation of the anonymous Market.limits.price object ({ min }); record shape only."
 
 [[symbol]]
 ts = "Ticker"
@@ -222,9 +222,9 @@ note = ""
 ts = "Position"
 kind = "type"
 layer = "mirror"
-rs = "safe-cex-types/src/lib.rs::Position"
+rs = [ "safe-cex-types/src/lib.rs::Position", "safe-cex-types/src/lib.rs::PositionOption" ]
 status = "ported"
-note = ""
+note = "Split member `safe-cex-types/src/lib.rs::PositionOption`. Named representation of the anonymous Position.option object ({ greeks? }); record shape only."
 
 [[symbol]]
 ts = "DisplayedPosition"

@@ -1,5 +1,22 @@
 use super::*;
 
+pub(super) fn raw_reporting_base() -> BaseExchange {
+    let runtime = Rc::new(ReportingRuntime {
+        worker: false,
+        consoles: RefCell::default(),
+        reports: RefCell::default(),
+        trace: Rc::default(),
+    });
+    BaseExchange::new(
+        ExchangeName::Mexc,
+        serde_json::from_value(json!({"key":"key","secret":"secret","publicDataOnly":false}))
+            .unwrap(),
+        Rc::new(DefaultStore::new()),
+        runtime,
+        ExchangeSettings::default(),
+    )
+}
+
 struct ReportingRuntime {
     worker: bool,
     consoles: RefCell<Vec<String>>,

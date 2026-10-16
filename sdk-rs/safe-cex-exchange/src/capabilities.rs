@@ -300,8 +300,9 @@ pub struct ExchangeCapabilities {
 impl Default for ExchangeCapabilities {
     fn default() -> Self {
         use BaseCapabilityMethod::{
-            FetchClosedPnl, FetchHistoricalFills, FetchHistoricalOrders, FetchIncomeHistory,
-            FetchIncomeHistoryRange, Start,
+            FetchAccountGreeks, FetchClosedPnl, FetchHistoricalFills, FetchHistoricalOrders,
+            FetchIncomeHistory, FetchIncomeHistoryRange, FetchOptionChain, FetchOptionExpiries,
+            Start,
         };
         Self {
             start: mark_base_capability_fallback(Start, |_, _| {

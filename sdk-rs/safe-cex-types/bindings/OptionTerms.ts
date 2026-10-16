@@ -5,11 +5,17 @@ import type { OptionRight } from "./OptionRight";
  */
 export type OptionTerms = {
     readonly underlying: string;
+    /**
+     * Expiry, ms since epoch.
+     */
     readonly expiry: number;
     readonly strike: number;
     readonly right: OptionRight;
     readonly style: "european";
     readonly settlement: "cash";
+    /**
+     * The asset the premium is quoted in, which is the unit of `price` on an option order.
+     */
     readonly premiumAsset: string;
     readonly settleAsset: string;
 };
