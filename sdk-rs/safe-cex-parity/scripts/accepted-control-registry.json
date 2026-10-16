@@ -100,6 +100,10 @@
       "local future alias pins reject output lifetime and generic redirection",
       "local future alias probes require actual compiler dependency and sysroot context"
     ],
+    "accepted-grvt-fields.test.mjs": [
+      "exact borrowed Fields policy retains every route and refuses compiler or witness redirects",
+      "borrowed Fields executes actual static and owned routes and rejects native drift"
+    ],
     "accepted-identity-alias.test.mjs": [
       "identity aliases select one internal actual-alias monomorphization",
       "generic identity probes reject bounds defaults synthetic parameters and where clauses",
@@ -350,6 +354,9 @@
     "inherited refusal native fixture pin",
     "inherited refusal native adapter pin",
     "inherited refusal native error identity",
-    "inherited refusal native zero HTTP"
+    "inherited refusal native zero HTTP",
+    "Fields identity",
+    "Fields members",
+    "Fields route"
   ]
 }
