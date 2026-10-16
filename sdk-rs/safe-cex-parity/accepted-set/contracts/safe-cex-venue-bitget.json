@@ -33227,5 +33227,3057 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_bitget::account_positions::AccountFuture": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The supplied account-read future is an executable asynchronous capability, not serialized account data.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::cancellation::CancelKey": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "primitive": "u16"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "primitive": "u16"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "decoder",
+    "shape": "union",
+    "evidence": "Reviewed the concrete Vec<u16> cancellation Map key alias: its native units preserve exact UTF-16 code units, including surrogate units, with no UTF-8 string conversion. Actual array decoding is inspected through unit count/first/last fields; all raw alternate traits are independently probed.",
+    "positive": [
+      [],
+      [
+        65,
+        66
+      ],
+      [
+        55357,
+        56832,
+        0
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      "AB",
+      [
+        65536
+      ],
+      [
+        -1
+      ],
+      [
+        1.25
+      ],
+      [
+        true
+      ]
+    ],
+    "observation": {
+      "call": "{let decoded: $type=serde_json::from_value($value.clone()).unwrap();serde_json::json!({\"length\":decoded.len(),\"first\":decoded.first(),\"last\":decoded.last()})}",
+      "cases": [
+        {
+          "input": [],
+          "output": {
+            "length": 0,
+            "first": null,
+            "last": null
+          }
+        },
+        {
+          "input": [
+            65,
+            66
+          ],
+          "output": {
+            "length": 2,
+            "first": 65,
+            "last": 66
+          }
+        },
+        {
+          "input": [
+            55357,
+            56832,
+            0
+          ],
+          "output": {
+            "length": 3,
+            "first": 55357,
+            "last": 0
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::cancellation::CancelOrders": {
+    "generics": {
+      "params": [
+        {
+          "name": "O",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "O"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "O"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The Rc<RefCell<Vec<O>>> alias is a shared mutable native order collection; it is constructed by the cancellation host and not itself a protocol JSON decoder.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::cancellation::CancelFuture": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The supplied cancellation future retains pending request ownership and typed result/error channels; it is not a decoder.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::cancellation::CancelPayload": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_bitget::cancellation::CancelArgument",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "V"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_bitget::cancellation::CancelArgument",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "V"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The payload alias is an outgoing native list of static field names and typed CancelArgument variants, encoded by CancellationHost::post; it defines no incoming schema.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::cancellation::CancelGroups": {
+    "generics": {
+      "params": [
+        {
+          "name": "O",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_bitget::cancellation::CancelKey",
+                        "args": null
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "O"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::vec::Vec",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "tuple": [
+                    {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    },
+                    {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "O"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ]
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "decoder",
+    "shape": "union",
+    "evidence": "Reviewed the exact CancelGroups<Value> fixed native type: Vec<(Vec<u16>,Vec<Value>)>, including expanded CancelKey and both ordered tuple slots. Native observations inspect grouping keys and collection sizes directly; no generic tuple permission or serialization of the decoded alias.",
+    "positive": [
+      [
+        [
+          [
+            65,
+            66
+          ],
+          [
+            {
+              "id": "native-a"
+            }
+          ]
+        ],
+        [
+          [
+            67
+          ],
+          []
+        ]
+      ],
+      [
+        [
+          [],
+          [
+            "native-b",
+            null
+          ]
+        ]
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      [
+        [
+          [
+            65536
+          ],
+          []
+        ]
+      ],
+      [
+        [
+          [],
+          [],
+          []
+        ]
+      ],
+      [
+        [
+          "bad",
+          []
+        ]
+      ]
+    ],
+    "observation": {
+      "call": "{let decoded:$type=serde_json::from_value($value.clone()).unwrap();serde_json::json!({\"groups\":decoded.len(),\"firstKey\":decoded.first().map(|g|g.0.clone()),\"firstCount\":decoded.first().map(|g|g.1.len()),\"lastKey\":decoded.last().map(|g|g.0.clone()),\"lastCount\":decoded.last().map(|g|g.1.len())})}",
+      "cases": [
+        {
+          "input": [
+            [
+              [
+                65,
+                66
+              ],
+              [
+                {
+                  "id": "native-a"
+                }
+              ]
+            ],
+            [
+              [
+                67
+              ],
+              []
+            ]
+          ],
+          "output": {
+            "groups": 2,
+            "firstKey": [
+              65,
+              66
+            ],
+            "firstCount": 1,
+            "lastKey": [
+              67
+            ],
+            "lastCount": 0
+          }
+        },
+        {
+          "input": [
+            [
+              [],
+              [
+                "native-b",
+                null
+              ]
+            ]
+          ],
+          "output": {
+            "groups": 1,
+            "firstKey": [],
+            "firstCount": 2,
+            "lastKey": [],
+            "lastCount": 2
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::rest_actions::RestActionFuture": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The REST-action future owns asynchronous operation completion, rather than accepting a wire payload.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::order_reads::OrderReadFuture": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The order-read future is an executable host capability; response normalization belongs to the actual read/mapping consumers.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::private_throttles::FetchThrottleCallback": {
+    "generics": {
+      "params": [
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The throttle callback is a reusable zero-argument executable capability with an opaque typed error channel.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::public_data::PublicRead": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The public-read alias carries an asynchronous result/error capability, with no raw text/JSON constructor.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::socket_runtime::SocketFuture": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "E"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The socket future carries asynchronous host execution, not encoded socket frames.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::stream_timers::StreamTimerCallback": {
+    "generics": {
+      "params": [
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The timer callback is a zero-argument executable capability, not serialized timer state.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::assembly::NativeCallback": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "The assembly callback receives existing native argument handles and returns a typed value/error; input admission belongs to its actual invoked body.",
+    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+  },
+  "safe_cex_venue_bitget::binding::exchange::BitgetExchange": {
+    "shape": "observed",
+    "evidence": "Reviewed the full exact concrete Exchange API. The executable entries call production methods through literal UFCS on actual constructed Bitget receivers over the maintained I/O harness; native field identities/bits and actual requests are observed. Source-inherited refusals retain explicit exact reviewed constant policy, rather than invented output differences or raw-method exemptions.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "name",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeName",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_types::ExchangeOptions",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "store",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "safe_cex_store::contract::Store",
+                                      "args": null
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "deps",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_bitget::binding::exchange::BitgetDependencies",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "generic": "Self"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Constructs the concrete venue from typed ExchangeName/options/store and runtime/HTTP/provider capabilities. Source factory and concrete E2Es separately execute the actual construction."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_positions",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbols",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Position",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the exact concrete Exchange method on a real constructed receiver; inspect native fields and actual HTTP effects.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-exchange-fixture.rs\"));}let alternate=$value==true;let h=fx::setup(alternate);let venue:&$type=h.exchange.as_ref();let rows=h.drive(<$type as safe_cex_exchange::exchange::Exchange>::fetch_positions(venue,None)).unwrap();serde_json::json!({\"length\":rows.len(),\"id\":rows[0].id,\"symbol\":rows[0].symbol,\"contractsBits\":format!(\"{:016x}\",rows[0].contracts.to_bits()),\"entryBits\":format!(\"{:016x}\",rows[0].entry_price.to_bits())})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "length": 1,
+              "id": "BTCUSDT",
+              "symbol": "BTCUSDT",
+              "contractsBits": "4000000000000000",
+              "entryBits": "4059600000000000"
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "length": 1,
+              "id": "ETHUSDT",
+              "symbol": "ETHUSDT",
+              "contractsBits": "4008000000000000",
+              "entryBits": "4069500000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbols",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Order",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the exact concrete Exchange method on a real constructed receiver; inspect native fields and actual HTTP effects.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-exchange-fixture.rs\"));}let alternate=$value==true;let h=fx::setup(alternate);let venue:&$type=h.exchange.as_ref();let rows=h.drive(<$type as safe_cex_exchange::exchange::Exchange>::fetch_orders(venue,None)).unwrap();serde_json::json!({\"length\":rows.len(),\"id\":rows[0].id,\"symbol\":rows[0].symbol,\"amountBits\":format!(\"{:016x}\",rows[0].amount.to_bits()),\"priceBits\":format!(\"{:016x}\",rows[0].price.to_bits())})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "length": 1,
+              "id": "native-a",
+              "symbol": "BTCUSDT",
+              "amountBits": "4000000000000000",
+              "priceBits": "4059600000000000"
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "length": 1,
+              "id": "native-b",
+              "symbol": "ETHUSDT",
+              "amountBits": "4008000000000000",
+              "priceBits": "4069500000000000"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_symbol_max_leverage",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the exact source-inherited constant refusal with distinct genuine inputs; native error and no-effect observations are independently pinned by the reviewed inherited-method policy.",
+        "constantOutput": true,
+        "call": "{ #[allow(dead_code)] mod fixture {use crate as safe_cex_venue_bitget;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/binding_harness.rs\"));} use safe_cex_exchange::exchange::Exchange;use safe_cex_store::{Store,StoreUpdate};use serde_json::json;use std::{cell::Cell,rc::Rc};let h=fixture::harness(safe_cex_types::ExchangeName::Bitget,fixture::options(),|_|{});\n    // Synthetic finite seeds are independent of the venue being observed.\n    let orders = serde_json::from_value(json!([{\"id\":\"seed-order\",\"symbol\":\"SEED\",\n        \"status\":\"open\",\"type\":\"limit\",\"side\":\"buy\",\"price\":17.5,\"amount\":2,\n        \"filled\":0.5,\"remaining\":1.5,\"reduceOnly\":false,\"lastUpdate\":33}]))\n    .unwrap();\n    let positions = serde_json::from_value(json!([{\"id\":\"seed-position\",\"symbol\":\"SEED\",\n        \"side\":\"long\",\"entryPrice\":19.5,\"notional\":39,\"leverage\":2,\n        \"unrealizedPnl\":3.25,\"contracts\":2,\"liquidationPrice\":7.5}]))\n    .unwrap();\n    Store::update(\n        &*h.store,\n        StoreUpdate {\n            orders: Some(orders),\n            positions: Some(positions),\n            ..Default::default()\n        },\n        false,\n    )\n    .unwrap();\n    let notifications = Rc::new(Cell::new(0));\n    let watched = notifications.clone();\n    let _unsubscribe = Store::subscribe(\n        &*h.store,\n        Box::new(move |_, _| {\n            watched.set(watched.get() + 1);\n            Ok(())\n        }),\n    );\n    let events = Rc::new(Cell::new(0));\n    for name in [\"update\", \"error\", \"log\"] {\n        let watched = events.clone();\n        h.exchange.base().on(\n            name,\n            Rc::new(move |_, _| {\n                watched.set(watched.get() + 1);\n                Ok(())\n            }),\n        );\n    }\n    let snapshot = || {\n        let balance = h.store.balance();\n        (\n            balance.clone(),\n            [\n                balance.used.to_bits(),\n                balance.free.to_bits(),\n                balance.total.to_bits(),\n                balance.upnl.to_bits(),\n            ],\n            h.store.orders().to_vec(),\n            h.store.positions().to_vec(),\n            h.store.markets().to_vec(),\n            h.store.tickers().to_vec(),\n        )\n    };\n    let before = snapshot();\n    let options = h.exchange.base().options();\n    let reports = h.runtime.reports.borrow().len();\n    let now = h.runtime.now.get().to_bits();\n    let sockets = h.runtime.sockets.borrow().len();\n    let error = h.drive(<$type as safe_cex_exchange::exchange::Exchange>::fetch_symbol_max_leverage(h.exchange.as_ref(),$value[\"symbol\"].as_str().unwrap().to_owned())).unwrap_err();\n    json!({\"error\":error.message,\"error_name\":error.name,\"http\":h.http.requests.borrow().len(),\n        \"state_unchanged\":before==snapshot(),\"options_unchanged\":options==h.exchange.base().options(),\n        \"notifications\":notifications.get(),\"events\":events.get(),\n        \"reports_unchanged\":reports==h.runtime.reports.borrow().len(),\n        \"sockets_unchanged\":sockets==h.runtime.sockets.borrow().len(),\"now_unchanged\":now==h.runtime.now.get().to_bits()})\n}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          },
+          {
+            "input": {
+              "symbol": ""
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "set_leverage",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "leverage",
+                {
+                  "primitive": "f64"
+                }
+              ],
+              [
+                "side",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::PositionSide",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the exact concrete Exchange method on a real constructed receiver; inspect native fields and actual HTTP effects.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-exchange-fixture.rs\"));}let alternate=$value==true;let h=fx::setup(alternate);let venue:&$type=h.exchange.as_ref();let symbol=if alternate{\"ETHUSDT\"}else{\"BTCUSDT\"};h.drive(<$type as safe_cex_exchange::exchange::Exchange>::set_leverage(venue,symbol.into(),if alternate{13.0}else{7.0},None)).unwrap();let posted=fx::posted(&h,\"/api/v2/mix/account/set-leverage\");serde_json::json!({\"symbol\":posted[\"symbol\"],\"leverageBits\":format!(\"{:016x}\",posted[\"leverage\"].as_f64().unwrap().to_bits()),\"posts\":h.http.calls(\"/api/v2/mix/account/set-leverage\").len(),\"positionReads\":h.http.calls(\"/api/v2/mix/position/all-position\").len()})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "symbol": "BTCUSDT",
+              "leverageBits": "401c000000000000",
+              "posts": 1,
+              "positionReads": 1
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "symbol": "ETHUSDT",
+              "leverageBits": "402a000000000000",
+              "posts": 1,
+              "positionReads": 1
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_position_mode",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "hedged",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the exact concrete Exchange method on a real constructed receiver; inspect native fields and actual HTTP effects.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-exchange-fixture.rs\"));}let alternate=$value==true;let h=fx::setup(alternate);let venue:&$type=h.exchange.as_ref();h.drive(<$type as safe_cex_exchange::exchange::Exchange>::change_position_mode(venue,alternate,None)).unwrap();let posted=fx::posted(&h,\"/api/v2/mix/account/set-position-mode\");serde_json::json!({\"mode\":posted[\"posMode\"],\"product\":posted[\"productType\"],\"posts\":h.http.calls(\"/api/v2/mix/account/set-position-mode\").len()})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "mode": "one_way_mode",
+              "product": "usdt-futures",
+              "posts": 1
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "mode": "hedge_mode",
+              "product": "usdt-futures",
+              "posts": 1
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_margin_type",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "isolated",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Invoke the exact concrete Exchange method on a real constructed receiver; inspect native fields and actual HTTP effects.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/bitget-exchange-fixture.rs\"));}let alternate=$value==true;let h=fx::setup(alternate);let venue:&$type=h.exchange.as_ref();let symbol=if alternate{\"ETHUSDT\"}else{\"BTCUSDT\"};h.drive(<$type as safe_cex_exchange::exchange::Exchange>::change_margin_type(venue,alternate,Some(symbol.into()))).unwrap();let posted=fx::posted(&h,\"/api/v2/mix/account/set-margin-mode\");serde_json::json!({\"symbol\":posted[\"symbol\"],\"marginMode\":posted[\"marginMode\"],\"posts\":h.http.calls(\"/api/v2/mix/account/set-margin-mode\").len()})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "symbol": "BTCUSDT",
+              "marginMode": "crossed",
+              "posts": 1
+            }
+          },
+          {
+            "input": true,
+            "output": {
+              "symbol": "ETHUSDT",
+              "marginMode": "isolated",
+              "posts": 1
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_public_trades",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "_limit",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::PublicTrade",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the exact source-inherited constant refusal with distinct genuine inputs; native error and no-effect observations are independently pinned by the reviewed inherited-method policy.",
+        "constantOutput": true,
+        "call": "{ #[allow(dead_code)] mod fixture {use crate as safe_cex_venue_bitget;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/binding_harness.rs\"));} use safe_cex_exchange::exchange::Exchange;use safe_cex_store::{Store,StoreUpdate};use serde_json::json;use std::{cell::Cell,rc::Rc};let h=fixture::harness(safe_cex_types::ExchangeName::Bitget,fixture::options(),|_|{});\n    // Synthetic finite seeds are independent of the venue being observed.\n    let orders = serde_json::from_value(json!([{\"id\":\"seed-order\",\"symbol\":\"SEED\",\n        \"status\":\"open\",\"type\":\"limit\",\"side\":\"buy\",\"price\":17.5,\"amount\":2,\n        \"filled\":0.5,\"remaining\":1.5,\"reduceOnly\":false,\"lastUpdate\":33}]))\n    .unwrap();\n    let positions = serde_json::from_value(json!([{\"id\":\"seed-position\",\"symbol\":\"SEED\",\n        \"side\":\"long\",\"entryPrice\":19.5,\"notional\":39,\"leverage\":2,\n        \"unrealizedPnl\":3.25,\"contracts\":2,\"liquidationPrice\":7.5}]))\n    .unwrap();\n    Store::update(\n        &*h.store,\n        StoreUpdate {\n            orders: Some(orders),\n            positions: Some(positions),\n            ..Default::default()\n        },\n        false,\n    )\n    .unwrap();\n    let notifications = Rc::new(Cell::new(0));\n    let watched = notifications.clone();\n    let _unsubscribe = Store::subscribe(\n        &*h.store,\n        Box::new(move |_, _| {\n            watched.set(watched.get() + 1);\n            Ok(())\n        }),\n    );\n    let events = Rc::new(Cell::new(0));\n    for name in [\"update\", \"error\", \"log\"] {\n        let watched = events.clone();\n        h.exchange.base().on(\n            name,\n            Rc::new(move |_, _| {\n                watched.set(watched.get() + 1);\n                Ok(())\n            }),\n        );\n    }\n    let snapshot = || {\n        let balance = h.store.balance();\n        (\n            balance.clone(),\n            [\n                balance.used.to_bits(),\n                balance.free.to_bits(),\n                balance.total.to_bits(),\n                balance.upnl.to_bits(),\n            ],\n            h.store.orders().to_vec(),\n            h.store.positions().to_vec(),\n            h.store.markets().to_vec(),\n            h.store.tickers().to_vec(),\n        )\n    };\n    let before = snapshot();\n    let options = h.exchange.base().options();\n    let reports = h.runtime.reports.borrow().len();\n    let now = h.runtime.now.get().to_bits();\n    let sockets = h.runtime.sockets.borrow().len();\n    let error = h.drive(<$type as safe_cex_exchange::exchange::Exchange>::fetch_public_trades(h.exchange.as_ref(),$value[\"symbol\"].as_str().unwrap().to_owned(),$value[\"limit\"].as_f64())).unwrap_err();\n    json!({\"error\":error.message,\"error_name\":error.name,\"http\":h.http.requests.borrow().len(),\n        \"state_unchanged\":before==snapshot(),\"options_unchanged\":options==h.exchange.base().options(),\n        \"notifications\":notifications.get(),\"events\":events.get(),\n        \"reports_unchanged\":reports==h.runtime.reports.borrow().len(),\n        \"sockets_unchanged\":sockets==h.runtime.sockets.borrow().len(),\"now_unchanged\":now==h.runtime.now.get().to_bits()})\n}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "limit": null
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          },
+          {
+            "input": {
+              "symbol": "",
+              "limit": 3
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          }
+        ]
+      }
+    ]
   }
 }
