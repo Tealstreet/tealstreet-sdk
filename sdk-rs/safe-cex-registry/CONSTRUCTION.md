@@ -4,7 +4,7 @@ Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bit
 `bitgetusdc`), `bitunix`, `blofin`, Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
 the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
-`okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
+`okxeu`, `okxeudemo`), and `woo`, 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
 (crate layout, "Constructors and loaders live in `safe-cex-registry`"; P4 exit,
 "a tier-1 account on the Rust path behind a flag").
@@ -49,6 +49,10 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     `rest_http_host` over a fresh terminal adapter.
   - `binancepm` and `binancespot`, built with `BinancePMExchange::new` and
     `BinanceSpotExchange::new` on the same `RustVenueHost::binance` inputs.
+  - `woo`, built with the existing production `WooExchange::new` and caller
+    options/Store. Its dependencies use the shared signed HTTP host, runtime and
+    external-data factory. The native construction witness verifies the exact
+    account-read HMAC on a local HTTP server.
 - **Dependencies:** `safe-cex-registry` gains direct dependencies on those venue
   crates. The edges go downward (registry is above venues), but layering alone
   does not allow them: `layers.json` `registryConstructors` lists exactly the
@@ -81,7 +85,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 
 When a venue lane finishes binding its class, it adds that venue in its own small
 follow-up PR. Expected next: `bybit`, `kucoin`, `mexc`, `lighter`
-and `woo`.
+and `weex`.
 
 Each follow-up does four things:
 - adds one `RUST_VENUES` entry;

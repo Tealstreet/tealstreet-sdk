@@ -84,7 +84,9 @@ Binance and OKX on a local gateway socket.
 installs the remote signing adapter on every client and signs Spot ws-auth
 through it. OKX-family, BloFin and Bitunix also share that hosted account for
 HTTP and private websocket auth. Coinbase and Coinbase Spot use the same shared
-hosted signer for HTTP and native JWT websocket subscriptions. The JS host binds its exchange name during
+hosted signer for HTTP and native JWT websocket subscriptions. WOO is registered
+through its existing production binding and the same signed HTTP host; its local
+account-read test verifies the actual HMAC preimage. The JS host binds its exchange name during
 BaseExchange construction and injects the same signer into options and core
 availability; it refuses reuse for a different exchange. Bitunix retains the
 account name in its private auth request. Backpack still refuses hosted signing.

@@ -26,6 +26,7 @@ use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
+use safe_cex_venue_woo::{WooDependencies, WooExchange};
 use std::rc::Rc;
 
 /// What `BackpackExchange::new` takes besides the BaseExchange the registry builds.
@@ -77,6 +78,11 @@ pub trait RustVenueHost {
     /// Optional hosted account capability; no host-local secret is required.
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
+    }
+    fn woo(&self) -> Result<WooDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "WOO dependencies were not supplied by this RustVenueHost",
+        ))
     }
     fn coinbase(&self) -> Result<CoinbaseDependencies, ExchangeError> {
         Err(ExchangeError::new(
@@ -131,6 +137,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Woo, woo_constructor),
 ];
 
 pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -210,6 +217,12 @@ fn external_factory(
             },
         )),
     }
+}
+
+pub fn woo_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(WooExchange::new(name, options, store, host.woo()?)?)
+    })
 }
 
 pub fn coinbase_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
