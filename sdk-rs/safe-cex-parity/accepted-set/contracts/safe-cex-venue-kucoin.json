@@ -40861,5 +40861,2465 @@
       }
     ],
     "evidence": "Read actual request/currency/options composition, strict code and fallback paths, and four numeric field accesses. Execute the actual shared VM parseFloat capability with host Get/truthy fallback for numeric conversion; independent balances and currencies observe actual native field bits, signed zero and sent currency params. Execute the actual production function; inspect native primitive/field/variant/effect observations without serializing and redecoding a returned owner. Scripted transport/callbacks supply I/O only."
+  },
+  "safe_cex_venue_kucoin::kucoin_exchange::KucoinExchange": {
+    "shape": "observed",
+    "evidence": "Reviewed full concrete KuCoin binding and all10 selected compiler APIs. Constructor remains typed; all9 selected raw trait methods retain actual native adapters. Ordinary methods inspect native models, real HTTP/state effects and connected socket callbacks/cleanup. Six genuine constant/error entrypoints preserve honest equal outputs and require exact separately reviewed shared policy; no dropped API, raw-to-typed relabeling, replacement venue body or output padding. All12 ordinary trait adapters have executed natively (24 genuine inputs); the6 constant/refusal adapters executed separately (12 inputs). Formal complete-owner native/Wasm receipts remain pending exact shared policy support.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "parts",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::base_exchange::BaseExchangeParts",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "deps",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::kucoin_exchange::KucoinDependencies",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "generic": "Self"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "BaseExchangeParts and KucoinDependencies are typed options/store/runtime/executable capabilities. Every observed method below constructs the actual concrete class through this constructor."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_positions",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbols",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Position",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the literal concrete Exchange::fetch_positions on two independently scripted raw position responses or typed Spot market seeds; observe actual native model fields, variants and f64 bits, retaining source parseInt leverage truncation.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::futures();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));h.wire.script(\"GET\",\"/api/v1/positions\",serde_json::json!({\"code\":\"200000\",\"data\":[{\"symbol\":api,\"currentQty\":$value[\"qty\"],\"markPrice\":\"100\",\"avgEntryPrice\":\"99\",\"leverage\":$value[\"leverage\"],\"unrealisedPnl\":\"1.5\",\"liquidationPrice\":\"50\",\"marginMode\":\"CROSS\",\"positionSide\":\"BOTH\"}]}));let native=fx::io::drive(&h.runtime,<$type as Exchange>::fetch_positions(venue.as_ref(),Some(vec![symbol.into()]))).unwrap();let p=&native[0];serde_json::json!({\"count\":native.len(),\"symbol\":p.symbol,\"contractsBits\":format!(\"{:016x}\",p.contracts.to_bits()),\"leverageBits\":format!(\"{:016x}\",p.leverage.to_bits()),\"side\":format!(\"{:?}\",p.side),\"mode\":format!(\"{:?}\",p.position_mode),\"margin\":format!(\"{:?}\",p.margin_type)})}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "api": "XBTUSDTM",
+              "qty": 3,
+              "leverage": 17.25
+            },
+            "output": {
+              "count": 1,
+              "symbol": "BTCUSDT",
+              "contractsBits": "3ff8000000000000",
+              "leverageBits": "4031000000000000",
+              "side": "Long",
+              "mode": "Some(OneWay)",
+              "margin": "Some(Cross)"
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETHUSDT",
+              "api": "ETHUSDTM",
+              "qty": -5,
+              "leverage": 29.5
+            },
+            "output": {
+              "count": 1,
+              "symbol": "ETHUSDT",
+              "contractsBits": "4004000000000000",
+              "leverageBits": "403d000000000000",
+              "side": "Short",
+              "mode": "Some(OneWay)",
+              "margin": "Some(Cross)"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_symbols",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Order",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Call actual concrete fetch_orders with genuine symbol arguments and two independent successful REST order books, then inspect native mapped Order identities/enums/numeric bits rather than a serialized owner.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::futures();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));h.wire.script(\"GET\",\"/api/v1/orders\",serde_json::json!({\"code\":\"200000\",\"data\":{\"items\":[$value[\"row\"]]}}));h.wire.script(\"GET\",\"/api/v1/stopOrders\",serde_json::json!({\"code\":\"200000\",\"data\":{\"items\":[]}}));let native=fx::io::drive(&h.runtime,<$type as Exchange>::fetch_orders(venue.as_ref(),Some(vec![symbol.into()])));serde_json::json!({\"ok\":native.is_ok(),\"orders\":native.unwrap().iter().map(fx::order).collect::<Vec<_>>()})}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "api": "XBTUSDTM",
+              "row": {
+                "id": "future-a",
+                "symbol": "XBTUSDTM",
+                "price": "17.25",
+                "size": 5,
+                "filledSize": 1,
+                "side": "buy",
+                "status": "open",
+                "type": "limit",
+                "timeInForce": "GTC",
+                "createdAt": 33,
+                "reduceOnly": false
+              }
+            },
+            "output": {
+              "ok": true,
+              "orders": [
+                {
+                  "id": "future-a",
+                  "symbol": "BTCUSDT",
+                  "side": "Buy",
+                  "type": "Limit",
+                  "status": "Open",
+                  "tif": "Some(GoodTillCancel)",
+                  "bits": [
+                    "4031400000000000",
+                    "4004000000000000",
+                    "3fe0000000000000",
+                    "4000000000000000",
+                    "4040800000000000"
+                  ],
+                  "reduce": false,
+                  "remainingNativeBits": "4010000000000000",
+                  "infoId": "future-a"
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETHUSDT",
+              "api": "ETHUSDTM",
+              "row": {
+                "id": "future-b",
+                "symbol": "ETHUSDTM",
+                "price": "29.5",
+                "size": 7,
+                "filledSize": 2,
+                "side": "sell",
+                "status": "open",
+                "type": "limit",
+                "timeInForce": "GTC",
+                "createdAt": 33,
+                "reduceOnly": false
+              }
+            },
+            "output": {
+              "ok": true,
+              "orders": [
+                {
+                  "id": "future-b",
+                  "symbol": "ETHUSDT",
+                  "side": "Sell",
+                  "type": "Limit",
+                  "status": "Open",
+                  "tif": "Some(GoodTillCancel)",
+                  "bits": [
+                    "403d800000000000",
+                    "400c000000000000",
+                    "3ff0000000000000",
+                    "4004000000000000",
+                    "4040800000000000"
+                  ],
+                  "reduce": false,
+                  "remainingNativeBits": "4014000000000000",
+                  "infoId": "future-b"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_symbol_max_leverage",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Exact individually reviewed source constant or source-inherited refusal; execute the real receiver and preserve honest equal outputs with native state/effect witnesses. Shared policy review required.",
+        "constantOutput": true,
+        "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::futures(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_symbol_max_leverage(receiver,symbol).await.map(|_|()) })) }",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT"
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          },
+          {
+            "input": {
+              "symbol": ""
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "set_leverage",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "leverage",
+                {
+                  "primitive": "f64"
+                }
+              ],
+              [
+                "_side",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::PositionSide",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual concrete method and inspect native typed Store leverage changes for Spot or actual cross-leverage HTTP payloads for a positions-loaded Futures fixture, with independent symbols and target leverage inputs.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::futures();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));h.wire.script(\"GET\",\"/api/v1/positions\",serde_json::json!({\"code\":\"200000\",\"data\":[{\"symbol\":api,\"currentQty\":$value[\"qty\"],\"markPrice\":\"100\",\"avgEntryPrice\":\"99\",\"leverage\":$value[\"leverage\"],\"unrealisedPnl\":\"1.5\",\"liquidationPrice\":\"50\",\"marginMode\":\"CROSS\",\"positionSide\":\"BOTH\"}]}));let mut loaded=h.store.loaded().clone();loaded.positions=true;safe_cex_store::Store::update(h.store.as_ref(),safe_cex_store::StoreUpdate{loaded:Some(loaded),..Default::default()},false).unwrap();h.wire.script(\"POST\",\"/api/v2/changeCrossUserLeverage\",serde_json::json!({\"code\":\"200000\",\"data\":true}));let native=fx::io::drive(&h.runtime,<$type as Exchange>::set_leverage(venue.as_ref(),symbol.into(),$value[\"target\"].as_f64().unwrap(),None));let requests=h.wire.take();let post=requests.iter().find(|r|r.0==\"POST\"&&r.1==\"/api/v2/changeCrossUserLeverage\").unwrap_or_else(||panic!(\"native result={native:?}; wire={requests:?}; reports={:?}\",h.runtime.errors.borrow()));serde_json::json!({\"ok\":native.is_ok(),\"post\":post.2})}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "api": "XBTUSDTM",
+              "qty": 3,
+              "leverage": 2,
+              "target": 17.5
+            },
+            "output": {
+              "ok": true,
+              "post": {
+                "symbol": "XBTUSDTM",
+                "leverage": "17.5"
+              }
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETHUSDT",
+              "api": "ETHUSDTM",
+              "qty": 3,
+              "leverage": 2,
+              "target": 29.5
+            },
+            "output": {
+              "ok": true,
+              "post": {
+                "symbol": "ETHUSDTM",
+                "leverage": "29.5"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_position_mode",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "hedged",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "_symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual flat-account mode switch for both genuine booleans; inspect actual native HTTP request bodies after position reads, without echoed fixture outputs.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::futures();h.wire.script(\"GET\",\"/api/v1/positions\",serde_json::json!({\"code\":\"200000\",\"data\":[]}));h.wire.script(\"POST\",\"/api/v2/position/switchPositionMode\",serde_json::json!({\"code\":\"200000\",\"data\":{\"positionMode\":\"1\"}}));let native=fx::io::drive(&h.runtime,<$type as Exchange>::change_position_mode(venue.as_ref(),$value.as_bool().unwrap(),None));let requests=h.wire.take();let post=requests.iter().find(|r|r.0==\"POST\"&&r.1==\"/api/v2/position/switchPositionMode\").unwrap();serde_json::json!({\"ok\":native.is_ok(),\"post\":post.2})}",
+        "cases": [
+          {
+            "input": true,
+            "output": {
+              "ok": true,
+              "post": {
+                "positionMode": "1"
+              }
+            }
+          },
+          {
+            "input": false,
+            "output": {
+              "ok": true,
+              "post": {
+                "positionMode": "0"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_margin_type",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "isolated",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the real concrete margin-mode change and refresh for two genuine symbol/mode inputs; inspect the actual sent symbol and ISOLATED/CROSS payload.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::futures();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));h.wire.script(\"GET\",\"/api/v1/positions\",serde_json::json!({\"code\":\"200000\",\"data\":[{\"symbol\":api,\"currentQty\":$value[\"qty\"],\"markPrice\":\"100\",\"avgEntryPrice\":\"99\",\"leverage\":$value[\"leverage\"],\"unrealisedPnl\":\"1.5\",\"liquidationPrice\":\"50\",\"marginMode\":\"CROSS\",\"positionSide\":\"BOTH\"}]}));h.wire.script(\"POST\",\"/api/v2/position/changeMarginMode\",serde_json::json!({\"code\":\"200000\",\"data\":true}));let native=fx::io::drive(&h.runtime,<$type as Exchange>::change_margin_type(venue.as_ref(),$value[\"isolated\"].as_bool().unwrap(),Some(symbol.into())));let requests=h.wire.take();let post=requests.iter().find(|r|r.0==\"POST\"&&r.1==\"/api/v2/position/changeMarginMode\").unwrap();serde_json::json!({\"ok\":native.is_ok(),\"post\":post.2})}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "api": "XBTUSDTM",
+              "qty": 3,
+              "leverage": 2,
+              "isolated": true
+            },
+            "output": {
+              "ok": true,
+              "post": {
+                "symbol": "XBTUSDTM",
+                "marginMode": "ISOLATED"
+              }
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETHUSDT",
+              "api": "ETHUSDTM",
+              "qty": 3,
+              "leverage": 2,
+              "isolated": false
+            },
+            "output": {
+              "ok": true,
+              "post": {
+                "symbol": "ETHUSDTM",
+                "marginMode": "CROSS"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "cancel_symbol_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute actual concrete cancel_symbol_orders and observe real DELETE transport effects for two independently seeded API-symbol identities.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::futures();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));h.wire.script(\"DELETE\",\"/api/v3/orders\",serde_json::json!({\"code\":\"200000\",\"data\":{}}));let native=fx::io::drive(&h.runtime,<$type as Exchange>::cancel_symbol_orders(venue.as_ref(),symbol.into()));let requests=h.wire.take();let request=requests.iter().find(|r|r.0==\"DELETE\"&&r.1==\"/api/v3/orders\").unwrap();serde_json::json!({\"ok\":native.is_ok(),\"method\":request.0,\"path\":request.1,\"params\":request.2})}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "api": "XBTUSDTM"
+            },
+            "output": {
+              "ok": true,
+              "method": "DELETE",
+              "path": "/api/v3/orders",
+              "params": {
+                "symbol": "XBTUSDTM"
+              }
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETHUSDT",
+              "api": "ETHUSDTM"
+            },
+            "output": {
+              "ok": true,
+              "method": "DELETE",
+              "path": "/api/v3/orders",
+              "params": {
+                "symbol": "ETHUSDTM"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_public_trades",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "_limit",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::PublicTrade",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Exact source-inherited constant error; preserve all real symbol/limit inputs and actual native Error/state/zero-HTTP observations pending finite shared-policy review.",
+        "constantOutput": true,
+        "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::futures(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); let limit=$value[\"limit\"].as_f64(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_public_trades(receiver,symbol,limit).await.map(|_|()) })) }",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "limit": null
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          },
+          {
+            "input": {
+              "symbol": "",
+              "limit": 3
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "listen_order_book",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "callback",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [
+                                            {
+                                              "resolved_path": {
+                                                "path": "safe_cex_types::OrderBook",
+                                                "args": null
+                                              }
+                                            }
+                                          ],
+                                          "output": null
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ListenerCleanup",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the literal concrete listener on a genuinely connected shared BaseWebSocket using scripted dial/event I/O only. Observe actual native callback field bits for two raw books; execute cleanup then deliver a real source socket message and prove no second callback. No venue method/getter replacement.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;use std::{cell::RefCell,rc::Rc};let (h,parts,deps,transport)=fx::io::connected_parts(safe_cex_types::ExchangeName::Kucoin);let venue=$type::new(parts,deps).unwrap();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));let price=$value[\"price\"].as_f64().unwrap();let amount=$value[\"amount\"].as_f64().unwrap();h.wire.script(\"POST\",\"/api/v1/bullet-public\",serde_json::json!({\"code\":\"200000\",\"data\":{\"token\":\"native-token\",\"instanceServers\":[{\"endpoint\":\"wss://native.invalid\",\"pingInterval\":18000}]}}));h.wire.script(\"GET\",\"/api/v1/level2/snapshot\",serde_json::json!({\"code\":\"200000\",\"data\":{\"bids\":[[price,amount]],\"asks\":[[price+1.0,amount+1.0]],\"sequence\":1}}));let socket=venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).unwrap();socket.connect_and_subscribe(false).unwrap();h.runtime.pump();h.runtime.pump();assert!(socket.is_connected());let received=Rc::new(RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));let callbacks=received.clone();let cleanup=<$type as Exchange>::listen_order_book(venue.as_ref(),symbol.into(),Rc::new(move |book|callbacks.borrow_mut().push(book))).unwrap();let frame=safe_cex_transport::socket::SocketFrame::Text(serde_json::json!({\"type\":\"message\",\"topic\":format!(\"/contractMarket/level2:{api}\"),\"data\":{\"bids\":[[price,amount]],\"asks\":[[price+1.0,amount+1.0]],\"sequence\":2}}).to_string());h.runtime.pump();h.runtime.pump();let count=received.borrow().len();let book=received.borrow()[0].clone();cleanup().unwrap();socket.on_message(&frame).unwrap();let after=received.borrow().len();let output=serde_json::json!({\"count\":count,\"afterCleanup\":after,\"bits\":([book.bids[0].price,book.bids[0].amount,book.asks[0].price,book.asks[0].amount].map(|v|format!(\"{:016x}\",v.to_bits()))),\"sockets\":transport.sockets.borrow().len()});venue.dispose().unwrap();output}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "api": "XBTUSDTM",
+              "price": 17.25,
+              "amount": 3.5
+            },
+            "output": {
+              "count": 1,
+              "afterCleanup": 1,
+              "bits": [
+                "4031400000000000",
+                "400c000000000000",
+                "4032400000000000",
+                "4012000000000000"
+              ],
+              "sockets": 1
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETHUSDT",
+              "api": "ETHUSDTM",
+              "price": 29.5,
+              "amount": 7.25
+            },
+            "output": {
+              "count": 1,
+              "afterCleanup": 1,
+              "bits": [
+                "403d800000000000",
+                "401d000000000000",
+                "403e800000000000",
+                "4020800000000000"
+              ],
+              "sockets": 1
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::kucoin_exchange::KucoinSpotExchange": {
+    "shape": "observed",
+    "evidence": "Reviewed full concrete KuCoin binding and all10 selected compiler APIs. Constructor remains typed; all9 selected raw trait methods retain actual native adapters. Ordinary methods inspect native models, real HTTP/state effects and connected socket callbacks/cleanup. Six genuine constant/error entrypoints preserve honest equal outputs and require exact separately reviewed shared policy; no dropped API, raw-to-typed relabeling, replacement venue body or output padding. All12 ordinary trait adapters have executed natively (24 genuine inputs); the6 constant/refusal adapters executed separately (12 inputs). Formal complete-owner native/Wasm receipts remain pending exact shared policy support.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "new",
+          "signature": {
+            "inputs": [
+              [
+                "parts",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::base_exchange::BaseExchangeParts",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "deps",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::kucoin_exchange::KucoinDependencies",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::rc::Rc",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "generic": "Self"
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "BaseExchangeParts and KucoinDependencies are typed options/store/runtime/executable capabilities. Every observed method below constructs the actual concrete class through this constructor."
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_positions",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbols",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Position",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the literal concrete Exchange::fetch_positions on two independently scripted raw position responses or typed Spot market seeds; observe actual native model fields, variants and f64 bits, retaining source parseInt leverage truncation.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::spot();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));let native=fx::io::drive(&h.runtime,<$type as Exchange>::fetch_positions(venue.as_ref(),Some(vec![symbol.into()]))).unwrap();let p=&native[0];serde_json::json!({\"count\":native.len(),\"symbol\":p.symbol,\"contractsBits\":format!(\"{:016x}\",p.contracts.to_bits()),\"leverageBits\":format!(\"{:016x}\",p.leverage.to_bits()),\"side\":format!(\"{:?}\",p.side),\"mode\":format!(\"{:?}\",p.position_mode),\"margin\":format!(\"{:?}\",p.margin_type)})}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTC-USDT",
+              "api": "BTC-USDT"
+            },
+            "output": {
+              "count": 1,
+              "symbol": "BTC-USDT",
+              "contractsBits": "0000000000000000",
+              "leverageBits": "3ff0000000000000",
+              "side": "Long",
+              "mode": "Some(OneWay)",
+              "margin": "Some(Isolated)"
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETH-USDT",
+              "api": "ETH-USDT"
+            },
+            "output": {
+              "count": 1,
+              "symbol": "ETH-USDT",
+              "contractsBits": "0000000000000000",
+              "leverageBits": "3ff0000000000000",
+              "side": "Long",
+              "mode": "Some(OneWay)",
+              "margin": "Some(Isolated)"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbols",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::Order",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Call actual concrete fetch_orders with genuine symbol arguments and two independent successful REST order books, then inspect native mapped Order identities/enums/numeric bits rather than a serialized owner.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::spot();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));h.wire.script(\"GET\",\"/api/v1/hf/orders/active/page\",serde_json::json!({\"code\":\"200000\",\"data\":{\"totalPage\":1,\"items\":[$value[\"row\"]]}}));let native=fx::io::drive(&h.runtime,<$type as Exchange>::fetch_orders(venue.as_ref(),Some(vec![symbol.into()])));serde_json::json!({\"ok\":native.is_ok(),\"orders\":native.unwrap().iter().map(fx::order).collect::<Vec<_>>()})}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTC-USDT",
+              "api": "BTC-USDT",
+              "row": {
+                "id": "spot-a",
+                "symbol": "BTC-USDT",
+                "price": "17.25",
+                "size": 5,
+                "filledSize": 1,
+                "side": "buy",
+                "status": "open",
+                "type": "limit",
+                "timeInForce": "GTC",
+                "createdAt": 33,
+                "reduceOnly": false
+              }
+            },
+            "output": {
+              "ok": true,
+              "orders": [
+                {
+                  "id": "spot-a",
+                  "symbol": "BTC-USDT",
+                  "side": "Buy",
+                  "type": "Limit",
+                  "status": "Open",
+                  "tif": "Some(GoodTillCancel)",
+                  "bits": [
+                    "4031400000000000",
+                    "4014000000000000",
+                    "3ff0000000000000",
+                    "4010000000000000",
+                    "4040800000000000"
+                  ],
+                  "reduce": false,
+                  "remainingNativeBits": null,
+                  "infoId": "spot-a"
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETH-USDT",
+              "api": "ETH-USDT",
+              "row": {
+                "id": "spot-b",
+                "symbol": "ETH-USDT",
+                "price": "29.5",
+                "size": 7,
+                "filledSize": 2,
+                "side": "sell",
+                "status": "open",
+                "type": "limit",
+                "timeInForce": "GTC",
+                "createdAt": 33,
+                "reduceOnly": false
+              }
+            },
+            "output": {
+              "ok": true,
+              "orders": [
+                {
+                  "id": "spot-b",
+                  "symbol": "ETH-USDT",
+                  "side": "Sell",
+                  "type": "Limit",
+                  "status": "Open",
+                  "tif": "Some(GoodTillCancel)",
+                  "bits": [
+                    "403d800000000000",
+                    "401c000000000000",
+                    "4000000000000000",
+                    "4014000000000000",
+                    "4040800000000000"
+                  ],
+                  "reduce": false,
+                  "remainingNativeBits": null,
+                  "infoId": "spot-b"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_symbol_max_leverage",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Exact individually reviewed source constant or source-inherited refusal; execute the real receiver and preserve honest equal outputs with native state/effect witnesses. Shared policy review required.",
+        "constantOutput": true,
+        "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-constant-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::spot(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned();fixture::observe(venue.as_ref(),&h,|receiver|<$type as Exchange>::fetch_symbol_max_leverage(receiver,symbol),|native|serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",native.to_bits())})) }",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTC-USDT"
+            },
+            "output": {
+              "native": {
+                "kind": "number",
+                "bits": "3ff0000000000000"
+              },
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          },
+          {
+            "input": {
+              "symbol": ""
+            },
+            "output": {
+              "native": {
+                "kind": "number",
+                "bits": "3ff0000000000000"
+              },
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "set_leverage",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "leverage",
+                {
+                  "primitive": "f64"
+                }
+              ],
+              [
+                "side",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::PositionSide",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual concrete method and inspect native typed Store leverage changes for Spot or actual cross-leverage HTTP payloads for a positions-loaded Futures fixture, with independent symbols and target leverage inputs.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::spot();let symbol=$value[\"symbol\"].as_str().unwrap();fx::io::drive(&h.runtime,<$type as Exchange>::set_leverage(venue.as_ref(),symbol.into(),$value[\"leverage\"].as_f64().unwrap(),Some(safe_cex_types::PositionSide::Long))).unwrap();let values=h.store.fetched_leverage();let leverage=values.get(symbol).unwrap();serde_json::json!({\"count\":values.len(),\"key\":values.keys().next().unwrap(),\"buyBits\":format!(\"{:016x}\",leverage.buy_leverage.to_bits()),\"sellBits\":format!(\"{:016x}\",leverage.sell_leverage.to_bits()),\"http\":h.wire.requests.lock().unwrap().len()})}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTC-USDT",
+              "leverage": 17.5
+            },
+            "output": {
+              "count": 1,
+              "key": "BTC-USDT",
+              "buyBits": "3ff0000000000000",
+              "sellBits": "3ff0000000000000",
+              "http": 0
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETH-USDT",
+              "leverage": 29.5
+            },
+            "output": {
+              "count": 1,
+              "key": "ETH-USDT",
+              "buyBits": "3ff0000000000000",
+              "sellBits": "3ff0000000000000",
+              "http": 0
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_position_mode",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "hedged",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual source-defined no-op resolves unit for both genuine argument combinations; retain native unit/unchanged-state/effect observations, pending exact finite policy review.",
+        "constantOutput": true,
+        "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-constant-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::spot(); let symbol=$value[\"symbol\"].as_str().map(str::to_owned);let flag=$value[\"flag\"].as_bool().unwrap();fixture::observe(venue.as_ref(),&h,|receiver|<$type as Exchange>::change_position_mode(receiver,flag,symbol),|()|serde_json::json!({\"kind\":\"unit\"})) }",
+        "cases": [
+          {
+            "input": {
+              "flag": true,
+              "symbol": "ETH-USDT"
+            },
+            "output": {
+              "native": {
+                "kind": "unit"
+              },
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          },
+          {
+            "input": {
+              "flag": false,
+              "symbol": null
+            },
+            "output": {
+              "native": {
+                "kind": "unit"
+              },
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "change_margin_type",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "isolated",
+                {
+                  "primitive": "bool"
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Actual source-defined no-op resolves unit for both genuine argument combinations; retain native unit/unchanged-state/effect observations, pending exact finite policy review.",
+        "constantOutput": true,
+        "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-constant-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::spot(); let symbol=$value[\"symbol\"].as_str().map(str::to_owned);let flag=$value[\"flag\"].as_bool().unwrap();fixture::observe(venue.as_ref(),&h,|receiver|<$type as Exchange>::change_margin_type(receiver,flag,symbol),|()|serde_json::json!({\"kind\":\"unit\"})) }",
+        "cases": [
+          {
+            "input": {
+              "flag": true,
+              "symbol": "BTC-USDT"
+            },
+            "output": {
+              "native": {
+                "kind": "unit"
+              },
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          },
+          {
+            "input": {
+              "flag": false,
+              "symbol": null
+            },
+            "output": {
+              "native": {
+                "kind": "unit"
+              },
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "cancel_symbol_orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute actual concrete cancel_symbol_orders and observe real DELETE transport effects for two independently seeded API-symbol identities.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;let (venue,h)=fx::io::spot();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));h.wire.script(\"DELETE\",\"/api/v1/hf/orders\",serde_json::json!({\"code\":\"200000\",\"data\":{}}));let native=fx::io::drive(&h.runtime,<$type as Exchange>::cancel_symbol_orders(venue.as_ref(),symbol.into()));let requests=h.wire.take();let request=requests.iter().find(|r|r.0==\"DELETE\"&&r.1==\"/api/v1/hf/orders\").unwrap();serde_json::json!({\"ok\":native.is_ok(),\"method\":request.0,\"path\":request.1,\"params\":request.2})}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTC-USDT",
+              "api": "API-A"
+            },
+            "output": {
+              "ok": true,
+              "method": "DELETE",
+              "path": "/api/v1/hf/orders",
+              "params": {
+                "symbol": "API-A"
+              }
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETH-USDT",
+              "api": "API-B"
+            },
+            "output": {
+              "ok": true,
+              "method": "DELETE",
+              "path": "/api/v1/hf/orders",
+              "params": {
+                "symbol": "API-B"
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "fetch_public_trades",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "_symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "_limit",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::ExchangeFuture",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "lifetime": "'_"
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::PublicTrade",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Exact source-inherited constant error; preserve all real symbol/limit inputs and actual native Error/state/zero-HTTP observations pending finite shared-policy review.",
+        "constantOutput": true,
+        "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::spot(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); let limit=$value[\"limit\"].as_f64(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_public_trades(receiver,symbol,limit).await.map(|_|()) })) }",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTC-USDT",
+              "limit": null
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          },
+          {
+            "input": {
+              "symbol": "",
+              "limit": 7
+            },
+            "output": {
+              "error": "Not implemented",
+              "error_name": "Error",
+              "http": 0,
+              "state_unchanged": true,
+              "options_unchanged": true,
+              "notifications": 0,
+              "events": 0,
+              "reports_unchanged": true,
+              "sockets_unchanged": true,
+              "now_unchanged": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_exchange::exchange::Exchange",
+          "name": "listen_order_book",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "callback",
+                {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::ops::function::Fn",
+                                      "args": {
+                                        "parenthesized": {
+                                          "inputs": [
+                                            {
+                                              "resolved_path": {
+                                                "path": "safe_cex_types::OrderBook",
+                                                "args": null
+                                              }
+                                            }
+                                          ],
+                                          "output": null
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ListenerCleanup",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::runtime::ExchangeError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the literal concrete listener on a genuinely connected shared BaseWebSocket using scripted dial/event I/O only. Observe actual native callback field bits for two raw books; execute cleanup then deliver a real source socket message and prove no second callback. No venue method/getter replacement.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;use std::{cell::RefCell,rc::Rc};let (h,parts,deps,transport)=fx::io::connected_parts(safe_cex_types::ExchangeName::Kucoinspot);let venue=$type::new(parts,deps).unwrap();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));let price=$value[\"price\"].as_f64().unwrap();let amount=$value[\"amount\"].as_f64().unwrap();h.wire.script(\"POST\",\"/api/v1/bullet-public\",serde_json::json!({\"code\":\"200000\",\"data\":{\"token\":\"native-token\",\"instanceServers\":[{\"endpoint\":\"wss://native.invalid\",\"pingInterval\":18000}]}}));let socket=venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).unwrap();socket.connect_and_subscribe(false).unwrap();h.runtime.pump();h.runtime.pump();assert!(socket.is_connected());let received=Rc::new(RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));let callbacks=received.clone();let cleanup=<$type as Exchange>::listen_order_book(venue.as_ref(),symbol.into(),Rc::new(move |book|callbacks.borrow_mut().push(book))).unwrap();let frame=safe_cex_transport::socket::SocketFrame::Text(serde_json::json!({\"type\":\"message\",\"topic\":format!(\"/spotMarket/level2Depth50:{symbol}\"),\"data\":{\"bids\":[[price,amount]],\"asks\":[[price+1.0,amount+1.0]],\"sequence\":2}}).to_string());socket.on_message(&frame).unwrap();let count=received.borrow().len();let book=received.borrow()[0].clone();cleanup().unwrap();socket.on_message(&frame).unwrap();let after=received.borrow().len();let output=serde_json::json!({\"count\":count,\"afterCleanup\":after,\"bits\":([book.bids[0].price,book.bids[0].amount,book.asks[0].price,book.asks[0].amount].map(|v|format!(\"{:016x}\",v.to_bits()))),\"sockets\":transport.sockets.borrow().len()});venue.dispose().unwrap();output}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTC-USDT",
+              "api": "BTC-USDT",
+              "price": 17.25,
+              "amount": 3.5
+            },
+            "output": {
+              "count": 1,
+              "afterCleanup": 1,
+              "bits": [
+                "4031400000000000",
+                "400c000000000000",
+                "4032400000000000",
+                "4012000000000000"
+              ],
+              "sockets": 1
+            }
+          },
+          {
+            "input": {
+              "symbol": "ETH-USDT",
+              "api": "ETH-USDT",
+              "price": 29.5,
+              "amount": 7.25
+            },
+            "output": {
+              "count": 1,
+              "afterCleanup": 1,
+              "bits": [
+                "403d800000000000",
+                "401d000000000000",
+                "403e800000000000",
+                "4020800000000000"
+              ],
+              "sockets": 1
+            }
+          }
+        ]
+      }
+    ]
   }
 }

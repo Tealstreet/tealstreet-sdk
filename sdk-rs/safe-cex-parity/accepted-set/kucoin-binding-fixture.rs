@@ -1,20 +1,16 @@
 // Accepted-set instrumentation: retain the existing scripted I/O and production
 // language operations. No venue method or decoder is replaced by this fixture.
-#[allow(dead_code)]
-pub mod io {
-    use crate as safe_cex_venue_kucoin;
-    include!(concat!(
-        env!("CARGO_MANIFEST_DIR"),
-        "/tests/support/exchange_runtime.rs"
-    ));
-}
+use crate as venue_crate;
+include!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs"
+));
 use safe_cex_exchange::js_runtime::{
     globals::{install_builtins, install_enums},
     library::install_library,
     scope::{Scope, ScopeShared},
     value::Js,
 };
-use std::{cell::RefCell, rc::Rc};
 
 pub fn host() -> Scope<crate::binding::Extra> {
     let runtime = Rc::new(io::Runtime::default());
@@ -77,67 +73,6 @@ pub fn primitive(
     }
 }
 
-pub fn market(id: &str, symbol: &str, contract_size: Option<f64>) -> safe_cex_types::Market {
-    use safe_cex_types::{
-        Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision,
-    };
-    Market {
-        id: id.into(),
-        symbol: symbol.into(),
-        pretty_symbol: None,
-        base: "NATIVE".into(),
-        quote: "USDT".into(),
-        active: true,
-        precision: MarketPrecision {
-            amount: 0.5,
-            price: 0.25,
-        },
-        limits: MarketLimits {
-            amount: MarketLimitsAmount {
-                min: 0.5,
-                max: 1000.0,
-            },
-            leverage: MarketLimitsLeverage {
-                min: 1.0,
-                max: 125.0,
-            },
-            price: None,
-        },
-        option: None,
-        contract_size,
-        is_expiring: None,
-        is_inverse: None,
-        is_spot: None,
-        is_perpetual: None,
-        is_read_only: None,
-        info: None,
-        taker_fee: None,
-        maker_fee: None,
-    }
-}
-
-pub fn seed_market(store: &dyn safe_cex_store::Store, market: safe_cex_types::Market) {
-    safe_cex_store::Store::update(
-        store,
-        safe_cex_store::StoreUpdate {
-            markets: Some(vec![market]),
-            ..Default::default()
-        },
-        false,
-    )
-    .unwrap();
-}
-
-pub fn order(value: &safe_cex_types::Order) -> serde_json::Value {
-    serde_json::json!({"id":value.id,"symbol":value.symbol,
-        "side":format!("{:?}",value.side),"type":format!("{:?}",value.r#type),
-        "status":format!("{:?}",value.status),"tif":format!("{:?}",value.time_in_force),
-        "bits":([value.price,value.amount,value.filled,value.remaining,value.last_update]
-            .map(|v|format!("{:016x}",v.to_bits()))),"reduce":value.reduce_only,
-        "remainingNativeBits":value.extra.as_ref().and_then(|v|v.remaining_native).map(|v|format!("{:016x}",v.to_bits())),
-        "infoId":value.info.as_ref().and_then(|v|v.get("id"))})
-}
-
 pub fn connect_read(
     value: &Js,
     key: &str,
@@ -154,26 +89,5 @@ pub fn connect_read(
         "?.endpoint" if value.is_nullish() => Ok(Js::Undefined),
         "?.endpoint" => value.get("endpoint"),
         _ => value.get(key),
-    }
-}
-
-pub fn ticker(symbol: &str, last: f64) -> safe_cex_types::Ticker {
-    safe_cex_types::Ticker {
-        id: "API".into(),
-        symbol: symbol.into(),
-        bid: 0.0,
-        ask: 0.0,
-        last,
-        mark: 0.0,
-        index: 0.0,
-        mid_price: None,
-        percentage: 0.0,
-        open_interest: 0.0,
-        funding_rate: 0.0,
-        funding_time: 0.0,
-        volume: 0.0,
-        quote_volume: 0.0,
-        timestamp: None,
-        info: None,
     }
 }
