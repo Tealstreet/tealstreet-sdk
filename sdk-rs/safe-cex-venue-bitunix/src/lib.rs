@@ -31,3 +31,11 @@ pub mod event_models;
 pub mod order_cancellation;
 pub mod orderbook_subscription;
 pub mod position_adapter;
+
+pub mod adapter;
+mod adapter_exchange;
+mod adapter_history;
+mod adapter_orders;
+mod adapter_rest;
+mod native_http;
+mod sockets;
