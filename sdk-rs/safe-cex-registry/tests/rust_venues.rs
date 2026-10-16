@@ -690,6 +690,8 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bitrue,
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
+            ExchangeName::Coinbase,
+            ExchangeName::Coinbasespot,
             ExchangeName::Kraken,
             ExchangeName::Krakenspot,
             ExchangeName::Okx,

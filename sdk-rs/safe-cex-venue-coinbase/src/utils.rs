@@ -255,6 +255,18 @@ pub struct CoinbasePemDecodeError;
 
 // ts: pemToPkcs8Der
 pub fn pem_to_pkcs8_der(pem: &str) -> Result<Vec<u8>, CoinbasePemDecodeError> {
+    pem_to_pkcs8_der_with(pem, |encoded| {
+        safe_cex_transport::codec::decode_base64(encoded).map_err(|_| CoinbasePemDecodeError)
+    })
+}
+
+/// The source body with its imported atob operation supplied separately. Native
+/// assembly keeps the decoder's original failure instead of rebuilding the pure
+/// facade's deliberately metadata-free unit error.
+pub(crate) fn pem_to_pkcs8_der_with<E>(
+    pem: &str,
+    decode: impl FnOnce(&str) -> Result<Vec<u8>, E>,
+) -> Result<Vec<u8>, E> {
     let is_pkcs8 = pem.contains("-----BEGIN PRIVATE KEY-----");
     // JS replace without /g removes only the first matching marker of each kind.
     let remove_first = |text: String, first: &str, second: &str| {
@@ -278,7 +290,7 @@ pub fn pem_to_pkcs8_der(pem: &str) -> Result<Vec<u8>, CoinbasePemDecodeError> {
         "-----END PRIVATE KEY-----",
     );
     let b64 = safe_cex_num::js_split_whitespace(&b64).concat();
-    let der = safe_cex_transport::codec::decode_base64(&b64).map_err(|_| CoinbasePemDecodeError)?;
+    let der = decode(&b64)?;
     if is_pkcs8 {
         return Ok(der);
     }
