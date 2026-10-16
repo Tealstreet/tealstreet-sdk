@@ -1,3 +1,41 @@
+# Eight account, market and ledger string-enum reviews
+
+Individually reviewed contracts cover `HyperliquidUserAbstractionMode`, both
+`MetaUniverseItem` margin/growth enums, `UserFundingDeltaType`,
+`UserNonFundingLedgerDeltaType`, `WsUserNonFundingLedgerUpdateType` and both
+`Hip3MarketInfo` margin/growth enums. Maintained TS lines 79-80, 104-105, 396,
+410, 633 and 666-667 define their exact tag sets. Each native declaration and
+private remote rename table matches its own TS declaration. The production
+String admissions and bodies remain unchanged.
+
+Native tests pass **8/8** for all 23 valid tags, exact native variants and wire
+spelling, JSON whitespace, every valid externally tagged map rejection and seven
+other forbidden values. Each input traverses text, qualified owned/borrowed Value
+and all three shared numeric ingress functions. Direct contract expressions pass
+**8/8**, with **110 independently authored cases / 660 native route observations**;
+variant/ordinal fields are read before serialization. Temporary probe files are
+removed after execution.
+
+`scripts/accepted-mode-controls.py`: **8 compiled named tagged-shape failures /
+8 restored passes; final 8/8 pass**. Each existing String admission is removed
+independently, forwarding directly to that owner's private remote decoder. Its
+named test fails on the admitted tagged object, and exact source restoration
+passes. No compiler error counts as negative evidence; `types.rs` is restored
+byte-for-byte. These are owner-specific native/default reviews, with no alias,
+private helper, local scope, dependency or target-matrix exemption.
+
+Master #349's four string owners are preserved alongside these eight: 49 owner
+contracts and two Clone reviews, **51 reviewed of 572 current obligations**, with
+**521 unreviewed**. Fresh discovery's additional `host_spot::class_pair` and
+`spot_binding::HyperliquidSpotExchange` remain explicit and unreviewed. Integrated native literal tests pass **12/12** after the master merge. The
+associated-projection policy review is separate #346; its ordinary refusal is
+not waived by this batch. Strict native all-targets clippy and formatting pass
+after integration. Fresh compiler API/static eligibility passes for all eight
+owners, retaining every original census key and both additional owners. The
+ordinary gate still stops at PrivateValue's exact associated projection; it
+emits no acceptance receipts. `parity:check` passes with 7459 rows, 17206 public
+items and zero findings.
+
 # Four string-enum contract reviews
 
 The contract shard adds individual reviews for `Tif`, `Tpsl`, `Grouping` and
