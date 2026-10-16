@@ -310,3 +310,11 @@ call is needed. This preserves the source's inherited event listeners while
 disposing public then private sockets. The binding lifecycle regression checks
 the flag and retained update listener; shared js_runtime's live-source disposal
 oracle checks ordering and abrupt completion.
+
+Native/default accepted-contract review for six concrete scalar wire records and
+eight finite carrier enum APIs is documented in RECORD_CARRIER_CONTRACT_REVIEW.md.
+The closed selector is scripts/record-carrier-contracts.mjs; native field/variant
+observations and mutation controls run independently of compiler shape discovery.
+This is fourteen original census owners and six specific Clone reviews; other
+owners, aliases, construction entries, locals, features and WASM execution remain
+separate obligations.

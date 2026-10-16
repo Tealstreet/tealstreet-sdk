@@ -1,0 +1,4716 @@
+{
+  "safe_cex_venue_cryptocom::wire::CryptocomInstrument": {
+    "shape": "map",
+    "sample": {
+      "symbol": "symbol-A",
+      "inst_type": "inst_type-A",
+      "display_name": "display_name-A",
+      "base_ccy": "base_ccy-A",
+      "quote_ccy": "quote_ccy-A",
+      "quote_decimals": -0.0,
+      "quantity_decimals": 17.5,
+      "price_tick_size": "price_tick_size-A",
+      "qty_tick_size": "qty_tick_size-A",
+      "max_leverage": "max_leverage-A",
+      "tradable": true,
+      "expiry_timestamp_ms": 31.5,
+      "beta_product": false,
+      "underlying_symbol": "underlying_symbol-A",
+      "contract_size": "contract_size-A",
+      "margin_buy_enabled": false,
+      "margin_sell_enabled": false
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "own_keys",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Enumerates original captured own string keys and current known-field presence on this already decoded concrete record; it admits no new raw value. Native observations execute the method and compare independently authored key order/presence."
+      }
+    ],
+    "evidence": "Reviewed actual cryptocom.types.ts declared fields and wire.rs capture/remote decoding. The concrete path already rejects complete valid positional arrays at the retained numeric capture, with an additional private remote object guard. Independent native observations inspect every scalar field, number bits, one-hot boolean cases where applicable, retained opaque value kinds/bits, captured keys, own_keys and actual Clone field preservation through six decoder paths. Existing shared UTF8, owned JSON snapshot and numeric boundaries remain; this is not raw JS identity, private-helper exemption or full crate coverage.",
+    "nativeObservation": {
+      "nativeFields": [
+        "symbol",
+        "inst_type",
+        "display_name",
+        "base_ccy",
+        "quote_ccy",
+        "quote_decimals_bits",
+        "quantity_decimals_bits",
+        "price_tick_size",
+        "qty_tick_size",
+        "max_leverage",
+        "tradable",
+        "expiry_timestamp_ms_bits",
+        "beta_product",
+        "underlying_symbol",
+        "contract_size",
+        "margin_buy_enabled",
+        "margin_sell_enabled",
+        "additional_fields",
+        "input_keys",
+        "own_keys"
+      ],
+      "call": "{fn native_json(value:&serde_json::Value)->serde_json::Value { match value {serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),serde_json::Value::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),serde_json::Value::String(s)=>serde_json::json!({\"kind\":\"string\",\"value\":s}),serde_json::Value::Number(_)=>{let n=safe_cex_num::numeric_ingress::js_value_as_f64(value).expect(\"retained native number\");serde_json::json!({\"kind\":\"number\",\"bits\":if n.is_nan(){\"NaN\".into()}else{format!(\"{:016x}\",n.to_bits())}})},serde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"items\":values.iter().map(native_json).collect::<Vec<_>>()}),serde_json::Value::Object(fields)=>{let fields=fields.iter().map(|(k,v)|(k.clone(),native_json(v))).collect::<serde_json::Map<_,_>>();serde_json::json!({\"kind\":\"object\",\"fields\":fields})}}}fn observe(v:&$type)->serde_json::Value {let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"symbol\".into(),serde_json::json!(v.symbol));out.insert(\"inst_type\".into(),serde_json::json!(v.inst_type));out.insert(\"display_name\".into(),serde_json::json!(v.display_name));out.insert(\"base_ccy\".into(),serde_json::json!(v.base_ccy));out.insert(\"quote_ccy\".into(),serde_json::json!(v.quote_ccy));out.insert(\"quote_decimals_bits\".into(),serde_json::json!(format!(\"{:016x}\",v.quote_decimals.to_bits())));out.insert(\"quantity_decimals_bits\".into(),serde_json::json!(format!(\"{:016x}\",v.quantity_decimals.to_bits())));out.insert(\"price_tick_size\".into(),serde_json::json!(v.price_tick_size));out.insert(\"qty_tick_size\".into(),serde_json::json!(v.qty_tick_size));out.insert(\"max_leverage\".into(),serde_json::json!(v.max_leverage));out.insert(\"tradable\".into(),serde_json::json!(v.tradable));out.insert(\"expiry_timestamp_ms_bits\".into(),serde_json::json!(format!(\"{:016x}\",v.expiry_timestamp_ms.to_bits())));out.insert(\"beta_product\".into(),serde_json::json!(v.beta_product));out.insert(\"underlying_symbol\".into(),serde_json::json!(v.underlying_symbol));out.insert(\"contract_size\".into(),serde_json::json!(v.contract_size));out.insert(\"margin_buy_enabled\".into(),serde_json::json!(v.margin_buy_enabled));out.insert(\"margin_sell_enabled\".into(),serde_json::json!(v.margin_sell_enabled));out.insert(\"additional_fields\".into(),native_json(&v.additional_fields));out.insert(\"input_keys\".into(),serde_json::json!(v.input_keys));out.insert(\"own_keys\".into(),serde_json::json!(v.own_keys()));serde_json::Value::Object(out)}let raw=$value.as_str().expect(\"authored JSON record text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>{let observed=observe(&decoded);assert_eq!(observed,observe(&decoded.clone()),\"actual native Clone field preservation\");observed},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"record entry paths differ\");}observations[0].clone()}",
+      "cases": [
+        {
+          "input": "{\"symbol\":\"symbol-A\",\"inst_type\":\"inst_type-A\",\"display_name\":\"display_name-A\",\"base_ccy\":\"base_ccy-A\",\"quote_ccy\":\"quote_ccy-A\",\"quote_decimals\":-0.0,\"quantity_decimals\":17.5,\"price_tick_size\":\"price_tick_size-A\",\"qty_tick_size\":\"qty_tick_size-A\",\"max_leverage\":\"max_leverage-A\",\"tradable\":true,\"expiry_timestamp_ms\":31.5,\"beta_product\":false,\"underlying_symbol\":\"underlying_symbol-A\",\"contract_size\":\"contract_size-A\",\"margin_buy_enabled\":false,\"margin_sell_enabled\":false,\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "symbol": "symbol-A",
+            "inst_type": "inst_type-A",
+            "display_name": "display_name-A",
+            "base_ccy": "base_ccy-A",
+            "quote_ccy": "quote_ccy-A",
+            "quote_decimals_bits": "8000000000000000",
+            "quantity_decimals_bits": "4031800000000000",
+            "price_tick_size": "price_tick_size-A",
+            "qty_tick_size": "qty_tick_size-A",
+            "max_leverage": "max_leverage-A",
+            "tradable": true,
+            "expiry_timestamp_ms_bits": "403f800000000000",
+            "beta_product": false,
+            "underlying_symbol": "underlying_symbol-A",
+            "contract_size": "contract_size-A",
+            "margin_buy_enabled": false,
+            "margin_sell_enabled": false,
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "symbol",
+              "inst_type",
+              "display_name",
+              "base_ccy",
+              "quote_ccy",
+              "quote_decimals",
+              "quantity_decimals",
+              "price_tick_size",
+              "qty_tick_size",
+              "max_leverage",
+              "tradable",
+              "expiry_timestamp_ms",
+              "beta_product",
+              "underlying_symbol",
+              "contract_size",
+              "margin_buy_enabled",
+              "margin_sell_enabled",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "symbol",
+              "inst_type",
+              "display_name",
+              "base_ccy",
+              "quote_ccy",
+              "quote_decimals",
+              "quantity_decimals",
+              "price_tick_size",
+              "qty_tick_size",
+              "max_leverage",
+              "tradable",
+              "expiry_timestamp_ms",
+              "beta_product",
+              "underlying_symbol",
+              "contract_size",
+              "margin_buy_enabled",
+              "margin_sell_enabled",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "{\"opaqueArray\":[-0.0,\"opaque\"],\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueZero\":-0.0,\"opaqueNumber\":17.5,\"margin_sell_enabled\":false,\"margin_buy_enabled\":false,\"contract_size\":\"contract_size-A\",\"underlying_symbol\":\"underlying_symbol-A\",\"beta_product\":false,\"expiry_timestamp_ms\":31.5,\"tradable\":true,\"max_leverage\":\"max_leverage-A\",\"qty_tick_size\":\"qty_tick_size-A\",\"price_tick_size\":\"price_tick_size-A\",\"quantity_decimals\":17.5,\"quote_decimals\":-0.0,\"quote_ccy\":\"quote_ccy-A\",\"base_ccy\":\"base_ccy-A\",\"display_name\":\"display_name-A\",\"inst_type\":\"inst_type-A\",\"symbol\":\"symbol-A\"}",
+          "output": {
+            "ok": true,
+            "symbol": "symbol-A",
+            "inst_type": "inst_type-A",
+            "display_name": "display_name-A",
+            "base_ccy": "base_ccy-A",
+            "quote_ccy": "quote_ccy-A",
+            "quote_decimals_bits": "8000000000000000",
+            "quantity_decimals_bits": "4031800000000000",
+            "price_tick_size": "price_tick_size-A",
+            "qty_tick_size": "qty_tick_size-A",
+            "max_leverage": "max_leverage-A",
+            "tradable": true,
+            "expiry_timestamp_ms_bits": "403f800000000000",
+            "beta_product": false,
+            "underlying_symbol": "underlying_symbol-A",
+            "contract_size": "contract_size-A",
+            "margin_buy_enabled": false,
+            "margin_sell_enabled": false,
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "margin_sell_enabled",
+              "margin_buy_enabled",
+              "contract_size",
+              "underlying_symbol",
+              "beta_product",
+              "expiry_timestamp_ms",
+              "tradable",
+              "max_leverage",
+              "qty_tick_size",
+              "price_tick_size",
+              "quantity_decimals",
+              "quote_decimals",
+              "quote_ccy",
+              "base_ccy",
+              "display_name",
+              "inst_type",
+              "symbol"
+            ],
+            "own_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "margin_sell_enabled",
+              "margin_buy_enabled",
+              "contract_size",
+              "underlying_symbol",
+              "beta_product",
+              "expiry_timestamp_ms",
+              "tradable",
+              "max_leverage",
+              "qty_tick_size",
+              "price_tick_size",
+              "quantity_decimals",
+              "quote_decimals",
+              "quote_ccy",
+              "base_ccy",
+              "display_name",
+              "inst_type",
+              "symbol"
+            ]
+          }
+        },
+        {
+          "input": "{\"symbol\":\"symbol-A\",\"inst_type\":\"inst_type-A\",\"display_name\":\"display_name-A\",\"base_ccy\":\"base_ccy-A\",\"quote_ccy\":\"quote_ccy-A\",\"quote_decimals\":-0.0,\"quantity_decimals\":17.5,\"price_tick_size\":\"price_tick_size-A\",\"qty_tick_size\":\"qty_tick_size-A\",\"max_leverage\":\"max_leverage-A\",\"tradable\":false,\"expiry_timestamp_ms\":31.5,\"beta_product\":true,\"underlying_symbol\":\"underlying_symbol-A\",\"contract_size\":\"contract_size-A\",\"margin_buy_enabled\":false,\"margin_sell_enabled\":false,\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "symbol": "symbol-A",
+            "inst_type": "inst_type-A",
+            "display_name": "display_name-A",
+            "base_ccy": "base_ccy-A",
+            "quote_ccy": "quote_ccy-A",
+            "quote_decimals_bits": "8000000000000000",
+            "quantity_decimals_bits": "4031800000000000",
+            "price_tick_size": "price_tick_size-A",
+            "qty_tick_size": "qty_tick_size-A",
+            "max_leverage": "max_leverage-A",
+            "tradable": false,
+            "expiry_timestamp_ms_bits": "403f800000000000",
+            "beta_product": true,
+            "underlying_symbol": "underlying_symbol-A",
+            "contract_size": "contract_size-A",
+            "margin_buy_enabled": false,
+            "margin_sell_enabled": false,
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "symbol",
+              "inst_type",
+              "display_name",
+              "base_ccy",
+              "quote_ccy",
+              "quote_decimals",
+              "quantity_decimals",
+              "price_tick_size",
+              "qty_tick_size",
+              "max_leverage",
+              "tradable",
+              "expiry_timestamp_ms",
+              "beta_product",
+              "underlying_symbol",
+              "contract_size",
+              "margin_buy_enabled",
+              "margin_sell_enabled",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "symbol",
+              "inst_type",
+              "display_name",
+              "base_ccy",
+              "quote_ccy",
+              "quote_decimals",
+              "quantity_decimals",
+              "price_tick_size",
+              "qty_tick_size",
+              "max_leverage",
+              "tradable",
+              "expiry_timestamp_ms",
+              "beta_product",
+              "underlying_symbol",
+              "contract_size",
+              "margin_buy_enabled",
+              "margin_sell_enabled",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "{\"symbol\":\"symbol-A\",\"inst_type\":\"inst_type-A\",\"display_name\":\"display_name-A\",\"base_ccy\":\"base_ccy-A\",\"quote_ccy\":\"quote_ccy-A\",\"quote_decimals\":-0.0,\"quantity_decimals\":17.5,\"price_tick_size\":\"price_tick_size-A\",\"qty_tick_size\":\"qty_tick_size-A\",\"max_leverage\":\"max_leverage-A\",\"tradable\":false,\"expiry_timestamp_ms\":31.5,\"beta_product\":false,\"underlying_symbol\":\"underlying_symbol-A\",\"contract_size\":\"contract_size-A\",\"margin_buy_enabled\":true,\"margin_sell_enabled\":false,\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "symbol": "symbol-A",
+            "inst_type": "inst_type-A",
+            "display_name": "display_name-A",
+            "base_ccy": "base_ccy-A",
+            "quote_ccy": "quote_ccy-A",
+            "quote_decimals_bits": "8000000000000000",
+            "quantity_decimals_bits": "4031800000000000",
+            "price_tick_size": "price_tick_size-A",
+            "qty_tick_size": "qty_tick_size-A",
+            "max_leverage": "max_leverage-A",
+            "tradable": false,
+            "expiry_timestamp_ms_bits": "403f800000000000",
+            "beta_product": false,
+            "underlying_symbol": "underlying_symbol-A",
+            "contract_size": "contract_size-A",
+            "margin_buy_enabled": true,
+            "margin_sell_enabled": false,
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "symbol",
+              "inst_type",
+              "display_name",
+              "base_ccy",
+              "quote_ccy",
+              "quote_decimals",
+              "quantity_decimals",
+              "price_tick_size",
+              "qty_tick_size",
+              "max_leverage",
+              "tradable",
+              "expiry_timestamp_ms",
+              "beta_product",
+              "underlying_symbol",
+              "contract_size",
+              "margin_buy_enabled",
+              "margin_sell_enabled",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "symbol",
+              "inst_type",
+              "display_name",
+              "base_ccy",
+              "quote_ccy",
+              "quote_decimals",
+              "quantity_decimals",
+              "price_tick_size",
+              "qty_tick_size",
+              "max_leverage",
+              "tradable",
+              "expiry_timestamp_ms",
+              "beta_product",
+              "underlying_symbol",
+              "contract_size",
+              "margin_buy_enabled",
+              "margin_sell_enabled",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "{\"symbol\":\"symbol-A\",\"inst_type\":\"inst_type-A\",\"display_name\":\"display_name-A\",\"base_ccy\":\"base_ccy-A\",\"quote_ccy\":\"quote_ccy-A\",\"quote_decimals\":-0.0,\"quantity_decimals\":17.5,\"price_tick_size\":\"price_tick_size-A\",\"qty_tick_size\":\"qty_tick_size-A\",\"max_leverage\":\"max_leverage-A\",\"tradable\":false,\"expiry_timestamp_ms\":31.5,\"beta_product\":false,\"underlying_symbol\":\"underlying_symbol-A\",\"contract_size\":\"contract_size-A\",\"margin_buy_enabled\":false,\"margin_sell_enabled\":true,\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "symbol": "symbol-A",
+            "inst_type": "inst_type-A",
+            "display_name": "display_name-A",
+            "base_ccy": "base_ccy-A",
+            "quote_ccy": "quote_ccy-A",
+            "quote_decimals_bits": "8000000000000000",
+            "quantity_decimals_bits": "4031800000000000",
+            "price_tick_size": "price_tick_size-A",
+            "qty_tick_size": "qty_tick_size-A",
+            "max_leverage": "max_leverage-A",
+            "tradable": false,
+            "expiry_timestamp_ms_bits": "403f800000000000",
+            "beta_product": false,
+            "underlying_symbol": "underlying_symbol-A",
+            "contract_size": "contract_size-A",
+            "margin_buy_enabled": false,
+            "margin_sell_enabled": true,
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "symbol",
+              "inst_type",
+              "display_name",
+              "base_ccy",
+              "quote_ccy",
+              "quote_decimals",
+              "quantity_decimals",
+              "price_tick_size",
+              "qty_tick_size",
+              "max_leverage",
+              "tradable",
+              "expiry_timestamp_ms",
+              "beta_product",
+              "underlying_symbol",
+              "contract_size",
+              "margin_buy_enabled",
+              "margin_sell_enabled",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "symbol",
+              "inst_type",
+              "display_name",
+              "base_ccy",
+              "quote_ccy",
+              "quote_decimals",
+              "quantity_decimals",
+              "price_tick_size",
+              "qty_tick_size",
+              "max_leverage",
+              "tradable",
+              "expiry_timestamp_ms",
+              "beta_product",
+              "underlying_symbol",
+              "contract_size",
+              "margin_buy_enabled",
+              "margin_sell_enabled",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "[\"symbol-A\",\"inst_type-A\",\"display_name-A\",\"base_ccy-A\",\"quote_ccy-A\",-0.0,17.5,\"price_tick_size-A\",\"qty_tick_size-A\",\"max_leverage-A\",true,31.5,false,\"underlying_symbol-A\",\"contract_size-A\",false,false]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"inst_type\": \"inst_type-A\", \"display_name\": \"display_name-A\", \"base_ccy\": \"base_ccy-A\", \"quote_ccy\": \"quote_ccy-A\", \"quote_decimals\": -0.0, \"quantity_decimals\": 17.5, \"price_tick_size\": \"price_tick_size-A\", \"qty_tick_size\": \"qty_tick_size-A\", \"max_leverage\": \"max_leverage-A\", \"tradable\": true, \"expiry_timestamp_ms\": 31.5, \"beta_product\": false, \"underlying_symbol\": \"underlying_symbol-A\", \"contract_size\": \"contract_size-A\", \"margin_buy_enabled\": false, \"margin_sell_enabled\": false}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"symbol\": null, \"inst_type\": \"inst_type-A\", \"display_name\": \"display_name-A\", \"base_ccy\": \"base_ccy-A\", \"quote_ccy\": \"quote_ccy-A\", \"quote_decimals\": -0.0, \"quantity_decimals\": 17.5, \"price_tick_size\": \"price_tick_size-A\", \"qty_tick_size\": \"qty_tick_size-A\", \"max_leverage\": \"max_leverage-A\", \"tradable\": true, \"expiry_timestamp_ms\": 31.5, \"beta_product\": false, \"underlying_symbol\": \"underlying_symbol-A\", \"contract_size\": \"contract_size-A\", \"margin_buy_enabled\": false, \"margin_sell_enabled\": false}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomTicker": {
+    "shape": "map",
+    "sample": {
+      "i": "i-A",
+      "b": "b-A",
+      "k": "k-A",
+      "a": "a-A",
+      "c": "c-A",
+      "h": "h-A",
+      "l": "l-A",
+      "v": "v-A",
+      "vv": "vv-A",
+      "oi": "oi-A",
+      "t": -0.0
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "own_keys",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Enumerates original captured own string keys and current known-field presence on this already decoded concrete record; it admits no new raw value. Native observations execute the method and compare independently authored key order/presence."
+      }
+    ],
+    "evidence": "Reviewed actual cryptocom.types.ts declared fields and wire.rs capture/remote decoding. The concrete path already rejects complete valid positional arrays at the retained numeric capture, with an additional private remote object guard. Independent native observations inspect every scalar field, number bits, one-hot boolean cases where applicable, retained opaque value kinds/bits, captured keys, own_keys and actual Clone field preservation through six decoder paths. Existing shared UTF8, owned JSON snapshot and numeric boundaries remain; this is not raw JS identity, private-helper exemption or full crate coverage.",
+    "nativeObservation": {
+      "nativeFields": [
+        "i",
+        "b",
+        "k",
+        "a",
+        "c",
+        "h",
+        "l",
+        "v",
+        "vv",
+        "oi",
+        "t_bits",
+        "additional_fields",
+        "input_keys",
+        "own_keys"
+      ],
+      "call": "{fn native_json(value:&serde_json::Value)->serde_json::Value { match value {serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),serde_json::Value::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),serde_json::Value::String(s)=>serde_json::json!({\"kind\":\"string\",\"value\":s}),serde_json::Value::Number(_)=>{let n=safe_cex_num::numeric_ingress::js_value_as_f64(value).expect(\"retained native number\");serde_json::json!({\"kind\":\"number\",\"bits\":if n.is_nan(){\"NaN\".into()}else{format!(\"{:016x}\",n.to_bits())}})},serde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"items\":values.iter().map(native_json).collect::<Vec<_>>()}),serde_json::Value::Object(fields)=>{let fields=fields.iter().map(|(k,v)|(k.clone(),native_json(v))).collect::<serde_json::Map<_,_>>();serde_json::json!({\"kind\":\"object\",\"fields\":fields})}}}fn observe(v:&$type)->serde_json::Value {let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"i\".into(),serde_json::json!(v.i));out.insert(\"b\".into(),serde_json::json!(v.b));out.insert(\"k\".into(),serde_json::json!(v.k));out.insert(\"a\".into(),serde_json::json!(v.a));out.insert(\"c\".into(),serde_json::json!(v.c));out.insert(\"h\".into(),serde_json::json!(v.h));out.insert(\"l\".into(),serde_json::json!(v.l));out.insert(\"v\".into(),serde_json::json!(v.v));out.insert(\"vv\".into(),serde_json::json!(v.vv));out.insert(\"oi\".into(),serde_json::json!(v.oi));out.insert(\"t_bits\".into(),serde_json::json!(format!(\"{:016x}\",v.t.to_bits())));out.insert(\"additional_fields\".into(),native_json(&v.additional_fields));out.insert(\"input_keys\".into(),serde_json::json!(v.input_keys));out.insert(\"own_keys\".into(),serde_json::json!(v.own_keys()));serde_json::Value::Object(out)}let raw=$value.as_str().expect(\"authored JSON record text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>{let observed=observe(&decoded);assert_eq!(observed,observe(&decoded.clone()),\"actual native Clone field preservation\");observed},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"record entry paths differ\");}observations[0].clone()}",
+      "cases": [
+        {
+          "input": "{\"i\":\"i-A\",\"b\":\"b-A\",\"k\":\"k-A\",\"a\":\"a-A\",\"c\":\"c-A\",\"h\":\"h-A\",\"l\":\"l-A\",\"v\":\"v-A\",\"vv\":\"vv-A\",\"oi\":\"oi-A\",\"t\":-0.0,\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "i": "i-A",
+            "b": "b-A",
+            "k": "k-A",
+            "a": "a-A",
+            "c": "c-A",
+            "h": "h-A",
+            "l": "l-A",
+            "v": "v-A",
+            "vv": "vv-A",
+            "oi": "oi-A",
+            "t_bits": "8000000000000000",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "i",
+              "b",
+              "k",
+              "a",
+              "c",
+              "h",
+              "l",
+              "v",
+              "vv",
+              "oi",
+              "t",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "i",
+              "b",
+              "k",
+              "a",
+              "c",
+              "h",
+              "l",
+              "v",
+              "vv",
+              "oi",
+              "t",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "{\"opaqueArray\":[-0.0,\"opaque\"],\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueZero\":-0.0,\"opaqueNumber\":17.5,\"t\":-0.0,\"oi\":\"oi-A\",\"vv\":\"vv-A\",\"v\":\"v-A\",\"l\":\"l-A\",\"h\":\"h-A\",\"c\":\"c-A\",\"a\":\"a-A\",\"k\":\"k-A\",\"b\":\"b-A\",\"i\":\"i-A\"}",
+          "output": {
+            "ok": true,
+            "i": "i-A",
+            "b": "b-A",
+            "k": "k-A",
+            "a": "a-A",
+            "c": "c-A",
+            "h": "h-A",
+            "l": "l-A",
+            "v": "v-A",
+            "vv": "vv-A",
+            "oi": "oi-A",
+            "t_bits": "8000000000000000",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "t",
+              "oi",
+              "vv",
+              "v",
+              "l",
+              "h",
+              "c",
+              "a",
+              "k",
+              "b",
+              "i"
+            ],
+            "own_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "t",
+              "oi",
+              "vv",
+              "v",
+              "l",
+              "h",
+              "c",
+              "a",
+              "k",
+              "b",
+              "i"
+            ]
+          }
+        },
+        {
+          "input": "{\"i\":\"i-B\",\"b\":\"b-B\",\"k\":\"k-B\",\"a\":\"a-B\",\"c\":\"c-B\",\"h\":\"h-B\",\"l\":\"l-B\",\"v\":\"v-B\",\"vv\":\"vv-B\",\"oi\":\"oi-B\",\"t\":17.5,\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "i": "i-B",
+            "b": "b-B",
+            "k": "k-B",
+            "a": "a-B",
+            "c": "c-B",
+            "h": "h-B",
+            "l": "l-B",
+            "v": "v-B",
+            "vv": "vv-B",
+            "oi": "oi-B",
+            "t_bits": "4031800000000000",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "i",
+              "b",
+              "k",
+              "a",
+              "c",
+              "h",
+              "l",
+              "v",
+              "vv",
+              "oi",
+              "t",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "i",
+              "b",
+              "k",
+              "a",
+              "c",
+              "h",
+              "l",
+              "v",
+              "vv",
+              "oi",
+              "t",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "[\"i-A\",\"b-A\",\"k-A\",\"a-A\",\"c-A\",\"h-A\",\"l-A\",\"v-A\",\"vv-A\",\"oi-A\",-0.0]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"b\": \"b-A\", \"k\": \"k-A\", \"a\": \"a-A\", \"c\": \"c-A\", \"h\": \"h-A\", \"l\": \"l-A\", \"v\": \"v-A\", \"vv\": \"vv-A\", \"oi\": \"oi-A\", \"t\": -0.0}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"i\": null, \"b\": \"b-A\", \"k\": \"k-A\", \"a\": \"a-A\", \"c\": \"c-A\", \"h\": \"h-A\", \"l\": \"l-A\", \"v\": \"v-A\", \"vv\": \"vv-A\", \"oi\": \"oi-A\", \"t\": -0.0}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomCandlestick": {
+    "shape": "map",
+    "sample": {
+      "t": -0.0,
+      "o": "o-A",
+      "h": "h-A",
+      "l": "l-A",
+      "c": "c-A",
+      "v": "v-A"
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "own_keys",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Enumerates original captured own string keys and current known-field presence on this already decoded concrete record; it admits no new raw value. Native observations execute the method and compare independently authored key order/presence."
+      }
+    ],
+    "evidence": "Reviewed actual cryptocom.types.ts declared fields and wire.rs capture/remote decoding. The concrete path already rejects complete valid positional arrays at the retained numeric capture, with an additional private remote object guard. Independent native observations inspect every scalar field, number bits, one-hot boolean cases where applicable, retained opaque value kinds/bits, captured keys, own_keys and actual Clone field preservation through six decoder paths. Existing shared UTF8, owned JSON snapshot and numeric boundaries remain; this is not raw JS identity, private-helper exemption or full crate coverage.",
+    "nativeObservation": {
+      "nativeFields": [
+        "t_bits",
+        "o",
+        "h",
+        "l",
+        "c",
+        "v",
+        "additional_fields",
+        "input_keys",
+        "own_keys"
+      ],
+      "call": "{fn native_json(value:&serde_json::Value)->serde_json::Value { match value {serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),serde_json::Value::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),serde_json::Value::String(s)=>serde_json::json!({\"kind\":\"string\",\"value\":s}),serde_json::Value::Number(_)=>{let n=safe_cex_num::numeric_ingress::js_value_as_f64(value).expect(\"retained native number\");serde_json::json!({\"kind\":\"number\",\"bits\":if n.is_nan(){\"NaN\".into()}else{format!(\"{:016x}\",n.to_bits())}})},serde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"items\":values.iter().map(native_json).collect::<Vec<_>>()}),serde_json::Value::Object(fields)=>{let fields=fields.iter().map(|(k,v)|(k.clone(),native_json(v))).collect::<serde_json::Map<_,_>>();serde_json::json!({\"kind\":\"object\",\"fields\":fields})}}}fn observe(v:&$type)->serde_json::Value {let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"t_bits\".into(),serde_json::json!(format!(\"{:016x}\",v.t.to_bits())));out.insert(\"o\".into(),serde_json::json!(v.o));out.insert(\"h\".into(),serde_json::json!(v.h));out.insert(\"l\".into(),serde_json::json!(v.l));out.insert(\"c\".into(),serde_json::json!(v.c));out.insert(\"v\".into(),serde_json::json!(v.v));out.insert(\"additional_fields\".into(),native_json(&v.additional_fields));out.insert(\"input_keys\".into(),serde_json::json!(v.input_keys));out.insert(\"own_keys\".into(),serde_json::json!(v.own_keys()));serde_json::Value::Object(out)}let raw=$value.as_str().expect(\"authored JSON record text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>{let observed=observe(&decoded);assert_eq!(observed,observe(&decoded.clone()),\"actual native Clone field preservation\");observed},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"record entry paths differ\");}observations[0].clone()}",
+      "cases": [
+        {
+          "input": "{\"t\":-0.0,\"o\":\"o-A\",\"h\":\"h-A\",\"l\":\"l-A\",\"c\":\"c-A\",\"v\":\"v-A\",\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "t_bits": "8000000000000000",
+            "o": "o-A",
+            "h": "h-A",
+            "l": "l-A",
+            "c": "c-A",
+            "v": "v-A",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "t",
+              "o",
+              "h",
+              "l",
+              "c",
+              "v",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "t",
+              "o",
+              "h",
+              "l",
+              "c",
+              "v",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "{\"opaqueArray\":[-0.0,\"opaque\"],\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueZero\":-0.0,\"opaqueNumber\":17.5,\"v\":\"v-A\",\"c\":\"c-A\",\"l\":\"l-A\",\"h\":\"h-A\",\"o\":\"o-A\",\"t\":-0.0}",
+          "output": {
+            "ok": true,
+            "t_bits": "8000000000000000",
+            "o": "o-A",
+            "h": "h-A",
+            "l": "l-A",
+            "c": "c-A",
+            "v": "v-A",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "v",
+              "c",
+              "l",
+              "h",
+              "o",
+              "t"
+            ],
+            "own_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "v",
+              "c",
+              "l",
+              "h",
+              "o",
+              "t"
+            ]
+          }
+        },
+        {
+          "input": "{\"t\":17.5,\"o\":\"o-B\",\"h\":\"h-B\",\"l\":\"l-B\",\"c\":\"c-B\",\"v\":\"v-B\",\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "t_bits": "4031800000000000",
+            "o": "o-B",
+            "h": "h-B",
+            "l": "l-B",
+            "c": "c-B",
+            "v": "v-B",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "t",
+              "o",
+              "h",
+              "l",
+              "c",
+              "v",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "t",
+              "o",
+              "h",
+              "l",
+              "c",
+              "v",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "[-0.0,\"o-A\",\"h-A\",\"l-A\",\"c-A\",\"v-A\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"o\": \"o-A\", \"h\": \"h-A\", \"l\": \"l-A\", \"c\": \"c-A\", \"v\": \"v-A\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"t\": null, \"o\": \"o-A\", \"h\": \"h-A\", \"l\": \"l-A\", \"c\": \"c-A\", \"v\": \"v-A\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomPositionBalance": {
+    "shape": "map",
+    "sample": {
+      "instrument_name": "instrument_name-A",
+      "quantity": "quantity-A",
+      "reserved_qty": "reserved_qty-A",
+      "collateral_amount": "collateral_amount-A",
+      "collateral_eligible": false,
+      "haircut": "haircut-A",
+      "market_value": "market_value-A",
+      "max_withdrawal_balance": "max_withdrawal_balance-A",
+      "hourly_interest_rate": "hourly_interest_rate-A"
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "own_keys",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Enumerates original captured own string keys and current known-field presence on this already decoded concrete record; it admits no new raw value. Native observations execute the method and compare independently authored key order/presence."
+      }
+    ],
+    "evidence": "Reviewed actual cryptocom.types.ts declared fields and wire.rs capture/remote decoding. The concrete path already rejects complete valid positional arrays at the retained numeric capture, with an additional private remote object guard. Independent native observations inspect every scalar field, number bits, one-hot boolean cases where applicable, retained opaque value kinds/bits, captured keys, own_keys and actual Clone field preservation through six decoder paths. Existing shared UTF8, owned JSON snapshot and numeric boundaries remain; this is not raw JS identity, private-helper exemption or full crate coverage.",
+    "nativeObservation": {
+      "nativeFields": [
+        "instrument_name",
+        "quantity",
+        "reserved_qty",
+        "collateral_amount",
+        "collateral_eligible",
+        "haircut",
+        "market_value",
+        "max_withdrawal_balance",
+        "hourly_interest_rate",
+        "additional_fields",
+        "input_keys",
+        "own_keys"
+      ],
+      "call": "{fn native_json(value:&serde_json::Value)->serde_json::Value { match value {serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),serde_json::Value::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),serde_json::Value::String(s)=>serde_json::json!({\"kind\":\"string\",\"value\":s}),serde_json::Value::Number(_)=>{let n=safe_cex_num::numeric_ingress::js_value_as_f64(value).expect(\"retained native number\");serde_json::json!({\"kind\":\"number\",\"bits\":if n.is_nan(){\"NaN\".into()}else{format!(\"{:016x}\",n.to_bits())}})},serde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"items\":values.iter().map(native_json).collect::<Vec<_>>()}),serde_json::Value::Object(fields)=>{let fields=fields.iter().map(|(k,v)|(k.clone(),native_json(v))).collect::<serde_json::Map<_,_>>();serde_json::json!({\"kind\":\"object\",\"fields\":fields})}}}fn observe(v:&$type)->serde_json::Value {let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"instrument_name\".into(),serde_json::json!(v.instrument_name));out.insert(\"quantity\".into(),serde_json::json!(v.quantity));out.insert(\"reserved_qty\".into(),serde_json::json!(v.reserved_qty));out.insert(\"collateral_amount\".into(),serde_json::json!(v.collateral_amount));out.insert(\"collateral_eligible\".into(),serde_json::json!(v.collateral_eligible));out.insert(\"haircut\".into(),serde_json::json!(v.haircut));out.insert(\"market_value\".into(),serde_json::json!(v.market_value));out.insert(\"max_withdrawal_balance\".into(),serde_json::json!(v.max_withdrawal_balance));out.insert(\"hourly_interest_rate\".into(),serde_json::json!(v.hourly_interest_rate));out.insert(\"additional_fields\".into(),native_json(&v.additional_fields));out.insert(\"input_keys\".into(),serde_json::json!(v.input_keys));out.insert(\"own_keys\".into(),serde_json::json!(v.own_keys()));serde_json::Value::Object(out)}let raw=$value.as_str().expect(\"authored JSON record text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>{let observed=observe(&decoded);assert_eq!(observed,observe(&decoded.clone()),\"actual native Clone field preservation\");observed},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"record entry paths differ\");}observations[0].clone()}",
+      "cases": [
+        {
+          "input": "{\"instrument_name\":\"instrument_name-A\",\"quantity\":\"quantity-A\",\"reserved_qty\":\"reserved_qty-A\",\"collateral_amount\":\"collateral_amount-A\",\"collateral_eligible\":false,\"haircut\":\"haircut-A\",\"market_value\":\"market_value-A\",\"max_withdrawal_balance\":\"max_withdrawal_balance-A\",\"hourly_interest_rate\":\"hourly_interest_rate-A\",\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "instrument_name": "instrument_name-A",
+            "quantity": "quantity-A",
+            "reserved_qty": "reserved_qty-A",
+            "collateral_amount": "collateral_amount-A",
+            "collateral_eligible": false,
+            "haircut": "haircut-A",
+            "market_value": "market_value-A",
+            "max_withdrawal_balance": "max_withdrawal_balance-A",
+            "hourly_interest_rate": "hourly_interest_rate-A",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "instrument_name",
+              "quantity",
+              "reserved_qty",
+              "collateral_amount",
+              "collateral_eligible",
+              "haircut",
+              "market_value",
+              "max_withdrawal_balance",
+              "hourly_interest_rate",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "instrument_name",
+              "quantity",
+              "reserved_qty",
+              "collateral_amount",
+              "collateral_eligible",
+              "haircut",
+              "market_value",
+              "max_withdrawal_balance",
+              "hourly_interest_rate",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "{\"opaqueArray\":[-0.0,\"opaque\"],\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueZero\":-0.0,\"opaqueNumber\":17.5,\"hourly_interest_rate\":\"hourly_interest_rate-A\",\"max_withdrawal_balance\":\"max_withdrawal_balance-A\",\"market_value\":\"market_value-A\",\"haircut\":\"haircut-A\",\"collateral_eligible\":false,\"collateral_amount\":\"collateral_amount-A\",\"reserved_qty\":\"reserved_qty-A\",\"quantity\":\"quantity-A\",\"instrument_name\":\"instrument_name-A\"}",
+          "output": {
+            "ok": true,
+            "instrument_name": "instrument_name-A",
+            "quantity": "quantity-A",
+            "reserved_qty": "reserved_qty-A",
+            "collateral_amount": "collateral_amount-A",
+            "collateral_eligible": false,
+            "haircut": "haircut-A",
+            "market_value": "market_value-A",
+            "max_withdrawal_balance": "max_withdrawal_balance-A",
+            "hourly_interest_rate": "hourly_interest_rate-A",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "hourly_interest_rate",
+              "max_withdrawal_balance",
+              "market_value",
+              "haircut",
+              "collateral_eligible",
+              "collateral_amount",
+              "reserved_qty",
+              "quantity",
+              "instrument_name"
+            ],
+            "own_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "hourly_interest_rate",
+              "max_withdrawal_balance",
+              "market_value",
+              "haircut",
+              "collateral_eligible",
+              "collateral_amount",
+              "reserved_qty",
+              "quantity",
+              "instrument_name"
+            ]
+          }
+        },
+        {
+          "input": "{\"instrument_name\":\"instrument_name-B\",\"quantity\":\"quantity-B\",\"reserved_qty\":\"reserved_qty-B\",\"collateral_amount\":\"collateral_amount-B\",\"collateral_eligible\":true,\"haircut\":\"haircut-B\",\"market_value\":\"market_value-B\",\"max_withdrawal_balance\":\"max_withdrawal_balance-B\",\"hourly_interest_rate\":\"hourly_interest_rate-B\",\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "instrument_name": "instrument_name-B",
+            "quantity": "quantity-B",
+            "reserved_qty": "reserved_qty-B",
+            "collateral_amount": "collateral_amount-B",
+            "collateral_eligible": true,
+            "haircut": "haircut-B",
+            "market_value": "market_value-B",
+            "max_withdrawal_balance": "max_withdrawal_balance-B",
+            "hourly_interest_rate": "hourly_interest_rate-B",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "instrument_name",
+              "quantity",
+              "reserved_qty",
+              "collateral_amount",
+              "collateral_eligible",
+              "haircut",
+              "market_value",
+              "max_withdrawal_balance",
+              "hourly_interest_rate",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "instrument_name",
+              "quantity",
+              "reserved_qty",
+              "collateral_amount",
+              "collateral_eligible",
+              "haircut",
+              "market_value",
+              "max_withdrawal_balance",
+              "hourly_interest_rate",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "[\"instrument_name-A\",\"quantity-A\",\"reserved_qty-A\",\"collateral_amount-A\",false,\"haircut-A\",\"market_value-A\",\"max_withdrawal_balance-A\",\"hourly_interest_rate-A\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"quantity\": \"quantity-A\", \"reserved_qty\": \"reserved_qty-A\", \"collateral_amount\": \"collateral_amount-A\", \"collateral_eligible\": false, \"haircut\": \"haircut-A\", \"market_value\": \"market_value-A\", \"max_withdrawal_balance\": \"max_withdrawal_balance-A\", \"hourly_interest_rate\": \"hourly_interest_rate-A\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"instrument_name\": null, \"quantity\": \"quantity-A\", \"reserved_qty\": \"reserved_qty-A\", \"collateral_amount\": \"collateral_amount-A\", \"collateral_eligible\": false, \"haircut\": \"haircut-A\", \"market_value\": \"market_value-A\", \"max_withdrawal_balance\": \"max_withdrawal_balance-A\", \"hourly_interest_rate\": \"hourly_interest_rate-A\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomError": {
+    "shape": "map",
+    "sample": {
+      "code": -0.0,
+      "message": "message-A"
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "own_keys",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Enumerates original captured own string keys and current known-field presence on this already decoded concrete record; it admits no new raw value. Native observations execute the method and compare independently authored key order/presence."
+      }
+    ],
+    "evidence": "Reviewed actual cryptocom.types.ts declared fields and wire.rs capture/remote decoding. The concrete path already rejects complete valid positional arrays at the retained numeric capture, with an additional private remote object guard. Independent native observations inspect every scalar field, number bits, one-hot boolean cases where applicable, retained opaque value kinds/bits, captured keys, own_keys and actual Clone field preservation through six decoder paths. Existing shared UTF8, owned JSON snapshot and numeric boundaries remain; this is not raw JS identity, private-helper exemption or full crate coverage.",
+    "nativeObservation": {
+      "nativeFields": [
+        "code_bits",
+        "message",
+        "additional_fields",
+        "input_keys",
+        "own_keys"
+      ],
+      "call": "{fn native_json(value:&serde_json::Value)->serde_json::Value { match value {serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),serde_json::Value::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),serde_json::Value::String(s)=>serde_json::json!({\"kind\":\"string\",\"value\":s}),serde_json::Value::Number(_)=>{let n=safe_cex_num::numeric_ingress::js_value_as_f64(value).expect(\"retained native number\");serde_json::json!({\"kind\":\"number\",\"bits\":if n.is_nan(){\"NaN\".into()}else{format!(\"{:016x}\",n.to_bits())}})},serde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"items\":values.iter().map(native_json).collect::<Vec<_>>()}),serde_json::Value::Object(fields)=>{let fields=fields.iter().map(|(k,v)|(k.clone(),native_json(v))).collect::<serde_json::Map<_,_>>();serde_json::json!({\"kind\":\"object\",\"fields\":fields})}}}fn observe(v:&$type)->serde_json::Value {let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"code_bits\".into(),serde_json::json!(format!(\"{:016x}\",v.code.to_bits())));out.insert(\"message\".into(),serde_json::json!(v.message));out.insert(\"additional_fields\".into(),native_json(&v.additional_fields));out.insert(\"input_keys\".into(),serde_json::json!(v.input_keys));out.insert(\"own_keys\".into(),serde_json::json!(v.own_keys()));serde_json::Value::Object(out)}let raw=$value.as_str().expect(\"authored JSON record text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>{let observed=observe(&decoded);assert_eq!(observed,observe(&decoded.clone()),\"actual native Clone field preservation\");observed},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"record entry paths differ\");}observations[0].clone()}",
+      "cases": [
+        {
+          "input": "{\"code\":-0.0,\"message\":\"message-A\",\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "code_bits": "8000000000000000",
+            "message": "message-A",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "code",
+              "message",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "code",
+              "message",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "{\"opaqueArray\":[-0.0,\"opaque\"],\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueZero\":-0.0,\"opaqueNumber\":17.5,\"message\":\"message-A\",\"code\":-0.0}",
+          "output": {
+            "ok": true,
+            "code_bits": "8000000000000000",
+            "message": "message-A",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "message",
+              "code"
+            ],
+            "own_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "message",
+              "code"
+            ]
+          }
+        },
+        {
+          "input": "{\"code\":17.5,\"message\":\"message-B\",\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "code_bits": "4031800000000000",
+            "message": "message-B",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "code",
+              "message",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "code",
+              "message",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "[-0.0,\"message-A\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"message\": \"message-A\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"code\": null, \"message\": \"message-A\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomAccountIdentity": {
+    "shape": "map",
+    "sample": {
+      "uuid": "uuid-A"
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "own_keys",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Enumerates original captured own string keys and current known-field presence on this already decoded concrete record; it admits no new raw value. Native observations execute the method and compare independently authored key order/presence."
+      }
+    ],
+    "evidence": "Reviewed actual cryptocom.types.ts declared fields and wire.rs capture/remote decoding. The concrete path already rejects complete valid positional arrays at the retained numeric capture, with an additional private remote object guard. Independent native observations inspect every scalar field, number bits, one-hot boolean cases where applicable, retained opaque value kinds/bits, captured keys, own_keys and actual Clone field preservation through six decoder paths. Existing shared UTF8, owned JSON snapshot and numeric boundaries remain; this is not raw JS identity, private-helper exemption or full crate coverage.",
+    "nativeObservation": {
+      "nativeFields": [
+        "uuid",
+        "additional_fields",
+        "input_keys",
+        "own_keys"
+      ],
+      "call": "{fn native_json(value:&serde_json::Value)->serde_json::Value { match value {serde_json::Value::Null=>serde_json::json!({\"kind\":\"null\"}),serde_json::Value::Bool(b)=>serde_json::json!({\"kind\":\"boolean\",\"value\":b}),serde_json::Value::String(s)=>serde_json::json!({\"kind\":\"string\",\"value\":s}),serde_json::Value::Number(_)=>{let n=safe_cex_num::numeric_ingress::js_value_as_f64(value).expect(\"retained native number\");serde_json::json!({\"kind\":\"number\",\"bits\":if n.is_nan(){\"NaN\".into()}else{format!(\"{:016x}\",n.to_bits())}})},serde_json::Value::Array(values)=>serde_json::json!({\"kind\":\"array\",\"items\":values.iter().map(native_json).collect::<Vec<_>>()}),serde_json::Value::Object(fields)=>{let fields=fields.iter().map(|(k,v)|(k.clone(),native_json(v))).collect::<serde_json::Map<_,_>>();serde_json::json!({\"kind\":\"object\",\"fields\":fields})}}}fn observe(v:&$type)->serde_json::Value {let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"uuid\".into(),serde_json::json!(v.uuid));out.insert(\"additional_fields\".into(),native_json(&v.additional_fields));out.insert(\"input_keys\".into(),serde_json::json!(v.input_keys));out.insert(\"own_keys\".into(),serde_json::json!(v.own_keys()));serde_json::Value::Object(out)}let raw=$value.as_str().expect(\"authored JSON record text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>{let observed=observe(&decoded);assert_eq!(observed,observe(&decoded.clone()),\"actual native Clone field preservation\");observed},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"record entry paths differ\");}observations[0].clone()}",
+      "cases": [
+        {
+          "input": "{\"uuid\":\"uuid-A\",\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "uuid": "uuid-A",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "uuid",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "uuid",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "{\"opaqueArray\":[-0.0,\"opaque\"],\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueZero\":-0.0,\"opaqueNumber\":17.5,\"uuid\":\"uuid-A\"}",
+          "output": {
+            "ok": true,
+            "uuid": "uuid-A",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "uuid"
+            ],
+            "own_keys": [
+              "opaqueArray",
+              "opaqueObject",
+              "opaqueZero",
+              "opaqueNumber",
+              "uuid"
+            ]
+          }
+        },
+        {
+          "input": "{\"uuid\":\"uuid-B\",\"opaqueNumber\":17.5,\"opaqueZero\":-0.0,\"opaqueObject\":{\"kept\":\"yes\"},\"opaqueArray\":[-0.0,\"opaque\"]}",
+          "output": {
+            "ok": true,
+            "uuid": "uuid-B",
+            "additional_fields": {
+              "kind": "object",
+              "fields": {
+                "opaqueNumber": {
+                  "kind": "number",
+                  "bits": "4031800000000000"
+                },
+                "opaqueZero": {
+                  "kind": "number",
+                  "bits": "8000000000000000"
+                },
+                "opaqueObject": {
+                  "kind": "object",
+                  "fields": {
+                    "kept": {
+                      "kind": "string",
+                      "value": "yes"
+                    }
+                  }
+                },
+                "opaqueArray": {
+                  "kind": "array",
+                  "items": [
+                    {
+                      "kind": "number",
+                      "bits": "8000000000000000"
+                    },
+                    {
+                      "kind": "string",
+                      "value": "opaque"
+                    }
+                  ]
+                }
+              }
+            },
+            "input_keys": [
+              "uuid",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ],
+            "own_keys": [
+              "uuid",
+              "opaqueNumber",
+              "opaqueZero",
+              "opaqueObject",
+              "opaqueArray"
+            ]
+          }
+        },
+        {
+          "input": "[\"uuid-A\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"uuid\": null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::ws_payloads::CryptocomWsValuationChannel": {
+    "shape": "observed",
+    "category": "decoder",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_value",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadValue",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Projects a captured PayloadValue primitive into a finite native union; this body performs literal and kind admission, so it receives executed decoder cases, not a typed-construction waiver."
+      }
+    ],
+    "evidence": "Reviewed exact cryptocom.types.ts literal unions and supplied concrete native body. Cases cover every literal with direct variant/ordinal matches, strict case/whitespace/BOM and lone-surrogate refusal; captured PayloadValue owners additionally reject non-string kinds and valid-tag object maps. These are existing static carrier decoders, not a runtime TypeScript validator or raw JSON/property host binding. No Serde, primitive coercion, getter or live-object alias behavior is claimed.",
+    "call": "{use crate::ws_payloads::PayloadValue;let input=match $value[\"kind\"].as_str().unwrap(){\"undefined\"=>PayloadValue::Undefined,\"null\"=>PayloadValue::Null,\"bool\"=>PayloadValue::Bool(true),\"number\"=>PayloadValue::Number(-0.0),\"string\"=>PayloadValue::String($value[\"units\"].as_array().unwrap().iter().map(|n|u16::try_from(n.as_u64().unwrap()).unwrap()).collect()),\"array\"=>PayloadValue::Array(vec![PayloadValue::Null]),\"object\"=>PayloadValue::Object(std::collections::BTreeMap::from([($value[\"tag\"].as_str().unwrap().encode_utf16().collect(),PayloadValue::Null)])),_=>panic!(\"unclassified native fixture\")};let result=$type::from_value(&input);match result{Ok(variant)=>{let (variant,ordinal)=match variant{$type::Mark=>(\"Mark\",0u32),$type::Index=>(\"Index\",1u32),$type::Funding=>(\"Funding\",2u32),$type::Estimatedfunding=>(\"Estimatedfunding\",3u32)};serde_json::json!({\"ok\":true,\"variant\":variant,\"ordinal\":ordinal})},Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.0})}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            109,
+            97,
+            114,
+            107
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "Mark",
+          "ordinal": 0
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            105,
+            110,
+            100,
+            101,
+            120
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "Index",
+          "ordinal": 1
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            102,
+            117,
+            110,
+            100,
+            105,
+            110,
+            103
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "Funding",
+          "ordinal": 2
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            101,
+            115,
+            116,
+            105,
+            109,
+            97,
+            116,
+            101,
+            100,
+            102,
+            117,
+            110,
+            100,
+            105,
+            110,
+            103
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "Estimatedfunding",
+          "ordinal": 3
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            95,
+            95,
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100,
+            95,
+            95
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            32,
+            109,
+            97,
+            114,
+            107
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            109,
+            97,
+            114,
+            107,
+            32
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            65279,
+            109,
+            97,
+            114,
+            107
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            77,
+            65,
+            82,
+            75
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": []
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            56320
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296,
+            120
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "bool"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "number"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "array"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "tag": "mark"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_cryptocom::ws_payloads::CryptocomWsSide": {
+    "shape": "observed",
+    "category": "decoder",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_value",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadValue",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Projects a captured PayloadValue primitive into a finite native union; this body performs literal and kind admission, so it receives executed decoder cases, not a typed-construction waiver."
+      }
+    ],
+    "evidence": "Reviewed exact cryptocom.types.ts literal unions and supplied concrete native body. Cases cover every literal with direct variant/ordinal matches, strict case/whitespace/BOM and lone-surrogate refusal; captured PayloadValue owners additionally reject non-string kinds and valid-tag object maps. These are existing static carrier decoders, not a runtime TypeScript validator or raw JSON/property host binding. No Serde, primitive coercion, getter or live-object alias behavior is claimed.",
+    "call": "{use crate::ws_payloads::PayloadValue;let input=match $value[\"kind\"].as_str().unwrap(){\"undefined\"=>PayloadValue::Undefined,\"null\"=>PayloadValue::Null,\"bool\"=>PayloadValue::Bool(true),\"number\"=>PayloadValue::Number(-0.0),\"string\"=>PayloadValue::String($value[\"units\"].as_array().unwrap().iter().map(|n|u16::try_from(n.as_u64().unwrap()).unwrap()).collect()),\"array\"=>PayloadValue::Array(vec![PayloadValue::Null]),\"object\"=>PayloadValue::Object(std::collections::BTreeMap::from([($value[\"tag\"].as_str().unwrap().encode_utf16().collect(),PayloadValue::Null)])),_=>panic!(\"unclassified native fixture\")};let result=$type::from_value(&input);match result{Ok(variant)=>{let (variant,ordinal)=match variant{$type::Buy=>(\"Buy\",0u32),$type::Sell=>(\"Sell\",1u32)};serde_json::json!({\"ok\":true,\"variant\":variant,\"ordinal\":ordinal})},Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.0})}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            66,
+            85,
+            89
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "Buy",
+          "ordinal": 0
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            83,
+            69,
+            76,
+            76
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "Sell",
+          "ordinal": 1
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            95,
+            95,
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100,
+            95,
+            95
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            32,
+            66,
+            85,
+            89
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            66,
+            85,
+            89,
+            32
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            65279,
+            66,
+            85,
+            89
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            98,
+            117,
+            121
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": []
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            56320
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296,
+            120
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "bool"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "number"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "array"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "tag": "BUY"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_cryptocom::ws_payloads::CryptocomWsRefPriceType": {
+    "shape": "observed",
+    "category": "decoder",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_value",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadValue",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Projects a captured PayloadValue primitive into a finite native union; this body performs literal and kind admission, so it receives executed decoder cases, not a typed-construction waiver."
+      }
+    ],
+    "evidence": "Reviewed exact cryptocom.types.ts literal unions and supplied concrete native body. Cases cover every literal with direct variant/ordinal matches, strict case/whitespace/BOM and lone-surrogate refusal; captured PayloadValue owners additionally reject non-string kinds and valid-tag object maps. These are existing static carrier decoders, not a runtime TypeScript validator or raw JSON/property host binding. No Serde, primitive coercion, getter or live-object alias behavior is claimed.",
+    "call": "{use crate::ws_payloads::PayloadValue;let input=match $value[\"kind\"].as_str().unwrap(){\"undefined\"=>PayloadValue::Undefined,\"null\"=>PayloadValue::Null,\"bool\"=>PayloadValue::Bool(true),\"number\"=>PayloadValue::Number(-0.0),\"string\"=>PayloadValue::String($value[\"units\"].as_array().unwrap().iter().map(|n|u16::try_from(n.as_u64().unwrap()).unwrap()).collect()),\"array\"=>PayloadValue::Array(vec![PayloadValue::Null]),\"object\"=>PayloadValue::Object(std::collections::BTreeMap::from([($value[\"tag\"].as_str().unwrap().encode_utf16().collect(),PayloadValue::Null)])),_=>panic!(\"unclassified native fixture\")};let result=$type::from_value(&input);match result{Ok(variant)=>{let (variant,ordinal)=match variant{$type::MarkPrice=>(\"MarkPrice\",0u32),$type::IndexPrice=>(\"IndexPrice\",1u32),$type::LastPrice=>(\"LastPrice\",2u32)};serde_json::json!({\"ok\":true,\"variant\":variant,\"ordinal\":ordinal})},Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.0})}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            77,
+            65,
+            82,
+            75,
+            95,
+            80,
+            82,
+            73,
+            67,
+            69
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "MarkPrice",
+          "ordinal": 0
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            73,
+            78,
+            68,
+            69,
+            88,
+            95,
+            80,
+            82,
+            73,
+            67,
+            69
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "IndexPrice",
+          "ordinal": 1
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            76,
+            65,
+            83,
+            84,
+            95,
+            80,
+            82,
+            73,
+            67,
+            69
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "LastPrice",
+          "ordinal": 2
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            95,
+            95,
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100,
+            95,
+            95
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            32,
+            77,
+            65,
+            82,
+            75,
+            95,
+            80,
+            82,
+            73,
+            67,
+            69
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            77,
+            65,
+            82,
+            75,
+            95,
+            80,
+            82,
+            73,
+            67,
+            69,
+            32
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            65279,
+            77,
+            65,
+            82,
+            75,
+            95,
+            80,
+            82,
+            73,
+            67,
+            69
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            109,
+            97,
+            114,
+            107,
+            95,
+            112,
+            114,
+            105,
+            99,
+            101
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": []
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            56320
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296,
+            120
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "bool"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "number"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "array"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "tag": "MARK_PRICE"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_cryptocom::ws_payloads::CryptocomWsPositionType": {
+    "shape": "observed",
+    "category": "decoder",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_value",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadValue",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Projects a captured PayloadValue primitive into a finite native union; this body performs literal and kind admission, so it receives executed decoder cases, not a typed-construction waiver."
+      }
+    ],
+    "evidence": "Reviewed exact cryptocom.types.ts literal unions and supplied concrete native body. Cases cover every literal with direct variant/ordinal matches, strict case/whitespace/BOM and lone-surrogate refusal; captured PayloadValue owners additionally reject non-string kinds and valid-tag object maps. These are existing static carrier decoders, not a runtime TypeScript validator or raw JSON/property host binding. No Serde, primitive coercion, getter or live-object alias behavior is claimed.",
+    "call": "{use crate::ws_payloads::PayloadValue;let input=match $value[\"kind\"].as_str().unwrap(){\"undefined\"=>PayloadValue::Undefined,\"null\"=>PayloadValue::Null,\"bool\"=>PayloadValue::Bool(true),\"number\"=>PayloadValue::Number(-0.0),\"string\"=>PayloadValue::String($value[\"units\"].as_array().unwrap().iter().map(|n|u16::try_from(n.as_u64().unwrap()).unwrap()).collect()),\"array\"=>PayloadValue::Array(vec![PayloadValue::Null]),\"object\"=>PayloadValue::Object(std::collections::BTreeMap::from([($value[\"tag\"].as_str().unwrap().encode_utf16().collect(),PayloadValue::Null)])),_=>panic!(\"unclassified native fixture\")};let result=$type::from_value(&input);match result{Ok(variant)=>{let (variant,ordinal)=match variant{$type::PerpetualSwap=>(\"PerpetualSwap\",0u32),$type::LongPosition=>(\"LongPosition\",1u32),$type::ShortPosition=>(\"ShortPosition\",2u32)};serde_json::json!({\"ok\":true,\"variant\":variant,\"ordinal\":ordinal})},Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.0})}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            80,
+            69,
+            82,
+            80,
+            69,
+            84,
+            85,
+            65,
+            76,
+            95,
+            83,
+            87,
+            65,
+            80
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "PerpetualSwap",
+          "ordinal": 0
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            76,
+            79,
+            78,
+            71,
+            95,
+            80,
+            79,
+            83,
+            73,
+            84,
+            73,
+            79,
+            78
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "LongPosition",
+          "ordinal": 1
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            83,
+            72,
+            79,
+            82,
+            84,
+            95,
+            80,
+            79,
+            83,
+            73,
+            84,
+            73,
+            79,
+            78
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "ShortPosition",
+          "ordinal": 2
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            95,
+            95,
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100,
+            95,
+            95
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            32,
+            80,
+            69,
+            82,
+            80,
+            69,
+            84,
+            85,
+            65,
+            76,
+            95,
+            83,
+            87,
+            65,
+            80
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            80,
+            69,
+            82,
+            80,
+            69,
+            84,
+            85,
+            65,
+            76,
+            95,
+            83,
+            87,
+            65,
+            80,
+            32
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            65279,
+            80,
+            69,
+            82,
+            80,
+            69,
+            84,
+            85,
+            65,
+            76,
+            95,
+            83,
+            87,
+            65,
+            80
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            112,
+            101,
+            114,
+            112,
+            101,
+            116,
+            117,
+            97,
+            108,
+            95,
+            115,
+            119,
+            97,
+            112
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": []
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            56320
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296,
+            120
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "bool"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "number"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "array"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "tag": "PERPETUAL_SWAP"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_cryptocom::ws_payloads::CryptocomWsIsolationType": {
+    "shape": "observed",
+    "category": "decoder",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_value",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadValue",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_cryptocom::ws_payloads::PayloadError",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Projects a captured PayloadValue primitive into a finite native union; this body performs literal and kind admission, so it receives executed decoder cases, not a typed-construction waiver."
+      }
+    ],
+    "evidence": "Reviewed exact cryptocom.types.ts literal unions and supplied concrete native body. Cases cover every literal with direct variant/ordinal matches, strict case/whitespace/BOM and lone-surrogate refusal; captured PayloadValue owners additionally reject non-string kinds and valid-tag object maps. These are existing static carrier decoders, not a runtime TypeScript validator or raw JSON/property host binding. No Serde, primitive coercion, getter or live-object alias behavior is claimed.",
+    "call": "{use crate::ws_payloads::PayloadValue;let input=match $value[\"kind\"].as_str().unwrap(){\"undefined\"=>PayloadValue::Undefined,\"null\"=>PayloadValue::Null,\"bool\"=>PayloadValue::Bool(true),\"number\"=>PayloadValue::Number(-0.0),\"string\"=>PayloadValue::String($value[\"units\"].as_array().unwrap().iter().map(|n|u16::try_from(n.as_u64().unwrap()).unwrap()).collect()),\"array\"=>PayloadValue::Array(vec![PayloadValue::Null]),\"object\"=>PayloadValue::Object(std::collections::BTreeMap::from([($value[\"tag\"].as_str().unwrap().encode_utf16().collect(),PayloadValue::Null)])),_=>panic!(\"unclassified native fixture\")};let result=$type::from_value(&input);match result{Ok(variant)=>{let (variant,ordinal)=match variant{$type::IsolatedMargin=>(\"IsolatedMargin\",0u32)};serde_json::json!({\"ok\":true,\"variant\":variant,\"ordinal\":ordinal})},Err(error)=>serde_json::json!({\"ok\":false,\"error\":error.0})}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            73,
+            83,
+            79,
+            76,
+            65,
+            84,
+            69,
+            68,
+            95,
+            77,
+            65,
+            82,
+            71,
+            73,
+            78
+          ]
+        },
+        "output": {
+          "ok": true,
+          "variant": "IsolatedMargin",
+          "ordinal": 0
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            95,
+            95,
+            105,
+            110,
+            118,
+            97,
+            108,
+            105,
+            100,
+            95,
+            95
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            32,
+            73,
+            83,
+            79,
+            76,
+            65,
+            84,
+            69,
+            68,
+            95,
+            77,
+            65,
+            82,
+            71,
+            73,
+            78
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            73,
+            83,
+            79,
+            76,
+            65,
+            84,
+            69,
+            68,
+            95,
+            77,
+            65,
+            82,
+            71,
+            73,
+            78,
+            32
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            65279,
+            73,
+            83,
+            79,
+            76,
+            65,
+            84,
+            69,
+            68,
+            95,
+            77,
+            65,
+            82,
+            71,
+            73,
+            78
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            105,
+            115,
+            111,
+            108,
+            97,
+            116,
+            101,
+            100,
+            95,
+            109,
+            97,
+            114,
+            103,
+            105,
+            110
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": []
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            56320
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "string",
+          "units": [
+            55296,
+            120
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "string literal"
+        }
+      },
+      {
+        "input": {
+          "kind": "undefined"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "null"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "bool"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "number"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "array"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      },
+      {
+        "input": {
+          "kind": "object",
+          "tag": "ISOLATED_MARGIN"
+        },
+        "output": {
+          "ok": false,
+          "error": "string"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_cryptocom::account_envelopes::CryptocomRequestType": {
+    "shape": "observed",
+    "category": "decoder",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_units",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "primitive": "u16"
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Projects a borrowed lossless UTF16 code-unit slice into a finite native union, including refusal of unknown and ill-formed strings; the actual slice-domain decoder is executed, with no invented JSON/object admission contract."
+      }
+    ],
+    "evidence": "Reviewed exact cryptocom.types.ts literal unions and supplied concrete native body. Cases cover every literal with direct variant/ordinal matches, strict case/whitespace/BOM and lone-surrogate refusal; captured PayloadValue owners additionally reject non-string kinds and valid-tag object maps. These are existing static carrier decoders, not a runtime TypeScript validator or raw JSON/property host binding. No Serde, primitive coercion, getter or live-object alias behavior is claimed.",
+    "call": "{let input=$value.as_array().unwrap().iter().map(|n|u16::try_from(n.as_u64().unwrap()).unwrap()).collect::<Vec<_>>();let result=$type::from_units(&input);match result{Some(variant)=>{let (variant,ordinal)=match variant{$type::Limit=>(\"Limit\",0u32),$type::Market=>(\"Market\",1u32),$type::StopLoss=>(\"StopLoss\",2u32),$type::StopLimit=>(\"StopLimit\",3u32),$type::TakeProfit=>(\"TakeProfit\",4u32),$type::TakeProfitLimit=>(\"TakeProfitLimit\",5u32)};serde_json::json!({\"ok\":true,\"variant\":variant,\"ordinal\":ordinal})},None=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": [
+          76,
+          73,
+          77,
+          73,
+          84
+        ],
+        "output": {
+          "ok": true,
+          "variant": "Limit",
+          "ordinal": 0
+        }
+      },
+      {
+        "input": [
+          77,
+          65,
+          82,
+          75,
+          69,
+          84
+        ],
+        "output": {
+          "ok": true,
+          "variant": "Market",
+          "ordinal": 1
+        }
+      },
+      {
+        "input": [
+          83,
+          84,
+          79,
+          80,
+          95,
+          76,
+          79,
+          83,
+          83
+        ],
+        "output": {
+          "ok": true,
+          "variant": "StopLoss",
+          "ordinal": 2
+        }
+      },
+      {
+        "input": [
+          83,
+          84,
+          79,
+          80,
+          95,
+          76,
+          73,
+          77,
+          73,
+          84
+        ],
+        "output": {
+          "ok": true,
+          "variant": "StopLimit",
+          "ordinal": 3
+        }
+      },
+      {
+        "input": [
+          84,
+          65,
+          75,
+          69,
+          95,
+          80,
+          82,
+          79,
+          70,
+          73,
+          84
+        ],
+        "output": {
+          "ok": true,
+          "variant": "TakeProfit",
+          "ordinal": 4
+        }
+      },
+      {
+        "input": [
+          84,
+          65,
+          75,
+          69,
+          95,
+          80,
+          82,
+          79,
+          70,
+          73,
+          84,
+          95,
+          76,
+          73,
+          77,
+          73,
+          84
+        ],
+        "output": {
+          "ok": true,
+          "variant": "TakeProfitLimit",
+          "ordinal": 5
+        }
+      },
+      {
+        "input": [
+          95,
+          95,
+          105,
+          110,
+          118,
+          97,
+          108,
+          105,
+          100,
+          95,
+          95
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          32,
+          76,
+          73,
+          77,
+          73,
+          84
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          76,
+          73,
+          77,
+          73,
+          84,
+          32
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          65279,
+          76,
+          73,
+          77,
+          73,
+          84
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          108,
+          105,
+          109,
+          105,
+          116
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          55296
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          56320
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          55296,
+          120
+        ],
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_cryptocom::account_envelopes::CryptocomRequestTimeInForce": {
+    "shape": "observed",
+    "category": "decoder",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_units",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "primitive": "u16"
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Projects a borrowed lossless UTF16 code-unit slice into a finite native union, including refusal of unknown and ill-formed strings; the actual slice-domain decoder is executed, with no invented JSON/object admission contract."
+      }
+    ],
+    "evidence": "Reviewed exact cryptocom.types.ts literal unions and supplied concrete native body. Cases cover every literal with direct variant/ordinal matches, strict case/whitespace/BOM and lone-surrogate refusal; captured PayloadValue owners additionally reject non-string kinds and valid-tag object maps. These are existing static carrier decoders, not a runtime TypeScript validator or raw JSON/property host binding. No Serde, primitive coercion, getter or live-object alias behavior is claimed.",
+    "call": "{let input=$value.as_array().unwrap().iter().map(|n|u16::try_from(n.as_u64().unwrap()).unwrap()).collect::<Vec<_>>();let result=$type::from_units(&input);match result{Some(variant)=>{let (variant,ordinal)=match variant{$type::GoodTillCancel=>(\"GoodTillCancel\",0u32),$type::FillOrKill=>(\"FillOrKill\",1u32),$type::ImmediateOrCancel=>(\"ImmediateOrCancel\",2u32),$type::PostOnly=>(\"PostOnly\",3u32)};serde_json::json!({\"ok\":true,\"variant\":variant,\"ordinal\":ordinal})},None=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": [
+          71,
+          79,
+          79,
+          68,
+          95,
+          84,
+          73,
+          76,
+          76,
+          95,
+          67,
+          65,
+          78,
+          67,
+          69,
+          76
+        ],
+        "output": {
+          "ok": true,
+          "variant": "GoodTillCancel",
+          "ordinal": 0
+        }
+      },
+      {
+        "input": [
+          70,
+          73,
+          76,
+          76,
+          95,
+          79,
+          82,
+          95,
+          75,
+          73,
+          76,
+          76
+        ],
+        "output": {
+          "ok": true,
+          "variant": "FillOrKill",
+          "ordinal": 1
+        }
+      },
+      {
+        "input": [
+          73,
+          77,
+          77,
+          69,
+          68,
+          73,
+          65,
+          84,
+          69,
+          95,
+          79,
+          82,
+          95,
+          67,
+          65,
+          78,
+          67,
+          69,
+          76
+        ],
+        "output": {
+          "ok": true,
+          "variant": "ImmediateOrCancel",
+          "ordinal": 2
+        }
+      },
+      {
+        "input": [
+          80,
+          79,
+          83,
+          84,
+          95,
+          79,
+          78,
+          76,
+          89
+        ],
+        "output": {
+          "ok": true,
+          "variant": "PostOnly",
+          "ordinal": 3
+        }
+      },
+      {
+        "input": [
+          95,
+          95,
+          105,
+          110,
+          118,
+          97,
+          108,
+          105,
+          100,
+          95,
+          95
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          32,
+          71,
+          79,
+          79,
+          68,
+          95,
+          84,
+          73,
+          76,
+          76,
+          95,
+          67,
+          65,
+          78,
+          67,
+          69,
+          76
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          71,
+          79,
+          79,
+          68,
+          95,
+          84,
+          73,
+          76,
+          76,
+          95,
+          67,
+          65,
+          78,
+          67,
+          69,
+          76,
+          32
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          65279,
+          71,
+          79,
+          79,
+          68,
+          95,
+          84,
+          73,
+          76,
+          76,
+          95,
+          67,
+          65,
+          78,
+          67,
+          69,
+          76
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          103,
+          111,
+          111,
+          100,
+          95,
+          116,
+          105,
+          108,
+          108,
+          95,
+          99,
+          97,
+          110,
+          99,
+          101,
+          108
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          55296
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          56320
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          55296,
+          120
+        ],
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_cryptocom::account_envelopes::CryptocomSubscribeMethod": {
+    "shape": "observed",
+    "category": "decoder",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_units",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "primitive": "u16"
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Projects a borrowed lossless UTF16 code-unit slice into a finite native union, including refusal of unknown and ill-formed strings; the actual slice-domain decoder is executed, with no invented JSON/object admission contract."
+      }
+    ],
+    "evidence": "Reviewed exact cryptocom.types.ts literal unions and supplied concrete native body. Cases cover every literal with direct variant/ordinal matches, strict case/whitespace/BOM and lone-surrogate refusal; captured PayloadValue owners additionally reject non-string kinds and valid-tag object maps. These are existing static carrier decoders, not a runtime TypeScript validator or raw JSON/property host binding. No Serde, primitive coercion, getter or live-object alias behavior is claimed.",
+    "call": "{let input=$value.as_array().unwrap().iter().map(|n|u16::try_from(n.as_u64().unwrap()).unwrap()).collect::<Vec<_>>();let result=$type::from_units(&input);match result{Some(variant)=>{let (variant,ordinal)=match variant{$type::Subscribe=>(\"Subscribe\",0u32)};serde_json::json!({\"ok\":true,\"variant\":variant,\"ordinal\":ordinal})},None=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": [
+          115,
+          117,
+          98,
+          115,
+          99,
+          114,
+          105,
+          98,
+          101
+        ],
+        "output": {
+          "ok": true,
+          "variant": "Subscribe",
+          "ordinal": 0
+        }
+      },
+      {
+        "input": [
+          95,
+          95,
+          105,
+          110,
+          118,
+          97,
+          108,
+          105,
+          100,
+          95,
+          95
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          32,
+          115,
+          117,
+          98,
+          115,
+          99,
+          114,
+          105,
+          98,
+          101
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          115,
+          117,
+          98,
+          115,
+          99,
+          114,
+          105,
+          98,
+          101,
+          32
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          65279,
+          115,
+          117,
+          98,
+          115,
+          99,
+          114,
+          105,
+          98,
+          101
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          83,
+          85,
+          66,
+          83,
+          67,
+          82,
+          73,
+          66,
+          69
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          55296
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          56320
+        ],
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": [
+          55296,
+          120
+        ],
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  }
+}
