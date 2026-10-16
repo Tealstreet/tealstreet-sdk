@@ -36,7 +36,7 @@ impl WsProtocol for PrivateProtocol {
         super::connect_and_subscribe(
             &socket,
             self.runtime.as_ref(),
-            parent.base().is_demo,
+            parent.uses_bybit_demo_environment(),
             Some(parent.get_bybit_private_ws_url(
                 if parent.base().options().testnet == Some(true) {
                     crate::exchange::Network::Testnet
