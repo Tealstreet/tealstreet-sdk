@@ -404,8 +404,8 @@ the original map fields and reject positional arrays. No debt entry was added.
 
 ## Per-crate contract storage cutover
 
-At source base `7354cfdf80b47539d70a811135ac8b4319bac297`, the former
-`contracts.json` held 764 contracts. Those exact entries now occupy 15 compiler
+At source base `71107baba8`, the former
+`contracts.json` held 797 contracts. Those exact entries now occupy 16 compiler
 crate files in `contracts/`; no row, native adapter, signature, expected value or
 classification changed. `accepted-contract-files.mjs` supplies the complete
 merged object to the gate, local helper review, native helper controls and
@@ -414,12 +414,12 @@ proposal helper. Existing explicit JSON fixture files remain supported.
 The executed test compared the COMPLETE original production object with the
 new loader using deep strict equality, including every adapter string and
 ordered array. Their recursively key-sorted semantic JSON SHA-256 both equal
-`59182d25d8e8d3d114e81326b34b95f35016d0a3268310fe89925645dd6f69c9`.
+`b396f4a835ef661ae97f65ad883a2e64b4ba4aa21bdab8b4ba09f21c69a2eab9`.
 On this cutover commit, reproduce the comparison from Git history as follows
 (later reviewed contract additions naturally change the complete live set):
 
 ```sh
-git show 7354cfdf80:sdk-rs/safe-cex-parity/accepted-set/contracts.json > /tmp/accepted-contracts-before-cutover.json
+git show 71107baba8:sdk-rs/safe-cex-parity/accepted-set/contracts.json > /tmp/accepted-contracts-before-cutover.json
 node sdk-rs/safe-cex-parity/scripts/accepted-contract-files.test.mjs --legacy-contracts=/tmp/accepted-contracts-before-cutover.json
 ```
 
