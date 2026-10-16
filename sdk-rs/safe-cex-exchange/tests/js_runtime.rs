@@ -22,6 +22,7 @@ struct Runtime {
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
+    hold_sleep: std::cell::Cell<bool>,
 }
 struct Task;
 impl ExchangeTask for Task {
@@ -35,6 +36,9 @@ impl ExchangeRuntime for Runtime {
         self.wall_clock.get()
     }
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
+        if self.hold_sleep.get() {
+            return Box::pin(std::future::pending());
+        }
         self.clock.set(self.clock.get() + ms as f64);
         Box::pin(async { Ok(()) })
     }
@@ -61,6 +65,141 @@ impl ExchangeRuntime for Runtime {
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
     }
+}
+
+#[test]
+fn base_worker_rpc_forwards_arguments_results_errors_and_completion_hook() {
+    use safe_cex_exchange::{
+        capabilities::ExchangeCapabilities,
+        exchange::{BaseExchange, Exchange},
+        worker::CallableMethodsInWorker,
+    };
+    struct Venue {
+        base: Rc<BaseExchange>,
+        caps: ExchangeCapabilities,
+        completed: RefCell<Vec<(Value, Value, Vec<Value>)>>,
+    }
+    impl Exchange for Venue {
+        type PlaceOpts = safe_cex_types::PlaceOrderOpts;
+        fn base(&self) -> &BaseExchange {
+            &self.base
+        }
+        fn capabilities(&self) -> &ExchangeCapabilities {
+            &self.caps
+        }
+        fn after_method_called_in_worker(
+            &self,
+            result: &Value,
+            method: CallableMethodsInWorker,
+            args: &[Value],
+        ) -> Result<(), ExchangeError> {
+            self.completed.borrow_mut().push((
+                result.clone(),
+                serde_json::to_value(method).unwrap(),
+                args.to_vec(),
+            ));
+            Ok(())
+        }
+    }
+    for success in [true, false] {
+        let assembled = assemble(json!({"key":"k","secret":"s"})).unwrap();
+        assembled.runtime.hold_sleep.set(true);
+        let venue = Rc::new(Venue {
+            base: assembled.base.clone(),
+            caps: Default::default(),
+            completed: RefCell::new(vec![]),
+        });
+        let dynamic: Rc<dyn Exchange> = venue.clone();
+        *assembled.context.venue.borrow_mut() = Some(Rc::downgrade(&dynamic));
+        let requests = Rc::new(RefCell::new(vec![]));
+        let captured = requests.clone();
+        assembled.base.on(
+            "callMethod",
+            Rc::new(move |_, request| {
+                captured.borrow_mut().push(request.clone());
+                Ok(())
+            }),
+        );
+        let promise = assembled
+            .this
+            .call_method(
+                "callMethodInWorker",
+                vec![Js::str("removeOrders"), worker_order_ids(), Js::Number(17.)],
+            )
+            .expect("shared worker RPC is installed");
+        assert_eq!(
+            requests.borrow().len(),
+            1,
+            "source async prefix emits one worker request"
+        );
+        let request = requests.borrow()[0].clone();
+        assert_eq!(request["method"], json!("removeOrders"));
+        assert_eq!(request["args"], json!([[{"id":"wire-7"}],17.0]));
+        let result = if success {
+            json!({"removed":["wire-7"],"version":23.0})
+        } else {
+            json!({"name":"WorkerFailure","message":"worker rejected","code":409,"stack":"worker stack"})
+        };
+        assembled
+            .base
+            .emit(
+                "callMethod:done",
+                json!({"requestId":request["requestId"],"success":success,"result":result}),
+            )
+            .unwrap();
+        let reply = settle(&assembled.runtime, promise);
+        if success {
+            assert_eq!(to_json(&reply.unwrap()).unwrap(), result);
+            assert_eq!(
+                venue.completed.borrow().as_slice(),
+                &[(
+                    result,
+                    json!("removeOrders"),
+                    vec![json!([{"id":"wire-7"}]), json!(17.0)]
+                )]
+            );
+        } else {
+            let error = reply.unwrap_err();
+            assert_eq!(
+                error.value.get("name").unwrap().to_display(),
+                "WorkerFailure"
+            );
+            assert_eq!(
+                to_json(&error.value.get("code").unwrap()).unwrap(),
+                json!(409.0)
+            );
+            assert_eq!(
+                error.value.get("stack").unwrap().to_display(),
+                "worker stack"
+            );
+            assert_eq!(error.to_exchange_error().message, "worker rejected");
+            assert!(venue.completed.borrow().is_empty());
+        }
+    }
+    // The default test clock resolves its sleep immediately: the facade must
+    // preserve the existing core timeout rather than leave an unsettled promise.
+    let assembled = assemble(json!({"key":"k","secret":"s"})).unwrap();
+    let venue: Rc<dyn Exchange> = Rc::new(Venue {
+        base: assembled.base.clone(),
+        caps: Default::default(),
+        completed: RefCell::new(vec![]),
+    });
+    *assembled.context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+    let promise = assembled
+        .this
+        .call_method(
+            "callMethodInWorker",
+            vec![Js::str("removeOrders"), worker_order_ids()],
+        )
+        .unwrap();
+    assert_eq!(
+        settle(&assembled.runtime, promise).unwrap_err().message(),
+        "Timeout callMethodInWorker"
+    );
+}
+
+fn worker_order_ids() -> Js {
+    safe_cex_exchange::js_runtime::value::from_json(&json!([{"id":"wire-7"}]))
 }
 
 struct Http {
@@ -1364,6 +1503,7 @@ impl safe_cex_transport::RestAdapter for Terminal {
             body: RestResponseBody::Encoded(body.as_bytes().to_vec()),
         };
         let result = match request.url.as_str() {
+            "/large-id" => Ok(response(200, r#"{ "orderId":9007199254740993 }"#)),
             "/down" => {
                 let mut failure = RestFailure::pre_transmit("socket hang up".into(), request);
                 failure.code = Some("ECONNRESET".into());
@@ -1443,6 +1583,44 @@ fn rest_http_host_carries_config_to_the_terminal_adapter() {
     assert_eq!(
         to_json(&down.value.get("code").unwrap()).unwrap(),
         json!("ECONNRESET")
+    );
+}
+
+#[test]
+fn rest_http_host_text_response_preserves_raw_big_integer_tokens() {
+    let runtime = Rc::new(Runtime::default());
+    let terminal = std::sync::Arc::new(Terminal::default());
+    let host = client::rest_http_host(runtime.clone(), terminal);
+    let xhr = client::create(host, Js::object(vec![("responseType", Js::str("text"))]));
+    let response = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/large-id")]).unwrap(),
+    )
+    .unwrap();
+    let raw = response.get("data").unwrap();
+    assert!(
+        raw.is_string(),
+        "text response must reach the venue before numeric projection"
+    );
+    assert_eq!(raw.to_display(), r#"{ "orderId":9007199254740993 }"#);
+    assert_eq!(
+        safe_cex_transport::how::big_int_as_string_json_parse(&raw.to_display())["orderId"],
+        "9007199254740993"
+    );
+    let failed = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/fail")]).unwrap(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        failed
+            .value
+            .get("response")
+            .unwrap()
+            .get("data")
+            .unwrap()
+            .to_display(),
+        r#"{"code":"1"}"#
     );
 }
 

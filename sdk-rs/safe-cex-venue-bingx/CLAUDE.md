@@ -134,3 +134,50 @@ historical evidence, not itself an executable content guard. Same-length replace
 and reversal controls exercise all three input guards. Cardinality bypass controls
 remove both the length and content admission guards, retaining native comparisons
 and fixed executed-method counts.
+
+## Production binding
+
+`binding::BingxExchange` (also re-exported at crate root) assembles the landed
+`exchange::BingxExchange` bodies on shared `safe-cex-exchange::js_runtime`: one
+ScopeShared/Store, Axios client with raw-text bigint parsing, common intrinsics,
+and public/private BaseWebSocket facades. `BingxDependencies` supplies the HTTP
+wire host, WsRuntime and optional external-public-data factory. Secondary keys
+route GETs to the secondary client and writes to the primary. Hosted signer
+options fail visibly until the host supplies that capability.
+
+All 16 Exchange trait methods are bound. The source inherits the base rejection
+for fetchSymbolMaxLeverage, scheduleCancel and fetchPublicTrades; their tests
+assert the exact Error and zero requests. Other hooks delegate to the existing
+venue bodies rather than duplicating their algorithms. Existing manifest
+divergences remain priced at their original rows. This binding does not claim
+whole-venue equivalence or resolve the remaining API helper rows.
+
+`tests/binding.rs` drives each of the 16 methods with a scripted HTTP/WS host,
+including caller order IDs, distinct amount/price steps, purity, and disposal.
+The registry native-host proof exercises startup, signed placement and cancellation
+over real loopback HTTP and WebSockets.
+
+`scripts/binding-controls.py` compiles one deliberate failure for each of the 16
+required Exchange overrides plus both public listener hooks, requires each named E2E failure, restores the source in finally,
+and proves the restored suite. Run without concurrent Cargo/source changes.
+Additional binding tests cover raw serialized POST signature resends (HTTP
+200 and 400), the one-resend guard, ambiguous write refusal, and fresh signatures
+on retryable reads. Signature decisions and payload preparation reuse the shared
+signature-rejection port; the host wires its per-call stamp into Axios retries.
+
+The shared binary socket bridge delivers native Buffer/browser Blob objects. The
+binding retains a leased frame handle and delegates decompression to the shared
+Store read_blob helper, preserving its pako byte widening. The typed handlers keep
+their disposal guards after that await. The binary E2E proves both gzip and zlib
+Ping/Pong on public and private protocols. Frame leases are released on completion,
+error and cancellation. `scripts/registry-control.py` proves removing the actual
+constructor entry breaks native startup and restores a pass.
+
+Candle/book trait listeners dispatch to the existing public subscription receiver.
+The shared OrderBook callback carries a value snapshot; unlike the source live
+book object, an earlier native callback value retains its levels after cleanup.
+That owned-callback boundary is priced on the listenOrderBook manifest row.
+
+`scripts/binding-precision-controls.py` independently swaps the production amount
+and price precision operands. Fractional wire assertions must fail separately;
+integral placement inputs do not establish this protection.

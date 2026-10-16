@@ -584,7 +584,16 @@ impl PrivateStream {
             )
         };
         for update in updates {
-            let previous = currencies.get(&update.asset);
+            let previous = currencies
+                .get(&update.asset)
+                .map(|row| {
+                    row.as_balance().ok_or_else(|| {
+                        ExchangeError::new(
+                            "AsterDEX balance update requires a declared Balance currency row",
+                        )
+                    })
+                })
+                .transpose()?;
             let mut balance = previous.cloned().unwrap_or(Balance {
                 total: 0.0,
                 free: 0.0,
@@ -598,14 +607,26 @@ impl PrivateStream {
             balance.free = update.free;
             balance.used = update.used;
             balance.upnl = or_zero(previous.map_or(0.0, |b| b.upnl)) + delta(&update.asset);
-            currencies.insert(update.asset.clone(), balance);
+            currencies.insert(update.asset.clone(), balance.into());
         }
         let reconcile =
             updates.iter().any(|u| u.asset != "USDT") || currencies.keys().any(|a| a != "USDT");
         let mut next = current.clone();
         if !reconcile {
             if let Some(collateral) = updates.iter().find(|u| u.asset == "USDT") {
-                if let Some(previous) = current.currencies.as_ref().and_then(|c| c.get("USDT")) {
+                if let Some(previous) = current
+                    .currencies
+                    .as_ref()
+                    .and_then(|c| c.get("USDT"))
+                    .map(|row| {
+                        row.as_balance().ok_or_else(|| {
+                            ExchangeError::new(
+                                "AsterDEX balance update requires a declared Balance currency row",
+                            )
+                        })
+                    })
+                    .transpose()?
+                {
                     next.total = current.total + collateral.total - previous.total;
                     next.free = current.free + collateral.free - previous.free;
                     next.used = current.used + collateral.used - previous.used;
