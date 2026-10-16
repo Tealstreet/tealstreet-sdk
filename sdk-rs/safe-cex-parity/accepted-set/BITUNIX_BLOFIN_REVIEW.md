@@ -45,3 +45,19 @@ The original review inventory has 199 Bitunix owners plus two aliases and
 its function-pointer alias, and all 163 Blofin owners plus ten aliases, for
 subsequent review. Those counts describe this source snapshot rather than a
 passing package ratchet.
+
+## Subscription parser follow-up
+
+Five further native/default contracts execute the concrete OHLCV and order-book
+parser owners and their field/float/level helpers. Candle fixtures observe all
+six native number fields, negative zero, ticker-before-callback order, absent
+tickers and callback errors. Book fixtures inspect both native sides, independent
+cumulative amounts, original Rc identity and partial state when asks refuse
+after bids have been replaced. Failure callbacks retain the completed book.
+
+All five production-native receipts pass with jobs1. Two independently compiled
+copied-production mutations replace candle open with close and accumulate book
+prices instead of amounts. Each fails its named owner; exact restoration passes
+both owners. These are runtime assertion failures, not compiler failures, and
+the real production source bytes are unchanged. This follow-up leaves 128 of
+the original Bitunix owners for subsequent review.
