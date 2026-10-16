@@ -1,5 +1,6 @@
 // Production WS native controls mutate ws_auth.rs sequentially and restore it in finally.
 import assert from 'node:assert/strict';
+import { loadContracts } from './accepted-contract-files.mjs';
 import fs from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -11,7 +12,7 @@ import { runProbes } from './accepted-probes.mjs';
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 const sourcePath = path.join(root, 'safe-cex-types/src/ws_auth.rs');
 const original = fs.readFileSync(sourcePath, 'utf8');
-const contracts = JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/contracts.json')));
+const contracts = loadContracts();
 const visitorPins = JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/local-functions.json')));
 // RequestVisitor and ResponseVisitor are delegated to their enclosing
 // Deserialize owners by the scanner. The free payload helper retains the

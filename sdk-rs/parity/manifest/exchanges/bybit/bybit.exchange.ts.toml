@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs", "safe-cex-venue-bybit/src/ws_private/messages.rs", "safe-cex-venue-bybit/src/binding/members/batch.rs" ]
 
 [[symbol]]
 ts = "BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS"
@@ -390,9 +390,9 @@ note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary: the a
 ts = "BybitExchange.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = [ "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::create", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitDependencies", "safe-cex-venue-bybit/src/lib.rs::BybitDependencies" ]
+rs = [ "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::create", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitDependencies", "safe-cex-venue-bybit/src/lib.rs::BybitDependencies", "safe-cex-venue-bybit/src/binding/members/batch.rs::install" ]
 status = "divergent"
-note = "CHOSEN: host-supplied runtime, wire, clocks and external-public-data factory are collected in BybitDependencies and its public re-export, consumed by BybitExchange::create to assemble the source constructor's clients, weak socket parents, receiver and method bindings. Rust host capabilities remain explicit because ambient browser globals would hide required runtime ownership. The constructor creates no task or dial; source-constructor and production exchange_binding witnesses cover initialization and startup ordering. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to options retained by the shared BaseExchange. Renamed Rust constructor: safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::create; companion constructor inputs: safe-cex-venue-bybit/src/binding/exchange.rs::BybitDependencies and safe-cex-venue-bybit/src/lib.rs::BybitDependencies."
+note = "CHOSEN: host-supplied runtime, wire, clocks and external-public-data factory are collected in BybitDependencies and its public re-export, consumed by BybitExchange::create to assemble the source constructor's clients, weak socket parents, receiver and method bindings. Rust host capabilities remain explicit because ambient browser globals would hide required runtime ownership. The constructor creates no task or dial; source-constructor and production exchange_binding witnesses cover initialization and startup ordering. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to options retained by the shared BaseExchange. Renamed Rust constructor: safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::create; receiver installer: safe-cex-venue-bybit/src/binding/members/batch.rs::install; companion constructor inputs: safe-cex-venue-bybit/src/binding/exchange.rs::BybitDependencies and safe-cex-venue-bybit/src/lib.rs::BybitDependencies."
 
 [[symbol]]
 ts = "BybitExchange.dispose"
@@ -944,7 +944,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/exchange.rs::BybitExchange::has_full_sized_position_opposite_side"
 status = "divergent"
-note = "Renamed to safe-cex-venue-bybit/src/exchange.rs::BybitExchange::has_full_sized_position_opposite_side. CHOSEN: typed helper preserves source some selection, opposite-side matching, strict numeric nonzero and signed contracts >= amount; never take abs(contracts). The actual-source 396-case oracle pins every ordered input and 347 false / 49 true outcomes, comparing native booleans with invocation-attached return coverage. Typed Position and OrderSide ingress refuses string contracts and unexpected sides that source consumes; paired source/native witnesses distinguish string zero from numeric zero and malformed position side from malformed order side. Admitting these would widen the shared Store and enum contracts, declined. UTF-8 symbol ingress follows sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary with a source-successful lone-surrogate equality witness and native refusal. Accessor-bearing Store state is not a native getter-parity claim. This method currently has only its source-oracle test as a Rust caller; placement and constructor composition remain pending."
+note = "Renamed to safe-cex-venue-bybit/src/exchange.rs::BybitExchange::has_full_sized_position_opposite_side. CHOSEN: typed helper preserves source some selection, opposite-side matching, strict numeric nonzero and signed contracts >= amount; never take abs(contracts). The actual-source 396-case oracle pins every ordered input and 347 false / 49 true outcomes, comparing native booleans with invocation-attached return coverage. Typed Position and OrderSide ingress refuses string contracts and unexpected sides that source consumes; paired source/native witnesses distinguish string zero from numeric zero and malformed position side from malformed order side. Admitting these would widen the shared Store and enum contracts, declined. UTF-8 symbol ingress follows sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary with a source-successful lone-surrogate equality witness and native refusal. Accessor-bearing Store state is not a native getter-parity claim. The concrete batch receiver now consumes this predicate during source special-order separation; the mixed BBO/option/trailing-stop physical transport witness covers that consumer. Other placement consumers remain separately classified."
 
 [[symbol]]
 ts = "BybitExchange#getOrderExecutionParams"
@@ -1005,42 +1005,42 @@ note = ""
 [[symbol]]
 ts = "BybitExchange.placeOrders"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/binding/members/batch.rs::place_orders", "safe-cex-venue-bybit/src/binding/members/batch.rs::method", "safe-cex-venue-bybit/src/binding/members/batch.rs::items", "safe-cex-venue-bybit/src/binding/members/batch.rs::emit", "safe-cex-venue-bybit/src/binding/members/batch.rs::caught_message", "safe-cex-venue-bybit/src/binding/members/batch.rs::append" ]
+status = "divergent"
+note = "CHOSEN: the concrete typed facade runs native source receiver members with core-owned promise cancellation, rather than continuing source promises after disposal. The physical transport disposal witness stops before later batches. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary apply to the existing typed options/Store inputs; arbitrary executable option getters or mutation of the caller object during awaits are not claimed by this binding. Atomic caller-ID and execution validation precedes every HTTP request; special orders run serially before regular category batches and errors continue with the next special. Native 24 actual-source compositions cover ordinary batch consumers, with mixed BBO/option/failing-special physical writes separately exercised. Eight compiled consumer faults and the original missing-receiver regression distinguish delivered dispatch. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/batch.rs::place_orders; companion adapter helpers: safe-cex-venue-bybit/src/binding/members/batch.rs::method, safe-cex-venue-bybit/src/binding/members/batch.rs::items, safe-cex-venue-bybit/src/binding/members/batch.rs::emit, safe-cex-venue-bybit/src/binding/members/batch.rs::caught_message, safe-cex-venue-bybit/src/binding/members/batch.rs::append."
 
 [[symbol]]
 ts = "BybitExchange#placeBatchOrders"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/batch.rs::place_batch_orders"
+status = "divergent"
+note = "CHOSEN: the concrete typed facade runs native source receiver members with core-owned promise cancellation, rather than continuing source promises after disposal. The physical transport disposal witness stops before later batches. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary apply to the existing typed options/Store inputs; arbitrary executable option getters or mutation of the caller object during awaits are not claimed by this binding. Live getCategoryForSymbol grouping preserves first category order; every group delegates through the receiver placeBatchOrdersForCategory member. The mixed inverse/linear native composition agrees with actual source. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/batch.rs::place_batch_orders."
 
 [[symbol]]
 ts = "BybitExchange#placeBatchOrdersForCategory"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/binding/members/batch.rs::place_batch_orders_for_category"
+status = "divergent"
+note = "CHOSEN: the concrete typed facade runs native source receiver members with core-owned promise cancellation, rather than continuing source promises after disposal. The physical transport disposal witness stops before later batches. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary apply to the existing typed options/Store inputs; arbitrary executable option getters or mutation of the caller object during awaits are not claimed by this binding. Uses the shared source Lodash chunk helper and current batchLimit, waits 1200ms before each later chunk, and on batch rejection attempts each original order serially while retaining successful IDs. Native chunk-boundary, fallback and pending-delay disposal witnesses execute the real facade; the delay fault fails a named assertion. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/batch.rs::place_batch_orders_for_category."
 
 [[symbol]]
 ts = "BybitExchange#processBatch"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/binding/members/batch.rs::process_batch", "safe-cex-venue-bybit/src/binding/members/batch.rs::error" ]
+status = "divergent"
+note = "CHOSEN: the concrete typed facade runs native source receiver members with core-owned promise cancellation, rather than continuing source promises after disposal. The physical transport disposal witness stops before later batches. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and #shared-utf8-string-boundary apply to the existing typed options/Store inputs; arbitrary executable option getters or mutation of the caller object during awaits are not claimed by this binding. Formats all orders before awaiting Promise.all; excludes only null requests, retains TP/SL fields on every request, and associates returned order IDs with the filtered request/option pair. Actual source comparisons cover missing middle markets and partial errors including agreement remediation. Successful IDs are observed again through fetchOrders and the recently-placed cache. Renamed Rust target: safe-cex-venue-bybit/src/binding/members/batch.rs::process_batch; caught response error adapter: safe-cex-venue-bybit/src/binding/members/batch.rs::error."
 
 [[symbol]]
 ts = "BybitExchange#formatOrderForBatch"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/order_format.rs::format_order_for_batch"
+rs = [ "safe-cex-venue-bybit/src/order_format.rs::format_order_for_batch", "safe-cex-venue-bybit/src/binding/members/batch.rs::format_order_for_batch" ]
 status = "divergent"
-note = "CHOSEN: Typed-market KEY SET MEMBERSHIP divergence, not key order or numeric key spelling: TS plain-object lookup accepts inherited constructor/toString/__proto__ entries then fails reading precision.price; Rust requires an owned Market and reports Market SYMBOL not found. Owned Rust maps have no prototype chain; explicit JS prototype emulation is possible but is not part of this typed-map representation. The live oracle pins both diagnostic outcomes. Extracted request phase to safe-cex-venue-bybit/src/order_format.rs::format_order_for_batch with market, ticker and fetched positionIdx explicit. Caller must fetch conditional positionIdx with reduceOnly=false. Source logs then returns null; Rust returns the diagnostic as Err for the caller to emit. Live oracle compares request/null outcome and complete diagnostic text, including catch prefix and missing-ticker property; transport, async position lookup and exchange logging integration remain in the pending class/placement work."
+note = "CHOSEN: Typed-market KEY SET MEMBERSHIP divergence, not key order or numeric key spelling: TS plain-object lookup accepts inherited constructor/toString/__proto__ entries then fails reading precision.price; Rust requires an owned Market and reports Market SYMBOL not found. Owned Rust maps have no prototype chain; explicit JS prototype emulation is possible but is not part of this typed-map representation. The live oracle pins both diagnostic outcomes. Extracted request phase to safe-cex-venue-bybit/src/order_format.rs::format_order_for_batch with market, ticker and fetched positionIdx explicit. Caller must fetch conditional positionIdx with reduceOnly=false. Source logs then returns null; Rust returns the diagnostic as Err for the caller to emit. Live oracle compares request/null outcome and complete diagnostic text, including catch prefix and missing-ticker property; The live receiver now supplies the awaited position index and publishes errors/nulls through the source batch composition. The canonical selector emits only 0/1/2; all other request numerics are source string fields, so this request record contains no nonfinite numeric JSON projection. The 24 native/actual-source compositions include missing markets, rounded-zero conditional triggers, hedged reduce-only overrides, precision and TP/SL fields. The shared typed options snapshot and core cancellation choices also apply to the new async adapter. Renamed async consumer: safe-cex-venue-bybit/src/binding/members/batch.rs::format_order_for_batch."
 
 [[symbol]]
 ts = "BybitExchange.updateOrder"
