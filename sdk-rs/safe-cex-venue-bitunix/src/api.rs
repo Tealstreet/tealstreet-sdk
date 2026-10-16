@@ -16,15 +16,54 @@ type Request = fn(
     &mut Clock<'_>,
     &mut Nonce<'_>,
 ) -> Result<Option<JsJsonValue>, String>;
-type Response =
-    for<'a> fn(&'a Value, &mut Header<'_>, &mut Report<'_>) -> Result<&'a Value, String>;
+type Resend<'a> = dyn FnMut(&Value) -> Result<Option<Value>, String> + 'a;
+type Seen<'a> = dyn FnMut(&Value) -> bool + 'a;
+type Response = for<'a> fn(
+    &'a Value,
+    &mut Header<'_>,
+    &mut Report<'_>,
+    &mut Resend<'_>,
+    &mut Seen<'_>,
+) -> Result<Received<'a>, String>;
+type Condition<'a> = dyn FnMut() -> Result<bool, String> + 'a;
+/// ts: the inline retryCondition. Both arms are host-bound and evaluated per error.
+pub type RetryCondition = fn(&mut Condition<'_>, &mut Condition<'_>) -> Result<bool, String>;
 
-pub fn create_api<C, R, E>(
+/// The response interceptor's result: the resend's promise, or the response itself.
+pub enum Received<'a> {
+    Resent(Value),
+    Response(&'a Value),
+}
+
+// ts: isBitunixSignatureRejection
+pub fn is_bitunix_signature_rejection(data: &Value) -> Result<bool, safe_cex_num::JsCoercionError> {
+    let field = |key| data.as_object().and_then(|object| object.get(key));
+    if safe_cex_num::js_number(field("code"))? == 10007.0 {
+        return Ok(true);
+    }
+    let message = match field("msg").filter(|value| !value.is_null()) {
+        Some(value) => js_string(Some(value))?,
+        None => String::new(),
+    };
+    // A non-unicode /i regex never folds a non-ASCII unit onto an ASCII one.
+    Ok(message
+        .to_ascii_lowercase()
+        .contains("sign signature error"))
+}
+
+/// networkErrorOnRead()(error) || signatureRejectedResponse(isBitunixSignatureRejection)(error)
+pub fn retry_condition(
+    network_error_on_read: &mut Condition<'_>,
+    signature_rejected: &mut Condition<'_>,
+) -> Result<bool, String> {
+    Ok(network_error_on_read()? || signature_rejected()?)
+}
+
+pub fn create_api<C, E>(
     testnet: bool,
     public_data_only: bool,
     create: impl FnOnce(JsJsonValue) -> Result<C, E>,
-    retry_condition: impl FnOnce() -> Result<R, E>,
-    retry: impl FnOnce(&C, R, f64) -> Result<(), E>,
+    retry: impl FnOnce(&C, RetryCondition, f64) -> Result<(), E>,
     transport: impl FnOnce(&C) -> Result<(), E>,
     request: impl FnOnce(&C, Request) -> Result<(), E>,
     response: impl FnOnce(&C, Response) -> Result<(), E>,
@@ -51,8 +90,7 @@ pub fn create_api<C, R, E>(
             }),
         ),
     ]))?;
-    let condition = retry_condition()?;
-    retry(&client, condition, 3.0)?;
+    retry(&client, retry_condition, 3.0)?;
     if !public_data_only {
         transport(&client)?;
     }
@@ -84,7 +122,10 @@ pub fn sign_request(
     } else {
         None
     };
-    let data = if js_truthy(config.get("data")) {
+    // A replayed config carries the body Axios already serialized: sign those bytes.
+    let data = if let Some(Value::String(text)) = config.get("data") {
+        Some(text.clone())
+    } else if js_truthy(config.get("data")) {
         js_json_stringify(&JsJsonValue::from(config["data"].clone()))
             .map_err(|e| e.message.to_owned())?
     } else {
@@ -146,7 +187,16 @@ pub fn receive_response<'a>(
     response: &'a Value,
     header: &mut Header<'_>,
     report: &mut Report<'_>,
-) -> Result<&'a Value, String> {
+    resend: &mut Resend<'_>,
+    seen: &mut Seen<'_>,
+) -> Result<Received<'a>, String> {
+    if let Some(resent) = resend(response)?.filter(|value| js_truthy(Some(value))) {
+        return Ok(Received::Resent(resent));
+    }
+    // An axios-retry resend reaches here twice (its chain, then the original's): emit once.
+    if seen(response) {
+        return Ok(Received::Response(response));
+    }
     let config = response.get("config");
     let suppress = config.and_then(|c| c.get("__suppressExchangeError"))
         == Some(&Value::Bool(true))
@@ -163,7 +213,7 @@ pub fn receive_response<'a>(
             "true",
         )?;
     if suppress {
-        return Ok(response);
+        return Ok(Received::Response(response));
     }
     let data = response.get("data");
     if js_truthy(data) && !js_truthy(data.and_then(|v| v.get("data"))) {
@@ -176,5 +226,5 @@ pub fn receive_response<'a>(
             }
         }
     }
-    Ok(response)
+    Ok(Received::Response(response))
 }

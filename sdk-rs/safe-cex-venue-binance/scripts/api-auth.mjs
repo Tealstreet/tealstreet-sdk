@@ -22,11 +22,11 @@ if(family==='auth'){
  }
 }else{
  assert.ok(families[family]);assert.equal(all.factories.length,12);assert.equal(all.requests.length,10);assert.equal(all.responses.length,9);
- const [stem,method]=families[family],t=tree(`packages/safe-cex/src/exchanges/binance/${stem}.api.ts`),types=tree(`packages/safe-cex/src/exchanges/binance/${stem}.types.ts`),retry=tree('packages/safe-cex/src/utils/retryReadsOnly.ts'),remote=tree('packages/safe-cex/src/remoteSigningAdapter.ts');
+ const [stem,method]=families[family],t=tree(`packages/safe-cex/src/exchanges/binance/${stem}.api.ts`),types=tree(`packages/safe-cex/src/exchanges/binance/${stem}.types.ts`),retry=tree('packages/safe-cex/src/utils/retryReadsOnly.ts'),signatures=tree('packages/safe-cex/src/utils/signatureRejection.ts'),remote=tree('packages/safe-cex/src/remoteSigningAdapter.ts');
  const names=stem==='binancepm'?['createBinanceAPI','createPAPI','createFAPI','createPublicAPI']:stem==='binance'?['createPublicAPI','createAPI']:['createAPI'];
  for(const f of all.factories){const trace=[],exports={},context={exports,isNetworkError:()=>true};vm.createContext(context);
   const code=[...(stem==='binancepm'?['BASE_PAPI_URL','BASE_FAPI_URL']:['BASE_URL']), 'ENDPOINTS','PUBLIC_ENDPOINTS','RECV_WINDOW'].map(n=>decl(types,n)).join('\n');
-  vm.runInContext(compile(`${code}\n${['isReadOnlyMethod','onlyReads','networkErrorOnRead','readsAndPosted'].map(n=>decl(retry,n)).join('\n')}\n${decl(remote,'SKIP_REMOTE_SIGNING')}\n${decl(remote,'markSkipRemoteSigning').replace('export const markSkipRemoteSigning =','exports.markSkip =')}\n${names.map(n=>decl(t,n)).join('\n')}\nexports.error=()=>new RangeError('api fixture');`),context);
+  vm.runInContext(compile(`${code}\n${['isReadOnlyMethod','onlyReads','networkErrorOnRead','readsAndPosted'].map(n=>decl(retry,n)).join('\n')}\n${['SIGNATURE_RETRY_CONFIG_KEY','isBinanceStyleSignatureRejection','hasRetriedSignature','signatureRejectedResponse','resendOnSignatureRejection'].map(n=>decl(signatures,n)).join('\n')}\n${decl(remote,'SKIP_REMOTE_SIGNING')}\n${decl(remote,'markSkipRemoteSigning').replace('export const markSkipRemoteSigning =','exports.markSkip =')}\n${names.map(n=>decl(t,n)).join('\n')}\nexports.error=()=>new RangeError('api fixture');`),context);
   const error=exports.error();error.code='api-code';error.response={status:503};const options={key:'key-A',secret:'secret-A'},exchange={name:stem},client={interceptors:{request:{use(handler){trace.push(['request_use']);if(f.name==='request-fail')throw error;client.request=handler}},response:{use(success,failure){trace.push(['response_use']);client.success=success;client.failure=failure}}}};
   if(f.name==='testnet')options.testnet=true;if(f.name==='recv-zero')options.extra={recvWindow:0};if(f.name==='recv-null')options.extra={recvWindow:null};if(f.name==='recv-string')options.extra={recvWindow:'2500'};if(['tunnel','install-fail'].includes(f.name))options.tealstreetTunnel=true;
   let config,mode,createRefs;function create(which){return(c,o,e)=>{trace.push(['create',which]);if(f.name==='create-fail')throw error;config=c;mode=which;createRefs=o===options&&e===exchange;return client}}
@@ -47,7 +47,7 @@ if(family==='auth'){
     requests.push({name:r.name,calls,value:norm(value),refs:value?{input:value===config,headers:value.headers===headers,nested:value.nested===nested}:null,signRefs,failure:failure?{original:failure===error,name:failure.name,message:failure.message,code:norm(failure.code),response:norm(failure.response)}:null});
    }
    if(client.success)for(const r of all.responses){const emitted=[],response={data:r.data},original={response},msg=r.data?.msg;
-    exchange.emitAndLogError=m=>emitted.push(norm(m));for(const which of ['success','failure']){let value,error;try{value=await client[which](which==='success'?response:original)}catch(e){error=e}
+    exchange.emitAndLogError=m=>emitted.push(norm(m));for(const which of ['success','failure'].filter(which=>client[which])){let value,error;try{value=await client[which](which==='success'?response:original)}catch(e){error=e}
      responses.push({name:r.name,which,emitted:emitted.splice(0),value:norm(value),refs:value?value===response:null,error:error?{original:error===original,name:error.name??null,message:error.message??null,code:norm(error.code),responseRef:error.response===response}:null});}
    }
   }

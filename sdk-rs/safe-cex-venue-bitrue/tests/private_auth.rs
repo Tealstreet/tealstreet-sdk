@@ -258,6 +258,7 @@ struct State {
     client: RefCell<V>,
     api_config: RefCell<V>,
     interceptor: RefCell<V>,
+    response_interceptor: RefCell<V>,
     initial_incremental: RefCell<V>,
     expected_update: RefCell<V>,
     group: String,
@@ -582,6 +583,18 @@ impl ReadHost for Host {
             );
             self.effect("use", vec![boolean(true)])?;
             *self.interceptor.borrow_mut() = args[0].clone();
+            return Ok(self.undefined());
+        }
+        if kind == "use-response" {
+            assert!(
+                Rc::ptr_eq(
+                    &receiver,
+                    &get(&get(&self.client.borrow(), "interceptors"), "response")
+                ),
+                "native response interceptor receiver"
+            );
+            self.effect("use-response", vec![boolean(true)])?;
+            *self.response_interceptor.borrow_mut() = args[0].clone();
             return Ok(self.undefined());
         }
         if !matches!(kind, "update" | "digest") {
@@ -973,10 +986,16 @@ impl PrivateHost for Host {
         *self.api_config.borrow_mut() = config;
         let client = object(vec![(
             "interceptors",
-            object(vec![(
-                "request",
-                object(vec![("use", Rc::new(Raw::Function("use")))]),
-            )]),
+            object(vec![
+                (
+                    "request",
+                    object(vec![("use", Rc::new(Raw::Function("use")))]),
+                ),
+                (
+                    "response",
+                    object(vec![("use", Rc::new(Raw::Function("use-response")))]),
+                ),
+            ]),
         )]);
         *self.client.borrow_mut() = client.clone();
         Ok(client)
@@ -993,7 +1012,20 @@ impl PrivateHost for Host {
         )
     }
     fn retry_condition(&self) -> Result<V, E> {
-        Ok(Rc::new(Raw::Function("isErrorSignature")))
+        Ok(Rc::new(Raw::Function("isRetryable")))
+    }
+    fn signature_rejection(&self) -> Result<V, E> {
+        Ok(Rc::new(Raw::Function("isBitrueSignatureRejection")))
+    }
+    fn resend_on_signature_rejection(&self, client: V, _response: V, predicate: V) -> Result<V, E> {
+        self.effect(
+            "resend",
+            vec![
+                boolean(Rc::ptr_eq(&client, &self.client.borrow())),
+                predicate,
+            ],
+        )?;
+        Ok(self.undefined())
     }
     fn retry(&self, c: V, o: V) -> Result<(), E> {
         self.effect(
@@ -1201,6 +1233,7 @@ fn setup(group: &str, cfg: V) -> Host {
         client: RefCell::new(undef.clone()),
         api_config: RefCell::new(undef.clone()),
         interceptor: RefCell::new(undef.clone()),
+        response_interceptor: RefCell::new(undef.clone()),
         initial_incremental: RefCell::new(undef.clone()),
         expected_update: RefCell::new(undef),
         group: group.to_owned(),
@@ -1304,6 +1337,12 @@ fn run(group: &str, row: &Value) {
                     h.undefined(),
                     vec![c.clone()],
                 )?;
+                let response = object(vec![("data", object(vec![("code", h.number(0.0))]))]);
+                let kept = h.call(
+                    h.response_interceptor.borrow().clone(),
+                    h.undefined(),
+                    vec![response.clone()],
+                )?;
                 identity = object(vec![
                     ("client", boolean(Rc::ptr_eq(&out, &h.client.borrow()))),
                     ("fresh", boolean(!Rc::ptr_eq(&result, &c))),
@@ -1319,6 +1358,7 @@ fn run(group: &str, row: &Value) {
                         "headers",
                         boolean(same(&get(&result, "headers"), &get(&c, "headers"))),
                     ),
+                    ("responseKept", boolean(Rc::ptr_eq(&kept, &response))),
                 ]);
                 Ok(result)
             }
