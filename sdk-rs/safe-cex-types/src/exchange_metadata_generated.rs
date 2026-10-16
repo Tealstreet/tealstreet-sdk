@@ -76,10 +76,14 @@ pub struct ExchangeMetadata {
     #[serde(rename = "supportsSpotToggle")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_spot_toggle: Option<bool>,
+    #[serde(rename = "supportsOptionsToggle")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_options_toggle: Option<bool>,
+    #[serde(rename = "supportsInverseToggle")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_inverse_toggle: Option<bool>,
     #[serde(rename = "supportsTestnet")]
     pub supports_testnet: bool,
-    #[serde(rename = "supportsExecutionsHistory")]
-    pub supports_executions_history: bool,
     #[serde(rename = "leverageMagnets")]
     pub leverage_magnets: Vec<f64>,
     #[serde(rename = "orderbookTickDelay")]
@@ -285,10 +289,14 @@ struct ExchangeMetadataWire {
     #[serde(rename = "supportsSpotToggle")]
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub supports_spot_toggle: Option<bool>,
+    #[serde(rename = "supportsOptionsToggle")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_options_toggle: Option<bool>,
+    #[serde(rename = "supportsInverseToggle")]
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub supports_inverse_toggle: Option<bool>,
     #[serde(rename = "supportsTestnet")]
     pub supports_testnet: bool,
-    #[serde(rename = "supportsExecutionsHistory")]
-    pub supports_executions_history: bool,
     #[serde(rename = "leverageMagnets")]
     pub leverage_magnets: Vec<f64>,
     #[serde(rename = "orderbookTickDelay")]
