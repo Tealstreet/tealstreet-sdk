@@ -1,0 +1,251 @@
+//! Virtual-clock runtime, recording sockets and a URL-scripted REST wire for
+//! driving a `MexcExchange::new` venue through the `Exchange` trait.
+use safe_cex_exchange::{
+    exchange::{BaseExchange, ExchangeSettings},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    websocket::{WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
+};
+use safe_cex_store::store::DefaultStore;
+use safe_cex_transport::{
+    RestAdapter, RestBody, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    TransportProvider, socket::TunnelHost,
+};
+use safe_cex_types::{ExchangeName, ExchangeOptions};
+use safe_cex_venue_mexc::{exchange::MexcExchange, sockets::MexcSocketDependencies};
+use serde_json::{Value, json};
+use std::{
+    cell::{Cell, RefCell},
+    collections::{BTreeMap, VecDeque},
+    future::Future,
+    pin::Pin,
+    rc::Rc,
+    sync::Arc,
+    task::{Context, Poll, Waker},
+};
+
+type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
+
+pub struct Runtime {
+    pub now: Rc<Cell<f64>>,
+    pub jobs: RefCell<Vec<Job>>,
+    pub console: RefCell<Vec<String>>,
+    pub errors: RefCell<Vec<String>>,
+    pub sent: Rc<RefCell<Vec<String>>>,
+}
+
+struct Task(Rc<Cell<bool>>);
+impl ExchangeTask for Task {
+    fn cancel(&self) {
+        self.0.set(true);
+    }
+}
+
+impl Runtime {
+    pub fn pump(&self) {
+        let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
+        let mut pending = vec![];
+        for (mut f, c) in jobs {
+            if !c.get()
+                && f.as_mut()
+                    .poll(&mut Context::from_waker(Waker::noop()))
+                    .is_pending()
+            {
+                pending.push((f, c));
+            }
+        }
+        self.jobs.borrow_mut().extend(pending);
+    }
+}
+
+impl ExchangeRuntime for Runtime {
+    fn monotonic_now_ms(&self) -> f64 {
+        self.now.get()
+    }
+    fn now_ms(&self) -> f64 {
+        self.now.get()
+    }
+    fn sleep(&self, d: u64) -> ExchangeFuture<'static, ()> {
+        let at = self.now.get() + d as f64;
+        let now = self.now.clone();
+        Box::pin(std::future::poll_fn(move |_| {
+            if now.get() >= at {
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Pending
+            }
+        }))
+    }
+    fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
+        let c = Rc::new(Cell::new(false));
+        self.jobs.borrow_mut().push((f, c.clone()));
+        Box::new(Task(c))
+    }
+    fn console(&self, _: &str, message: &str) {
+        self.console.borrow_mut().push(message.into());
+    }
+    fn unique_id(&self) -> String {
+        "fixture-id".into()
+    }
+    fn is_worker(&self) -> bool {
+        false
+    }
+    fn random(&self) -> f64 {
+        0.375
+    }
+    fn report_raw_exception(&self, _: &Value, _: &Value) {
+        panic!("unexpected raw exception report in this test runtime");
+    }
+    fn report_exception(&self, e: &ExchangeError, _: &Value) {
+        self.errors.borrow_mut().push(e.message.clone());
+    }
+    fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
+        Box::pin(async { Err(ExchangeError::new("Worker unused in native fixture")) })
+    }
+}
+
+struct Socket {
+    events: RefCell<VecDeque<WsEvent>>,
+    sent: Rc<RefCell<Vec<String>>>,
+    closed: Cell<bool>,
+}
+impl WsSocket for Socket {
+    fn ready_state(&self) -> u8 {
+        if self.closed.get() { 3 } else { 1 }
+    }
+    fn next_event(&self) -> ExchangeFuture<'static, WsEvent> {
+        match self.events.borrow_mut().pop_front() {
+            Some(event) => Box::pin(async move { Ok(event) }),
+            None => Box::pin(std::future::pending()),
+        }
+    }
+    fn send(&self, message: &str) -> Result<(), ExchangeError> {
+        self.sent.borrow_mut().push(message.into());
+        Ok(())
+    }
+    fn close(&self) {
+        self.closed.set(true);
+    }
+    fn terminate(&self) {
+        self.closed.set(true);
+    }
+    fn reconnect(&self) {}
+    fn is_reconnecting(&self) -> bool {
+        false
+    }
+}
+
+impl WsRuntime for Runtime {
+    fn transport(&self) -> Arc<dyn TransportProvider> {
+        Arc::new(safe_cex_transport::DirectTransport)
+    }
+    fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
+        panic!("fixture refuses tunnel transport")
+    }
+    fn dial(
+        &self,
+        _: String,
+        _: Vec<String>,
+        _: WebSocketConnectionOptions,
+        _: bool,
+    ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
+        let socket: Rc<dyn WsSocket> = Rc::new(Socket {
+            events: RefCell::new(VecDeque::from([WsEvent::Open])),
+            sent: self.sent.clone(),
+            closed: Cell::new(false),
+        });
+        Box::pin(async move { Ok(socket) })
+    }
+    fn headers_capable(&self) -> bool {
+        true
+    }
+    fn enable_reconnecting(&self) -> bool {
+        false
+    }
+    fn min_reconnection_delay_ms(&self) -> f64 {
+        1000.0
+    }
+    fn library_min_reconnection_delay_ms(&self) -> f64 {
+        3000.0
+    }
+    fn diagnostics_enabled(&self) -> bool {
+        false
+    }
+    fn lifecycle_logs_enabled(&self) -> bool {
+        false
+    }
+}
+
+/// Requests in send order as (METHOD, path, JSON body); responses by path.
+#[derive(Default)]
+pub struct Wire {
+    pub requests: RefCell<Vec<(String, String, Value)>>,
+    pub bodies: RefCell<BTreeMap<String, Value>>,
+}
+impl RestAdapter for Wire {
+    fn execute(&self, r: RestRequest) -> RestFuture<'_, RestResponse> {
+        // Record the body as the wire text the transport's JSON.stringify sends.
+        let body = match &r.body {
+            Some(RestBody::Untransformed(value)) => {
+                let text = safe_cex_num::js_json_stringify(&value.clone().into())
+                    .unwrap()
+                    .unwrap();
+                serde_json::from_str(&text).unwrap()
+            }
+            _ => Value::Null,
+        };
+        self.requests
+            .borrow_mut()
+            .push((r.method.to_uppercase(), r.url.clone(), body));
+        let response = self
+            .bodies
+            .borrow()
+            .get(&r.url)
+            .cloned()
+            .unwrap_or(json!({"success":true,"code":0,"data":[]}));
+        Box::pin(async move {
+            Ok(RestResponse {
+                status: 200,
+                reason: None,
+                headers: BTreeMap::new(),
+                body: RestResponseBody::Untransformed(response),
+            })
+        })
+    }
+}
+
+pub fn fixture() -> (Rc<MexcExchange>, Rc<Runtime>, Rc<DefaultStore>, Rc<Wire>) {
+    let runtime = Rc::new(Runtime {
+        now: Rc::new(Cell::new(1_700_000_000_000.0)),
+        jobs: RefCell::default(),
+        console: RefCell::default(),
+        errors: RefCell::default(),
+        sent: Rc::default(),
+    });
+    let store = Rc::new(DefaultStore::new());
+    let options: ExchangeOptions =
+        serde_json::from_value(json!({"key":"fixture-key","secret":"fixture-secret"})).unwrap();
+    let base = BaseExchange::new(
+        ExchangeName::Mexc,
+        options,
+        store.clone(),
+        runtime.clone(),
+        // exchangeMetadata.ts MexcMetadata: tickInterval 2_000, supportsPublicOnly.
+        ExchangeSettings {
+            tick_interval: Some(2_000.0),
+            supports_public_only: true,
+            ..Default::default()
+        },
+    );
+    let wire = Rc::new(Wire::default());
+    let venue = MexcExchange::new(
+        base,
+        wire.clone(),
+        Rc::new(|v| v),
+        MexcSocketDependencies {
+            runtime: runtime.clone(),
+            remote_account_name: None,
+            emit_fill: Rc::new(|_| Ok(())),
+        },
+    );
+    (venue, runtime, store, wire)
+}

@@ -213,6 +213,7 @@ fn venue_with_runtime_and_key(
         symbol_settings: RefCell::new(BTreeMap::new()),
         account_position_mode: RefCell::new(safe_cex_types::PositionMode::Hedged),
         public_socket: RefCell::default(),
+        binding: Default::default(),
     };
     (exchange, runtime)
 }
