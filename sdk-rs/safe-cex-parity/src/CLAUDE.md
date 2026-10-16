@@ -149,3 +149,20 @@ invention diagnostics, restores exact bytes and requires the focused tests to
 pass. A second batch falsely claims explicitly unassigned capabilities and must
 fail both native ownership and canonical-remainder assertions. These are
 annotation checks, not fresh runtime behavior proofs.
+
+Two exact nongeneric function-pointer aliases (`RetryCondition` in Bitunix and
+`BlofinApiFactory` in Blofin) have reviewed compiler signatures in
+`../accepted-set/function-pointer-aliases.json`. Their source identity, complete
+raw/expanded ASTs, every nested authenticated compiler root and selected workspace
+package are pinned. Native probes require invariant equality with independently
+authored Rust types and execute the ordinary alias Serde/conversion checks. This
+is capability classification, not callback execution or permission for other
+function pointers. Contracts cannot supply expected signatures or probe modes.
+
+The concrete WEEX `WeexKlineRow` protocol tuple has its own finite policy in
+`../scripts/accepted-weex-kline-alias.mjs`: all eleven ordered raw/expanded slots,
+eight repeated authenticated String roots and the sized invariant Rust type are
+pinned. Its native control observes every decoded slot and executes the ordinary
+Serde/conversion probes. Expanded-slot, native-identity and removed-policy
+controls must fail before restoration passes. This policy grants no permission
+to other tuples; callers cannot redirect its expected type, suffix or probe mode.

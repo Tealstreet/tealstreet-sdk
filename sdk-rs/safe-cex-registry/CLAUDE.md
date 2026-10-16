@@ -146,7 +146,9 @@ read purity. The module-host construction path remains the default.
 Phemex's Rust constructor receives the shared Js HTTP host and external-data
 factory. Its local HTTP witness checks amount/price precision independently and
 verifies the account-query HMAC against the bytes observed by the server. Native
-Phemex tunnel construction fails explicitly without a transport installer.
+Phemex tunnel construction supplies the shared default transport installer.
+The tunnel witness observes authenticated rpc.http, signed account bytes and zero
+direct-origin traffic; absent and no-op provider controls must both fail.
 
 Kraken Futures/Spot native inputs use the shared hosted signer bridge for private
 HTTP and Futures websocket challenges. Both retain the hosted account name with
@@ -178,3 +180,7 @@ with no venue REST or private/public venue sockets in public-only mode.
 WEEX is registered through its concrete native binding and the shared signed HTTP
 host, gateway factory and UTC host date profile. `tests/native_host_weex.rs` checks
 its account read and exact request HMAC over loopback HTTP.
+
+TxFlow is constructible only as the source Phase-0 scaffold. Native inputs build
+its HTTP client, while start emits the exact refusal before IO. Keep its existing
+source start boundary and test both mainnet/testnet construction without network.
