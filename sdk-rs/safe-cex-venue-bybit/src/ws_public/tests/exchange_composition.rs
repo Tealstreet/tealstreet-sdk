@@ -84,7 +84,7 @@ fn constructor_clients_and_sockets_follow_actual_source() {
         String::from_utf8_lossy(&output.stderr)
     );
     let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cases.len(), 12);
+    assert_eq!(cases.len(), 36);
     let mut compared = [0usize; 3];
     let mut constructors = [0usize; 2];
     for case in cases {
@@ -414,12 +414,12 @@ fn constructor_clients_and_sockets_follow_actual_source() {
     }
     assert_eq!(
         constructors,
-        [7, 5],
+        [21, 15],
         "CONSTRUCTOR-CARDINALITY success/failure totals"
     );
     assert_eq!(
         compared,
-        [80, 20, 25],
+        [240, 60, 75],
         "CONSTRUCTOR-CARDINALITY native comparison totals"
     );
 }

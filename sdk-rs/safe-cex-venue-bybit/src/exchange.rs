@@ -102,6 +102,16 @@ impl BybitExchange {
         Err(safe_cex_exchange::runtime::ExchangeError::new(message))
     }
 
+    /// Options join this connection only when the account opted in.
+    pub(crate) fn options_enabled(&self) -> bool {
+        self.base.options().enable_option_markets == Some(true)
+    }
+    /// A shared public data source has no inverse markets, so it cannot size inverse positions.
+    pub(crate) fn inverse_enabled(&self) -> bool {
+        let options = self.base.options();
+        options.enable_inverse_markets == Some(true) && options.external_public_data.is_none()
+    }
+
     // ts: BybitExchange.getCategoryForSymbol — routed by symbol so a row routes before its market loads.
     pub(crate) fn get_category_for_symbol(&self, symbol: &str) -> &'static str {
         if crate::options::is_bybit_option_symbol(symbol) {
@@ -325,7 +335,7 @@ impl BybitExchange {
             &ExchangeOptions,
             &BaseExchange,
         ) -> Result<Arc<dyn RestAdapter>, TransportError>,
-        public_protocol: impl FnOnce(Weak<Self>, &str) -> Rc<dyn WsProtocol>,
+        public_protocol: impl Fn(Weak<Self>, &str) -> Rc<dyn WsProtocol>,
         private_protocol: impl FnOnce(Weak<Self>) -> Rc<dyn WsProtocol>,
     ) -> Result<Rc<Self>, TransportError> {
         base.settings.client_order_id_rule = Some(pattern_client_order_id_rule(
@@ -380,6 +390,17 @@ impl BybitExchange {
             public_protocol(Rc::downgrade(&venue), "linear"),
         );
         venue.base.set_socket(SocketSlot::Public, Some(public));
+        if venue.inverse_enabled() {
+            let inverse = BaseWebSocket::new(
+                1,
+                parent.clone(),
+                runtime.clone(),
+                public_protocol(Rc::downgrade(&venue), "inverse"),
+            );
+            venue
+                .base
+                .set_socket(SocketSlot::PublicSecondary, Some(inverse));
+        }
         let private =
             BaseWebSocket::new(0, parent, runtime, private_protocol(Rc::downgrade(&venue)));
         venue.base.set_socket(SocketSlot::Private, Some(private));
@@ -396,7 +417,7 @@ impl BybitExchange {
             &ExchangeOptions,
             &BaseExchange,
         ) -> Result<Arc<dyn RestAdapter>, TransportError>,
-        public_protocol: impl FnOnce(Weak<Self>, &str) -> Rc<dyn WsProtocol>,
+        public_protocol: impl Fn(Weak<Self>, &str) -> Rc<dyn WsProtocol>,
         private: crate::ws_private::protocol::PrivateProtocolConfig,
     ) -> Result<Rc<Self>, TransportError> {
         let private_runtime = runtime.clone();
