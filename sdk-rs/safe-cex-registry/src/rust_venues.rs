@@ -23,6 +23,7 @@ use safe_cex_venue_binance::exchange_classes::{
 use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
+use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use std::rc::Rc;
@@ -77,6 +78,11 @@ pub trait RustVenueHost {
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
     }
+    fn coinbase(&self) -> Result<CoinbaseDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Coinbase dependencies were not supplied by this RustVenueHost",
+        ))
+    }
     fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "BingX dependencies are unavailable on this host",
@@ -121,6 +127,8 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Coinbase, coinbase_constructor),
+    (ExchangeName::Coinbasespot, coinbase_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
@@ -216,6 +224,13 @@ fn external_factory(
             },
         )),
     }
+}
+
+pub fn coinbase_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = CoinbaseExchange::new(name, options, store, host.coinbase()?)?;
+        Ok(exchange)
+    })
 }
 
 pub fn bitget_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {

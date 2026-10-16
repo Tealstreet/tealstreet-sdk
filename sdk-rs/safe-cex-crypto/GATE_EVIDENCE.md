@@ -480,3 +480,45 @@ semantic bypass. The parent ran the command and mutation exits above serially.
 No production crypto or parity manifest changed. The existing divergence
 classification remains governed by
 [the canonical taxonomy](../parity/MANIFEST-SPEC.md#divergence-taxonomy).
+
+## zkLink ContractBuilder and seed-only signer supplement
+
+The imported SDK capability in `zklink/contract.rs` is adapted from public
+zkLinkProtocol/zklink_sdk revision3152525e2615ecbbdb56fd6728ce265ad2dde485.
+`tests/fixtures/zklink/contracts.cjs` captures npm1.0.2 WASM signatures before
+native implementation and refuses overwriting the new golden. Original fixtures
+remain unchanged. Its full-package pin plus JS SHA256 d20354a3ea5f13321312b36a0b6d5fc4e13eed71c3eda3ba1b2404c8b7db560e
+and WASM SHA256 4fc3cd426eef58022fb7228a8fcd6e268f6f243af36c848a55cabcbd1ab96c7e
+are enforced live. The pinned source revision and published binary are separate
+references; this does not claim the binary was built from that revision.
+
+The self-authored supplement has24 contracts: eleven independently changed
+fields, nonzero amount/price, both directions, distinct fees, subsidy, high bits
+for slot/nonce/pair truncation, zero/max/rounded sizes,120-bit price maximum,
+BigUint decimal spellings, and four different recovery bytes. It also compares
+18 amount/fee rounding answers through the actual exported npm functions.
+Every contract runs through the actual TypeScript `signContract` helper with
+the real SDK too; the harness supplies imports and transpiles its original
+assertions/body. Native signatures, public keys, full signed records and wire
+property order match. Raw JSON tests include numeric overflow tokens and
+explicit native range refusals. These bounds are described in CLAUDE.md; no
+identical panic/error claim or other-transaction capability is implied.
+
+Measured gates on this change:
+- `cargo test -p safe-cex-crypto --test zklink_contract --jobs1`:5 pass.
+- Existing `cargo test -p safe-cex-crypto --lib zklink --jobs1`:6 pass.
+- Strict all-target host Clippy and wasm32 library Clippy pass.
+- `scripts/zklink-contract-controls.py`: maker/taker serialization swap,
+  always-next-exponent packing, and recovery-byte replacement each compile and
+  fail their exact named test/assertion (exit101); restoration passes (exit0).
+- Global parity:0 findings (7459 rows/17054 public items). Imported SDK roots
+  are outside TS extraction; each new public primitive has its own explicit
+  exemption, with venue transaction bodies still mapped separately.
+- Read-only extraction:0 added/0 orphaned symbols; only the existing shared
+  base.ts and safeCexAxiosCreate.ts metadata drift remains. No owned drift.
+
+The signer owns zeroizing65-byte seed storage without Debug, Serialize, Clone
+or export. Decoding failures drop and erase partial storage. Caller-owned
+strings and scalar temporaries in the existing signing primitive are outside
+this erasure guarantee. SDK Apache-2.0 notice is retained. No dependency, root
+script, workflow, deployment or TypeScript production file changes.
