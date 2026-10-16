@@ -20,6 +20,7 @@ use std::{
 struct Runtime {
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
     clock: std::cell::Cell<f64>,
+    wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
 }
 struct Task;
@@ -31,7 +32,7 @@ impl ExchangeRuntime for Runtime {
         self.clock.get()
     }
     fn now_ms(&self) -> f64 {
-        0.0
+        self.wall_clock.get()
     }
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         self.clock.set(self.clock.get() + ms as f64);
@@ -151,6 +152,229 @@ fn client_retry_preserves_the_failed_config_and_retry_stamp() {
     assert_eq!(sent[0]["data"], "original body");
     assert_eq!(sent[1]["data"], "replayed body");
     assert_eq!(sent[1]["signatureRetried"], true);
+}
+
+#[test]
+fn client_headers_support_source_set_get_has_without_wire_methods() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(
+        http.clone(),
+        Js::object(vec![(
+            "headers",
+            Js::object(vec![
+                ("X-Trace", Js::str("default")),
+                ("Content-Type", Js::str("application/json")),
+            ]),
+        )]),
+    );
+    xhr.get("interceptors")
+        .unwrap()
+        .get("request")
+        .unwrap()
+        .call_method(
+            "use",
+            vec![Js::function("source headers", |_, a| {
+                let config = arg(&a, 0);
+                let headers = config.get("headers")?;
+                assert!(
+                    headers.get("set")?.is_callable(),
+                    "source-interceptor headers.set must be callable"
+                );
+                assert!(
+                    !headers.has_own("set"),
+                    "AxiosHeaders methods are inherited"
+                );
+                assert_eq!(
+                    headers
+                        .call_method("get", vec![Js::str("x-trace")])?
+                        .to_display(),
+                    "request",
+                    "request header wins case-insensitively"
+                );
+                let returned = headers
+                    .call_method("set", vec![Js::str("POLY_SIGNATURE"), Js::str("signed")])?;
+                assert!(returned.same_reference(&headers), "headers.set is fluent");
+                headers.call_method("set", vec![Js::str("poly_signature"), Js::str("updated")])?;
+                assert_eq!(
+                    headers
+                        .call_method("get", vec![Js::str("Poly_Signature")])?
+                        .to_display(),
+                    "updated"
+                );
+                assert!(
+                    headers
+                        .call_method("has", vec![Js::str("POLY_SIGNATURE")])?
+                        .truthy()
+                );
+                assert!(
+                    !headers
+                        .call_method("has", vec![Js::str("absent")])?
+                        .truthy()
+                );
+                assert_eq!(
+                    headers
+                        .own_keys()
+                        .iter()
+                        .map(|k| String::from_utf16(k).unwrap())
+                        .collect::<Vec<_>>(),
+                    vec!["X-Trace", "Content-Type", "POLY_SIGNATURE"],
+                    "only header entries reach the wire"
+                );
+                Ok(config)
+            })],
+        )
+        .unwrap();
+    settle(
+        &runtime,
+        xhr.call_method(
+            "get",
+            vec![
+                Js::str("/ok"),
+                Js::object(vec![(
+                    "headers",
+                    Js::object(vec![("x-trace", Js::str("request"))]),
+                )]),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        http.sent.borrow()[0]["headers"],
+        json!({"X-Trace":"request","Content-Type":"application/json","POLY_SIGNATURE":"updated"}),
+        "wire headers contain data only"
+    );
+}
+
+#[test]
+fn client_header_facade_matches_installed_axios() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_headers_oracle.cjs"
+        ))
+        .output()
+        .expect("Axios oracle launches");
+    assert!(
+        output.status.success(),
+        "Axios oracle: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let capture: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = capture["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 4, "independent header corpus floor");
+    let mut compared = 0;
+    for case in cases {
+        let runtime = Rc::new(Runtime::default());
+        let http = Rc::new(Http {
+            runtime: runtime.clone(),
+            sent: RefCell::default(),
+        });
+        let xhr = client::create(
+            http,
+            Js::object(vec![(
+                "headers",
+                safe_cex_exchange::js_runtime::value::from_json(&case["defaults"]),
+            )]),
+        );
+        let source = case.clone();
+        let checked = Rc::new(std::cell::Cell::new(0));
+        let performed = checked.clone();
+        xhr.get("interceptors")
+            .unwrap()
+            .get("request")
+            .unwrap()
+            .call_method(
+                "use",
+                vec![Js::function("compare source headers", move |_, a| {
+                    let config = arg(&a, 0);
+                    let headers = config.get("headers")?;
+                    for (sets, expected) in source["sets"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .zip(source["snapshots"].as_array().unwrap())
+                    {
+                        let args = sets
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(safe_cex_exchange::js_runtime::value::from_json)
+                            .collect();
+                        assert!(
+                            headers.call_method("set", args)?.same_reference(&headers),
+                            "source fluent receiver"
+                        );
+                        let entries: Vec<_> = headers
+                            .own_entries()?
+                            .into_iter()
+                            .map(|(k, v)| {
+                                json!([String::from_utf16(&k).unwrap(), to_json(&v).unwrap()])
+                            })
+                            .collect();
+                        assert_eq!(
+                            json!(entries),
+                            expected["entries"],
+                            "actual Axios native entries"
+                        );
+                        assert_eq!(
+                            json!(
+                                headers
+                                    .own_keys()
+                                    .iter()
+                                    .map(|k| String::from_utf16(k).unwrap())
+                                    .collect::<Vec<_>>()
+                            ),
+                            expected["keys"],
+                            "actual Axios own-key order"
+                        );
+                        for probe in expected["probes"].as_array().unwrap() {
+                            let name = Js::str(probe["name"].as_str().unwrap());
+                            let value = headers.call_method("get", vec![name.clone()])?;
+                            assert_eq!(
+                                headers.call_method("has", vec![name])?.truthy(),
+                                probe["present"].as_bool().unwrap(),
+                                "actual Axios has"
+                            );
+                            if let Some(expected) = probe.get("value") {
+                                assert_eq!(to_json(&value)?, *expected, "actual Axios get");
+                            } else {
+                                assert!(value.is_undefined(), "absent Axios get stays undefined");
+                            }
+                        }
+                        performed.set(performed.get() + 1);
+                    }
+                    Ok(config)
+                })],
+            )
+            .unwrap();
+        settle(
+            &runtime,
+            xhr.call_method(
+                "get",
+                vec![
+                    Js::str("/ok"),
+                    Js::object(vec![(
+                        "headers",
+                        safe_cex_exchange::js_runtime::value::from_json(&case["request"]),
+                    )]),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            checked.get(),
+            case["sets"].as_array().unwrap().len(),
+            "no skipped source operations"
+        );
+        compared += checked.get();
+    }
+    assert_eq!(compared, 17, "independent performed operation count");
 }
 
 #[test]
@@ -2277,4 +2501,24 @@ fn client_rejection_handlers_follow_the_axios_promise_chain() {
         result.get("recovered").unwrap().to_display(),
         "Request failed with status code 500"
     );
+}
+
+#[test]
+fn date_now_is_integer_while_performance_retains_fractional_milliseconds() {
+    let (runtime, shared) = scoped_globals();
+    for (wall, expected) in [
+        (1_735_689_600_000.75, 1_735_689_600_000.0),
+        (1234.125, 1234.0),
+    ] {
+        runtime.wall_clock.set(wall);
+        runtime.clock.set(7.625);
+        assert_eq!(
+            run(&shared.globals, "Date.now", vec![]).as_f64(),
+            Some(expected)
+        );
+        assert_eq!(
+            run(&shared.globals, "performance.now", vec![]).as_f64(),
+            Some(7.625)
+        );
+    }
 }

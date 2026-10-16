@@ -117,7 +117,10 @@ fn sizing_typescript_differential() {
             ),
             "getBalanceSlice" => {
                 let selected = get_balance_slice(balance.as_ref(), m);
-                assert_native_balance(selected, &row["expected"]);
+                assert_native_balance(
+                    selected.and_then(BalanceSlice::as_balance),
+                    &row["expected"],
+                );
                 object = Some(serde_json::to_value(selected).unwrap());
                 0.0
             }
@@ -162,7 +165,7 @@ fn assert_native_balance(actual: Option<&Balance>, expected: &Value) {
             "SIZING native currencies count"
         );
         for (key, value) in currencies.iter() {
-            assert_native_balance(Some(value), &expected["currencies"][key]);
+            assert_native_balance(value.as_balance(), &expected["currencies"][key]);
         }
     } else {
         assert!(
@@ -170,4 +173,23 @@ fn assert_native_balance(actual: Option<&Balance>, expected: &Value) {
             "SIZING native currencies absence"
         );
     }
+}
+
+#[test]
+fn balance_slice_preserves_available_locked_row_and_missing_total_default() {
+    let balance: Balance = serde_json::from_value(json!({
+        "used":6,"free":9,"total":15,"upnl":0,
+        "currencies":{"USD":{"available":9,"locked":6}}
+    }))
+    .unwrap();
+    let market: Market = serde_json::from_value(json!({"id":"m","symbol":"BTCUSD","base":"BTC","quote":"USD","active":true,"precision":{"amount":0.01,"price":0.1},"limits":{"amount":{"min":0,"max":100},"leverage":{"min":1,"max":100}}})).unwrap();
+    let selected = get_balance_slice(Some(&balance), Some(&market)).unwrap();
+    assert!(selected.as_balance().is_none());
+    let source_row = serde_json::to_value(selected).unwrap();
+    assert_eq!(source_row, json!({"available":9.0,"locked":6.0}));
+    assert_eq!(
+        get_total_balance_from_balance(Some(&balance), Some(&market)),
+        0.0
+    );
+    assert_eq!(get_total_balance_from_balance(Some(&balance), None), 15.0);
 }

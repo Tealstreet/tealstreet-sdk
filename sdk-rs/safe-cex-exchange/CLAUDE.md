@@ -73,6 +73,10 @@ The store contract is `safe-cex-store`'s port of
 that trait directly; it never defines a projection or another store shape.
 `ExchangeRuntime` supplies clock, local task/timer cancellation, runtime logging
 and worker requests. Runtime signing handles stay outside serializable options.
+The native wall clock supplies integer epoch milliseconds for Date.now timestamps
+and signing nonces; its monotonic clock retains fractional milliseconds. The shared
+JS Date.now facade also rounds down an injected wall clock, while performance.now
+keeps the host's fractional precision.
 Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
@@ -617,6 +621,13 @@ serialize_headers. Merge factory defaults and request headers case-insensitively
 before the signer, then normalize again after signer output. The first spelling
 survives while the last value wins. Plain-object serialize_headers deliberately
 retains its entries, including case variants.
+
+The JS client gives source request interceptors an AxiosHeaders facade with
+inherited `set(name, value, rewrite?)`, `set(record, rewrite?)`, `get(name)` and
+`has(name)` methods. Header casing, value normalization, fluent receiver identity
+and own-key order are checked against installed Axios; methods never become wire
+entries. Parser/matcher overloads of get/has fail visibly until bound. This does
+not widen the transport's string-valued header ABI to Axios's false sentinel.
 
 After signing, the shared request transform generates application/json for
 object/array data when Content-Type is absent, and dispatch supplies
