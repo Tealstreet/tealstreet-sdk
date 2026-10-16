@@ -325,31 +325,31 @@
   },
   {
     "function": "create",
-    "body": "0dab8401cc48d80c",
+    "body": "106e408f35a9bd80",
     "call": "venue . is_public_data_only ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "0dab8401cc48d80c",
+    "body": "106e408f35a9bd80",
     "call": "venue . fetch_and_set_private_snapshot (tries)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "0dab8401cc48d80c",
+    "body": "106e408f35a9bd80",
     "call": "venue . fetch_and_set_orders (symbols)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "0dab8401cc48d80c",
+    "body": "106e408f35a9bd80",
     "call": "base . dispose ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "facade",
-    "body": "e0d87b364583eff2",
+    "body": "fab443eb188d87f5",
     "call": "st . update_order (& id_of (& arg (& a , 0)) ? , & patch (& arg (& a , 1)) ?)",
     "file": "safe-cex-exchange/src/js_runtime/store.rs"
   },
@@ -4738,6 +4738,156 @@
     "body": "62cb0d6ec48f4678",
     "reference": "TxFlowExchange :: start",
     "file": "safe-cex-venue-txflow/src/exchange.rs"
+  },
+  {
+    "function": "capabilities",
+    "body": "7fd4da5365ca4436",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-woo/src/binding/exchange.rs"
+  },
+  {
+    "function": "capabilities",
+    "body": "7fd4da5365ca4436",
+    "call": "venue . fetch_historical_fills (opts)",
+    "file": "safe-cex-venue-woo/src/binding/exchange.rs"
+  },
+  {
+    "function": "capabilities",
+    "body": "7fd4da5365ca4436",
+    "call": "venue . fetch_historical_orders (opts)",
+    "file": "safe-cex-venue-woo/src/binding/exchange.rs"
+  },
+  {
+    "function": "bind",
+    "body": "25b97367f9740aeb",
+    "reference": "body :: fetch_ohlcv",
+    "file": "safe-cex-venue-woo/src/binding/hosts/data_reads.rs"
+  },
+  {
+    "function": "bind",
+    "body": "25b97367f9740aeb",
+    "reference": "body :: listen_ohlcv",
+    "file": "safe-cex-venue-woo/src/binding/hosts/data_reads.rs"
+  },
+  {
+    "function": "bind",
+    "body": "25b97367f9740aeb",
+    "reference": "body :: listen_order_book",
+    "file": "safe-cex-venue-woo/src/binding/hosts/data_reads.rs"
+  },
+  {
+    "function": "bind",
+    "body": "25b97367f9740aeb",
+    "reference": "body :: fetch_positions",
+    "file": "safe-cex-venue-woo/src/binding/hosts/data_reads.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "72ccbc9099cda8cc",
+    "call": "self . rt () ? . base () . dispose ()",
+    "file": "safe-cex-venue-woo/src/binding/hosts/fill_recovery.rs"
+  },
+  {
+    "function": "bind",
+    "body": "67757c3ffd1a0359",
+    "reference": "body :: dispose",
+    "file": "safe-cex-venue-woo/src/binding/hosts/fill_recovery.rs"
+  },
+  {
+    "function": "bind",
+    "body": "6d8670cf9a7ff3e5",
+    "reference": "reads :: get_account",
+    "file": "safe-cex-venue-woo/src/binding/hosts/market_reads.rs"
+  },
+  {
+    "function": "bind",
+    "body": "6d8670cf9a7ff3e5",
+    "reference": "reads :: validate_account",
+    "file": "safe-cex-venue-woo/src/binding/hosts/market_reads.rs"
+  },
+  {
+    "function": "bind",
+    "body": "6d8670cf9a7ff3e5",
+    "reference": "reads :: fetch_markets",
+    "file": "safe-cex-venue-woo/src/binding/hosts/market_reads.rs"
+  },
+  {
+    "function": "bind",
+    "body": "6d8670cf9a7ff3e5",
+    "reference": "reads :: fetch_tickers",
+    "file": "safe-cex-venue-woo/src/binding/hosts/market_reads.rs"
+  },
+  {
+    "function": "bind",
+    "body": "2f1e737352cecffd",
+    "reference": "legacy_lifecycle :: start",
+    "file": "safe-cex-venue-woo/src/binding/hosts/members.rs"
+  },
+  {
+    "function": "bind",
+    "body": "2f1e737352cecffd",
+    "reference": "legacy_lifecycle :: fetch_historical_positions",
+    "file": "safe-cex-venue-woo/src/binding/hosts/members.rs"
+  },
+  {
+    "function": "bind",
+    "body": "2f1e737352cecffd",
+    "reference": "historical_fills :: fetch_historical_fills",
+    "file": "safe-cex-venue-woo/src/binding/hosts/members.rs"
+  },
+  {
+    "function": "set_leverage",
+    "body": "f5142c9a7d30e78f",
+    "reference": "meta :: set_leverage",
+    "file": "safe-cex-venue-woo/src/binding/hosts/metadata.rs"
+  },
+  {
+    "function": "change_position_mode",
+    "body": "79849f0bc86a2d3d",
+    "reference": "meta :: change_position_mode",
+    "file": "safe-cex-venue-woo/src/binding/hosts/metadata.rs"
+  },
+  {
+    "function": "bind",
+    "body": "b7afb14fef7609ea",
+    "reference": "body :: fetch_orders",
+    "file": "safe-cex-venue-woo/src/binding/hosts/order_control.rs"
+  },
+  {
+    "function": "bind",
+    "body": "b7afb14fef7609ea",
+    "reference": "body :: cancel_orders",
+    "file": "safe-cex-venue-woo/src/binding/hosts/order_control.rs"
+  },
+  {
+    "function": "bind",
+    "body": "b7afb14fef7609ea",
+    "reference": "body :: cancel_all_orders",
+    "file": "safe-cex-venue-woo/src/binding/hosts/order_control.rs"
+  },
+  {
+    "function": "bind",
+    "body": "b7afb14fef7609ea",
+    "reference": "body :: cancel_symbol_orders",
+    "file": "safe-cex-venue-woo/src/binding/hosts/order_control.rs"
+  },
+  {
+    "function": "bind",
+    "body": "211ddfa97dc184e4",
+    "reference": "body :: update_order",
+    "file": "safe-cex-venue-woo/src/binding/hosts/order_writes.rs"
+  },
+  {
+    "function": "bind",
+    "body": "211ddfa97dc184e4",
+    "reference": "body :: fetch_historical_orders",
+    "file": "safe-cex-venue-woo/src/binding/hosts/order_writes.rs"
+  },
+  {
+    "function": "private_snapshot",
+    "body": "df5c789e86dc817c",
+    "call": "venue . fetch_and_set_private_snapshot (1)",
+    "file": "safe-cex-venue-woo/src/binding/hosts/socket_control.rs"
   },
   {
     "function": "internal_rows",
