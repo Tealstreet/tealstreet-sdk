@@ -221,3 +221,37 @@ and custom_orderbook_map_native; it does not establish a concrete JS host.
 The 51-row divergent audit is DIVERGENCE_AUDIT.md. Its parsed-field unit
 witnesses do not establish executable structural-object parity or all caller
 bindings. Numeric-capture depth refusal is a separately priced local choice.
+
+The production binding is `binding::exchange::GrvtExchange`, assembled from the
+existing constructor, account/order runtimes and native public/private socket
+ports through the shared `js_runtime`. The Rust registry constructs it without a
+module-host fallback. Its SDK adapter uses the consumed lite schema maps, SDK
+OrderWithBuilderFee signing domain, cookie refresh and endpoint paths; legacy
+signing helpers keep their separate source domain. Live vendored-source oracles
+compare signatures, bidirectional schema mapping and cookie parsing. The 21
+production Exchange tests cover startup, all required methods, SDK wire requests,
+nonce reconciliation and public/private socket behavior; 17 compiling dispatch
+controls fail their named test before exact restoration.
+
+This binding retains the existing typed JSON/Store and native cache boundaries
+listed in the manifest. Socket scalar fields alias native state; map views read
+that state and refuse arbitrary protocol-cache writes. It does not establish
+arbitrary executable host-object or third-party SDK conformance. The five missing
+source Exchange methods retain their inherited `Not implemented` rejection.
+The native registry installs the shared hosted signer on GRVT's HTTP clients,
+including public requests that the source does not tag for bypass. Hosted
+`getAccount` works without a local secret; the provided callback owns returned
+authentication config. SDK order placement retains the source local-wallet
+requirement and fails before signing RPC or HTTP when that wallet is absent.
+`safe-cex-registry/tests/native_host_grvt_signer.rs` compares actual source
+factories and `getAccount` inputs, observes callback headers on real reqwest IO,
+and checks callback rejection and the independent SDK wallet guard.
+
+Each of the three API clients uses the shared
+`js_runtime::client::factory::create` with the runtime transport provider. This retains eager routing
+refusals, transport authorization, standard headers and the common 20-second
+timeout. The source GRVT HOW installations remain commented out; this binding
+preserves that choice. A caller-supplied HOW terminal still receives cookie/account
+config extensions. `safe-cex-registry/tests/native_host_grvt.rs` exercises real
+local HTTP, one-login SDK validation and direct header semantics; dropping the
+proxy routing options compiles and fails the construction-time routing-refusal test.

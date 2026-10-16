@@ -122,14 +122,14 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
             ),
         ])],
     )?;
-    // The signer capability is not serializable; it lives on the typed options.
-    let remote = rt.shared.extra.options.remote_signer.is_some();
     let runtime = rt.shared.runtime.clone();
     let interceptor = Js::function("", move |_, a| {
         // The signer works on the JSON view; callables (paramsSerializer) ride across.
         let original = arg(&a, 0);
         let serializer = original.get("paramsSerializer")?;
         let config = to_json(&original)?;
+        // BaseExchange injects executable signer handles into these live options.
+        let remote = options.get("remoteSigner")?.truthy();
         let typed = typed.clone();
         let runtime = runtime.clone();
         Ok(Js::Promise(super::promise::Promise::spawn(
