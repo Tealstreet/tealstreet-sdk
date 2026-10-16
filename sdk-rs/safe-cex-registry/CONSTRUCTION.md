@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitrue`, `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`),
 Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid` and `hyperliquidspot`, the Binance family (`binance`, `binancepm`,
@@ -268,3 +268,9 @@ names require the same caller-owned limiter and expose the configured public-dat
 factory. `native_host_hyperliquidspot` verifies native local HTTP/WS startup,
 real action signatures, the caller cloid, shifted spot asset IDs and cancellation;
 `native_host_external_data` separately verifies gateway startup.
+
+ApexOmni is assembled through its shared js_runtime binding with a real
+OmniKey-seeded zkLink contract signer. Its native proof observes HTTP/WS startup,
+wire HMAC over the transmitted order form, caller ID, private WS order delivery
+and cancellation. Unsupported hosted signing/wallet-provider operations reject
+visibly. The module-host path remains the default.

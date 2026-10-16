@@ -38,7 +38,7 @@ pub trait BatchBindings {
 }
 fn dense(v: &EventValue, expr: &str, method: &str) -> Result<Vec<EventValue>, Failure> {
     if let EventValue::Array(a) = v {
-        return Ok(a.borrow().clone());
+        return Ok(array_values(&a));
     }
     if v.nullish() {
         return Err(type_error(format!(
@@ -67,13 +67,18 @@ fn spread(out: &mut Vec<EventValue>, v: EventValue) -> Result<(), Failure> {
         EventValue::Array(a) => {
             let mut i = 0;
             while i < a.borrow().len() {
-                out.push(a.borrow()[i].clone());
+                out.push(a.borrow()[i].clone().unwrap_or(EventValue::Undefined));
                 i += 1
             }
             Ok(())
         }
         EventValue::String(s) => {
-            out.extend(s.chars().map(|c| string(c.to_string())));
+            out.extend(
+                EventValue::String(s.clone())
+                    .text()?
+                    .chars()
+                    .map(|c| string(c.to_string())),
+            );
             Ok(())
         }
         _ => Err(type_error(
@@ -118,7 +123,7 @@ pub async fn many_futures(
     iterable(&orders, "orders")?;
     let (mut regular, mut algo) = (vec![], vec![]);
     let mut i = 0;
-    while i < orders.get("length")?.number()? as usize {
+    while i < orders.read("length")?.number()? as usize {
         let o = orders.get(&i.to_string())?;
         i += 1;
         let f = b.capture_format()?;
@@ -129,19 +134,19 @@ pub async fn many_futures(
                 formatted.text()?
             )));
         }
-        let r = formatted.get("regular")?;
-        let a = formatted.get("algo")?;
+        let r = formatted.read("regular")?;
+        let a = formatted.read("algo")?;
         spread(&mut regular, r)?;
         spread(&mut algo, a)?;
     }
     let regular = array(regular);
     let algo = array(algo);
     let mut ids = vec![];
-    if regular.get("length")?.number()? > 0.0 {
+    if regular.read("length")?.number()? > 0.0 {
         let f = b.capture_method(Method::RegularBatch)?;
         spread(&mut ids, f(regular)?.await?)?;
     }
-    if algo.get("length")?.number()? > 0.0 {
+    if algo.read("length")?.number()? > 0.0 {
         let f = b.capture_method(Method::AlgoBatch)?;
         spread(&mut ids, f(algo)?.await?)?;
     }
@@ -155,7 +160,7 @@ async fn many(orders: EventValue, b: &mut impl BatchBindings) -> Result<EventVal
     for i in 0..len {
         let o = {
             if let EventValue::Array(a) = &orders {
-                a.borrow().get(i).cloned()
+                a.borrow().get(i).cloned().flatten()
             } else {
                 None
             }
@@ -164,7 +169,7 @@ async fn many(orders: EventValue, b: &mut impl BatchBindings) -> Result<EventVal
             let f = b.capture_format()?;
             let formatted = f(o)?;
             if let EventValue::Array(a) = formatted {
-                payloads.extend(a.borrow().iter().cloned())
+                payloads.extend(array_values(&a))
             } else {
                 payloads.push(formatted)
             }
@@ -227,12 +232,12 @@ pub async fn regular_futures(
                 if let EventValue::Array(rows) = data {
                     let len = rows.borrow().len();
                     for i in 0..len {
-                        let o = { rows.borrow().get(i).cloned() };
+                        let o = { rows.borrow().get(i).cloned().flatten() };
                         if let Some(o) = o {
-                            if o.get("code")?.truthy() {
+                            if o.read("code")?.truthy() {
                                 if !post_only(b, Rejection::Row(o.clone()))? {
                                     let emit = b.capture_emit()?;
-                                    emit(o.get("msg")?)?;
+                                    emit(o.read("msg")?)?;
                                 }
                             } else {
                                 ids.push(id(&o, "orderId", "o.orderId")?)
@@ -240,7 +245,7 @@ pub async fn regular_futures(
                         }
                     }
                 } else if !data.nullish() {
-                    let each = data.get("forEach")?;
+                    let each = data.read("forEach")?;
                     if !each.nullish() {
                         return Err(type_error("data?.forEach is not a function"));
                     }
@@ -266,7 +271,7 @@ pub async fn algo_futures(
     iterable(&payloads, "payloads")?;
     let mut ids = vec![];
     let mut i = 0;
-    while i < payloads.get("length")?.number()? as usize {
+    while i < payloads.read("length")?.number()? as usize {
         let payload = payloads.get(&i.to_string())?;
         i += 1;
         let result = async {
@@ -290,16 +295,16 @@ pub async fn batch_pm(
     iterable(&payloads, "payloads")?;
     let (mut regular, mut conditional) = (vec![], vec![]);
     let mut i = 0;
-    while i < payloads.get("length")?.number()? as usize {
+    while i < payloads.read("length")?.number()? as usize {
         let payload = payloads.get(&i.to_string())?;
         i += 1;
-        let payload_type = payload.get("type")?;
+        let payload_type = payload.read("type")?;
         if ["STOP_MARKET", "TAKE_PROFIT_MARKET", "TRAILING_STOP_MARKET"]
             .iter()
             .any(|v| payload_type.same(&string(*v)))
         {
-            let ty = payload.get("type")?;
-            let quantity = payload.get("quantity")?;
+            let ty = payload.read("type")?;
+            let quantity = payload.read("quantity")?;
             let mut rest = payload.spread();
             rest.remove("type");
             rest.remove("quantity");
@@ -311,18 +316,17 @@ pub async fn batch_pm(
                 let positions = dense(&positions, "this.store.positions", "find")?;
                 let mut found = EventValue::Undefined;
                 for p in positions {
-                    if p.get("symbol")?.same(&payload.get("symbol")?)
-                        && ((payload.get("side")?.same(&string("SELL"))
-                            && p.get("side")?
-                                .same(&EventValue::Enum(PrivateEnum::PositionSide(
-                                    PositionSide::Long,
-                                ))))
-                            || (payload.get("side")?.same(&string("BUY"))
-                                && p.get("side")?.same(&EventValue::Enum(
+                    if p.read("symbol")?.same(&payload.read("symbol")?)
+                        && ((payload.read("side")?.same(&string("SELL"))
+                            && p.read("side")?.same(&EventValue::enum_value(
+                                PrivateEnum::PositionSide(PositionSide::Long),
+                            )))
+                            || (payload.read("side")?.same(&string("BUY"))
+                                && p.read("side")?.same(&EventValue::enum_value(
                                     PrivateEnum::PositionSide(PositionSide::Short),
                                 ))))
                     {
-                        found = p.get("contracts")?;
+                        found = p.read("contracts")?;
                         break;
                     }
                 }
@@ -330,7 +334,7 @@ pub async fn batch_pm(
             };
             let result = record([("strategyType", ty), ("quantity", q)]);
             for (k, v) in rest {
-                result.define(&k, v)
+                result.write(&k, v)
             }
             conditional.push(result);
         } else {
@@ -342,7 +346,7 @@ pub async fn batch_pm(
         for payload in rows {
             let result = async {
                 post(b, Venue::PM, key, payload.clone()).await?;
-                ids.push(payload.get("newClientOrderId")?);
+                ids.push(payload.read("newClientOrderId")?);
                 Ok::<(), Failure>(())
             }
             .await;
@@ -365,7 +369,7 @@ pub async fn batch_spot(
         for payload in lot {
             let result = async {
                 post(b, Venue::Spot, "ORDER", payload.clone()).await?;
-                ids.push(payload.get("newClientOrderId")?);
+                ids.push(payload.read("newClientOrderId")?);
                 Ok::<(), Failure>(())
             }
             .await;
@@ -382,11 +386,14 @@ pub async fn cancel_close(
     opts: EventValue,
     b: &mut impl BatchBindings,
 ) -> Result<EventValue, Failure> {
-    let ty = opts.get("type")?;
-    if !ty.same(&EventValue::Enum(PrivateEnum::Type(OrderType::StopLoss)))
-        && !opts
-            .get("type")?
-            .same(&EventValue::Enum(PrivateEnum::Type(OrderType::TakeProfit)))
+    let ty = opts.read("type")?;
+    if !ty.same(&EventValue::enum_value(PrivateEnum::Type(
+        OrderType::StopLoss,
+    ))) && !opts
+        .read("type")?
+        .same(&EventValue::enum_value(PrivateEnum::Type(
+            OrderType::TakeProfit,
+        )))
     {
         return Ok(EventValue::Undefined);
     }
@@ -394,9 +401,9 @@ pub async fn cancel_close(
     if !market.truthy() {
         return Ok(EventValue::Undefined);
     }
-    let precision = market.get("precision")?.get("amount")?;
-    let amount = b.adjust(opts.get("amount")?, precision)?;
-    if !opts.get("close")?.truthy() && amount.truthy() {
+    let precision = market.read("precision")?.read("amount")?;
+    let amount = b.adjust(opts.read("amount")?, precision)?;
+    if !opts.read("close")?.truthy() && amount.truthy() {
         return Ok(EventValue::Undefined);
     }
     let orders = b.orders()?;
@@ -404,11 +411,11 @@ pub async fn cancel_close(
     let mut existing = vec![];
     for i in 0..len {
         let o = orders.get(&i.to_string())?;
-        if o.get("symbol")?.same(&opts.get("symbol")?)
-            && o.get("close")?.same(&EventValue::Bool(true))
-            && !o.get("amount")?.truthy()
-            && o.get("type")?.same(&opts.get("type")?)
-            && o.get("side")?.same(&opts.get("side")?)
+        if o.read("symbol")?.same(&opts.read("symbol")?)
+            && o.read("close")?.same(&EventValue::Bool(true))
+            && !o.read("amount")?.truthy()
+            && o.read("type")?.same(&opts.read("type")?)
+            && o.read("side")?.same(&opts.read("side")?)
         {
             existing.push(o)
         }

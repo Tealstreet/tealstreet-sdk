@@ -1709,9 +1709,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "c7b8b93cc60e00e2cb2bcfe44a35d00e13eef66524b5f1b158e2fdb9324eb64b",
+      "producer_sha256": "e63e86db789706fc031753ae1886eda07cf62d6faf2399d51e785ee6485db2c1",
       "classification": "no-owned-latch",
-      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical. Reviewed shared throttle installation: the added callback is synchronous and creates no new await or Promise; the same seven async boundaries and Promise/loop captures remain unchanged. Throttle delegates timer ownership/cancellation to Scope.set_timeout/clear_timeout, exercised by js_throttle native scheduling/cancel traces and the existing Scope timer regression."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",
@@ -1867,11 +1867,12 @@
         "opaque-macro-review",
         "opaque-macro-review",
         "opaque-macro-review",
+        "opaque-macro-review",
         "opaque-macro-review"
       ],
-      "producer_sha256": "b9798f457464f9c2ac70ceb92270684184664cab1cbaf400f766dac7833a034a",
+      "producer_sha256": "45732140d3e7a32d79fa0febf3c2f9690a24aad9f3040e9d5e6473f74b7450be",
       "classification": "immediate",
-      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed descriptor value formatting: the new DataDescriptor match arm passes its value to the same synchronous debug-map entry, with no task, waiter, or future."
+      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed retained Builtin referent arm: reference.js_string() returns an owned string and write! formats it synchronously. Existing DataDescriptor debug-map formatting remains synchronous. No task, waiter, future or cancellation latch is added."
     },
     {
       "owner": "src/js_runtime/value.rs::Thrown as fmt :: Debug::fmt",
