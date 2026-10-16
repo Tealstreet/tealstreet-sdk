@@ -1169,8 +1169,10 @@ and each collection's default iterator retain the source method aliases.
 deleting/clearing cannot shift a suspended cursor, and reinsertion appends a new
 position. Native host adapters must use its mutation methods rather than replace
 the backing Vec; the OKX state and Bitget lifecycle adapters preserve surviving
-positions when updating typed views. Kraken, WEEX, OKX, Paradex and Polymarket
-spread/iteration consumers use the shared protocol instead of array indexing.
+positions when updating typed views. Kraken, WEEX, OKX, Lighter, Paradex and
+Polymarket spread/iteration consumers use the shared protocol instead of array
+indexing. Kraken disposal and Lighter iteration advance lazily; Lighter retains
+iterator throws, and OKX historical fills spreads the live Map values iterator.
 `tests/js_collection_iterators.rs` compares 80 Node traces and checks native
 numeric bits, references, aliases, actual receivers, ownership and constructors.
 Bybit's `hyro_native_iterator` executes the existing source reset body over these

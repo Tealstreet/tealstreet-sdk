@@ -204,22 +204,22 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
             Js::Undefined
         }
         "array-push-spread" => {
-            for v in items(&y)? {
+            for v in y.iterable_values()? {
                 x.push(v)?;
             }
             Js::Undefined
         }
         // `[...a, ...b]`, `[...acc]`, `[...acc, row]`, `[...a, b]`
         "array-spread" | "array-spread-two" => {
-            let mut out = items(&x)?;
+            let mut out = x.iterable_values()?;
             if a.len() > 1 {
-                out.extend(items(&y)?);
+                out.extend(y.iterable_values()?);
             }
             Js::array(out)
         }
-        "array-spread-prefix" | "iterable-spread" => Js::array(items(&x)?),
+        "array-spread-prefix" | "iterable-spread" => Js::array(x.iterable_values()?),
         "array-prefix-append" | "spread-append" => {
-            let mut out = items(&x)?;
+            let mut out = x.iterable_values()?;
             out.push(y);
             Js::array(out)
         }
