@@ -1067,6 +1067,13 @@ including request overrides, async predicate results, timer failure and loss of
 an observer during a pending delay. This covers configured callbacks within the
 runtime's existing HTTP and timer profiles.
 
+Dispose delegation reviews name the actual TypeScript class and method span in
+`tests/override-base-delegations.json`. The live `dispose-source.cjs` gate resolves
+inheritance and AST super calls: a socket receiver type alone cannot justify base
+cleanup, and an own no-super override cannot use chosen-base to pass this gate.
+The shared BaseExchange bridge cites its actual base implementation separately.
+See `../parity/DISPOSE_AUDIT.md` for the complete venue sweep and routed mismatches.
+
 Venue overrides whose source calls only `this.ws.close()` use
 `BaseWebSocket::close_current_websocket`. It forwards current native/relay close
 without superclass disposal or force-close metadata/task changes, and releases
