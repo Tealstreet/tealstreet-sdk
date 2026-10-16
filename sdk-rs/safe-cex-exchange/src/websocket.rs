@@ -4131,6 +4131,8 @@ mod tests {
         p.disposed.set(true);
         p.snapshot_gate.set(true);
         r.pump();
+        // The rejection reaction waits one scheduler turn, as in source.
+        r.pump();
         assert_eq!(p.snapshots.get(), 1);
         assert!(
             p.logs
