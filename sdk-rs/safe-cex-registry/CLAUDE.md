@@ -103,3 +103,9 @@ The native host supplies a fresh HTTP host and the common gateway factory; remot
 signer hosts fail visibly until BingX signing is connected.
 `tests/native_host_bingx.rs` starts it on loopback HTTP/WS, verifies a signed order
 payload and caller client ID, and cancels the resulting order.
+
+KuCoin futures/Spot and MEXC registry entries reuse their concrete constructors.
+Their native host inputs retain each API's signing/transport/retry middleware.
+Private MEXC fills must reach the venue emitter; retain the weak callback when
+adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
+native request signatures against a local server.

@@ -227,8 +227,9 @@ test('removing a listed registry constructor rejects its live edge', () => {
 });
 test('a listed registry constructor without a live edge is stale', () => {
   const { policy, metadata } = inputs();
-  policy.registryConstructors.venues.push('safe-cex-venue-kucoin');
-  assert.throws(() => validateLayers(policy, metadata), /stale registry constructor: safe-cex-registry -> safe-cex-venue-kucoin/);
+  const registry = metadata.packages.find(pkg => pkg.name === 'safe-cex-registry');
+  registry.dependencies = registry.dependencies.filter(dep => dep.name !== 'safe-cex-venue-backpack');
+  assert.throws(() => validateLayers(policy, metadata), /stale registry constructor: safe-cex-registry -> safe-cex-venue-backpack/);
 });
 test('venue cannot depend upward on constructor registry', () => {
   const { policy, metadata } = inputs();
