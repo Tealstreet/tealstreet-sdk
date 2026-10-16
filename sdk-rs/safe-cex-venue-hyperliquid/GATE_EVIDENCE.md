@@ -1361,3 +1361,68 @@ After reviewing the final combined journal/external-data body, only those two
 fingerprints changed to `f16535160061e222`; the same test passes (1/1). No inventory
 regeneration or blanket delegation was used. This final body differs from the
 external-data-only master body's fingerprint because it also binds journal folding.
+
+## 2026-10-17 — Hyperliquid Spot production binding
+
+`spot_binding::HyperliquidSpotExchange::new` constructs the existing Spot class
+inside the production family realm, with the shared BaseExchange, Store, socket,
+HTTP, signer and caller-owned limiter inputs. The native BaseExchange also records
+`is_spot = true`. `RustVenueHost::hyperliquid` now takes the selected exchange name;
+all callers are updated. The native registry constructs both names independently.
+The source constructor's imported perpetual API factory and default-mainnet local
+signing calls are preserved.
+
+Observed gates on the integrated branch:
+
+- `cargo +1.99.0 test --locked --manifest-path sdk-rs/Cargo.toml -p
+  safe-cex-venue-hyperliquid --test binding --test spot_binding --test
+  spot_runtime --test spot_account_reads --test spot_ws_dispatch`: 18 + 21 + 11 +
+  10 + 9 passing tests. Every required Spot method is invoked; seven absent
+  source overrides retain the exact BaseExchange rejection. Additional tests
+  exercise real source OHLCV, book/candle message dispatch and cleanup, preflight
+  caller/batch IDs, the native spot flag, and source numeric-key result handling.
+- `python3 scripts/spot-binding-controls.py`: 19/19 independent method mutations
+  compiled and failed their named test; restored 21/21 pass. Sixteen required
+  methods and the three candle/book operations are controlled individually.
+- `scripts/spot-boundary-controls.py`: the three old-bridge/oracle controls and
+  separately selected `native-spot-flag` each compiled and failed their named
+  assertion; exact byte restoration passed Spot21 + source-runtime11. The wrong
+  omitUndefined stub still reads the actual source utility, keeping its source
+  count at9; it fails the native result assertion, not a hash/count guard.
+- Registry tests `native_host_external_data`, `native_host_hyperliquid`,
+  `native_host_hyperliquidspot`, `rust_venues`: 5 + 2 + 1 + 14 pass. The new Spot
+  test constructs through the real table, boots via loopback reqwest/tungstenite,
+  verifies source action/nonce signatures server-side, preserves caller cloid,
+  uses asset10000 and cancels oid777. The gateway test proves configured Spot
+  external-data startup without direct venue public REST/socket. Earlier table
+  removal compiled and failed that gateway construction witness. Hyperliquid's
+  native host test also proves the same limiter Rc across Spot/perpetual hosts
+  and selected Spot exchange-name metadata at the remote HTTP adapter.
+- Scoped strict Clippy passes for native all-targets and wasm32 library targets;
+  scoped formatting passes. `layers:check`:88/88. Registry equivalence:48 ordered
+  names plus its corrupt-claim control pass. `parity:check`:0 invention/status
+  findings (7459 rows,17127 public items on this observed tree).
+
+The real utility `utils/omitUndefined.ts` delegates to lodash/omitBy: source Spot
+placement returns a numeric-key object. The old source-runtime stub incorrectly
+used Array.filter. The corrected oracle executes the actual utility; the test host
+now reproduces its object result. The production realm already retained the right
+shape. Native order IDs use the explicit conversion documented on the place/update
+manifest rows and README under MANIFEST-SPEC#closed-typed-output-boundary; source
+objects are not rewritten to arrays. Batch preflight/mapSeries ordering is retained
+while combining lowered IDs at the native ABI.
+
+Realistic Spot asset contexts omit oraclePx/funding, producing source NaN. The
+Store/DTO bridge now uses the shared js_runtime typed codec instead of JSON and
+preserves f64 values through native snapshots/lookups; wire JSON is unchanged.
+The candle body also exposed an old production host error: object fields t/o/h/l/c/v
+were destructured as an array. The actual object pattern is now bound, with a
+compiling old-code control. Calendar arithmetic is the existing shared dayjs
+implementation, exposed through the two operations this source consumes.
+
+Override inventory updates are reviewed manually, without regeneration: the common
+Binding extraction preserves core dynamic dispose and its unbound fallback; the
+family base getter binds inherited BaseExchange isPublicDataOnly. Neither source
+Hyperliquid class overrides canSign. The new Spot start capability calls the
+concrete venue hook. Only affected existing pins and these two new calls are
+reconciled; other lanes' rows are retained.

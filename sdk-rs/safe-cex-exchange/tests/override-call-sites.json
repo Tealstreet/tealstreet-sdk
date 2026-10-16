@@ -4009,7 +4009,7 @@
   },
   {
     "function": "dispose",
-    "body": "45a8a8dba45efd57",
+    "body": "a57c48d8faa866ff",
     "call": "self . base . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/binding.rs"
   },
@@ -4345,13 +4345,19 @@
   },
   {
     "function": "base_exchange_class",
-    "body": "f16535160061e222",
+    "body": "d0b3260d4e9cb7dc",
     "call": "b . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
   {
     "function": "base_exchange_class",
-    "body": "f16535160061e222",
+    "body": "d0b3260d4e9cb7dc",
+    "call": "b . can_sign ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
+  },
+  {
+    "function": "base_exchange_class",
+    "body": "d0b3260d4e9cb7dc",
     "call": "b . name ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
@@ -4474,6 +4480,12 @@
     "body": "2d287c9ee82edad0",
     "reference": "helper_tasks :: start",
     "file": "safe-cex-venue-hyperliquid/src/spot_account_reads.rs"
+  },
+  {
+    "function": "new",
+    "body": "15c83f5cece8b548",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/spot_binding.rs"
   },
   {
     "function": "wait_for_token",
