@@ -16,23 +16,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/incremental_fills.rs::clean_float"
 status = "ported"
-note = "Number(n.toPrecision(15)) via the exact decimal expansion, with toPrecision's ties-away-from-zero (Rust's {:e} ties to even) and -0 printing as 0; nonfinite passes through."
-
-[[symbol]]
-ts = "decimalsOf"
-kind = "const-fn"
-layer = "mirror"
-rs = "safe-cex-store/src/incremental_fills.rs::decimals_of"
-status = "ported"
-note = ""
-
-[[symbol]]
-ts = "subtractDecimals"
-kind = "const-fn"
-layer = "mirror"
-rs = "safe-cex-store/src/incremental_fills.rs::subtract_decimals"
-status = "ported"
-note = ""
+note = "Ported for the bybit inverse fill price; the 15-digit form and decimalsOf/subtractDecimals arrive with PR #88 (claude-chn5rs), which supersedes this body."
 
 [[symbol]]
 ts = "createIncrementalFills"
