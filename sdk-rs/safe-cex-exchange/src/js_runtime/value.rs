@@ -260,6 +260,9 @@ impl Js {
     /// Computed property access preserving the well-known iterator symbol.
     pub fn get_property(&self, key: &Js) -> Result<Js, Thrown> {
         if matches!(key, Js::SymbolIterator) {
+            if self.is_nullish() {
+                return self.get("Symbol(Symbol.iterator)");
+            }
             return super::collections::iterator_method(self);
         }
         self.get_key(&key.to_js_string()?)

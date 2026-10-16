@@ -122,6 +122,9 @@ fn json_stringify(
 
 /// GetIterator once, preserving live iteration and abrupt completion.
 fn iterate(value: &Js) -> Result<Option<Js>, Thrown> {
+    if value.is_nullish() {
+        return Ok(None);
+    }
     let method = value.get_property(&Js::SymbolIterator)?;
     if method.is_nullish() {
         return Ok(None);

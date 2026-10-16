@@ -176,6 +176,8 @@ fn collection_iterators_preserve_native_bits_references_and_aliases() {
     let entries = map.get("entries").unwrap();
     let symbol = globals().get("Symbol").unwrap().get("iterator").unwrap();
     assert_eq!(symbol.type_of(), "symbol");
+    assert!(Js::Null.get_property(&symbol).is_err());
+    assert!(Js::Undefined.get_property(&symbol).is_err());
     let symbol_owner = globals().get("Symbol").unwrap();
     assert!(symbol_owner.set("iterator", Js::str("fake")).is_err());
     assert!(symbol_owner.own_keys().is_empty());
