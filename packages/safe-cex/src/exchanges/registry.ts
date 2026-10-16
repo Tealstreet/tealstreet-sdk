@@ -223,6 +223,10 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
       /* webpackChunkName: "exchange-tealstreet-dex" */ './orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange'
     ).then((m) => m.TealstreetDEXExchange),
 
+  // TxFlow (Phase 0 scaffold only)
+  txflow: () =>
+    import(/* webpackChunkName: "exchange-txflow" */ './txflow/txflow.exchange').then((m) => m.TxFlowExchange),
+
   what: () =>
     import(/* webpackChunkName: "exchange-what" */ './orderly/exchanges/what/what.exchange').then(
       (m) => m.WhatExchange,

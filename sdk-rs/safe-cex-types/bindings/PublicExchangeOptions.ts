@@ -34,6 +34,8 @@ export type PublicExchangeOptions = {
     };
     readonly testnet?: boolean;
     readonly enableSpotMarkets?: boolean;
+    readonly enableOptionMarkets?: boolean;
+    readonly enableInverseMarkets?: boolean;
     readonly bybitSiteId?: "BRA_BTL";
     readonly privateOnly?: boolean;
     readonly tealstreetProxy?: boolean;

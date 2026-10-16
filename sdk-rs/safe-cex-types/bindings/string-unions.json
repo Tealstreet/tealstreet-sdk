@@ -293,6 +293,16 @@
       "value": "business"
     }
   ],
+  "OptionRight": [
+    {
+      "name": "Call",
+      "value": "call"
+    },
+    {
+      "name": "Put",
+      "value": "put"
+    }
+  ],
   "RequestOutcome": [
     {
       "name": "Ok",
