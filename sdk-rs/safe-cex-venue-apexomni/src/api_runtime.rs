@@ -11,7 +11,6 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_num::{JsJsonValue as J, js_number_string};
-use safe_cex_transport::retry::SignatureRetryVenue;
 use safe_cex_types::ExchangeOptions;
 use std::rc::{Rc, Weak};
 pub struct ApexApiConfiguration {
@@ -27,8 +26,9 @@ pub trait ApexApiHost {
         options: &ExchangeOptions,
         exchange: &Rc<BaseExchange>,
     ) -> Result<(), ExchangeError>;
-    fn configure_retry(&self, retries: u8, venue: SignatureRetryVenue)
-    -> Result<(), ExchangeError>;
+    /// axios-retry with `networkErrorOnRead()`: signature failures arrive in a 200
+    /// envelope and take the legacy-signing resend instead.
+    fn configure_retry(&self, retries: u8) -> Result<(), ExchangeError>;
     fn register_request_handler(&self, api: Weak<ApexApi>) -> Result<(), ExchangeError>;
     fn register_response_handler(&self, api: Weak<ApexApi>) -> Result<(), ExchangeError>;
     fn install_transport_adapter(
@@ -118,7 +118,7 @@ pub fn create_api(
         &options,
         &exchange,
     )?;
-    host.configure_retry(3, SignatureRetryVenue::Apexomni)?;
+    host.configure_retry(3)?;
     let api = Rc::new(ApexApi {
         options,
         exchange,

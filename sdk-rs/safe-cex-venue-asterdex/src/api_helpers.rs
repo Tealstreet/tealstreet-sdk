@@ -83,6 +83,31 @@ pub fn build_query_string(params: &Map<String, Value>) -> Result<String, JsCoerc
     Ok(parts.join("&"))
 }
 
+const SIGNING_FIELDS: [&str; 6] = [
+    "signature",
+    "timestamp",
+    "recvWindow",
+    "user",
+    "signer",
+    "nonce",
+];
+
+/// ts: withoutSigningFields. A resend's params minus the previous attempt's signing fields.
+pub fn without_signing_fields(params: &Value) -> Map<String, Value> {
+    let mut entries = match params {
+        Value::Object(map) => map.clone(),
+        Value::Array(items) => items
+            .iter()
+            .enumerate()
+            .map(|(index, item)| (index.to_string(), item.clone()))
+            .collect(),
+        _ => return Map::new(),
+    };
+    normalize_object_order(&mut entries);
+    entries.retain(|key, _| !SIGNING_FIELDS.contains(&key.as_str()));
+    entries
+}
+
 pub fn build_v3_signing_payload(
     params: &Map<String, Value>,
 ) -> Result<Map<String, Value>, JsCoercionError> {

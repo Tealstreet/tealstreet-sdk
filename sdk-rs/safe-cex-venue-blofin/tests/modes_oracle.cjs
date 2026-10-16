@@ -9,7 +9,7 @@ const file=path.join(root,'packages/safe-cex/src/exchanges/blofin/blofin.exchang
 const ast=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true);
 const klass=ast.statements.find(n=>ts.isClassDeclaration(n)&&n.name?.text==='BlofinExchange');
 const methods={};
-for(const name of ['applyConfirmedPositionMode','afterMethodCalledInWorker','getPositionSide']) {
+for(const name of ['applyConfirmedPositionMode','applyConfirmedMarginType','afterMethodCalledInWorker','getPositionSide']) {
  const member=klass.members.find(n=>n.name?.text===name);
  assert(member&&ts.isPropertyDeclaration(member)&&ts.isArrowFunction(member.initializer),'source_shape:'+name);
  const text=`return function(){return ${member.initializer.getText(ast)}};`;
