@@ -1,3 +1,48 @@
+# Six fixed Realm associated-projection contracts
+
+Six accepted contracts classify only `PrivateValue<Realm>`, `PrivateError<Realm>`,
+`PublicValue<Realm>`, `PublicError<Realm>`, `ExchangeValue<Realm>` and
+`ExchangeError<Realm>`. Their actual raw and expanded targets remain the exact
+`<H as WsPingHost>::Value` or `::Error` projection. The shared finite mechanism in
+merged #362 authenticates the same-crate trait, concrete Realm, native Value enum,
+unique Realm implementation and associated bindings from fresh compiler metadata.
+This consumer preserves all six policy records and installs only its six contracts.
+
+`tests/support/accepted_projection_aliases.rs`: **6/6 native runtime identity tests
+pass** against the refreshed master. Each checks invariant mutable-reference type
+equality in both directions, TypeId, the original native slot, undefined,
+negative-zero/infinity bits, unpaired UTF-16 units and object/thrown identity. A
+write through the alias remains visible through the original object.
+
+`scripts/accepted-projection-native.mjs` reads the installed contracts and runs fresh
+ordinary rustdoc/check discovery, source claims and compiler-root authentication
+before selecting the finite cohort. It discovers all 534 owners and 36 aliases and
+requires new compiler-derived `projectionIdentity` evidence for every selected alias.
+The maintained `runProbes` executes the ordinary Serde and conversion detectors:
+**six native capability classifications pass with zero failures**. These are
+classification receipts, separate from the six runtime identity tests above.
+The target-specific Wasm run also passes all six capability classifications with
+zero failures, retaining all 534 owners and 36 aliases. Reproduce it with
+`--target=wasm32-unknown-unknown`.
+
+The shared mechanism's five executed provenance/host/source guard removals and its
+compiled concrete-owner rename control remain unchanged in #362. The normal native
+consumer probes grant only one fixed Realm identity per alias. Other generic hosts,
+remaining alias families, runtime decoder owners, local helpers, dependency and
+feature/target obligations retain their separate reviews. No package acceptance is
+claimed by these six contracts.
+
+The refreshed ordinary package gate now advances beyond all six projections to
+`spot_account_reads::AccountFuture`, where the unreviewed local-future shape is
+refused. Every original census key remains indexed. All 51 master contract rows
+were retained exactly; the shard now contains 51 owner contracts and six reviewed
+aliases, alongside two existing Clone reviews: **59 reviewed of 572 entries,
+513 unreviewed**. Earlier cohort sections below record their original snapshots.
+
+Strict native all-targets clippy and formatting pass. Parity passes with
+7459 rows, 17214 public items and zero findings. The final independent review
+found no issues after the evidence status was updated.
+
 # Two waiting-status owner reviews
 
 `OrderResponseStatusCase3` admits only `waitingForFill`; `OrderResponseStatusCase4`
