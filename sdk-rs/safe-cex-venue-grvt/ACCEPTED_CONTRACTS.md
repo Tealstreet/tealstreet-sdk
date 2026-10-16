@@ -71,3 +71,19 @@ python3 sdk-rs/safe-cex-venue-grvt/scripts/accepted-record-controls.py
 ```
 
 No historical debt entry or production decoder is changed by this batch.
+
+The domain and websocket interval contracts add two separately executed helper
+reviews. The EIP-712 domain observes both network choices, the three native
+object fields in order, string identity and chain-id Number bits. The websocket
+interval mapper observes all eighteen own mappings, five unchanged fallbacks and
+all twelve stock inherited members by native ProtoMember identity, arity and
+interpolation text. The existing builder_domain and public_subscriptions tests
+compare the actual TypeScript functions independently. These two contracts do
+not establish the caller's signing, subscription, or arbitrary host behavior.
+
+Swapping only the two production domain chain IDs compiled and failed the two
+network output expectations. Changing only the production 1m mapping to CI_3_M
+compiled and failed that exact interval output expectation. Each control retained
+the other helper's passing result; exact source restoration passed both owners.
+Selected production execution also passes on wasm. No new classification-only
+skip or historical debt row is introduced by these two helper reviews.
