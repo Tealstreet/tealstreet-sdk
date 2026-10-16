@@ -6,7 +6,7 @@ use super::{
 };
 use crate::runtime::ExchangeError;
 use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
-use safe_cex_types::{Order, OrderStatus, Position};
+use safe_cex_types::{OptionTerms, Order, OrderStatus, Position, PositionOption};
 use std::rc::Rc;
 
 /// Store mutators take the entity (`updateTicker(ticker, ...)`); its `id` is the key.
@@ -37,6 +37,21 @@ fn patch(value: &Js) -> Result<serde_json::Map<String, serde_json::Value>, Throw
         serde_json::Value::Object(map) => Ok(map),
         _ => Ok(serde_json::Map::new()),
     }
+}
+
+// The nested option model is a native typed field, including nonfinite numbers.
+// Keep the existing JSON patch profile for the other, independently owned fields.
+fn option_patch<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
+    value: &Js,
+) -> Result<ModelPatch, Thrown> {
+    let fields = value.spread_object()?;
+    let option = fields.get("option")?;
+    fields.delete(&super::value::utf16("option"));
+    let mut changes = ModelPatch::from(patch(&fields)?);
+    if !option.is_undefined() {
+        changes.set_native("option", to_typed::<T>(&option)?);
+    }
+    Ok(changes)
 }
 
 pub fn facade(store: Rc<dyn Store>) -> Js {
@@ -83,7 +98,7 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
         "update",
         Rc::new(|st, a| {
             let update: StoreUpdate = to_typed(&arg(&a, 0))?;
-            st.update(update, false).map_err(mutation)?;
+            st.update(update, arg(&a, 1).truthy()).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
@@ -121,8 +136,11 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updatePosition",
         Rc::new(|st, a| {
-            st.update_position(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
-                .map_err(mutation)?;
+            st.update_position(
+                &id_of(&arg(&a, 0))?,
+                &option_patch::<PositionOption>(&arg(&a, 1))?,
+            )
+            .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
@@ -132,7 +150,7 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
             let mut updates = vec![];
             for pair in arg(&a, 0).array_values().unwrap_or_default() {
                 let (position, changes) = (pair.get("0")?, pair.get("1")?);
-                updates.push((id_of(&position)?, ModelPatch::from(patch(&changes)?)));
+                updates.push((id_of(&position)?, option_patch::<PositionOption>(&changes)?));
             }
             st.update_positions(&updates).map_err(mutation)?;
             Ok(Js::Undefined)
@@ -255,8 +273,11 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateMarket",
         Rc::new(|st, a| {
-            st.update_market(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
-                .map_err(mutation)?;
+            st.update_market(
+                &id_of(&arg(&a, 0))?,
+                &option_patch::<OptionTerms>(&arg(&a, 1))?,
+            )
+            .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
