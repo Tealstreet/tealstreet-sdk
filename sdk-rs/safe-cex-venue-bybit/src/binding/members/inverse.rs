@@ -43,6 +43,9 @@ async fn get(rt: &Rt, endpoint: &str, params: Js) -> Result<Js, Thrown> {
 }
 
 pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
+    super::batch::install_inverse(rt)?;
+    super::inverse_orders::install(rt)?;
+    super::inverse_controls::install(rt)?;
     rt.this
         .define("supportedCategories", Js::array(vec![Js::str("inverse")]))?;
     method(rt, "getCategoryForSymbol", |rt, a| {
@@ -114,6 +117,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "mapPosition", |rt, a| {
         super::inverse_mapping::map_position(&rt, &arg(&a, 0))
+    })?;
+    method(rt, "updateOrder", |rt, a| {
+        super::amend::update_inverse_order(&rt, arg(&a, 0))
     })?;
     method(rt, "setLeverage", |rt, a| {
         super::controls::set_inverse_leverage(&rt, arg(&a, 0), arg(&a, 1))
