@@ -700,8 +700,8 @@ and serializer; the fixed20-second factory timeout remains independent of the
 venue receive window. Two compiled substitutions each lose one of these
 capabilities and fail the named adapter witness; restoration passes.
 
-Post-integration gates: full source oracle153 tests (72 exchange,7 pure,9 record,
-28 schema,6 signer,7 signing,21 transaction,11 utility);27 assembled binding E2Es;
+Post-integration gates: full source oracle161 tests (72 exchange,7 protocol,9 pure,
+28 record,6 signer,7 signing,21 transaction,11 utility);27 assembled binding E2Es;
 native registry1+13; host all-targets Clippy for venue and registry; wasm library
 Clippy for venue; fmt; registry equivalence; layers88; global parity0. The source
 oracle retains the actual four-position late-disposal observation while asserting

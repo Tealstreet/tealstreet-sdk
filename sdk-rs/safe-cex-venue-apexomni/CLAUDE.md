@@ -280,7 +280,7 @@ public data requires an injected factory.
 
 The shared HTTP factory owns default timeout, headers, tunnel routing and adapter
 selection. Signing preserves callable adapter/serializer values and unchanged
-config identity; the typed legacy response bridge restores those client-default
+config-field identity; the typed legacy response bridge restores those client-default
 capabilities before resend.
 
 Network failures retry reads only. Apex's signature code20016/401/message
