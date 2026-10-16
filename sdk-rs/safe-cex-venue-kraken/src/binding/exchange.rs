@@ -30,6 +30,9 @@ pub struct KrakenDependencies {
     /// The module-scoped Spot client-ID generator (see `spot_client_ids`), shared by
     /// every Kraken Spot instance of one SDK runtime. Required for `krakenspot`.
     pub spot_client_ids: Option<Rc<RefCell<SpotIds>>>,
+    /// `kraken.api.ts`'s module-scoped nonce counter: create once per SDK runtime and
+    /// share it, so every Futures client of every instance strictly increases one nonce.
+    pub futures_nonces: Rc<FuturesModule>,
 }
 
 /// Wrap `helpers::create_kraken_spot_client_order_id` once per SDK runtime.
@@ -123,7 +126,7 @@ impl KrakenExchange {
                 })
             }) as SpotIds)),
         };
-        let module: Rc<FuturesModule> = super::rt::FUTURES_MODULE.with(Rc::clone);
+        let module = deps.futures_nonces.clone();
         let shared = Rc::new_cyclic(|weak: &std::rc::Weak<Shared>| {
             let globals = globals::build(weak.clone());
             ScopeShared::new(

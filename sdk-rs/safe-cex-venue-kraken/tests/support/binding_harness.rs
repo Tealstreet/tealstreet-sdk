@@ -315,6 +315,7 @@ pub fn harness(
             http: http.clone(),
             external_public_data: None,
             journal: None,
+            futures_nonces: std::rc::Rc::new(safe_cex_venue_kraken::api::FuturesModule::default()),
             spot_client_ids: Some(spot_client_ids(move |bytes| {
                 for b in bytes.iter_mut() {
                     counter = counter.wrapping_add(1);

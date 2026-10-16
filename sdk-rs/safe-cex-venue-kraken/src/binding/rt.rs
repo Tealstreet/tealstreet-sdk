@@ -32,8 +32,3 @@ pub(crate) type Rt = Scope<KrakenExtra>;
 
 /// The source module-scoped `createKrakenSpotClientOrderId` generator.
 pub type SpotIds = Box<dyn FnMut() -> Result<String, safe_cex_num::JsCoercionError>>;
-
-thread_local! {
-    /// `kraken.api.ts`'s module-scoped nonce counter, shared by every Futures client.
-    pub(crate) static FUTURES_MODULE: Rc<FuturesModule> = Rc::new(FuturesModule::default());
-}
