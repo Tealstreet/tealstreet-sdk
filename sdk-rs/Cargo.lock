@@ -4096,7 +4096,11 @@ dependencies = [
 name = "safe-cex-venue-bitunix"
 version = "0.1.0"
 dependencies = [
+ "flate2",
+ "safe-cex-exchange",
  "safe-cex-num",
+ "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",

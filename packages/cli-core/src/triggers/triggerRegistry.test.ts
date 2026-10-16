@@ -115,7 +115,10 @@ describe('triggerRegistry', () => {
   it('expires rather than staying armed forever', async () => {
     const run = vi.fn().mockResolvedValue(undefined);
     arm({ run, condition: condition(() => false) });
-    await vi.advanceTimersByTimeAsync(MAX_ARMED_MS + 1_000);
+    // Jump the clock past the deadline, then let one poll observe it. Walking
+    // every 250ms poll across 12h took ~3s and timed out under a loaded suite.
+    vi.setSystemTime(Date.now() + MAX_ARMED_MS);
+    await vi.advanceTimersByTimeAsync(1_000);
     expect(listTriggers()[0].status).toBe('expired');
     expect(run).not.toHaveBeenCalled();
   });

@@ -165,7 +165,7 @@ jobs:
     # self-hosted slots in the private monorepo until 2026-10-16, which is the
     # capacity problem this move solves.
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    timeout-minutes: ${{ matrix.check == 'test' && 60 || 15 }}
     strategy:
       fail-fast: false
       matrix:

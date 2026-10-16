@@ -50,7 +50,8 @@ first-position selection, warning timing, zero sentinels and NaN propagation.
 **Signing reference:** `scripts/signing-capture.cjs` records actual TS hashing
 preimages and real Axios adapter payloads offline. API rows remain pending.
 The TS signing view deliberately differs from config.data for dollar stripping,
-underscore replacement, and array/string spread. Preserve those differences and
+underscore replacement, and array spread; a string body (a replayed config's
+already-serialized bytes) is signed raw. Preserve those differences and
 the text-replacement bug; do not repair them while porting. The pure
 toJsonString helper now consumes shared JSON.stringify and first/all replacement
 operations through JsJsonValue, retaining undefined keys and nonfinite values.
