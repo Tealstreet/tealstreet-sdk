@@ -89,3 +89,5 @@ pub mod public_class;
 
 pub mod core_exchange_class;
 pub mod core_exchange_leaves;
+
+pub mod spot_binding;
