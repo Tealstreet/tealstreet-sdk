@@ -133501,6 +133501,523 @@
       }
     }
   },
+  "safe_cex_venue_bitunix::history_mappers::map_bitunix_trade_to_income_records": {
+    "category": "decoder",
+    "evidence": "Actual Bitunix trade-to-income mapper emits PnL before fee, turns positive fees into negative commission and negative fees into positive rebate, retaining native income/time bits, source IDs, asset fallback and enum category. Independent fixtures include parseFloat prefixes, fallback ID, zero-time omission and the source null access error. No parent serialized snapshot is used.",
+    "call": "{match $type($value){Ok(rows)=>serde_json::json!({\"rows\":rows.into_iter().map(|r|{let category=match r.category {Some(safe_cex_types::IncomeCategory::RealizedPnl)=>\"pnl\",Some(safe_cex_types::IncomeCategory::Commission)=>\"commission\",Some(safe_cex_types::IncomeCategory::Rebate)=>\"rebate\",_=>panic!(\"unexpected actual income category\")};serde_json::json!({\"symbol\":r.symbol,\"incomeType\":r.income_type,\"incomeBits\":format!(\"{:016x}\",r.income.to_bits()),\"asset\":r.asset,\"timeBits\":format!(\"{:016x}\",r.timestamp.to_bits()),\"tranId\":r.tran_id,\"tradeId\":r.trade_id,\"category\":category})}).collect::<Vec<_>>()}),Err(e)=>serde_json::json!({\"error\":e.message,\"name\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "ctime": "100tail",
+          "symbol": "BTCUSDT",
+          "tradeId": 5,
+          "realizedPNL": "3.5suffix",
+          "fee": "0.25",
+          "marginCoin": "USDC"
+        },
+        "output": {
+          "rows": [
+            {
+              "symbol": "BTCUSDT",
+              "incomeType": "REALIZED_PNL",
+              "incomeBits": "400c000000000000",
+              "asset": "USDC",
+              "timeBits": "4059000000000000",
+              "tranId": "5:pnl",
+              "tradeId": "5",
+              "category": "pnl"
+            },
+            {
+              "symbol": "BTCUSDT",
+              "incomeType": "COMMISSION",
+              "incomeBits": "bfd0000000000000",
+              "asset": "USDC",
+              "timeBits": "4059000000000000",
+              "tranId": "5:fee",
+              "tradeId": "5",
+              "category": "commission"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "ctime": 200,
+          "symbol": "ETHUSDT",
+          "realizedPNL": 0,
+          "fee": "-0.5"
+        },
+        "output": {
+          "rows": [
+            {
+              "symbol": "ETHUSDT",
+              "incomeType": "REBATE",
+              "incomeBits": "3fe0000000000000",
+              "asset": "USDT",
+              "timeBits": "4069000000000000",
+              "tranId": "200:ETHUSDT:fee",
+              "tradeId": "200:ETHUSDT",
+              "category": "rebate"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "ctime": 0,
+          "symbol": "BTCUSDT",
+          "fee": 5
+        },
+        "output": {
+          "rows": []
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "error": "Cannot read properties of null (reading 'ctime')",
+          "name": "TypeError"
+        }
+      }
+    ],
+    "api": {
+      "kind": "function",
+      "name": "map_bitunix_trade_to_income_records",
+      "signature": {
+        "inputs": [
+          [
+            "row",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::IncomeRecord",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_bitunix::history_mappers::map_bitunix_historical_order": {
+    "category": "decoder",
+    "evidence": "Actual Bitunix historical-order mapper applies source ID/time guards, side validation, type/status tables and zero-as-undefined price projections. Native shared enum variants, optional presence and every supplied number bit are independently observed, alongside the deliberately absent unsupported fields; this is not a serialization roundtrip.",
+    "call": "{match $type($value){Ok(Some(r))=>{let side=match r.side{safe_cex_types::OrderSide::Buy=>\"buy\",safe_cex_types::OrderSide::Sell=>\"sell\"};let kind=match r.r#type{safe_cex_types::OrderType::Market=>\"market\",safe_cex_types::OrderType::Limit=>\"limit\",_=>panic!(\"unexpected historical type\")};let status=match r.status{safe_cex_types::OrderStatus::Open=>\"open\",safe_cex_types::OrderStatus::Canceled=>\"canceled\",safe_cex_types::OrderStatus::Closed=>\"closed\",_=>panic!(\"unexpected nonhistorical status\")};let optional=|n:Option<f64>|n.map(|n|format!(\"{:016x}\",n.to_bits()));serde_json::json!({\"present\":true,\"id\":r.id,\"symbol\":r.symbol,\"side\":side,\"type\":kind,\"status\":status,\"priceBits\":optional(r.price),\"averageBits\":optional(r.average_price),\"amountBits\":format!(\"{:016x}\",r.amount.to_bits()),\"filledBits\":format!(\"{:016x}\",r.filled.to_bits()),\"reduceOnly\":r.reduce_only,\"createdBits\":format!(\"{:016x}\",r.created_time.to_bits()),\"updatedBits\":optional(r.updated_time),\"unusedAbsent\":[r.position_side.is_none(),r.realized_pnl.is_none(),r.fees.is_none(),r.fee_asset.is_none(),r.rebate.is_none(),r.rebate_asset.is_none()]})},Ok(None)=>serde_json::json!({\"present\":false}),Err(e)=>serde_json::json!({\"error\":e.message,\"name\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "orderId": "o1",
+          "symbol": "BTC",
+          "ctime": "100suffix",
+          "side": "buy",
+          "orderType": "market",
+          "status": "PART_FILLED",
+          "price": "2.5",
+          "avgPrice": 0,
+          "qty": "4.5units",
+          "tradeQty": "2.5",
+          "mtime": 0,
+          "reduceOnly": false
+        },
+        "output": {
+          "present": true,
+          "id": "o1",
+          "symbol": "BTC",
+          "side": "buy",
+          "type": "market",
+          "status": "open",
+          "priceBits": "4004000000000000",
+          "averageBits": null,
+          "amountBits": "4012000000000000",
+          "filledBits": "4004000000000000",
+          "reduceOnly": false,
+          "createdBits": "4059000000000000",
+          "updatedBits": null,
+          "unusedAbsent": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        }
+      },
+      {
+        "input": {
+          "orderId": 17,
+          "symbol": "ETH",
+          "ctime": 300,
+          "side": "SELL",
+          "orderType": "other",
+          "status": "REJECTED",
+          "price": 0,
+          "avgPrice": "10.5",
+          "qty": 2,
+          "tradeQty": 1,
+          "mtime": "400tail",
+          "reduceOnly": "TrUe"
+        },
+        "output": {
+          "present": true,
+          "id": "17",
+          "symbol": "ETH",
+          "side": "sell",
+          "type": "limit",
+          "status": "canceled",
+          "priceBits": null,
+          "averageBits": "4025000000000000",
+          "amountBits": "4000000000000000",
+          "filledBits": "3ff0000000000000",
+          "reduceOnly": true,
+          "createdBits": "4072c00000000000",
+          "updatedBits": "4079000000000000",
+          "unusedAbsent": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        }
+      },
+      {
+        "input": {
+          "orderId": "x",
+          "symbol": "BTC",
+          "ctime": 1,
+          "side": "invalid"
+        },
+        "output": {
+          "present": false
+        }
+      },
+      {
+        "input": {
+          "orderId": "",
+          "symbol": "BTC",
+          "ctime": 1,
+          "side": "BUY"
+        },
+        "output": {
+          "present": false
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "error": "Cannot read properties of null (reading 'orderId')",
+          "name": "TypeError"
+        }
+      }
+    ],
+    "api": {
+      "kind": "function",
+      "name": "map_bitunix_historical_order",
+      "signature": {
+        "inputs": [
+          [
+            "row",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::HistoricalOrder",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_bitunix::history_mappers::map_bitunix_closed_position": {
+    "category": "decoder",
+    "evidence": "Actual Bitunix closed-position mapper constructs canonical numeric union variants, venue provenance and account identity. Independent native bit vectors name notional,contracts,entry,exit,PnL,fees,leverage,open and close time in that order. Inputs separate qty from close price, positive fees from rebates and explicit close time from source open-time fallback. No contract-size grading or alias serialization is introduced.",
+    "call": "{match $type(&$value[\"row\"],$value[\"account\"].as_str().unwrap()){Ok(Some(r))=>{use safe_cex_types::*;let provenance=match r.provenance{DataProvenance::Venue=>\"venue\",_=>panic!(\"unexpected provenance\")};let notional=match r.notional{ClosedPnlEntryNotional::Variant1(n)=>n,_=>panic!(\"notional must remain numeric\")};let contracts=match r.contracts{ClosedPnlEntryContracts::Variant1(n)=>n,_=>panic!(\"contracts must remain numeric\")};let entry=match r.entry_price{ClosedPnlEntryEntryPrice::Variant1(n)=>n,_=>panic!(\"entry must remain numeric\")};let exit=match r.exit_price{ClosedPnlEntryExitPrice::Variant1(n)=>n,_=>panic!(\"exit must remain numeric\")};let pnl=match r.unrealized_pnl{ClosedPnlEntryUnrealizedPnl::Variant1(n)=>n,_=>panic!(\"pnl must remain numeric\")};let fees=match r.fees{ClosedPnlEntryFees::Variant1(n)=>n,_=>panic!(\"fees must remain numeric\")};let leverage=match r.leverage{ClosedPnlEntryLeverage::Variant0(n)=>n,_=>panic!(\"leverage must remain numeric\")};let values=[notional,contracts,entry,exit,pnl,fees,leverage,r.time,r.closed_time].map(|n|format!(\"{:016x}\",n.to_bits()));serde_json::json!({\"present\":true,\"provenance\":provenance,\"symbol\":r.symbol,\"side\":r.side,\"account\":r.account,\"bits\":values})},Ok(None)=>serde_json::json!({\"present\":false}),Err(e)=>serde_json::json!({\"error\":e.message,\"name\":e.name})}}",
+    "cases": [
+      {
+        "input": {
+          "row": {
+            "ctime": 100,
+            "mtime": 200,
+            "symbol": "BTC",
+            "side": "SELL",
+            "qty": 3,
+            "maxQty": 30,
+            "closePrice": 8,
+            "entryPrice": 4,
+            "realizedPNL": 2,
+            "fee": "0.25",
+            "leverage": 4
+          },
+          "account": "account-A"
+        },
+        "output": {
+          "present": true,
+          "provenance": "venue",
+          "symbol": "BTC",
+          "side": "short",
+          "account": "account-A",
+          "bits": [
+            "4038000000000000",
+            "4008000000000000",
+            "4010000000000000",
+            "4020000000000000",
+            "4000000000000000",
+            "3fd0000000000000",
+            "4010000000000000",
+            "4059000000000000",
+            "4069000000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "row": {
+            "ctime": 300,
+            "mtime": 0,
+            "symbol": "ETH",
+            "side": "BUY",
+            "qty": 2,
+            "maxQty": 20,
+            "closePrice": 4,
+            "entryPrice": 3,
+            "realizedPNL": -2,
+            "fee": "-0.5",
+            "leverage": 2
+          },
+          "account": "account-B"
+        },
+        "output": {
+          "present": true,
+          "provenance": "venue",
+          "symbol": "ETH",
+          "side": "long",
+          "account": "account-B",
+          "bits": [
+            "4020000000000000",
+            "4000000000000000",
+            "4008000000000000",
+            "4010000000000000",
+            "c000000000000000",
+            "bfe0000000000000",
+            "4000000000000000",
+            "4072c00000000000",
+            "4072c00000000000"
+          ]
+        }
+      },
+      {
+        "input": {
+          "row": {
+            "ctime": 0,
+            "symbol": "BTC"
+          },
+          "account": "account-A"
+        },
+        "output": {
+          "present": false
+        }
+      },
+      {
+        "input": {
+          "row": null,
+          "account": "account-A"
+        },
+        "output": {
+          "error": "Cannot read properties of null (reading 'ctime')",
+          "name": "TypeError"
+        }
+      }
+    ],
+    "api": {
+      "kind": "function",
+      "name": "map_bitunix_closed_position",
+      "signature": {
+        "inputs": [
+          [
+            "row",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "account_name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::ClosedPnlEntry",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
   "safe_cex_venue_weex::response_types::WeexOrderResult": {
     "shape": "map",
     "evidence": "weex.types.ts WeexOrderResult declares five optional fields. response_types.rs retains omission, rejects present null and nonobjects through strict_decode::object before its private remote companion. accepted_responses.rs checks native fields through both trait routes and the complete five-slot array; removing only this owner guard must fail accepted_order_result::object_guard.",
