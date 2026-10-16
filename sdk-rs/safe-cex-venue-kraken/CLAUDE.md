@@ -306,3 +306,10 @@ and the two-request ceiling. `scripts/spot-api-binding-controls.py` independentl
 mutates each new native API-host method, requires a named runtime failure, restores
 exact bytes and requires the test to pass again. Shared retry-config preservation
 is covered by `safe-cex-exchange/tests/js_runtime.rs` and the same native E2E.
+
+Native hosted accounts enter through the shared Js HTTP host, which injects the
+signer into the live parent options. Private challenge auth must read that live
+`parent.options.remoteSigner.accountName`, not the original typed constructor
+options. The native registry HTTP and WS witnesses and compiling controls live
+in `safe-cex-registry/tests/native_host_kraken_signer.rs` and
+`safe-cex-registry/scripts/kraken-hosted-controls.py`.

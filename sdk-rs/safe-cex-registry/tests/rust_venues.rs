@@ -158,11 +158,13 @@ fn run<T>(runtime: &Runtime, future: impl Future<Output = T>) -> T {
 #[derive(Default)]
 struct Wire {
     requests: Mutex<Vec<String>>,
+    request_data: Mutex<Vec<RestRequest>>,
     bodies: Mutex<BTreeMap<String, Value>>,
 }
 impl RestAdapter for Wire {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         self.requests.lock().unwrap().push(request.url.clone());
+        self.request_data.lock().unwrap().push(request.clone());
         let body = self
             .bodies
             .lock()
@@ -490,6 +492,19 @@ struct Venues {
     kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
 }
 impl RustVenueHost for Venues {
+    fn grvt(
+        &self,
+    ) -> Result<safe_cex_venue_grvt::binding::exchange::GrvtDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("grvt");
+        Ok(safe_cex_venue_grvt::binding::exchange::GrvtDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                self.wire.clone(),
+            ),
+            external_public_data: None,
+        })
+    }
     #[allow(clippy::arc_with_non_send_sync)]
     fn hyperliquid(
         &self,
@@ -729,6 +744,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bitrue,
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
+            ExchangeName::Grvt,
             ExchangeName::Bybit,
             ExchangeName::Bybitdemo,
             ExchangeName::Coinbase,
@@ -982,21 +998,26 @@ fn okx_family_constructs_through_the_registry_and_reads_its_markets() {
 }
 
 #[test]
-fn rust_path_for_an_unbound_name_is_a_named_error_without_module_fallback() {
+fn unknown_name_is_rejected_before_registry_or_module_fallback() {
     let modules = Modules::default();
-    let error = match native_constructor(
-        ExchangeName::Grvt,
-        ConstructionPath::Rust,
-        &modules,
-        venues(),
-    ) {
-        Ok(_) => panic!("REGISTRY unbound rust path must fail"),
-        Err(error) => error,
-    };
-    assert_eq!(error.to_string(), "no Rust constructor for grvt");
+    let host = venues();
+    // ExchangeName is closed: a synthetic name fails at typed admission before
+    // either constructor route. Real venue additions cannot invalidate this gate.
+    let result = serde_json::from_value::<ExchangeName>(json!("__unbound_registry_control__"))
+        .map(|name| native_constructor(name, ConstructionPath::Rust, &modules, host.clone()));
+    let error = result.err().expect("unknown registry name must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("unknown variant `__unbound_registry_control__`")
+    );
     assert!(
         modules.required.borrow().is_empty(),
         "REGISTRY no module-host fallback"
+    );
+    assert!(
+        host.calls.borrow().is_empty(),
+        "REGISTRY no venue inputs requested"
     );
 }
 
@@ -1105,6 +1126,28 @@ fn native_kraken_dependencies_retain_module_state_per_host() {
     assert!(
         !Rc::ptr_eq(&first.futures_nonces, &other.futures_nonces),
         "REGISTRY separate native runtimes have separate module state"
+    );
+}
+
+#[test]
+fn grvt_constructs_through_registry_and_reads_actual_public_gateway() {
+    let host = venues();
+    host.wire.bodies.lock().unwrap().insert("/lite/v1/all_instruments".into(),json!({"r":[{"i":"BTC_USDT_Perp","k":"PERPETUAL","b":"BTC","q":"USDT","ms":"0.001","ts":"0.1","ih":"0x030501","bd":3,"qd":6}]}));
+    let exchange = construct(ExchangeName::Grvt, &host, json!({"key":"","secret":""}));
+    let markets = run(&host.runtime, exchange.fetch_markets()).expect("GRVT registry request");
+    assert_eq!(exchange.name(), &ExchangeName::Grvt);
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].symbol, "BTC_USDT_PERP");
+    assert_eq!(*host.calls.borrow(), ["grvt"]);
+    assert_eq!(
+        host.wire.request_data.lock().unwrap()[0]
+            .base_url
+            .as_deref(),
+        Some("https://market-data.grvt.io")
+    );
+    assert_eq!(
+        host.wire.requests.lock().unwrap()[0],
+        "/lite/v1/all_instruments"
     );
 }
 

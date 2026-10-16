@@ -3973,6 +3973,7 @@ dependencies = [
  "safe-cex-venue-bybit",
  "safe-cex-venue-coinbase",
  "safe-cex-venue-cryptocom",
+ "safe-cex-venue-grvt",
  "safe-cex-venue-hyperliquid",
  "safe-cex-venue-kraken",
  "safe-cex-venue-kucoin",
