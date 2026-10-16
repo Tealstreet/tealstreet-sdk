@@ -530,6 +530,15 @@ impl RustVenueHost for Venues {
             date_parse: Rc::new(|_| Ok(1_735_689_600_000.0)),
         })
     }
+    fn bitget(&self) -> Result<safe_cex_venue_bitget::BitgetDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("bitget");
+        let runtime: Rc<dyn ExchangeRuntime> = self.runtime.clone();
+        Ok(safe_cex_venue_bitget::BitgetDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(runtime, self.wire.clone()),
+            external_public_data: None,
+        })
+    }
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError> {
         self.calls.borrow_mut().push("bitunix");
         let wire = self.wire.clone();
@@ -649,6 +658,9 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Binance,
             ExchangeName::Binancepm,
             ExchangeName::Binancespot,
+            ExchangeName::Bitget,
+            ExchangeName::Bitgetinverse,
+            ExchangeName::Bitgetusdc,
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
             ExchangeName::Okx,
@@ -744,6 +756,34 @@ fn binance_pm_and_spot_construct_through_the_registry_on_the_binance_inputs() {
             "REGISTRY binance family reuses the binance host inputs once"
         );
     }
+}
+
+#[test]
+fn bitget_family_constructs_through_the_registry_and_reads_its_account() {
+    let opts = json!({"key":"k","secret":"s","passphrase":"p"});
+    for name in [
+        ExchangeName::Bitget,
+        ExchangeName::Bitgetinverse,
+        ExchangeName::Bitgetusdc,
+    ] {
+        let host = venues();
+        let exchange = construct(name.clone(), &host, opts.clone());
+        assert_eq!(exchange.name(), &name, "REGISTRY bitget family name");
+        assert_eq!(
+            *host.calls.borrow(),
+            ["bitget"],
+            "REGISTRY bitget host inputs requested once"
+        );
+    }
+    let host = venues();
+    let exchange = construct(ExchangeName::Bitget, &host, opts);
+    host.wire.bodies.lock().unwrap().insert(
+        "/api/v2/spot/account/info".into(),
+        json!({"code":"00000","msg":"success","requestTime":1,"data":{"userId":"777","inviterId":"9","parentId":null}}),
+    );
+    let account = run(&host.runtime, exchange.get_account())
+        .unwrap_or_else(|e| panic!("REGISTRY bitget getAccount: {}", e.message));
+    assert_eq!(account.user_id, "777", "REGISTRY bitget getAccount userId");
 }
 
 #[test]
