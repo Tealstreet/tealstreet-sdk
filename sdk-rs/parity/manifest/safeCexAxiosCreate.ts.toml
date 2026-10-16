@@ -24,7 +24,7 @@ kind = "const-fn"
 layer = "adapted"
 rs = ["safe-cex-exchange/src/http.rs::maybe_install_remote_signing_adapter", "safe-cex-exchange/src/http.rs::remote_output_adapter"]
 status = "ported"
-note = "Split member remote_output_adapter reuses the shared wire codec for hosted JS clients: paramsSerializer consumes the returned signed params after signing, and retry config retains the source URL and signed parameters."
+note = "Split member `safe-cex-exchange/src/http.rs::remote_output_adapter` reuses the shared wire codec for hosted JS clients: paramsSerializer consumes the returned signed params after signing, and retry config retains the source URL and signed parameters."
 
 [[symbol]]
 ts = "HttpRequestStatsTracker"
