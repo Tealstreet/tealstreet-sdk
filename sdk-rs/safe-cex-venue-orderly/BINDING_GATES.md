@@ -37,8 +37,8 @@ Measured local results before PR creation:
   Scoped rustfmt completed successfully.
 
 The shared native registry adapter now takes a venue name; Aster's existing
-routing is retained. Native hosted remoteSigner remains visibly refused until
-that separate capability is wired. The per-options HTTP factory owns transport
+routing is retained. Native hosted HTTP now uses the shared signer bridge; the source local-secret
+requirements for private HTTP and WS remain. See HOSTED_SIGNER_EVIDENCE.md. The per-options HTTP factory owns transport
 selection, while original Orderly API bodies own serialization, signing, retries
 and rate limiting.
 
