@@ -228,6 +228,18 @@ fn qualified_record_rejections(oracle: &Value) {
     );
     record!(FetchUtaOrdersResponse, "FETCH_UTA_ORDERS_RESPONSE", "");
     record!(
+        BitgetUtaFillFeeDetailItem,
+        "BITGET_UTA_FILL",
+        "/feeDetail/0"
+    );
+    record!(BitgetUtaFill, "BITGET_UTA_FILL", "");
+    record!(
+        FetchUtaFillsResponseData,
+        "FETCH_UTA_FILLS_RESPONSE",
+        "/data"
+    );
+    record!(FetchUtaFillsResponse, "FETCH_UTA_FILLS_RESPONSE", "");
+    record!(
         FetchPositionsV2ResponseDataItem,
         "FETCH_POSITIONS_V2_RESPONSE",
         "/data/0"
@@ -236,7 +248,7 @@ fn qualified_record_rejections(oracle: &Value) {
 }
 fn check_numeric_ingress(oracle: &Value) {
     let cases = oracle["numericIngress"].as_array().unwrap();
-    assert_eq!(cases.len(), 90, "Bitget numeric ingress field inventory");
+    assert_eq!(cases.len(), 108, "Bitget numeric ingress field inventory");
     macro_rules! probe {
         ($ty:ty, $case:expr) => {{
             let case=$case;
@@ -296,6 +308,7 @@ fn check_numeric_ingress(oracle: &Value) {
             "FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE" => probe!(FetchUtaAccountSettingsResponse, case),
             "FETCH_UTA_POSITIONS_RESPONSE" => probe!(FetchUtaPositionsResponse, case),
             "FETCH_UTA_ORDERS_RESPONSE" => probe!(FetchUtaOrdersResponse, case),
+            "FETCH_UTA_FILLS_RESPONSE" => probe!(FetchUtaFillsResponse, case),
             "FETCH_POSITIONS_V2_RESPONSE" => probe!(FetchPositionsV2Response, case),
             name => panic!("uncovered numeric ingress {name}"),
         }
@@ -395,6 +408,12 @@ fn check(oracle: Value) {
                 .map(|v| serde_json::to_value(v).unwrap())
                 .map_err(|e| e.to_string()),
             "FETCH_UTA_ORDERS_RESPONSE" => serde_json::from_value::<FetchUtaOrdersResponse>(value)
+                .map(|v| serde_json::to_value(v).unwrap())
+                .map_err(|e| e.to_string()),
+            "BITGET_UTA_FILL" => serde_json::from_value::<BitgetUtaFill>(value)
+                .map(|v| serde_json::to_value(v).unwrap())
+                .map_err(|e| e.to_string()),
+            "FETCH_UTA_FILLS_RESPONSE" => serde_json::from_value::<FetchUtaFillsResponse>(value)
                 .map(|v| serde_json::to_value(v).unwrap())
                 .map_err(|e| e.to_string()),
             "FETCH_POSITIONS_V2_RESPONSE" => {

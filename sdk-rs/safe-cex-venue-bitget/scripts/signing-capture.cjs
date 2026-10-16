@@ -25,10 +25,11 @@ function evaluate(file,bindings={},selected) {
 }
 const protocol=evaluate('packages/safe-cex/src/exchanges/bitget/bitget.types.ts',{},['BASE_URL','BROKER_ID','ENDPOINTS','RECV_WINDOW']);
 const reads=evaluate('packages/safe-cex/src/utils/retryReadsOnly.ts',{isNetworkError:retryModule.isNetworkError});
+const signatureRejection=evaluate('packages/safe-cex/src/utils/signatureRejection.ts');
 const getKey=evaluate('packages/safe-cex/src/utils/get-key.ts',{memoize:require('lodash/memoize'),snakeCase:require('lodash/snakeCase'),camelCase:require('lodash/camelCase')});
 let captures=[];
 const api=evaluate('packages/safe-cex/src/exchanges/bitget/bitget.api.ts',{
- ...protocol,...reads,...getKey,AxiosHeaders:axios.AxiosHeaders,
+ ...protocol,...reads,...getKey,...signatureRejection,AxiosHeaders:axios.AxiosHeaders,
  safeCexAxiosCreate:config=>axios.create(config),
  retry:retryModule.default||retryModule,
  qs,virtualClock:{getCurrentTimeMs:()=>1700000000123},

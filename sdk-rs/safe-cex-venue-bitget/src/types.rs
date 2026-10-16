@@ -1032,6 +1032,216 @@ pub struct FetchUtaOrdersResponse {
     pub extra: serde_json::Map<String, serde_json::Value>,
 }
 
+// ts: BITGET_UTA_FILL
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BitgetUtaFillFeeDetailItem {
+    #[serde(rename = "feeCoin")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub fee_coin: Option<String>,
+    #[serde(rename = "fee")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub fee: Option<String>,
+    #[serde(rename = "totalFee")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub total_fee: Option<String>,
+    // Flatten enforces a JSON object and retains undeclared venue fields.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+// ts: BITGET_UTA_FILL
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct BitgetUtaFill {
+    #[serde(rename = "category")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub category: Option<String>,
+    #[serde(rename = "symbol")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub symbol: Option<String>,
+    #[serde(rename = "execId")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub exec_id: Option<String>,
+    #[serde(rename = "execLinkId")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub exec_link_id: Option<String>,
+    #[serde(rename = "orderId")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub order_id: Option<String>,
+    #[serde(rename = "clientOid")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub client_oid: Option<String>,
+    #[serde(rename = "orderType")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub order_type: Option<String>,
+    #[serde(rename = "side")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub side: Option<String>,
+    #[serde(rename = "posSide")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub pos_side: Option<String>,
+    #[serde(rename = "execPrice")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub exec_price: Option<String>,
+    #[serde(rename = "execQty")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub exec_qty: Option<String>,
+    #[serde(rename = "execValue")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub exec_value: Option<String>,
+    #[serde(rename = "tradeScope")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub trade_scope: Option<String>,
+    #[serde(rename = "tradeSide")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub trade_side: Option<String>,
+    #[serde(rename = "feeDetail")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub fee_detail: Option<Vec<BitgetUtaFillFeeDetailItem>>,
+    #[serde(rename = "createdTime")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub created_time: Option<String>,
+    #[serde(rename = "updatedTime")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub updated_time: Option<String>,
+    #[serde(rename = "execPnl")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub exec_pnl: Option<String>,
+    #[serde(rename = "isRPI")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub is_rpi: Option<String>,
+    // Flatten enforces a JSON object and retains undeclared venue fields.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+// ts: FETCH_UTA_FILLS_RESPONSE
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FetchUtaFillsResponseData {
+    #[serde(rename = "list")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub list: Option<Vec<BitgetUtaFill>>,
+    #[serde(rename = "cursor")]
+    #[serde(
+        default,
+        skip_serializing_if = "Option::is_none",
+        deserialize_with = "present"
+    )]
+    pub cursor: Option<String>,
+    // Flatten enforces a JSON object and retains undeclared venue fields.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
+// ts: FETCH_UTA_FILLS_RESPONSE
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub struct FetchUtaFillsResponse {
+    #[serde(rename = "code")]
+    pub code: String,
+    #[serde(rename = "msg")]
+    pub msg: String,
+    #[serde(rename = "requestTime")]
+    #[serde(serialize_with = "js_number", deserialize_with = "request_time")]
+    pub request_time: f64,
+    #[serde(rename = "data")]
+    #[serde(deserialize_with = "nullable")]
+    pub data: Option<FetchUtaFillsResponseData>,
+    // Flatten enforces a JSON object and retains undeclared venue fields.
+    #[serde(flatten)]
+    pub extra: serde_json::Map<String, serde_json::Value>,
+}
+
 // ts: FETCH_POSITIONS_V2_RESPONSE
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 pub struct FetchPositionsV2ResponseDataItem {

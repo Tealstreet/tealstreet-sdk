@@ -68,8 +68,9 @@ pub struct AsterDEXExchange<H: AssemblyHost> {
     host: Rc<H>,
 }
 impl<H: AssemblyHost> AsterDEXExchange<H> {
-    pub const OPEN_INTEREST_POLL_INTERVAL_MS: f64 = 15000.;
-    pub const OPEN_INTEREST_BATCH_SIZE: usize = 25;
+    pub const OPEN_INTEREST_POLL_INTERVAL_MS: f64 =
+        crate::order_execution::OPEN_INTEREST_POLL_INTERVAL_MS;
+    pub const OPEN_INTEREST_BATCH_SIZE: usize = crate::order_execution::OPEN_INTEREST_BATCH_SIZE;
     /// ts: AsterDEXExchange.constructor.
     pub fn new(
         host: Rc<H>,
