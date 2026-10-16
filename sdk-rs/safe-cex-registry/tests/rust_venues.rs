@@ -615,6 +615,22 @@ impl RustVenueHost for Venues {
             external_public_data: None,
         })
     }
+    fn polymarket(
+        &self,
+    ) -> Result<safe_cex_venue_polymarket::binding::exchange::PolymarketDependencies, ExchangeError>
+    {
+        self.calls.borrow_mut().push("polymarket");
+        Ok(
+            safe_cex_venue_polymarket::binding::exchange::PolymarketDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                    self.runtime.clone(),
+                    self.wire.clone(),
+                ),
+                external_public_data: None,
+            },
+        )
+    }
 }
 fn venues() -> Rc<Venues> {
     Rc::new(Venues {
@@ -700,6 +716,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Okxdemo,
             ExchangeName::Okxeu,
             ExchangeName::Okxeudemo,
+            ExchangeName::Polymarket,
         ],
         "REGISTRY table membership is a deliberate, reviewed list"
     );
@@ -1054,5 +1071,34 @@ fn native_kraken_dependencies_retain_module_state_per_host() {
     assert!(
         !Rc::ptr_eq(&first.futures_nonces, &other.futures_nonces),
         "REGISTRY separate native runtimes have separate module state"
+    );
+}
+
+#[test]
+fn polymarket_constructs_through_the_registry_and_calls_live_methods() {
+    let host = venues();
+    let exchange = construct(
+        ExchangeName::Polymarket,
+        &host,
+        json!({"key":"","secret":"","publicDataOnly":true}),
+    );
+    assert_eq!(*exchange.base().name(), ExchangeName::Polymarket);
+    let account = run(&host.runtime, exchange.get_account()).unwrap();
+    assert_eq!(
+        account.user_id, "unknown",
+        "REGISTRY Polymarket account source body"
+    );
+    assert_eq!(
+        run(
+            &host.runtime,
+            exchange.fetch_symbol_max_leverage("example-Yes".into())
+        )
+        .unwrap(),
+        1.
+    );
+    assert_eq!(
+        &*host.calls.borrow(),
+        &["polymarket"],
+        "REGISTRY requests venue inputs exactly once"
     );
 }
