@@ -3387,5 +3387,11 @@ The four selected accepted contracts execute against actual production libraries
 with zero failed owners. Reproduce fresh discovery and that scoped execution with
 `node sdk-rs/safe-cex-venue-binance/scripts/record-contracts.mjs`; run accepted
 probes serially. Scoped all-target Clippy passes with warnings denied, and the
-invention/status checker passes 7,459 rows and 17,164 public Rust items. These
+invention/status checker passes 7,459 rows and 17,181 public Rust items. These
 results cover this record tranche; the other accepted contracts remain under review.
+
+After merging master `ce4111da95`, all 13 selected live/native tests, four
+production contract probes, formatting and parity-check pass again. The merge
+preserves every master contract entry and re-applies only these four reviewed
+Binance records. The compiled guard controls and all-target Clippy ran before
+this merge; the Binance implementation files are byte-identical across it.
