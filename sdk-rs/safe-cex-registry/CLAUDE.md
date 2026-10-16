@@ -122,3 +122,7 @@ Their native host inputs retain each API's signing/transport/retry middleware.
 Private MEXC fills must reach the venue emitter; retain the weak callback when
 adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
 native request signatures against a local server.
+
+WEEX is registered through its concrete native binding and the shared signed HTTP
+host, gateway factory and UTC host date profile. `tests/native_host_weex.rs` checks
+its account read and exact request HMAC over loopback HTTP.

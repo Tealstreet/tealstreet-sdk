@@ -745,6 +745,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Okxeudemo,
             ExchangeName::Polymarket,
             ExchangeName::Woo,
+            ExchangeName::Weex,
         ],
         "REGISTRY table membership is a deliberate, reviewed list"
     );
