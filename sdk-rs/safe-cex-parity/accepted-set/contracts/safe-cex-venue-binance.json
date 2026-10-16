@@ -1231,5 +1231,177 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_binance::order_logic::is_binance_position_mode_already_set_error": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_binance_position_mode_already_set_error",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean recognizer for an existing exchange error: reads response.data.code and compares it strictly with numeric/string -4059. Returns a predicate rather than constructing or admitting a decoded owner.",
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::isBinancePositionModeAlreadySetError. The actual Rust body computes this Boolean predicate on an existing value rather than decoding a representation into an owner. tests/accepted_predicate_roles.rs::position_mode_error_is_a_strict_boolean_recognizer executes independent native Boolean/error witnesses; tests/order_logic.rs (217 source comparisons) executes the maintained live TS oracle. scripts/predicate-role-controls.py compiled an incorrect result, required this named native test to fail, then restored exact source and passed. Production native classification receipts are checked separately by scripts/predicate-role-contracts.mjs; they are not claimed as predicate execution."
+  },
+  "safe_cex_venue_binance::order_logic::detect_balance_issue": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "detect_balance_issue",
+      "signature": {
+        "inputs": [
+          [
+            "_account_data",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Deprecated source-compatible account predicate. Deliberately ignores the supplied account value and always returns false; it admits no representation and constructs no decoded output.",
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::BinanceExchange.detectBalanceIssue. The actual Rust body computes this Boolean predicate on an existing value rather than decoding a representation into an owner. tests/accepted_predicate_roles.rs::deprecated_balance_predicate_ignores_account_data executes independent native Boolean/error witnesses; tests/order_logic.rs (217 source comparisons) executes the maintained live TS oracle. scripts/predicate-role-controls.py compiled an incorrect result, required this named native test to fail, then restored exact source and passed. Production native classification receipts are checked separately by scripts/predicate-role-contracts.mjs; they are not claimed as predicate execution."
+  },
+  "safe_cex_venue_binance::order_logic::is_post_only_rejection_error": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_post_only_rejection_error",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean classifier for an existing exchange error: nullish code precedence, numeric -5022 check, then source-truthy message selection and shared fallible String coercion before substring checks. It produces a predicate or coercion error, not a decoded owner.",
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::BinanceExchange.isPostOnlyRejectionError. The actual Rust body computes this Boolean predicate on an existing value rather than decoding a representation into an owner. tests/accepted_predicate_roles.rs::post_only_predicate_preserves_code_and_message_precedence executes independent native Boolean/error witnesses; tests/rejection.rs (5,471 source comparisons) executes the maintained live TS oracle. scripts/predicate-role-controls.py compiled an incorrect result, required this named native test to fail, then restored exact source and passed. Production native classification receipts are checked separately by scripts/predicate-role-contracts.mjs; they are not claimed as predicate execution."
   }
 }

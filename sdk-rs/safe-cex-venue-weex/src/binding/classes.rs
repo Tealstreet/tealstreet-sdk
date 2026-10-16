@@ -38,7 +38,7 @@ pub(super) fn settings(h: &Host) -> ExchangeSettings {
             }),
             ClientOrderIdRuleOverrides {
                 mint: Some(Rc::new(move || {
-                    format!("ts{}", runtime.unique_id())
+                    std::format!("ts{}", runtime.unique_id())
                         .chars()
                         .take(36)
                         .collect()
@@ -48,33 +48,33 @@ pub(super) fn settings(h: &Host) -> ExchangeSettings {
         )),
     }
 }
+fn table<K: serde::Serialize, V: serde::Serialize>(values: &[(K, V)]) -> Result<Js, Thrown> {
+    let result = Js::object(std::vec![]);
+    for (key, value) in values {
+        result.define_key(&from_typed(key)?.to_js_string()?, from_typed(value)?)?;
+    }
+    Ok(result)
+}
 pub(super) fn constant(name: &str) -> Result<Js, Thrown> {
     use crate::types::*;
-    macro_rules! table {
-        ($values:expr) => {{
-            let result = Js::object(vec![]);
-            for (key, value) in $values {
-                result.define_key(&from_typed(key)?.to_js_string()?, from_typed(value)?)?;
-            }
-            Ok(result)
-        }};
-    }
     match name {
         "GRAFANA_ENDPOINTS_EVERY" => from_typed(GRAFANA_ENDPOINTS_EVERY),
         "GRAFANA_ENDPOINTS_PERIODIC" => from_typed(GRAFANA_ENDPOINTS_PERIODIC),
-        "ENDPOINTS" => table!(ENDPOINTS),
-        "INTERVAL" => table!(INTERVAL),
-        "TIME_IN_FORCE" => table!(TIME_IN_FORCE),
-        "POSITION_MODE" => table!(POSITION_MODE),
-        "MARGIN_TYPE" => table!(MARGIN_TYPE),
-        "REVERSE_POSITION_MODE" => table!(REVERSE_POSITION_MODE),
-        "REVERSE_MARGIN_TYPE" => table!(REVERSE_MARGIN_TYPE),
-        "REVERSE_POSITION_SIDE" => table!(REVERSE_POSITION_SIDE),
-        "REVERSE_ORDER_SIDE" => table!(REVERSE_ORDER_SIDE),
-        "REVERSE_ORDER_TYPE" => table!(REVERSE_ORDER_TYPE),
-        "REVERSE_TIME_IN_FORCE" => table!(REVERSE_TIME_IN_FORCE),
-        "REVERSE_ORDER_TRIGGER_TYPE" => table!(REVERSE_ORDER_TRIGGER_TYPE),
-        _ => Err(Thrown::type_error(&format!("Unknown WEEX constant {name}"))),
+        "ENDPOINTS" => table(ENDPOINTS),
+        "INTERVAL" => table(INTERVAL),
+        "TIME_IN_FORCE" => table(TIME_IN_FORCE),
+        "POSITION_MODE" => table(POSITION_MODE),
+        "MARGIN_TYPE" => table(MARGIN_TYPE),
+        "REVERSE_POSITION_MODE" => table(REVERSE_POSITION_MODE),
+        "REVERSE_MARGIN_TYPE" => table(REVERSE_MARGIN_TYPE),
+        "REVERSE_POSITION_SIDE" => table(REVERSE_POSITION_SIDE),
+        "REVERSE_ORDER_SIDE" => table(REVERSE_ORDER_SIDE),
+        "REVERSE_ORDER_TYPE" => table(REVERSE_ORDER_TYPE),
+        "REVERSE_TIME_IN_FORCE" => table(REVERSE_TIME_IN_FORCE),
+        "REVERSE_ORDER_TRIGGER_TYPE" => table(REVERSE_ORDER_TRIGGER_TYPE),
+        _ => Err(Thrown::type_error(&std::format!(
+            "Unknown WEEX constant {name}"
+        ))),
     }
 }
 impl ClassHost for Factory {
@@ -106,7 +106,7 @@ impl ClassHost for Factory {
                 Ok(receiver)
             },
             client_rule: |_, _| {
-                Ok(Js::object(vec![
+                Ok(Js::object(std::vec![
                     ("label", Js::str("WEEX")),
                     ("requirement", Js::str("match /^[.A-Z:/a-z0-9_-]{1,36}$/")),
                 ]))
@@ -149,7 +149,7 @@ impl ClassHost for Factory {
             property: |_, o, k| o.get(k),
             method: |_, o, k| safe_cex_exchange::js_runtime::scope::bound_member(o, k),
             call_event: |_, f, this, event, handler| {
-                f.call(this, vec![Js::str(event), handler])?;
+                f.call(this, std::vec![Js::str(event), handler])?;
                 Ok(())
             },
         }
@@ -191,7 +191,7 @@ impl ClassHost for Factory {
         }))
     }
     fn binding_error(&self, _: ClassKind, name: &'static str, reason: &'static str) -> Thrown {
-        Thrown::type_error(&format!("WEEX {name}: {reason}"))
+        Thrown::type_error(&std::format!("WEEX {name}: {reason}"))
     }
     fn arrow(&self, name: &'static str, body: BoundMember<Js, Thrown>) -> Result<Js, Thrown> {
         let weak = self.0.clone();
@@ -228,7 +228,7 @@ impl ClassHost for Factory {
         let h = self.host()?;
         let mut protos = h.0.shared.extra.prototypes.borrow_mut();
         if !protos.iter().any(|(k, _)| *k == kind) {
-            let prototype = Js::object(vec![]);
+            let prototype = Js::object(std::vec![]);
             if let Js::Object(data) = &prototype {
                 *data.proto.borrow_mut() =
                     Some(sockets::base_websocket_class(&h.0.shared.sockets).get("prototype")?);
@@ -285,8 +285,8 @@ pub(super) fn lifecycle_runtime() -> l::WeexLifecycleRuntime<Host, Js, Thrown> {
         },
         all: |_, a, b| {
             Ok(Box::pin(async move {
-                let (a, b) = futures::try_join!(a, b)?;
-                Ok(Js::array(vec![a, b]))
+                let (a, b) = futures::future::try_join(a, b).await?;
+                Ok(Js::array(std::vec![a, b]))
             }))
         },
         loop_callback: |h, callback| {
@@ -297,7 +297,7 @@ pub(super) fn lifecycle_runtime() -> l::WeexLifecycleRuntime<Host, Js, Thrown> {
         },
         schedule_loop: |h, callback, interval| {
             h.global("loop")?
-                .call(Js::Undefined, vec![callback, interval])?;
+                .call(Js::Undefined, std::vec![callback, interval])?;
             Ok(())
         },
         object: Js::object,
@@ -322,14 +322,14 @@ fn symbol_runtime() -> crate::symbol_settings::WeexSymbolSettingsRuntime<Host, J
     crate::symbol_settings::WeexSymbolSettingsRuntime {
         cached: |h, symbol| {
             h.root("symbolSettings")?
-                .call_method("get", vec![Js::utf16(symbol)])
+                .call_method("get", std::vec![Js::utf16(symbol)])
         },
         truthy: Js::truthy,
         fetch: |h, symbol| {
-            let pending = h.call("fetchSymbolConfigs", vec![Js::utf16(symbol)]);
+            let pending = h.call("fetchSymbolConfigs", std::vec![Js::utf16(symbol)]);
             Box::pin(async move { await_js(pending?).await })
         },
-        fetched: |_, configs, symbol| configs.call_method("get", vec![Js::utf16(symbol)]),
+        fetched: |_, configs, symbol| configs.call_method("get", std::vec![Js::utf16(symbol)]),
         account_position_mode: |h| to_typed(&h.root("accountPositionMode")?),
         default_config: |_, config| v::default_config(config),
     }
@@ -523,7 +523,7 @@ fn dispatch(mut h: Host, name: &'static str, args: Vec<Js>) -> Result<Js, Thrown
                     "nukePositions" => a::nuke_positions(&h, &action).await?,
                     "nuke" => a::nuke(&h, &action).await?,
                     _ => {
-                        return Err(Thrown::type_error(&format!(
+                        return Err(Thrown::type_error(&std::format!(
                             "Unknown WEEX exchange member {name}"
                         )));
                     }
