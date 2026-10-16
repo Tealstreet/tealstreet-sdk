@@ -996,7 +996,7 @@ fn okx_family_constructs_through_the_registry_and_reads_its_markets() {
 fn rust_path_for_an_unbound_name_is_a_named_error_without_module_fallback() {
     let modules = Modules::default();
     let error = match native_constructor(
-        ExchangeName::Grvt,
+        ExchangeName::Txflow,
         ConstructionPath::Rust,
         &modules,
         venues(),
@@ -1004,7 +1004,7 @@ fn rust_path_for_an_unbound_name_is_a_named_error_without_module_fallback() {
         Ok(_) => panic!("REGISTRY unbound rust path must fail"),
         Err(error) => error,
     };
-    assert_eq!(error.to_string(), "no Rust constructor for grvt");
+    assert_eq!(error.to_string(), "no Rust constructor for txflow");
     assert!(
         modules.required.borrow().is_empty(),
         "REGISTRY no module-host fallback"
