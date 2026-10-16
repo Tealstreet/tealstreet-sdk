@@ -6,6 +6,7 @@ use safe_cex_transport::{
 };
 use safe_cex_types::{FetchedLeverage, Order, PlaceOrderOpts};
 use safe_cex_venue_blofin::{
+    modes::AccountModes,
     order_formatters::OrderPayload,
     order_rest::*,
     order_services::{ServiceError, ServiceHost},
@@ -38,10 +39,10 @@ fn corpus() -> &'static Value {
         let data: Value = serde_json::from_slice(&output.stdout).unwrap();
         assert_eq!(
             data["cases"].as_array().unwrap().len(),
-            52,
+            53,
             "independent_case_floor"
         );
-        assert_eq!(data["stoppedAfter"], 52);
+        assert_eq!(data["stoppedAfter"], 53);
         let arch = match std::env::consts::ARCH {
             "aarch64" => "arm64",
             "x86_64" => "x64",
@@ -542,6 +543,7 @@ fn run(case: &Value, variant: u8) {
         "changeMarginType" => ready(change_margin_type(
             args[0].as_bool().unwrap(),
             args[1].as_str(),
+            &AccountModes::default(),
             &store,
             &xhr,
             &host,
@@ -644,7 +646,7 @@ fn native_cancel_orders() {
 }
 #[test]
 fn native_change_margin_type() {
-    family("changeMarginType", 3)
+    family("changeMarginType", 4)
 }
 #[test]
 fn native_set_leverage() {

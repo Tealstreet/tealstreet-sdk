@@ -430,6 +430,10 @@ impl RestAdapter for HttpClient {
     }
 }
 impl HttpClient {
+    /// Whether this request is dispatched only to capture its signed config.
+    pub fn is_signing_capture(&self, request: &RestRequest) -> bool {
+        self.host.signing_capture(request)
+    }
     /// Signer/preflight refusal precedes common request statistics; serializers
     /// call the same failure constructor inside the adapter after those stats.
     pub fn refuse_before_transmit(

@@ -73,6 +73,10 @@ The store contract is `safe-cex-store`'s port of
 that trait directly; it never defines a projection or another store shape.
 `ExchangeRuntime` supplies clock, local task/timer cancellation, runtime logging
 and worker requests. Runtime signing handles stay outside serializable options.
+The native wall clock supplies integer epoch milliseconds for Date.now timestamps
+and signing nonces; its monotonic clock retains fractional milliseconds. The shared
+JS Date.now facade also rounds down an injected wall clock, while performance.now
+keeps the host's fractional precision.
 Remote-signer availability is the separate TS `RemoteSigner.isAvailable` /
 `onAvailabilityChange` contract; `payloadSigner` presence does not replace it.
 
@@ -618,6 +622,13 @@ before the signer, then normalize again after signer output. The first spelling
 survives while the last value wins. Plain-object serialize_headers deliberately
 retains its entries, including case variants.
 
+The JS client gives source request interceptors an AxiosHeaders facade with
+inherited `set(name, value, rewrite?)`, `set(record, rewrite?)`, `get(name)` and
+`has(name)` methods. Header casing, value normalization, fluent receiver identity
+and own-key order are checked against installed Axios; methods never become wire
+entries. Parser/matcher overloads of get/has fail visibly until bound. This does
+not widen the transport's string-valued header ABI to Axios's false sentinel.
+
 After signing, the shared request transform generates application/json for
 object/array data when Content-Type is absent, and dispatch supplies
 application/x-www-form-urlencoded for POST/PUT/PATCH when still absent. Explicit
@@ -938,3 +949,10 @@ Hosted JS venues receive the signer through JsHttpHost, shared by Scope and Base
 The js_runtime typed-value bridge uses the shared native serialization capture and native Serde visitors, preserving NaN, infinities and signed zero in scalar and nested model fields. `to_json` remains the explicit wire projection; do not route typed values through it. Native nonfinite values aimed at opaque serde_json::Value are refused rather than silently projected to null. Typed input retains the shared UTF-8 and bounded-depth choices. `tests/typed_js_values.rs` checks both directions independently, actual order-option fields, enum shapes and optional values; venue E2E tests own their receiver-level effects.
 
 JS socket properties are the source of truth for typed lifecycle grouping. BaseExchange installs weak, lazy lookups for the eight source fields; these create socket cores after venue assembly and observe property replacement/removal on each lookup. The JS runtime regression checks source order, public/private grouping and disposal.
+
+The js_runtime socket terminal preserves Binary as the host binary object: native
+Buffer and wasm Blob, with exact bytes behind ArrayBuffer. Buffer.toString and
+Blob.text perform UTF-8 replacement only when the venue explicitly asks for text;
+compressed-frame consumers must read the bytes and use their source decoder.
+`ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
+checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
