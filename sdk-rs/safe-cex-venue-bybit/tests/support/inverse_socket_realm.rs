@@ -220,6 +220,16 @@ impl Realm {
             }),
         );
         put(&h.global, "createdFunctions", arr(vec![]));
+        put(
+            &h.global,
+            "cleanFloat",
+            fun(|_, this, a| {
+                assert!(is_undefined(&this));
+                Ok(n(safe_cex_store::incremental_fills::clean_float(
+                    num(&a[0]),
+                )))
+            }),
+        );
         let next = Rc::new(Cell::new(0));
         put(
             &h.global,

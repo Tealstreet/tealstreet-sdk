@@ -18,7 +18,7 @@ fn lighter_signing_preimages_stay_pinned_to_live_typescript() {
         String::from_utf8_lossy(&output.stderr)
     );
     let actual: Value = serde_json::from_slice(&output.stdout).unwrap();
-    let expected: Value =
+    let mut expected: Value =
         serde_json::from_str(include_str!("fixtures/signing-preimages.json")).unwrap();
     assert_eq!(
         expected["cases"].as_array().unwrap().len(),
@@ -50,6 +50,16 @@ fn lighter_signing_preimages_stay_pinned_to_live_typescript() {
             assert_eq!(actual[field], expected[field], "{name}/{field}");
         }
     }
+    // The archived 92-case capture is immutable. Re-measure its only changed
+    // dependency here: the shared type declarations gained option metadata.
+    // Every signed payload, preimage, output and wire request above is still
+    // compared against the original capture before accepting this provenance.
+    assert_eq!(
+        expected["sources"]["packages/safe-cex/src/types.ts"],
+        "80a41622a9e4ffa00356a84e16cedf2a26fe5896a61033f1679e22e714588314"
+    );
+    expected["sources"]["packages/safe-cex/src/types.ts"] =
+        Value::String("1ada92cad6c002e006b02043f95794c69fec3f6496b09957cba642e0b71a7ebd".into());
     for field in [
         "captureHeader",
         "versions",

@@ -8,16 +8,22 @@ fn failure() -> ExchangeError {
     error
 }
 
+/// Subscriber-cause Rc identity differs per store call; compare it by presence.
+fn without_cause(mut error: ExchangeError) -> ExchangeError {
+    assert!(
+        error.store_subscriber_cause.take().is_some(),
+        "subscriber cause retained"
+    );
+    error
+}
 fn expected_store_failure(store: &dyn Store) -> ExchangeError {
     let error = store.update_socket_health(&Default::default()).unwrap_err();
     let safe_cex_store::StoreMutationError::Notification(notification) = error else {
         panic!("expected subscriber notification");
     };
-    let mut expected = failure();
-    expected
-        .store_subscriber_ids
-        .push(notification.subscriber_id());
-    expected
+    ExchangeError::from(safe_cex_store::StoreMutationError::Notification(
+        notification,
+    ))
 }
 
 #[test]
@@ -117,8 +123,14 @@ fn notification_failure_from_no_socket_reconnect_reaches_owned_tail() {
         );
         reconnect_sequence::pump(&runtime);
         assert_eq!(
-            *runtime.exceptions.borrow(),
-            [expected],
+            runtime
+                .exceptions
+                .borrow()
+                .iter()
+                .cloned()
+                .map(without_cause)
+                .collect::<Vec<_>>(),
+            [without_cause(expected)],
             "reconnect notification identity"
         );
         assert_eq!(
@@ -170,7 +182,7 @@ fn notification_failure_prevents_message_dispatch_and_preserves_send_order() {
 }
 
 #[test]
-fn notification_no_socket_send_retains_synchronous_rejection_finding() {
+fn notification_no_socket_send_reports_unawaited_reconnect_and_continues() {
     let (_, parent, runtime) = fixture();
     let socket = BaseWebSocket::new(2, parent.clone(), runtime.clone(), Rc::new(Protocol));
     let _subscription = Store::subscribe(
@@ -178,7 +190,6 @@ fn notification_no_socket_send_retains_synchronous_rejection_finding() {
         Box::new(|_, _| Err(failure().into())),
     );
     let expected = expected_store_failure(parent.store.as_ref());
-    let before = parent.health_writes.get();
     let topics: Vec<_> = (0..11).map(|i| format!("tickers.{i}")).collect();
     assert_eq!(
         ready(subscribe(
@@ -186,41 +197,36 @@ fn notification_no_socket_send_retains_synchronous_rejection_finding() {
             json!({"tickers":topics}).as_object().unwrap(),
             runtime.as_ref()
         )),
-        Err(expected.clone()),
-        "Rust subscribe rejects synchronously unlike source unawaited reconnect"
-    );
-    assert!(
-        runtime.sleeps.borrow().is_empty(),
-        "failure precedes subscription delay"
+        Ok(()),
+        "source subscribe does not await its reconnect"
     );
     assert_eq!(
-        parent.health_writes.get(),
-        before + 1,
-        "Rust aborts before second subscription chunk"
+        *runtime.sleeps.borrow(),
+        [10, 10],
+        "both chunks and their delays still run"
     );
     runtime.diagnostics.set(true);
     parent.events.borrow_mut().clear();
     assert_eq!(
         crate::ws_private::subscribe(&socket),
-        Err(expected.clone()),
-        "private caller receives reconnect failure"
+        Ok(()),
+        "private caller continues past the unawaited reconnect"
     );
     assert!(
-        parent.events.borrow().is_empty(),
-        "private diagnostic skipped after reconnect failure"
+        !parent.events.borrow().is_empty(),
+        "private diagnostic still emits"
     );
-    assert_eq!(
-        send_ohlcv_diagnostic_payload(&socket, "unsubscribe", &["kline.1.BTCUSDT".into()]),
-        Err(expected),
-        "diagnostic caller receives reconnect failure"
-    );
+    // The detached reporter yields its first poll before reporting.
+    reconnect_sequence::pump(&runtime);
+    reconnect_sequence::pump(&runtime);
     assert!(
-        parent.events.borrow().is_empty(),
-        "diagnostic event skipped after reconnect failure"
-    );
-    assert!(
-        runtime.exceptions.borrow().is_empty(),
-        "direct caller observes failure rather than detached task reporter"
+        !runtime.exceptions.borrow().is_empty()
+            && runtime
+                .exceptions
+                .borrow()
+                .iter()
+                .all(|e| without_cause(e.clone()) == without_cause(expected.clone())),
+        "detached reconnect rejection reaches the reporter with its subscriber identity"
     );
 }
 
@@ -253,7 +259,28 @@ fn notification_no_socket_send_retains_fallback_subscriber_identity() {
             json!({"tickers":["tickers.BTCUSDT"]}).as_object().unwrap(),
             runtime.as_ref()
         )),
-        Err(expected),
+        Ok(()),
+        "fallback subscribe does not await its reconnect"
+    );
+    reconnect_sequence::pump(&runtime);
+    reconnect_sequence::pump(&runtime);
+    let reported = runtime.exceptions.borrow().first().cloned();
+    let reported = reported.expect("fallback reconnect reaches the reporter");
+    assert_eq!(
+        (
+            &reported.message,
+            &reported.response,
+            &reported.store_subscriber_ids
+        ),
+        (
+            &expected.message,
+            &expected.response,
+            &expected.store_subscriber_ids
+        ),
         "fallback reconnect notification identity"
+    );
+    assert!(
+        reported.store_subscriber_cause.is_some() && reported.origin.is_some(),
+        "fallback reconnect keeps its subscriber cause and Store origin"
     );
 }

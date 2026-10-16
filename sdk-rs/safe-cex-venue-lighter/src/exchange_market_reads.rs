@@ -1,11 +1,11 @@
 //! Market/position/balance read bodies and the order-fetch cache wrapper.
 //! Required full live JS, Get/key/coercion, Call/import, array/iterator/spread,
 //! Promise/finally/return adoption hosts remain separate bindings. Numeric
-//! operations follow source typed Number/ordinary builtin contracts; this does
+//! operands take JS ToNumber (objects throw TypeError); this does
 //! not construct an exchange, HTTP client, store or JavaScript engine.
 use crate::{
     exchange_trading_preflight::TradingHost,
-    sdk_account_api::AccountValue,
+    sdk_account_api::{AccountValue, primitive_to_number},
     transaction_promise::{NativePromise, PromiseResolver},
     transaction_signing::{SigningResult, TransactionSigningError},
 };
@@ -57,11 +57,8 @@ fn equal(a: &AccountValue, b: &AccountValue) -> bool {
         _ => false,
     }
 }
-fn num(v: AccountValue) -> f64 {
-    let AccountValue::Number(n) = v else {
-        unreachable!("source typed Number")
-    };
-    n
+fn num(v: AccountValue) -> SigningResult<f64> {
+    primitive_to_number(&v)
 }
 fn call(h: &dyn MarketReadHost, key: &str, args: &[AccountValue]) -> SigningResult<AccountValue> {
     h.member(&h.owner(), key)?.call(args)
@@ -237,7 +234,7 @@ pub fn resolve_position_leverage(
                 candidate
             };
             let parsed = parse.call(&[stringify.call(&[value])?])?;
-            if finite(live.as_ref(), parsed.clone())? && num(parsed.clone()) > 0.0 {
+            if finite(live.as_ref(), parsed.clone())? && num(parsed.clone())? > 0.0 {
                 Ok(ForOfStep::Break(clamp(
                     live.as_ref(),
                     parsed,
@@ -260,8 +257,8 @@ pub fn resolve_position_leverage(
     )?;
     let fraction = fraction.call(&[value])?;
     if fraction.truthy() {
-        let derived = AccountValue::Number(1.0 / num(fraction));
-        if finite(h.as_ref(), derived.clone())? && num(derived.clone()) > 0.0 {
+        let derived = AccountValue::Number(1.0 / num(fraction)?);
+        if finite(h.as_ref(), derived.clone())? && num(derived.clone())? > 0.0 {
             return clamp(h.as_ref(), derived, min, max);
         }
     }
@@ -284,7 +281,7 @@ pub fn resolve_position_liquidation_price(
         &["liquidationPrice", "liquidation_price"],
         AccountValue::Number(0.0),
     )?;
-    let raw_n = num(raw.clone());
+    let raw_n = num(raw.clone())?;
     let raw_finite = finite(h, raw)? && raw_n > 0.0;
     let profit = raw_finite
         && finite(h, AccountValue::Number(entry))?
@@ -313,12 +310,12 @@ pub fn resolve_position_liquidation_price(
         ],
         text(""),
     )?;
-    let allocated_n = num(allocated.clone());
+    let allocated_n = num(allocated.clone())?;
     let notional = entry * contracts;
     let fallback = if finite(h, AccountValue::Number(leverage))? && leverage > 0.0 {
         notional / leverage
     } else {
-        num(h.constant("Number.NaN")?)
+        num(h.constant("Number.NaN")?)?
     };
     let allocated = if finite(h, allocated)? && allocated_n > 0.0 {
         allocated_n
@@ -347,7 +344,7 @@ pub fn resolve_position_liquidation_price(
     if maintenance.is_nullish() {
         maintenance = AccountValue::Number(0.0)
     }
-    let maintenance = num(maintenance);
+    let maintenance = num(maintenance)?;
     if !finite(h, AccountValue::Number(allocated))?
         || allocated <= 0.0
         || !finite(h, AccountValue::Number(maintenance))?
@@ -399,8 +396,8 @@ pub fn map_position(h: &dyn MarketReadHost, p: AccountValue) -> SigningResult<Ac
     }
     let short = equal(&h.get(&p, "side")?, &text("SHORT"))
         || equal(&h.get(&p, "side")?, &text("SELL"))
-        || num(sign) < 0.0
-        || num(raw) < 0.0;
+        || num(sign)? < 0.0
+        || num(raw)? < 0.0;
     let side = h.constant(if short {
         "PositionSide.Short"
     } else {
@@ -456,7 +453,7 @@ pub fn map_position(h: &dyn MarketReadHost, p: AccountValue) -> SigningResult<Ac
     let one_way = h.constant("PositionMode.OneWay")?;
     let id = create.call(&[symbol, side.clone(), one_way])?;
     let symbol = h.get(&market, "symbol")?;
-    let notional = AccountValue::Number(num(contracts.clone()) * num(entry.clone()));
+    let notional = AccountValue::Number(num(contracts.clone())? * num(entry.clone())?);
     let parse = h.global("parseFloat")?;
     let realized = parse.call(&[loose_or(h, &p, &["realizedPnl", "realized_pnl"])?])?;
     let position_mode = h.constant("PositionMode.OneWay")?;
@@ -498,15 +495,15 @@ fn balance_value(
             return Ok(acc);
         }
         let is_long = equal(&live.get(&p, "side")?, &live.constant("PositionSide.Long")?);
-        let delta = if is_long {
-            num(live.get(&ticker, "last")?) - num(live.get(&p, "entryPrice")?)
+        // Binary operands are both read before either is converted.
+        let (left, right) = if is_long {
+            (live.get(&ticker, "last")?, live.get(&p, "entryPrice")?)
         } else {
-            num(live.get(&p, "entryPrice")?) - num(live.get(&ticker, "last")?)
+            (live.get(&p, "entryPrice")?, live.get(&ticker, "last")?)
         };
-        live.add(
-            acc,
-            AccountValue::Number(delta * num(live.get(&p, "contracts")?)),
-        )
+        let delta = num(left)? - num(right)?;
+        let contracts = live.get(&p, "contracts")?;
+        live.add(acc, AccountValue::Number(delta * num(contracts)?))
     }))?;
     let upnl = reduce.call(&[callback, AccountValue::Number(0.0)])?;
     let parse = h.global("parseFloat")?;
@@ -733,13 +730,13 @@ pub fn fetch_markets_helper(h: Rc<dyn MarketReadHost>) -> NativePromise<AccountV
                 } else {
                     price
                 }])?;
-                let amount_increment = if num(amount.clone()) >= 0.0 {
-                    1.0 / owner.number_power(10.0, num(amount.clone()))
+                let amount_increment = if num(amount.clone())? >= 0.0 {
+                    1.0 / owner.number_power(10.0, num(amount.clone())?)
                 } else {
                     0.001
                 };
-                let price_increment = if num(price.clone()) >= 0.0 {
-                    1.0 / owner.number_power(10.0, num(price.clone()))
+                let price_increment = if num(price.clone())? >= 0.0 {
+                    1.0 / owner.number_power(10.0, num(price.clone())?)
                 } else {
                     0.01
                 };

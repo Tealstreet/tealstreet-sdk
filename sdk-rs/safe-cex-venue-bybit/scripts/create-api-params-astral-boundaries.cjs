@@ -49,7 +49,7 @@ for (const statement of apiSource.statements) {
 }
 assert.deepEqual(moduleFunctions, [
   'isSignedRequest', 'isPublicEndpoint', 'isInstrumentsInfoRequest', 'isBybitClockSyncRetMsg',
-  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitEnvProbeRequest',
+  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitSignRejection', 'isBybitEnvProbeRequest',
   'shouldRetryBybitRequest', 'createAPI',
 ], 'independent module function inventory');
 assert.ok(factory);
@@ -84,6 +84,7 @@ const types = load('assembled-bybit-api-constants.ts', {}, typesProgram);
 assert.deepEqual(Object.keys(types).sort(), [...typeNames].sort());
 const response = load('packages/safe-cex/src/exchanges/bybit/bybit.response.ts');
 const retryReads = load('packages/safe-cex/src/utils/retryReadsOnly.ts', { 'axios-retry': retry });
+const signatureRejection = load('packages/safe-cex/src/utils/signatureRejection.ts');
 
 const payloadSigner = load('packages/safe-cex/src/utils/payloadSigner.ts', { 'create-hmac': require('create-hmac') });
 const site = load('packages/safe-cex/src/exchanges/bybit/bybit.site.ts');
@@ -112,7 +113,7 @@ async function observeAstral(signed) {
     },
     '../../utils/runtime':{isNodeOrBunRuntime:()=>true},
     '../../utils/virtualClock':{virtualClock:{getCurrentTimeMs(){clockCalls++;return 1000;}}},
-    './bybit.response':response,'./bybit.site':site,'./bybit.types':types,'../../utils/retryReadsOnly':retryReads,
+    './bybit.response':response,'./bybit.site':site,'./bybit.types':types,'../../utils/retryReadsOnly':retryReads, '../../utils/signatureRejection': signatureRejection,
   },apiSource.text,{error(){assert.fail('unexpected diagnostic');}});
   const xhr=api.createAPI(options,{name:'bybitinverse',isDemo:false,
     recordAuthSuccess(){authSuccesses++;},recordAuthFailure(){assert.fail('unexpected auth failure');},emitAndLogError(){assert.fail('unexpected error');}});

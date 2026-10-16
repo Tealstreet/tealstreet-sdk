@@ -1,18 +1,19 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.inverse.ts"
+rust_files = [ "safe-cex-venue-bybit/src/inverse_symbol.rs" ]
 
 [[symbol]]
 ts = "isBybitInverseSymbol"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/inverse_symbol.rs::is_bybit_inverse_symbol"
+status = "ported"
 note = ""
 
 [[symbol]]
 ts = "positionUpnlInQuote"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/inverse_symbol.rs::position_upnl_in_quote"
+status = "ported"
 note = ""

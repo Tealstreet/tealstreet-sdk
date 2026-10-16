@@ -16,6 +16,14 @@ context is not automatically authenticated. MessagePack implements JS Number
 and Object.keys ordering, including integer-index keys; it cannot directly
 serialize arbitrary-precision serde numbers as their private representation.
 
+`es256::Es256SigningKey` imports P-256 PKCS8 DER and signs exact caller bytes
+with SHA-256, returning 64-byte IEEE-P1363 `r || s` as WebCrypto/JWS require.
+PEM normalization, JWT claims and key caching stay with the venue. RFC6979
+nonces are deterministic; WebCrypto chooses random nonces, so valid signature
+bytes can differ. Tests pin the RFC6979 known answer and verify signatures in
+both directions through the live Coinbase TypeScript/WebCrypto signer. Key
+handles have no serializer, Debug implementation or private-key export.
+
 **Lighter semantics.** Raw input words are little endian. `poseidon2_hash` and
 `poseidon2_hash_fp5` reproduce Go's noncanonical reduction.
 `poseidon2_two_to_one` accepts only canonical hash outputs; unlike Go it refuses
