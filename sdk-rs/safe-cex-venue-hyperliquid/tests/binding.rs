@@ -5,12 +5,17 @@
 mod host;
 use host::{Host, Routes};
 use safe_cex_exchange::exchange::Exchange;
+use safe_cex_exchange::runtime::{Cleanup, ExchangeSigners, RemoteSigner};
 use safe_cex_store::store::DefaultStore;
 use safe_cex_venue_hyperliquid::{
     binding::HyperliquidDependencies, exchange::HyperliquidExchange, rate_limit::RateLimiter,
 };
 use serde_json::{Value, json};
-use std::{rc::Rc, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::Arc,
+};
 
 const AGENT_KEY: &str = "0x0123456789012345678901234567890123456789012345678901234567890123";
 const MASTER: &str = "0x14dc79964da2c08b23698b3d3cc7ca32193d9955";
@@ -41,6 +46,15 @@ fn fixture(routes: Vec<(&str, Value)>) -> Fixture {
 
 #[allow(clippy::arc_with_non_send_sync)]
 fn fixture_with_options(routes: Vec<(&str, Value)>, options: Value) -> Fixture {
+    fixture_with_signers(routes, options, ExchangeSigners::default())
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn fixture_with_signers(
+    routes: Vec<(&str, Value)>,
+    options: Value,
+    signers: ExchangeSigners,
+) -> Fixture {
     let host = Rc::new(Host::default());
     let routes = Routes::new(routes);
     let clock = Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
@@ -54,6 +68,7 @@ fn fixture_with_options(routes: Vec<(&str, Value)>, options: Value) -> Fixture {
             runtime: host.clone(),
             http: routes.clone(),
             limiter: Rc::new(RateLimiter::new(clock, 1200.0, 60_000.0)),
+            signers,
         },
     )
     .unwrap_or_else(|e| panic!("construct: {e:?}"));
@@ -62,6 +77,71 @@ fn fixture_with_options(routes: Vec<(&str, Value)>, options: Value) -> Fixture {
         routes,
         exchange,
     }
+}
+
+#[derive(Default)]
+struct HostedSigner {
+    available: Cell<bool>,
+    listener: Rc<RefCell<Option<Rc<dyn Fn(bool)>>>>,
+}
+impl safe_cex_transport::signing::RemoteSigner for HostedSigner {
+    fn sign(
+        &self,
+        _: safe_cex_transport::signing::RemoteSignerRequest,
+    ) -> safe_cex_transport::TransportFuture<'_, safe_cex_transport::signing::RemoteSignerResponse>
+    {
+        Box::pin(async {
+            Err(safe_cex_transport::TransportError::Host(
+                "availability test must not send a signing request".into(),
+            ))
+        })
+    }
+}
+impl RemoteSigner for HostedSigner {
+    fn is_available(&self) -> bool {
+        self.available.get()
+    }
+    fn on_availability_change(&self, callback: Rc<dyn Fn(bool)>) -> Cleanup {
+        assert!(self.listener.borrow_mut().replace(callback).is_none());
+        let listener = self.listener.clone();
+        Box::new(move || {
+            listener.borrow_mut().take();
+        })
+    }
+}
+
+#[test]
+fn hosted_signer_reaches_native_capability_and_availability_without_a_secret() {
+    let signer = Rc::new(HostedSigner::default());
+    let f = fixture_with_signers(
+        vec![],
+        json!({
+            "key": agent_address(), "secret":"", "applicationId":MASTER,
+        }),
+        ExchangeSigners {
+            remote_signer: Some(signer.clone()),
+            payload_signer: None,
+        },
+    );
+    assert!(
+        f.exchange.can_sign(),
+        "native capability must see the hosted signer"
+    );
+    assert!(f.exchange.base().options().secret.is_empty());
+    let wait = f.exchange.base().wait_for_remote_signer();
+    let callback = signer
+        .listener
+        .borrow()
+        .clone()
+        .expect("availability subscribed");
+    signer.available.set(true);
+    callback(true);
+    assert!(f.host.block_on(wait).unwrap());
+    assert!(
+        signer.listener.borrow().is_none(),
+        "settled wait removes listener"
+    );
+    assert!(f.routes.requests.borrow().is_empty());
 }
 
 #[test]

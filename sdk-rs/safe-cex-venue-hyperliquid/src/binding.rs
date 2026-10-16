@@ -24,7 +24,7 @@ use safe_cex_exchange::{
         AccountIdentityPatch, BaseExchange, Exchange, ExchangeSettings, IdentityFieldPatch,
         ValidatedBatch, ValidatedOrder,
     },
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeSigners},
     websocket::WsRuntime,
     ws_parent::WsExchangeParent,
 };
@@ -41,6 +41,7 @@ pub struct HyperliquidDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub http: Arc<dyn RestAdapter>,
     pub limiter: Rc<RateLimiter>,
+    pub signers: ExchangeSigners,
 }
 
 pub(crate) struct Binding {
@@ -87,13 +88,14 @@ impl HyperliquidExchange {
             ..Default::default()
         };
         let runtime: Rc<dyn ExchangeRuntime> = deps.runtime.clone();
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             ExchangeName::Hyperliquid,
             options.clone(),
             store.clone(),
             runtime.clone(),
             settings,
         );
+        base.signers = deps.signers;
         let mut venue = Self::from_base(base);
         venue.capabilities = capabilities();
         let venue = Rc::new(venue);
