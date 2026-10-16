@@ -21,8 +21,6 @@ export const policy = JSON.parse(fs.readFileSync(path.join(sdk, 'rust-wasm.json'
  * the mirror had not picked it up yet would read as green.
  */
 const WORKFLOW_CANDIDATES = [
-    // Monorepo: the pre-merge tier.
-    '.github/workflows/rust.yml',
     // Monorepo: the mirror's workflow, authored here (contributors cannot edit
     // it on the mirror — CODEOWNERS + branch protection).
     'mirrors/tealstreet-sdk/.github/workflows/ci.yml',
