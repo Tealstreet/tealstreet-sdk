@@ -189,3 +189,10 @@ its account read and exact request HMAC over loopback HTTP.
 TxFlow is constructible only as the source Phase-0 scaffold. Native inputs build
 its HTTP client, while start emits the exact refusal before IO. Keep its existing
 source start boundary and test both mainnet/testnet construction without network.
+
+Breakout Prop constructs its DXtrade API/session/polling lifecycle through shared
+js_runtime. The native host preserves the selected transport and source session
+headers; remoteSigner DXtrade login refuses visibly. The native date realm is
+explicitly UTC for offset-less legacy timestamps, while embedding hosts supply
+their own local_to_utc policy. native_host_breakoutprop.rs proves actual native
+HTTP login/startup/reads/placement/cancellation with no websocket dial.
