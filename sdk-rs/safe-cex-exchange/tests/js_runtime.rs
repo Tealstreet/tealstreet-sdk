@@ -980,3 +980,35 @@ fn rest_http_host_lets_the_venue_serialize_its_query() {
     assert_eq!(seen[0].url, "/ok?a=1&b=2");
     assert_eq!(seen[0].params, None);
 }
+
+#[test]
+fn store_facade_mutators_key_on_the_entity_id() {
+    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    let store = Rc::new(DefaultStore::new());
+    Store::update(
+        &*store,
+        StoreUpdate {
+            tickers: Some(vec![
+                serde_json::from_value(json!({
+                    "id": "BTCUSDT", "symbol": "BTCUSDT", "bid": 1, "ask": 2, "last": 3,
+                    "mark": 4, "index": 5, "percentage": 0, "openInterest": 0,
+                    "fundingRate": 0, "fundingTime": 0, "volume": 0, "quoteVolume": 0
+                }))
+                .unwrap(),
+            ]),
+            ..StoreUpdate::default()
+        },
+        false,
+    )
+    .unwrap();
+    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone());
+    // ts: store.updateTicker(ticker, changes) receives the ticker object.
+    let ticker = Js::object(vec![("id", Js::str("BTCUSDT"))]);
+    facade
+        .call_method(
+            "updateTicker",
+            vec![ticker, Js::object(vec![("fundingRate", Js::Number(0.25))])],
+        )
+        .unwrap();
+    assert_eq!(store.tickers()[0].funding_rate, 0.25);
+}
