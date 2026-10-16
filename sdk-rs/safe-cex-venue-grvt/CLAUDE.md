@@ -285,3 +285,11 @@ writes retain the existing truthiness behavior. Wiring only requestId's setter
 to the session-attempt counter compiles and fails the named native-write
 assertion; exact restoration passes. This source visibility repair does not
 classify the complete Host owner or any of its remaining raw APIs.
+
+The exchange and member-dispatch bindings also name their consumed shared types
+explicitly. Their former wildcard imports prevented macro-origin discovery. The
+source scanner now retains the existing reviewed local comparison and reports no
+further markers. The four inherited-refusal policies retain their exact compiler
+APIs, method bodies, TypeScript sources and native witnesses; only the import-driven
+Rust line spans and whole-file hash change. This visibility repair does not
+classify the remaining unreviewed owners.
