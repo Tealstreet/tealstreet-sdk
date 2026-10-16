@@ -22,11 +22,17 @@ previous five compiled dispatch controls and the full earlier native controls
 remain documented below; their source and fixture bytes are unchanged.
 
 This is the complete selected Breakout owner/alias cohort, not transitive or
-matrix clearance. The ordinary full transitive run after #297 passes all 227
-shared-types receipts, then stops at two E0063 errors for SocketCore.disposing in
-shared native probe adapters. Shared repair #325 owns that compile blocker;
-compiler failures are not native runtime evidence. Re-run the ordinary full gate
-when its repair lands. No guard was relaxed or unresolved scope omitted.
+matrix clearance. The ordinary full transitive run after #325 compiles and
+executes all four selected packages: Breakout 67/67 pass; shared types report 227
+receipts with zero failed owners; shared exchange has five failed owners among
+169 receipts; transport has 58 failed owners among 115 receipts. The gate exits
+one with 63 failed owners. Transport failures include 32 missing owner/function
+contracts, six missing alias contracts, five stale APIs, two raw APIs classified
+as typed, nine positional-array admissions, two tagged-object admissions, one
+stale positive sample and one unreviewed function-local decoder. These shared
+reviews/repairs are separately owned. No foreign classifications, guard changes
+or omitted scopes were used to clear them. Exact local failure summaries and
+logs stay outside the repository.
 
 # Account lookup, validation and session invalidation
 
