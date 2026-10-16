@@ -1439,3 +1439,46 @@ compiling controls from sdk-rs. Omitting the native signer fails the HTTP tests;
 reading a missing live signer property fails the WS witness. Each restored tree
 passes all three native witnesses. The controls ran sequentially with one Cargo
 job. Read-only sub-agent review reported no blocking findings.
+
+
+## Four accepted module-helper bodies (2026-10-17)
+
+Each complete body was reviewed against the actual TS declarations and the
+existing module-utility host profile in MANIFEST-SPEC. `parse_trigger_signal`
+decodes JSON-domain values to native trigger variants/absence or a coercion error.
+The other three functions have distinct non-decoder roles: typed literal string
+comparison through the shared root collator; shared Error construction with
+literal message and separate optional metadata snapshots; and a module-owned ID
+generator factory driven by fallible host entropy. The factory's mutable byte
+slice belongs to the host fill callback, rather than an inbound wire schema.
+The binding factory and SpotIds alias remain separately reviewable owners.
+
+Four new direct native witnesses pass with all five existing actual-source helper
+tests: **nine passed, zero failures/ignored**. Observations include all three
+trigger variants and absence/error before Serialize; actual Ordering; literal
+message/name, separate nested response/cause fields, negative-zero bits, explicit
+null versus absence and snapshot behavior; and an entropy failure followed by
+native 32-character IDs and the independent source refill schedule. The installed
+nanoid 6.0.1 source was reviewed directly: growth advances before entropy filling,
+and constant 0xaf maps to hexadecimal f. The existing live source witness compares
+2640 generated results and callback schedules with the pinned dependency.
+
+The selected native/default production gate reports **one runtime result, three
+explicit classifications, zero failed owners**. Its 21 trigger input/output cases
+were authored independently of the Rust decoder. The call observes actual native
+enum variants/absence/error rather than serializing the enum or observing is_ok.
+A classification receipt does not execute the comparator, error constructor or
+factory; their separate native witnesses provide that execution evidence.
+
+`scripts/helper-contract-controls.py` completed four sequential compiled controls:
+reverse comparator operands, swap response/cause metadata, change the hexadecimal
+mask from 15 to 7, and map spot to the wrong trigger variant. The first three each
+fail their named native witness after compilation, then pass that same witness
+after exact source restoration. The trigger mutation fails only its own actual
+production output probe with native output mismatches; restored production1 plus
+classifications3 pass again. Exact final helpers.rs bytes match the original,
+and all nine native/source tests pass again with zero ignored. Compiler failures
+cannot count as control success. No production code or protocol boundary changed.
+
+These four contracts leave other Kraken owners, aliases, local functions,
+construction, the 25 receiver refusals and feature/wasm accepted coverage open.

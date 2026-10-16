@@ -313,3 +313,18 @@ signer into the live parent options. Private challenge auth must read that live
 options. The native registry HTTP and WS witnesses and compiling controls live
 in `safe-cex-registry/tests/native_host_kraken_signer.rs` and
 `safe-cex-registry/scripts/kraken-hosted-controls.py`.
+
+
+`tests/accepted_helpers.rs` directly observes all four module-helper APIs for
+accepted-contract review. The trigger decoder matches actual native enum variants,
+absence and coercion errors before serialization. Comparator operands, literal
+error construction/metadata snapshots and the entropy-backed ID generator retain
+three separate non-decoder roles; their classification receipts are not execution.
+Run the new native target together with `--test helpers` (one live TS process),
+then `scripts/helper-contract-controls.py` with the explicit TypeScript path.
+Its three role controls must fail named compiled native witnesses; the trigger
+control must fail its own actual production output probe. Every exact source
+restoration must pass. `scripts/helper-contracts.mjs` selects only these four
+native/default owners. Other owners, the 25 receiver refusals, aliases, local
+functions, construction and feature/wasm accepted behavior remain independent.
+The host profiles are already defined in MANIFEST-SPEC#kraken-module-utility-adapters.
