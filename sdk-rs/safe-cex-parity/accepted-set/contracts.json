@@ -141563,5 +141563,733 @@
     "category": "non-decoder",
     "reason": "Applies the same nullish/property access operation without a Host argument; the string selects a VM property and no data owner is decoded.",
     "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 219-225. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::classes::NativeMember": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "V"
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_weex::classes::ClassReturn",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "generic": "V"
+                                                      }
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "generic": "E"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "V"
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_weex::classes::ClassReturn",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "generic": "V"
+                                                      }
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "generic": "E"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "reason": "NativeMember is an executable Rc<dyn Fn> host capability over supplied receiver/argument values and Result<ClassReturn<V,E>,E> output, rather than a wire deserializer. The fixed Value/String instantiation receives actual native identity and complete Serde/conversion trait probes.",
+    "evidence": "Reviewed classes.rs actual callback signature and consumers. This bounded alias policy fixes V=serde_json::Value and E=String; it does not claim callback execution or decoder behavior for arbitrary generic arguments. Concrete Js/Thrown callback execution remains covered by production binding E2Es."
+  },
+  "safe_cex_venue_weex::classes::BoundMember": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "E",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_weex::classes::ClassReturn",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "generic": "V"
+                                                      }
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "generic": "E"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_venue_weex::classes::ClassReturn",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "generic": "V"
+                                                      }
+                                                    },
+                                                    {
+                                                      "type": {
+                                                        "generic": "E"
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "reason": "BoundMember is an executable Rc<dyn Fn> host capability over supplied receiver/argument values and Result<ClassReturn<V,E>,E> output, rather than a wire deserializer. The fixed Value/String instantiation receives actual native identity and complete Serde/conversion trait probes.",
+    "evidence": "Reviewed classes.rs actual callback signature and consumers. This bounded alias policy fixes V=serde_json::Value and E=String; it does not claim callback execution or decoder behavior for arbitrary generic arguments. Concrete Js/Thrown callback execution remains covered by production binding E2Es."
+  },
+  "safe_cex_venue_weex::response_types::WeexKlineRow": {
+    "category": "decoder",
+    "shape": "union",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "tuple": [
+        {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::response_types::WeexNumberOrString",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::response_types::WeexNumberOrString",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::response_types::WeexNumberOrString",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        }
+      ]
+    },
+    "target": {
+      "tuple": [
+        {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::response_types::WeexNumberOrString",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::response_types::WeexNumberOrString",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::response_types::WeexNumberOrString",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        }
+      ]
+    },
+    "entrypoints": [],
+    "evidence": "weex.types.ts declares eleven ordered kline slots; slots0,6,8 are number|string and all other slots are strings. Exact compiler tuple policy authenticates all slots and repeated roots, with invariant native equality. The actual tuple Deserialize and conversion trait paths execute, and native observations inspect every position before any owner serialization.",
+    "positive": [
+      [
+        1700000000000,
+        "1.25",
+        "1.5",
+        "1.0",
+        "1.4",
+        "3.25",
+        1700000060000,
+        "4.5",
+        9,
+        "2.0",
+        "2.5"
+      ],
+      [
+        "1700000001000",
+        "10.1",
+        "10.8",
+        "9.7",
+        "10.4",
+        "7.5",
+        "1700000061000",
+        "78.0",
+        "12",
+        "4.0",
+        "41.6"
+      ]
+    ],
+    "negative": [
+      null,
+      true,
+      {},
+      [],
+      [
+        1700000000000,
+        "1.25",
+        "1.5",
+        "1.0",
+        "1.4",
+        "3.25",
+        1700000060000,
+        "4.5",
+        9,
+        "2.0"
+      ],
+      [
+        "1700000001000",
+        "10.1",
+        "10.8",
+        "9.7",
+        "10.4",
+        "7.5",
+        "1700000061000",
+        "78.0",
+        "12",
+        "4.0",
+        "41.6",
+        "extra"
+      ],
+      [
+        1700000000000,
+        17,
+        "1.5",
+        "1.0",
+        "1.4",
+        "3.25",
+        1700000060000,
+        "4.5",
+        9,
+        "2.0",
+        "2.5"
+      ]
+    ],
+    "observation": {
+      "call": "{let decoded=serde_json::from_value::<$type>($value.clone()).expect(\"reviewed protocol row\");let scalar=|value:crate::response_types::WeexNumberOrString|match value{crate::response_types::WeexNumberOrString::Number(n)=>serde_json::json!({\"numberBits\":format!(\"{:016x}\",n.to_bits())}),crate::response_types::WeexNumberOrString::String(s)=>serde_json::json!({\"string\":s})};serde_json::json!([scalar(decoded.0),decoded.1,decoded.2,decoded.3,decoded.4,decoded.5,scalar(decoded.6),decoded.7,scalar(decoded.8),decoded.9,decoded.10])}",
+      "cases": [
+        {
+          "input": [
+            1700000000000,
+            "1.25",
+            "1.5",
+            "1.0",
+            "1.4",
+            "3.25",
+            1700000060000,
+            "4.5",
+            9,
+            "2.0",
+            "2.5"
+          ],
+          "output": [
+            {
+              "numberBits": "4278bcfe56800000"
+            },
+            "1.25",
+            "1.5",
+            "1.0",
+            "1.4",
+            "3.25",
+            {
+              "numberBits": "4278bcfe65260000"
+            },
+            "4.5",
+            {
+              "numberBits": "4022000000000000"
+            },
+            "2.0",
+            "2.5"
+          ]
+        },
+        {
+          "input": [
+            "1700000001000",
+            "10.1",
+            "10.8",
+            "9.7",
+            "10.4",
+            "7.5",
+            "1700000061000",
+            "78.0",
+            "12",
+            "4.0",
+            "41.6"
+          ],
+          "output": [
+            {
+              "string": "1700000001000"
+            },
+            "10.1",
+            "10.8",
+            "9.7",
+            "10.4",
+            "7.5",
+            {
+              "string": "1700000061000"
+            },
+            "78.0",
+            {
+              "string": "12"
+            },
+            "4.0",
+            "41.6"
+          ]
+        }
+      ]
+    }
   }
 }
