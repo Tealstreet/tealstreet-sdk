@@ -12,6 +12,8 @@ import {verifiedMacroOrigins} from './accepted-macro-origins.mjs';
 const name='safe_cex_venue_grvt::composition::Fields';
 const root=fileURLToPath(new URL('../..',import.meta.url));
 const spec=loadPolicy('generic-aliases')[name];
+// Synthetic AST/artifact fixtures exercise policy refusals only. nativeProbe
+// independently discovers and authenticates the selected SDK compiler inputs.
 const alias={name,ident:'Fields',span:{filename:spec.file,begin:[12,1],end:[12,61]},generics:spec.generics,rawTarget:spec.rawTarget,target:spec.target};
 function contract(actual,witnesses){return {category:'decoder',shape:'borrowed-map',evidence:'Concrete bool instantiation retains static key borrowing; actual text, retained borrowed Value and owned Value routes have separate admission and native key/value/pointer witnesses.',generics:actual.generics,rawTarget:actual.rawTarget,target:actual.target,entrypoints:[],borrowedRoutes:witnesses()};}
 const identity={expectedType:spec.expectedType,suffix:spec.suffix,canonical:spec.canonical,monomorphization:'one reviewed bool instantiation'};
