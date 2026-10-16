@@ -8,7 +8,7 @@ use safe_cex_exchange::{
     exchange::{BaseExchange, Exchange, ValidatedOrder},
     http::HttpClientOptions,
     js_runtime::{
-        base_exchange::BaseExchangeParts,
+        base_exchange::{BaseExchangeParts, HostedSigner},
         globals::{install_builtins, install_enums},
         library::install_library,
         promise::await_js,
@@ -27,6 +27,8 @@ use std::{cell::RefCell, rc::Rc};
 /// Host collaborators of both KuCoin classes.
 pub struct KucoinDependencies {
     pub runtime: Rc<dyn WsRuntime>,
+    /// One hosted account, shared with source options and typed availability.
+    pub hosted_signer: Option<HostedSigner>,
     /// Shared HTTP client options for createAPI/createKucoinSpotAPI (adapter, host, stats).
     pub http: Rc<dyn Fn(&ExchangeOptions) -> HttpClientOptions>,
     pub registry: Rc<TransportRegistry>,
@@ -64,6 +66,7 @@ fn assemble(
         me: me.clone(),
         runtime: deps.runtime.clone(),
         options: parts.options.clone(),
+        hosted_signer: deps.hosted_signer.clone(),
         spot,
         http: deps.http.clone(),
         registry: deps.registry.clone(),

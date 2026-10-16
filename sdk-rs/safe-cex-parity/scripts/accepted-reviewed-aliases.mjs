@@ -1,11 +1,10 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 
 // One reviewed fixed instantiation per generic alias. The spec owns the
 // expected Rust type; contracts never supply it, and unknown names fall
 // through to the original fail-closed families.
-const specPath = new URL('../accepted-set/generic-aliases.json', import.meta.url);
-const productionSpecs = fs.existsSync(specPath) ? JSON.parse(fs.readFileSync(specPath, 'utf8')) : {};
+const productionSpecs = loadPolicy('generic-aliases');
 const fields = ['canonical', 'expectedType', 'file', 'generics', 'rawTarget', 'suffix', 'target', 'unsized'];
 const callerFields = ['instantiation', 'aliasProbeExpected', 'aliasProbeKind', 'aliasProbeSuffix', 'nativeCanonical'];
 

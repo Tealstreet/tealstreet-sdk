@@ -721,4 +721,7 @@ pub mod get_key;
 pub mod numeric_ingress;
 
 pub mod prototype_realm;
-pub use prototype_realm::*;
+pub use prototype_realm::{
+    BuiltinIdentity, BuiltinReference, FunctionMethod, PrototypeRealm, PrototypeRealmBinding,
+    PrototypeRealmFuture, PrototypeScalar, PrototypeValue,
+};
