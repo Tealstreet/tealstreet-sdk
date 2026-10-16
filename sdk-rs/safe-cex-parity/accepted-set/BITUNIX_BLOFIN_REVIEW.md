@@ -434,3 +434,33 @@ This leaves nine original Bitunix owners and the previously measured 49 Blofin
 owners. OrderFrame itself, complete-package/local-owner and feature/WASM matrices
 remain separate obligations. These finite selected runtime profiles make no
 arbitrary callback, source-object or complete lifecycle claim.
+
+## Socket Parent, book constructor and historical fills
+
+Three native owners execute through twenty cases. The concrete socket Parent
+uses the real venue, BaseExchange and Store: distinct event names/messages,
+severity, error prefixes and suppression metadata retain actual events/reports;
+a missing weak owner refuses before forwarding.
+
+The book constructor uses String callbacks and usize parser/timer tokens. All
+native returned subscription fields and initially empty book vectors are checked,
+with exact live handler/topic mutations and sent frame, or deferred 100 ms wait.
+Precision lookup failure occurs before parser allocation. The bounded host refuses
+unused parsing/cancellation hooks; concrete Feed and lifecycle behavior stay
+separate.
+
+Historical fills retain complete ordered native JsJsonValue fields and number
+bits, two surviving rows, newest-first order and replacement of an earlier
+duplicate. Distinct symbol/order/side/price filters, millisecond timestamps,
+limit clamp/truncation, exact suppression request data and warning failure are
+selected. A surviving negative-fee row proves positive commission conversion.
+
+All three actual native owners pass. Eleven compiling copied-production controls
+fail intended output assertions: Parent event-name/severity/prefix forwarding,
+book handler case/topic count/deferred wait, and fill consuming empty/partial
+output loss, sort reversal, lost duplicate replacement and removed commission abs.
+Every owner passes its complete restored cases; production source bytes remain
+unchanged. Independent review strengthened event-name and surviving-fee fixtures
+before publication. Complete-package/local-owner and feature/WASM matrices, full
+telemetry/console, concrete socket integration and source-object boundaries retain
+their independent obligations.
