@@ -1038,3 +1038,10 @@ an exhausted budget rejects the original error before sleeping or sending.
 including request overrides, async predicate results, timer failure and loss of
 an observer during a pending delay. This covers configured callbacks within the
 runtime's existing HTTP and timer profiles.
+
+Venue overrides whose source calls only `this.ws.close()` use
+`BaseWebSocket::close_current_websocket`. It forwards current native/relay close
+without superclass disposal or force-close metadata/task changes, and releases
+state borrows before invoking host close callbacks. Native and managed-relay
+state-retention witnesses cover this primitive; Backpack's bound disposal tests
+compare the source-specific cleanup and order independently.

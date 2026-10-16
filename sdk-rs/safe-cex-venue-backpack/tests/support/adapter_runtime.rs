@@ -27,6 +27,7 @@ pub struct Runtime {
     pub now: Rc<Cell<f64>>,
     pub jobs: RefCell<Vec<Job>>,
     pub errors: RefCell<Vec<String>>,
+    pub dial_sockets: RefCell<Vec<Rc<dyn WsSocket>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -107,7 +108,12 @@ impl WsRuntime for Runtime {
         _: WebSocketConnectionOptions,
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
-        Box::pin(async { Err(ExchangeError::new("No dial in class construction fixture")) })
+        if self.dial_sockets.borrow().is_empty() {
+            Box::pin(async { Err(ExchangeError::new("No dial in class construction fixture")) })
+        } else {
+            let socket = self.dial_sockets.borrow_mut().remove(0);
+            Box::pin(std::future::ready(Ok(socket)))
+        }
     }
     fn headers_capable(&self) -> bool {
         false
