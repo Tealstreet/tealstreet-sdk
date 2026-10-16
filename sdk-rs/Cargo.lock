@@ -3964,6 +3964,7 @@ dependencies = [
  "safe-cex-venue-backpack",
  "safe-cex-venue-binance",
  "safe-cex-venue-bitget",
+ "safe-cex-venue-bitrue",
  "safe-cex-venue-bitunix",
  "safe-cex-venue-blofin",
  "safe-cex-venue-kraken",

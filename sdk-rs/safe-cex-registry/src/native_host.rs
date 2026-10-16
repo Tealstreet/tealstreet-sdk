@@ -239,6 +239,17 @@ impl RustVenueHost for NativeVenueHost {
             remote_signer_account_name: self.remote.as_ref().and_then(|(_, name)| name.clone()),
         })
     }
+    fn bitrue(&self) -> Result<safe_cex_venue_bitrue::BitrueDependencies, ExchangeError> {
+        Ok(safe_cex_venue_bitrue::BitrueDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
     fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
         Ok(OkxDependencies {
             runtime: self.runtime.clone(),

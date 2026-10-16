@@ -20,15 +20,13 @@ fn signature_condition(error: &Js) -> Result<bool, Thrown> {
         return Ok(false);
     }
     let config = error.get("config")?;
-    if !config.is_nullish() && config.get("safeCexSignatureRetry")?.truthy() {
+    if config.is_nullish() || config.get("safeCexSignatureRetry")?.truthy() {
         return Ok(false);
     }
     if !predicate(&response.get("data")?)? {
         return Ok(false);
     }
-    if !config.is_nullish() {
-        config.set("safeCexSignatureRetry", Js::Bool(true))?;
-    }
+    config.set("safeCexSignatureRetry", Js::Bool(true))?;
     Ok(true)
 }
 impl PrivateHost for Rt {

@@ -1,7 +1,7 @@
 # Rust venue construction through the registry
 
 Status: implemented for `asterdex`, `backpack`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`),
+`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`),
 the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
@@ -31,6 +31,9 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around
     `BitgetExchange::new`; `BitgetDependencies` carries the runtime and a
     `JsHttpHost` built with js_runtime `rest_http_host`.
+  - `bitrue`, built with `BitrueExchange::new` on the shared js_runtime; the
+    native host supplies signed HTTP and the external-data gateway factory.
+    `tests/native_host_bitrue.rs` independently verifies the request HMAC.
   - `bitunix`, built with `BitunixVenue::new` from a registry-built `BaseExchange`
     and `BitunixDependencies` (runtime, per-lane client builder and transport
     install, optional externalPublicData provider).

@@ -1,9 +1,9 @@
 //! Concrete Bitrue Exchange implementation over its assembled native class.
 use super::{Extra, Rt, classes};
 use safe_cex_exchange::{
-    capabilities::{ExchangeCapabilities, PlaceOrderBinding},
+    capabilities::{ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding},
     client_order_id,
-    exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedOrder},
+    exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedBatch, ValidatedOrder},
     js_runtime::{
         base_exchange::{BaseExchangeParts, ExternalPublicDataFactory},
         client::JsHttpHost,
@@ -12,7 +12,7 @@ use safe_cex_exchange::{
         store,
         value::{Js, Thrown, from_typed, to_typed},
     },
-    runtime::{ExchangeError, ExchangeFuture},
+    runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
@@ -121,26 +121,12 @@ impl BitrueExchange {
                 )
                 .map_err(err)?;
         }
-        // The shared facade omits this optional worker RPC member. Delegate to
-        // the existing BaseExchange owner so its timeout/listener cleanup stays shared.
-        let weak = Rc::downgrade(&shared);
-        receiver.define("callMethodInWorker", Js::function("callMethodInWorker", move |_, a| {
-            let rt = safe_cex_exchange::js_runtime::scope::scope_of(&weak)?;
-            let venue = rt.shared.sockets.venue.borrow().as_ref().and_then(std::rc::Weak::upgrade)
-                .ok_or_else(|| Thrown::error("Error", "exchange is not assembled"))?;
-            let method = to_typed(&safe_cex_exchange::js_runtime::value::arg(&a, 0))?;
-            let args = a.iter().skip(1).map(safe_cex_exchange::js_runtime::value::to_json).collect::<Result<Vec<_>, _>>()?;
-            Ok(rt.spawn(Box::pin(async move {
-                let value = venue.base().call_method_in_worker(venue.as_ref(), method, args).await
-                    .map_err(|e| Thrown::new(safe_cex_exchange::js_runtime::value::from_json(&serde_json::json!({"name":e.name,"message":e.message,"response":e.metadata.response}))))?;
-                Ok(safe_cex_exchange::js_runtime::value::from_json(&value))
-            })))
-        })).map_err(err)?;
         *shared.exchange.borrow_mut() = receiver.clone();
         let venue = Rc::new(Self {
             rt: rt.with_this(receiver),
             capabilities: ExchangeCapabilities {
                 place_order: PlaceOrderBinding::implemented::<Self>(Exchange::place_order),
+                place_orders: PlaceOrdersBinding::implemented::<Self>(Exchange::place_orders),
                 ..Default::default()
             },
         });
@@ -160,6 +146,33 @@ impl BitrueExchange {
                 .map_err(err)?;
             to_typed(&value).map_err(err)
         })
+    }
+    fn listen<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        name: &str,
+        first: Js,
+        callback: Rc<dyn Fn(T)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        let reporter = self.rt.shared.runtime.clone();
+        let listener = Js::function("callback", move |_, a| {
+            match to_typed::<T>(&safe_cex_exchange::js_runtime::value::arg(&a, 0)) {
+                Ok(value) => callback(value),
+                Err(error) => reporter.report_exception(
+                    &error.to_exchange_error(),
+                    &serde_json::json!({"source":"bitrue listener payload"}),
+                ),
+            }
+            Ok(Js::Undefined)
+        });
+        let cleanup = self
+            .rt
+            .this
+            .call_method(name, vec![first, listener])
+            .map_err(err)?;
+        Ok(Box::new(move || {
+            cleanup.call(Js::Undefined, vec![]).map_err(err)?;
+            Ok(())
+        }))
     }
     fn unit(&self, name: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, ()> {
         let this = self.rt.this.clone();
@@ -189,6 +202,29 @@ impl Exchange for BitrueExchange {
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
         let a = args!(js(order.options()));
         self.invoke("placeOrder", a)
+    }
+    fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
+        let orders: Vec<_> = orders
+            .orders()
+            .iter()
+            .map(|o| o.options().clone())
+            .collect();
+        let a = args!(js(&orders));
+        self.invoke("placeOrders", a)
+    }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOHLCV", js(&options)?, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<ListenerCleanup, ExchangeError> {
+        self.listen("listenOrderBook", js(&symbol)?, callback)
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         self.unit("start", vec![])

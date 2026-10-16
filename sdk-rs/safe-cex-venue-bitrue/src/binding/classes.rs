@@ -27,9 +27,12 @@ fn coercion(e: safe_cex_num::JsCoercionError) -> Thrown {
     Thrown::error(e.name, e.message)
 }
 fn exchange_error(e: safe_cex_exchange::runtime::ExchangeError) -> Thrown {
-    Thrown::new(from_json(
-        &serde_json::json!({"name":e.name,"message":e.message,"response":e.metadata.response}),
-    ))
+    let response = e.metadata.response.clone();
+    let thrown = Thrown::from(e);
+    if let Some(response) = response {
+        let _ = thrown.value.define("response", from_json(&response));
+    }
+    thrown
 }
 pub(super) fn install(g: &Js, weak: Weak<Shared>) -> Result<(), Thrown> {
     globals::install_builtins(g, weak.clone());
@@ -82,14 +85,49 @@ pub(super) fn install(g: &Js, weak: Weak<Shared>) -> Result<(), Thrown> {
             crate::private_auth::create_api(&rt, arg(&a, 0), arg(&a, 1))
         }),
     )?;
-    // Both names are the real codecs shared by native HTTP and websocket boundaries.
-    let parse = Js::function("bigIntAsStringJsonParse", |_, a| {
-        Ok(from_json(
-            &safe_cex_transport::how::big_int_as_string_json_parse(&text(&arg(&a, 0))?),
-        ))
-    });
-    g.define("bigIntAsStringJsonParse", parse.clone())?;
-    g.define("jsonParse", parse)?;
+    g.define(
+        "bigIntAsStringJsonParse",
+        Js::function("bigIntAsStringJsonParse", |_, a| {
+            let value = arg(&a, 0);
+            if !value.is_string() {
+                return Ok(value);
+            }
+            Ok(from_json(
+                &safe_cex_transport::how::big_int_as_string_json_parse(&text(&value)?),
+            ))
+        }),
+    )?;
+    g.define(
+        "jsonParse",
+        Js::function("jsonParse", |_, a| {
+            // jsonParse catches both ToString and parsing errors.
+            Ok(text(&arg(&a, 0))
+                .map(|s| from_json(&safe_cex_transport::how::json_parse(&s)))
+                .unwrap_or(Js::Null))
+        }),
+    )?;
+    let w = weak.clone();
+    g.define(
+        "readBlob",
+        Js::function("readBlob", move |_, a| {
+            let h = scope_of(&w)?;
+            let buffer = arg(&a, 0).call_method("arrayBuffer", vec![]);
+            Ok(h.spawn(Box::pin(async move {
+                let bytes = await_js(buffer?)
+                    .await?
+                    .get("bytes")?
+                    .array_values()
+                    .ok_or_else(|| Thrown::type_error("ArrayBuffer bytes are unavailable"))?
+                    .iter()
+                    .map(|v| v.to_number().map(|n| n as u8))
+                    .collect::<Result<Vec<_>, _>>()?;
+                safe_cex_store::read_blob::read_blob(async { Ok(bytes) })
+                    .await
+                    .map(|s| Js::str(&s))
+                    .map_err(|e| Thrown::error("Error", &e))
+            })))
+        }),
+    )?;
     g.define(
         "reverseWsSymbol",
         Js::function("reverseWsSymbol", |_, a| {

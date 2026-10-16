@@ -14,14 +14,14 @@ use safe_cex_types::{ExchangeName, ExchangeOptions, PlaceOrderOpts, UpdateOrderO
 use safe_cex_venue_bitrue::{BitrueDependencies, BitrueExchange};
 use serde_json::{Value, json};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     future::Future,
     pin::pin,
     rc::Rc,
     task::{Context, Poll, Waker},
 };
 
-struct Http(Rc<support::Runtime>, RefCell<Vec<Value>>);
+struct Http(Rc<support::Runtime>, RefCell<Vec<Value>>, Cell<bool>);
 impl JsHttpHost for Http {
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.0.clone()
@@ -46,7 +46,11 @@ impl JsHttpHost for Http {
             "/fapi/v2/order" => json!({"code":"0","data":{"orderId":"placed-order"}}),
             "/fapi/v2/cancel" | "/fapi/v2/level_edit" => json!({"code":"0","data":{}}),
             "/user_stream/api/v1/listenKey" => {
-                json!({"code":200,"data":{"listenKey":"fixture-listen-key"}})
+                if self.2.get() {
+                    json!({"code":400,"msg":"denied"})
+                } else {
+                    json!({"code":200,"data":{"listenKey":"fixture-listen-key"}})
+                }
             }
             other => panic!("unexpected Bitrue HTTP path {other}"),
         };
@@ -82,7 +86,11 @@ fn constructs_production_bitrue_and_inherits_source_account_rejection() {
         Rc::new(DefaultStore::new()),
         BitrueDependencies {
             runtime: runtime.clone(),
-            http: Rc::new(Http(runtime.clone(), RefCell::new(vec![]))),
+            http: Rc::new(Http(
+                runtime.clone(),
+                RefCell::new(vec![]),
+                Cell::new(false),
+            )),
             external_public_data: None,
         },
     )
@@ -98,7 +106,11 @@ fn constructs_production_bitrue_and_inherits_source_account_rejection() {
 fn sixteen_trait_methods_use_the_constructed_bitrue_and_scripted_transports() {
     let runtime = Rc::new(support::Runtime::default());
     runtime.now.set(1_700_000_000_000.);
-    let http = Rc::new(Http(runtime.clone(), RefCell::new(vec![])));
+    let http = Rc::new(Http(
+        runtime.clone(),
+        RefCell::new(vec![]),
+        Cell::new(false),
+    ));
     let store = Rc::new(DefaultStore::new());
     let venue = BitrueExchange::new(
         ExchangeName::Bitrue,
@@ -279,4 +291,129 @@ fn sixteen_trait_methods_use_the_constructed_bitrue_and_scripted_transports() {
         runtime.sockets.borrow().iter().all(|(_, s)| s.closed.get()),
         "BIND dispose closes both native sockets"
     );
+}
+
+#[test]
+fn client_ids_fail_closed_for_single_and_whole_batch_before_writes() {
+    let runtime = Rc::new(support::Runtime::default());
+    let http = Rc::new(Http(
+        runtime.clone(),
+        RefCell::new(vec![]),
+        Cell::new(false),
+    ));
+    let venue = BitrueExchange::new(
+        ExchangeName::Bitrue,
+        serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
+        Rc::new(DefaultStore::new()),
+        BitrueDependencies {
+            runtime: runtime.clone(),
+            http: http.clone(),
+            external_public_data: None,
+        },
+    )
+    .unwrap();
+    let opts = |id: &str| {
+        serde_json::from_value::<PlaceOrderOpts>(json!({"symbol":"E-BTC-USDT","type":"limit","side":"buy","amount":0.37,"price":27123.49,"clientOrderId":id})).unwrap()
+    };
+    let error = complete(
+        &runtime,
+        venue
+            .base()
+            .place_order(venue.as_ref(), opts(&"x".repeat(32))),
+    )
+    .unwrap_err();
+    assert!(
+        error.message.contains("clientOrderId"),
+        "CLIENT-ID single {error:?}"
+    );
+    let error = complete(
+        &runtime,
+        venue
+            .base()
+            .place_orders(venue.as_ref(), vec![opts("valid"), opts(&"x".repeat(32))]),
+    )
+    .unwrap_err();
+    assert!(
+        error.message.contains("clientOrderId"),
+        "CLIENT-ID batch {error:?}"
+    );
+    assert!(
+        http.1.borrow().is_empty(),
+        "CLIENT-ID no signed request for rejected batch"
+    );
+    venue.dispose().unwrap();
+}
+
+#[test]
+fn private_listen_key_failure_never_dials_or_subscribes_and_public_binary_uses_plain_json() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    let runtime = Rc::new(support::Runtime::default());
+    let http = Rc::new(Http(runtime.clone(), RefCell::new(vec![]), Cell::new(true)));
+    let venue = BitrueExchange::new(
+        ExchangeName::Bitrue,
+        serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
+        Rc::new(DefaultStore::new()),
+        BitrueDependencies {
+            runtime: runtime.clone(),
+            http: http.clone(),
+            external_public_data: None,
+        },
+    )
+    .unwrap();
+    complete(&runtime, venue.start()).unwrap();
+    for _ in 0..8 {
+        if http
+            .1
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/user_stream/api/v1/listenKey")
+            .count()
+            == 4
+        {
+            break;
+        }
+        runtime.advance(1000.);
+    }
+    assert_eq!(
+        http.1
+            .borrow()
+            .iter()
+            .filter(|r| r["url"] == "/user_stream/api/v1/listenKey")
+            .count(),
+        4,
+        "AUTH source retry count"
+    );
+    assert!(
+        runtime
+            .sockets
+            .borrow()
+            .iter()
+            .all(|(url, _)| !url.contains("listenKey")),
+        "AUTH no private dial without acquired key"
+    );
+    let public = runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("/kline-api/ws"))
+        .map(|(_, s)| s.clone())
+        .expect("public socket");
+    public
+        .events
+        .borrow_mut()
+        .push_back(WsEvent::Message(SocketFrame::Binary(
+            br#"{"ping":9007199254740993}"#.to_vec(),
+        )));
+    runtime.pump();
+    assert!(
+        public
+            .sent
+            .borrow()
+            .iter()
+            .any(|s| s == "{\"pong\":9007199254740992}"),
+        "PUBLIC binary Buffer coerces through plain jsonParse: {:?}",
+        public.sent.borrow()
+    );
+    venue.dispose().unwrap();
 }
