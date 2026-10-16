@@ -10,6 +10,7 @@ import { reviewedInheritedConstantOutput } from './accepted-inherited-constant-o
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const specs = Object.values(loadPolicy('inherited-constant-outputs'));
+const grvtSpecs = specs.filter(spec => spec.package === 'safe-cex-venue-grvt');
 function fixture(spec) {
   return {
     type: { name: spec.owner, ident: spec.ident, kind: 'record', deserialize: false, rawEntrypoints: [true], entrypointSources: [{ filename: spec.source.file, begin: spec.source.begin, end: spec.source.end }] },
@@ -20,7 +21,9 @@ function fixture(spec) {
 const context = item => ({ packageMetadata: item.packageMetadata, readSource: file => fs.readFileSync(path.resolve(root, file)) });
 
 test('reviewed inherited refusals retain exact compiler source fixture and native witnesses', () => {
-  assert.equal(specs.length, 4, 'only the four reviewed indexed GRVT methods are installed');
+  assert.deepEqual(grvtSpecs.map(spec => spec.api.name).sort(), [
+    'change_margin_type', 'change_position_mode', 'fetch_public_trades', 'fetch_symbol_max_leverage',
+  ], 'the four reviewed indexed GRVT methods remain installed');
   for (const spec of specs) {
     const item = fixture(spec);
     assert.equal(reviewedInheritedConstantOutput(item.type, item.entry, 0, context(item)), true);
@@ -56,7 +59,7 @@ test('reviewed inherited refusals retain exact compiler source fixture and nativ
 });
 
 test('reviewed inherited refusal source fixture and adapter pins reject executed mutations', () => {
-  const spec = specs[0];
+  const spec = grvtSpecs[0];
   const moduleUrl = new URL('./accepted-inherited-constant-output.mjs', import.meta.url).href;
   const entryUrl = new URL('./accepted-constant-output.mjs', import.meta.url).href;
   const cases = [

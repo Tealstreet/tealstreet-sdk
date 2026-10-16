@@ -108,8 +108,10 @@ raw decoder needs an adapter and positive witnesses; a typed constructor needs
 its reason. Record arrays use Serde's field order, not JSON map insertion order.
 Observed methods normally require distinct inputs and outputs. The two
 `Capture` serializer metadata constructors in `../accepted-set/constant-outputs/<crate>.json`
-and four exact GRVT inherited refusals in `../accepted-set/inherited-constant-outputs/<crate>.json`
-may set `constantOutput: true`. Their actual compiler package, API, body span,
+and exact reviewed venue inherited refusals in `../accepted-set/inherited-constant-outputs/<crate>.json`
+may set `constantOutput: true`. Only individually installed GRVT, BreakoutProp,
+and Bitget policy records qualify; adding a package name alone grants no method
+permission. Their actual compiler package, API, body span,
 whole-source hash, native adapter and cases are pinned. Inherited refusals also
 pin the maintained TS base method lines, base/venue file hashes and native
 harness bytes. Distinct genuine inputs still execute and observe native Error

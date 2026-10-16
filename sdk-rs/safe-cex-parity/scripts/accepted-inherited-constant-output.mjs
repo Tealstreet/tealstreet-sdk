@@ -18,7 +18,7 @@ export function reviewedInheritedConstantOutput(type, entry, index, context) {
   assert.ok(type.name === spec.owner && type.ident === spec.ident && type.kind === 'record' && type.deserialize === false, `${label}: actual compiled venue owner required`);
   assert.equal(type.rawEntrypoints?.[index], true, `${label}: actual indexed raw method required`);
   assert.deepEqual(entry.api, spec.api, `${label}: exact compiler API changed`);
-  assert.ok(['safe-cex-venue-grvt', 'safe-cex-venue-breakoutprop'].includes(spec.package), `${label}: unreviewed venue package`);
+  assert.ok(['safe-cex-venue-grvt', 'safe-cex-venue-breakoutprop', 'safe-cex-venue-bitget'].includes(spec.package), `${label}: unreviewed venue package`);
   assert.ok(context.packageMetadata?.name === spec.package
     && context.packageMetadata.manifest_path === fileURLToPath(new URL(`../../${spec.package}/Cargo.toml`, import.meta.url)), `${label}: actual compiler package required`);
   assert.deepEqual(type.entrypointSources?.[index], { filename: spec.source.file, begin: spec.source.begin, end: spec.source.end }, `${label}: compiler method source changed`);
