@@ -1058,3 +1058,18 @@ millisecond profile. The sequential `tests/js_throttle_controls.py` faults each
 of leading, trailing and maxWait; all three must compile and fail the source
 comparison, then pass after exact restoration. A fourth fault removes the shared
 import and must fail Polymarket construction, then restore all 15 concrete tests.
+
+
+The single `js_runtime::base_exchange::create` factory takes a synchronous source
+field initializer as its sixth argument. It initializes the JS receiver, reads
+`isSpot` and `isDemo` using shared property access/truthiness, then publishes the
+immutable typed base and installs its callbacks. Venue adapters own subclass
+field values; core contains no venue-name classification. Empty initializers keep
+the source base defaults. The hook must only initialize fields, without starting
+work or retaining the unpublished receiver. Typed flags are construction snapshots;
+later JS field changes do not rewrite them.
+Kraken/KuCoin Spot and Bybit/OKX Demo construction tests exercise actual facades.
+`tests/source_identity_controls.py` removes each projection, requires compiled
+assertion failures in both affected families, restores exact factory bytes and
+requires all four witnesses to pass. The runtime test also covers source getters,
+truthiness, inherited false defaults and original getter-error identity.

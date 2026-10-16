@@ -1288,3 +1288,18 @@ fn demo_fill_reconciliation_pages_to_exhaustion_and_fails_closed() {
         }
     }
 }
+
+#[test]
+fn source_identity_flags_survive_demo_facade_construction() {
+    use safe_cex_types::ExchangeName;
+    for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+        let h = support::harness_as(name.clone(), options(), |_| {});
+        assert_eq!(
+            h.venue().base().is_demo,
+            name == ExchangeName::Bybitdemo,
+            "Bybit source isDemo flag reaches typed base"
+        );
+        assert!(!h.venue().base().is_spot);
+        h.venue().dispose().unwrap();
+    }
+}

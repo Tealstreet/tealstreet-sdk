@@ -47,6 +47,7 @@ impl CompositionHost for Host {
             name,
             opts,
             store,
+            |_| Ok(()),
         ))?;
         let _ = self.0.shared.base.set(base);
         Ok(receiver)

@@ -232,7 +232,8 @@ fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown
         settings: crate::binding::exchange::settings(),
         external_public_data: extra.external_public_data.clone(),
     };
-    let (this, base) = base_exchange::create(&rt.shared.sockets, parts, name, options, store)?;
+    let (this, base) =
+        base_exchange::create(&rt.shared.sockets, parts, name, options, store, |_| Ok(()))?;
     let _ = rt.shared.base.set(base);
     Ok(this)
 }
