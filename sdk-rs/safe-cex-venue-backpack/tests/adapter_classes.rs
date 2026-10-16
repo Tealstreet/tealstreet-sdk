@@ -7,11 +7,11 @@ use safe_cex_exchange::{
 };
 use safe_cex_types::{OrderSide, OrderType};
 use safe_cex_venue_backpack::{
-    native_value::Value as Native, public_control::JsString, rest_reads,
+    native_value::Value as Native, public_adapter::Throttle, public_control::JsString, rest_reads,
 };
 use serde_json::json;
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     future::Future,
     rc::Rc,
     task::{Context, Poll, Waker},
@@ -177,6 +177,47 @@ fn concrete_public_throttle_and_weak_listener_lifetime() {
     assert!(
         stop().is_err(),
         "PUBLIC CLASS detached cleanup visibly fails"
+    );
+}
+#[test]
+fn concrete_public_depth_ticker_throttle_uses_source_100ms_window() {
+    let (o, rt, store, _) = support::fixture();
+    let p = o.public_websocket.get().unwrap().clone();
+    let depth = Rc::new(Throttle {
+        owner: Rc::downgrade(&p),
+        depth: true,
+        last: Cell::new(None),
+        pending: RefCell::new(None),
+        task: RefCell::new(None),
+    });
+    let data =
+        |bid: &str| Native::from_prepared(json!({"s":"BTC_USDC","b":[[bid,"1"]],"a":[]}).into());
+    depth.call(data("10")).unwrap();
+    assert_eq!(
+        store.tickers()[0].bid.to_bits(),
+        10.0f64.to_bits(),
+        "DEPTH leading"
+    );
+    rt.now.set(50.0);
+    depth.call(data("15")).unwrap();
+    assert_eq!(
+        store.tickers()[0].bid.to_bits(),
+        10.0f64.to_bits(),
+        "DEPTH inside window deferred"
+    );
+    rt.now.set(100.0);
+    rt.pump();
+    assert_eq!(
+        store.tickers()[0].bid.to_bits(),
+        15.0f64.to_bits(),
+        "DEPTH trailing fires at the source throttle(updateTickerFromDepth, 100) window"
+    );
+    rt.now.set(250.0);
+    depth.call(data("20")).unwrap();
+    assert_eq!(
+        store.tickers()[0].bid.to_bits(),
+        20.0f64.to_bits(),
+        "DEPTH leading after window"
     );
 }
 #[test]

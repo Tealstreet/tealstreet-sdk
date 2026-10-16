@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts"
-rust_files = [ "safe-cex-venue-asterdex/src/api_helpers.rs", "safe-cex-venue-asterdex/src/api_runtime.rs" ]
+rust_files = [ "safe-cex-venue-asterdex/src/api_helpers.rs", "safe-cex-venue-asterdex/src/api_runtime.rs", "safe-cex-crypto/src/ethereum.rs" ]
 
 [[symbol]]
 ts = "isAsterdexRead"
@@ -86,9 +86,9 @@ note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_hel
 ts = "generateV3Signature"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/api_runtime.rs::generate_v3_signature"
+rs = [ "safe-cex-venue-asterdex/src/api_runtime.rs::generate_v3_signature", "safe-cex-crypto/src/ethereum.rs::encode_string_address_address_uint256", "safe-cex-crypto/src/ethereum.rs::ethereum_message_hash", "safe-cex-crypto/src/ethereum.rs::keccak256", "safe-cex-crypto/src/ethereum.rs::sign_digest" ]
 status = "ported"
-note = "Concrete venue adapter now owns business-param conversion, sorted payload JSON, nonce BigInt conversion, ABI type/value ordering, exact hash pipeline, key prefix and signing-key/Signature serialization. Delegates crypto operations to shared primitives through RuntimeHost. Native fixture asserts each actual-source preimage and primitive argument before serialization; cryptographic primitive accuracy belongs to shared crypto gates, not this dependency-capture fixture."
+note = "Concrete venue adapter now owns business-param conversion, sorted payload JSON, nonce BigInt conversion, ABI type/value ordering, exact hash pipeline, key prefix and signing-key/Signature serialization. Delegates crypto operations to shared primitives through RuntimeHost. Native fixture asserts each actual-source preimage and primitive argument before serialization; cryptographic primitive accuracy belongs to shared crypto gates, not this dependency-capture fixture. Split member `safe-cex-crypto/src/ethereum.rs::encode_string_address_address_uint256`; plumbing this body consumes: dependency primitive outside the extracted TypeScript roots: ethers AbiCoder.encode for the (string,address,address,uint256) tuple used by the asterdex generateV3Signature pipeline, which now reaches it through its RuntimeHost. No repository TypeScript symbol of its own. Split member `safe-cex-crypto/src/ethereum.rs::ethereum_message_hash`; plumbing this body consumes: dependency primitive outside the extracted TypeScript roots: ethers hashMessage (EIP-191 prefix plus keccak256), used by the asterdex generateV3Signature hash pipeline through its RuntimeHost. No repository TypeScript symbol of its own. Split member `safe-cex-crypto/src/ethereum.rs::keccak256`; plumbing this body consumes: dependency primitive outside the extracted TypeScript roots: ethers keccak256, used by the asterdex generateV3Signature hash pipeline through its RuntimeHost. No repository TypeScript symbol of its own. Split member `safe-cex-crypto/src/ethereum.rs::sign_digest`; plumbing this body consumes: dependency primitive outside the extracted TypeScript roots: ethers SigningKey.sign over a 32-byte digest with r/s/v serialisation, used by the asterdex generateV3Signature pipeline through its RuntimeHost. No repository TypeScript symbol of its own."
 
 [[symbol]]
 ts = "stripQueryString"
