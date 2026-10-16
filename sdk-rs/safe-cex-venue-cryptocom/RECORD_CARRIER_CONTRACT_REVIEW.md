@@ -60,15 +60,14 @@ production probes. It separately matches the six selected compiler Clone
 capabilities with loadPolicy('construction') and their specific Crypto.com
 shard reviews. These checks do not replace the actual Clone value observations.
 
-After integrating master69fe03c566 and policy split315, the selected gate passed
+After integrating master 69fe03c566 and policy split 315, the selected gate passed
 14 native decoder owners with zero failures/classification-only receipts and
 matched all six selected compiler Clone capabilities with their reviewed rows.
-All14 compiled mutation/restoration controls passed. The integrated scoped suite
-passed128 with zero failures/two existing ignored tests; host/WASM all-target
-Clippy, formatting and parity0 (7459 rows/17204 public Rust items) passed.
+All 14 compiled mutation/restoration controls passed. The integrated scoped suite
+passed 128 with zero failures/two existing ignored tests; host/WASM all-target
+Clippy, formatting and parity 0 (7459 rows/17204 public Rust items) passed.
 The deleted flat policy tables remain absent. This slice covers only fourteen
-of the original 133
-native/default owners and six of fifteen construction reviews. Other owners,
+of the original 133 native/default owners and six of fifteen construction reviews. Other owners,
 aliases, construction entries, newer discovery, locals, features and WASM
 contract execution remain separate obligations. No full-package completion is
 claimed.

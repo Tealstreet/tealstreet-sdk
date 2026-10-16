@@ -67,6 +67,6 @@ assert.deepEqual(results.map(row => row.name).sort(), selected);
 for (const row of results) assert.deepEqual(row.failures, [], row.name);
 assert.equal(results.filter(row => !row.classificationOnly).length, 14);
 assert.equal(results.filter(row => row.classificationOnly).length, 0);
-console.log('Crypto.com selected records/carriers14:14 native decoder results +0 classifications,0 failed owners.');
-console.log('Selected construction6: exact compiler traits reviewed; record observations execute actual Clone values.');
+console.log('Crypto.com selected records/carriers: 14/14 native decoder results, 0 classifications, 0 failed owners.');
+console.log('Selected construction: 6 exact compiler traits reviewed; record observations execute actual Clone values.');
 console.log('Scope: six wire records and eight carrier enum APIs only; other census owners, aliases, construction, locals, features and wasm are separate obligations.');
