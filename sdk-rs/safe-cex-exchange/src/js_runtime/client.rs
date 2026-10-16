@@ -27,8 +27,9 @@ struct ClientState {
     responses: Vec<Js>,
     retries: u32,
     retry_condition: Option<Js>,
-    max_rps: Option<f64>,
-    sent_at: Vec<f64>,
+    /// axios-rate-limit windows `(maxRequests, perMilliseconds, sent)`; a chained
+    /// limiter adds a window and a request waits until every window has room.
+    windows: Vec<(f64, f64, Vec<f64>)>,
 }
 
 /// safeCexAxiosCreate(config): a client object whose verbs run the full pipeline.
@@ -116,7 +117,20 @@ pub fn create(host: Host, defaults: Js) -> Js {
     let _ = client.define(
         "__configureRateLimit",
         Js::function("__configureRateLimit", move |_, a| {
-            limit_state.borrow_mut().max_rps = Some(arg(&a, 0).get("maxRPS")?.to_number()?);
+            let opts = arg(&a, 0);
+            let rps = opts.get("maxRPS")?;
+            let window = if rps.is_undefined() {
+                (
+                    opts.get("maxRequests")?.to_number()?,
+                    opts.get("perMilliseconds")?.to_number()?,
+                )
+            } else {
+                (rps.to_number()?, 1000.0)
+            };
+            limit_state
+                .borrow_mut()
+                .windows
+                .push((window.0, window.1, vec![]));
             Ok(Js::Undefined)
         }),
     );
@@ -211,21 +225,28 @@ async fn send_once(
 }
 
 async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) {
-    let Some(max) = state.borrow().max_rps.filter(|m| *m > 0.0) else {
-        return;
-    };
     loop {
         let runtime = host.runtime();
         let now = runtime.monotonic_now_ms();
         let wait = {
             let mut s = state.borrow_mut();
-            s.sent_at.retain(|t| now - t < 1000.0);
-            if (s.sent_at.len() as f64) < max {
-                s.sent_at.push(now);
-                None
-            } else {
-                Some(1000.0 - (now - s.sent_at[0]))
+            let mut wait: Option<f64> = None;
+            for (max, per, sent) in s.windows.iter_mut() {
+                if *max <= 0.0 {
+                    continue;
+                }
+                sent.retain(|t| now - t < *per);
+                if sent.len() as f64 >= *max {
+                    let ms = *per - (now - sent[0]);
+                    wait = Some(wait.map_or(ms, |w| w.max(ms)));
+                }
             }
+            if wait.is_none() {
+                for (_, _, sent) in s.windows.iter_mut() {
+                    sent.push(now);
+                }
+            }
+            wait
         };
         match wait {
             None => return,

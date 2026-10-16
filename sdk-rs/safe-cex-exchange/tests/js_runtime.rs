@@ -19,6 +19,7 @@ use std::{
 #[derive(Default)]
 struct Runtime {
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
+    clock: std::cell::Cell<f64>,
 }
 struct Task;
 impl ExchangeTask for Task {
@@ -26,12 +27,13 @@ impl ExchangeTask for Task {
 }
 impl ExchangeRuntime for Runtime {
     fn monotonic_now_ms(&self) -> f64 {
-        0.0
+        self.clock.get()
     }
     fn now_ms(&self) -> f64 {
         0.0
     }
-    fn sleep(&self, _: u64) -> ExchangeFuture<'static, ()> {
+    fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
+        self.clock.set(self.clock.get() + ms as f64);
         Box::pin(async { Ok(()) })
     }
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
@@ -539,4 +541,34 @@ fn string_methods_dispatch_a_regexp_argument_to_its_symbol_method() {
         to_json(&string_method("a,b", "split", vec![Js::str(",")])).unwrap(),
         json!(["a", "b"])
     );
+}
+
+#[test]
+fn chained_rate_limits_hold_a_request_until_every_window_has_room() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    for (max, per) in [(4.0, 1000.0), (5.0, 6000.0)] {
+        xhr.call_method(
+            "__configureRateLimit",
+            vec![Js::object(vec![
+                ("maxRequests", Js::Number(max)),
+                ("perMilliseconds", Js::Number(per)),
+            ])],
+        )
+        .unwrap();
+    }
+    let mut sent_at = vec![];
+    for _ in 0..6 {
+        settle(
+            &runtime,
+            xhr.call_method("get", vec![Js::str("/ok")]).unwrap(),
+        )
+        .unwrap();
+        sent_at.push(runtime.clock.get());
+    }
+    assert_eq!(sent_at, [0.0, 0.0, 0.0, 0.0, 1000.0, 6000.0]);
 }
