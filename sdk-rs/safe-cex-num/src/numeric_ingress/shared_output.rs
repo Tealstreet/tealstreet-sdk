@@ -401,6 +401,18 @@ impl JsNumberOutput for safe_cex_types::Ticker {
     }
 }
 
+impl JsNumberOutput for safe_cex_types::CurrencyBalance {
+    fn check_number_output(&self) {
+        match self {
+            Self::Declared(balance) => balance.check_number_output(),
+            Self::AvailableLocked { available, locked } => {
+                available.check_number_output();
+                locked.check_number_output();
+            }
+        }
+    }
+}
+
 impl JsNumberOutput for safe_cex_types::Balance {
     fn check_number_output(&self) {
         crate::js_number_output!(self, struct { used, free, total, upnl, currencies, coins } passthrough { info });

@@ -59,7 +59,8 @@ fn balance(free: f64) -> Balance {
                     info: Some(json!({"tag":"currency"})),
                     currencies: None,
                     coins: None,
-                },
+                }
+                .into(),
             )]
             .into_iter()
             .collect(),
@@ -92,6 +93,7 @@ fn assert_balance(value: &Balance, expected: &Value) {
     assert_eq!(currencies.len(), 1, "VALIDATION native currency count");
     let (key, currency) = currencies.get_index(0).expect("VALIDATION currency index");
     assert_eq!(key, "USD", "VALIDATION native currency key");
+    let currency = currency.as_balance().unwrap();
     for (name, native) in [
         ("free", currency.free),
         ("used", currency.used),

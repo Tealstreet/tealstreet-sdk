@@ -131,3 +131,28 @@ The execution command built the Rust transport wasm example, processed it with t
 Two final bounded sub-agent MERGE reviews at621 are retained: [native bodies/witnesses](evidence/completion-62169a9fcb/RUNTIME_REVIEW.md) and [proof admission/manifest preservation](evidence/completion-62169a9fcb/PROOF_REVIEW.md). They distinguish read-only audits from the executed Cargo gates and preserve the initial failed broader-note audit. Their verdicts cover reviewed code/evidence; the full gate queue completed separately afterward.
 
 Not run: workspace test suites, full FFI browser/feature execution matrix, live venue/API/network trading, assembled Crypto.com engine certification, exhaustive inputs/hosts/schedules or remote CI reruns. Broad CI-wiring was not rerun at621; its earlier paired branch/integration failures remain historical measurements. The earlier **development Cargo-overlap deviation** remains plainly disclosed in this file and PR7872 itself. Actual fresh parent6957adc80f485c945c18bb0d83c4965f5fe3cd95; merged integration parentac0f5fccf24207b26c279e67da2a88f2c72a7aae. No unrelated unmerged lane ancestor.
+
+## Production binding: preserve REST currency output (2026-10-16)
+
+Integrated the shared CurrencyBalance implementation from #165 (61d2418fe7,
+merged integration 3b2483c4bb). Removed project_balance and its Store wrapper;
+validation now uses the same typed conversion as every other trait read.
+Source fetchBalance's USD fixture (quantity15, max_withdrawal_balance9) reaches
+both ValidateAccountResult and Store as AvailableLocked{available9,locked6},
+with exactly those two serialized field names. No free/used/total/upnl fields
+are invented for this source variant.
+
+The complete scoped venue suite passed 102 tests (27 targets including empty
+doctests), zero ignored, with actual TypeScript oracles enabled. All 22 compiling
+binding controls failed their named runtime test and passed after exact byte
+restoration: 19 method/disposal controls and 3 signing/retry globals controls.
+The validate_account control now redirects the production trait invocation;
+it no longer targets the removed normalization helper. Exact enum and JSON
+field assertions are in tests/exchange_binding.rs.
+
+Strict scoped host all-targets and wasm library Clippy passed with -D warnings.
+Canonical workspace parity passed: 7459 rows / 17049 public Rust items. Crypto.com
+has no FINDING rows after removing the currency normalization. Extractor check
+has no Crypto.com drift; remaining base.ts/safeCexAxiosCreate metadata formatting
+belongs to the core lane. Currency consumer correction caa2395524 was merged
+before pushing; it changes one Binance test and canonical TOML spacing only.
