@@ -613,69 +613,67 @@ mod strict_codecs {
         }
     }
 
+    struct DisplayedPositionVisitor;
+    impl<'de> serde::de::Visitor<'de> for DisplayedPositionVisitor {
+        type Value = WireDisplayedPosition;
+
+        fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+            formatter.write_str("a displayed position map")
+        }
+
+        fn visit_map<A: serde::de::MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+            use serde::de::MapAccess;
+            let mut fields = DisplayedPositionMap {
+                map,
+                key: None,
+                account: None,
+                ticker: None,
+                market: None,
+                balance: None,
+                exchange_name: None,
+                one_min_upnl: None,
+                five_min_upnl: None,
+                has_active_chaser: None,
+                has_active_twap: None,
+                is_fake_position: None,
+                chaser_size: None,
+                has_full_stop: None,
+                has_full_tp: None,
+            };
+            let position = <Position as serde::Deserialize>::deserialize(
+                serde::de::value::MapAccessDeserializer::new(&mut fields),
+            )?;
+            // Consume any remaining entries even if the inner decoder
+            // finishes early, so trailing display fields are observed.
+            while fields.next_key::<serde::de::IgnoredAny>()?.is_some() {
+                fields.next_value::<serde::de::IgnoredAny>()?;
+            }
+            Ok(WireDisplayedPosition {
+                position,
+                key: fields.key,
+                account: fields
+                    .account
+                    .ok_or_else(|| serde::de::Error::missing_field("account"))?,
+                ticker: fields.ticker,
+                market: fields.market,
+                balance: fields.balance,
+                exchange_name: fields.exchange_name,
+                one_min_upnl: fields.one_min_upnl,
+                five_min_upnl: fields.five_min_upnl,
+                has_active_chaser: fields.has_active_chaser,
+                has_active_twap: fields.has_active_twap,
+                is_fake_position: fields.is_fake_position,
+                chaser_size: fields.chaser_size,
+                has_full_stop: fields.has_full_stop,
+                has_full_tp: fields.has_full_tp,
+            })
+        }
+    }
+
     impl WireDisplayedPosition {
         fn deserialize<'de, D: serde::Deserializer<'de>>(
             deserializer: D,
         ) -> Result<Self, D::Error> {
-            struct DisplayedPositionVisitor;
-            impl<'de> serde::de::Visitor<'de> for DisplayedPositionVisitor {
-                type Value = WireDisplayedPosition;
-
-                fn expecting(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
-                    formatter.write_str("a displayed position map")
-                }
-
-                fn visit_map<A: serde::de::MapAccess<'de>>(
-                    self,
-                    map: A,
-                ) -> Result<Self::Value, A::Error> {
-                    let mut fields = DisplayedPositionMap {
-                        map,
-                        key: None,
-                        account: None,
-                        ticker: None,
-                        market: None,
-                        balance: None,
-                        exchange_name: None,
-                        one_min_upnl: None,
-                        five_min_upnl: None,
-                        has_active_chaser: None,
-                        has_active_twap: None,
-                        is_fake_position: None,
-                        chaser_size: None,
-                        has_full_stop: None,
-                        has_full_tp: None,
-                    };
-                    let position = <Position as serde::Deserialize>::deserialize(
-                        serde::de::value::MapAccessDeserializer::new(&mut fields),
-                    )?;
-                    // Consume any remaining entries even if the inner decoder
-                    // finishes early, so trailing display fields are observed.
-                    while fields.next_key::<serde::de::IgnoredAny>()?.is_some() {
-                        fields.next_value::<serde::de::IgnoredAny>()?;
-                    }
-                    Ok(WireDisplayedPosition {
-                        position,
-                        key: fields.key,
-                        account: fields
-                            .account
-                            .ok_or_else(|| serde::de::Error::missing_field("account"))?,
-                        ticker: fields.ticker,
-                        market: fields.market,
-                        balance: fields.balance,
-                        exchange_name: fields.exchange_name,
-                        one_min_upnl: fields.one_min_upnl,
-                        five_min_upnl: fields.five_min_upnl,
-                        has_active_chaser: fields.has_active_chaser,
-                        has_active_twap: fields.has_active_twap,
-                        is_fake_position: fields.is_fake_position,
-                        chaser_size: fields.chaser_size,
-                        has_full_stop: fields.has_full_stop,
-                        has_full_tp: fields.has_full_tp,
-                    })
-                }
-            }
-            use serde::de::MapAccess;
             deserializer.deserialize_map(DisplayedPositionVisitor)
         }
     }
