@@ -220,6 +220,10 @@ orders-replacing or upserting path (`update({ orders })` except `fromWorker`,
 refuses a NON-terminal row for a remembered id — the store's terminal row stands
 in, or the row is dropped if the order already left.
 
+`isTerminalOrder(order)` shares the store's `Closed` / `Canceled` classification
+with cancellation selectors and empty-snapshot diagnostics. Those rows may still
+be present in `store.orders`; local in-flight states remain non-terminal.
+
 **It is opt-in, and must stay that way.** Nothing is inferred from
 `removeOrders` (Hyperliquid's reconciler, Lighter and ApeX remove live orders
 and rely on them coming back) or from `updateOrdersStatus` (Bybit and Phemex map

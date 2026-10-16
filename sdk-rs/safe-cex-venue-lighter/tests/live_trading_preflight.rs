@@ -762,7 +762,7 @@ fn actual_trading_preflight_native_floor() {
     }
     // All decoded native results/args/identity/schema/closures precede source pin.
     assert_eq!(
-        corpus["contentHash"], "20c42b0d65f63effaf1ec72d13fe7f96fb5f68bcff17452fe4c107f60af38580",
+        corpus["contentHash"], "443cd771633bd36cb0eaab1d63d56ff5ae2c96cd71ab1f39297025cdaf638fda",
         "source-only pin AFTER native assertions"
     );
     println!("148 native cases; stopped at iteration147; no exhaustive/runtime/engine claim");

@@ -13,6 +13,7 @@ import times from 'lodash/times';
 import uniqBy from 'lodash/uniqBy';
 import { mapSeries } from 'p-iteration';
 
+import { isTerminalOrder } from '../../store/store.base';
 import {
   Candle,
   ExchangeOptions,
@@ -1200,7 +1201,7 @@ export class PhemexExchange extends BaseExchange {
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    const orders = this.store.orders.filter((o) => o.symbol === symbol);
+    const orders = this.store.orders.filter((o) => o.symbol === symbol && !isTerminalOrder(o));
     await this.cancelOrders(orders);
   };
 

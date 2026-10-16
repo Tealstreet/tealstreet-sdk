@@ -6,6 +6,9 @@ const owners=ast.statements.filter(n=>ts.isClassDeclaration(n)&&n.name.text==='B
 const types=load(path.join(root,'packages/safe-cex/src/types.ts'));
 const ENDPOINTS=load(path.join(root,'packages/safe-cex/src/exchanges/bitunix/bitunix.types.ts')).ENDPOINTS;
 const createPositionId=load(path.join(root,'packages/safe-cex/src/utils/createPositionId.ts')).createPositionId;
+const storeFile=path.join(root,'packages/safe-cex/src/store/store.base.ts'),storeAst=ts.createSourceFile(storeFile,fs.readFileSync(storeFile,'utf8'),ts.ScriptTarget.ES2022,true);
+const terminal=storeAst.statements.filter(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>['TERMINAL_STATUSES','isTerminalOrder'].includes(d.name.getText(storeAst))));assert.equal(terminal.length,2,'WRITE terminal selector');
+const isTerminalOrder=vm.runInNewContext(ts.transpileModule(terminal.map(n=>n.getText(storeAst).replace(/^export /,'')).join('\n')+'\nisTerminalOrder;',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{OrderStatus:types.OrderStatus});
 const arrows={};
 for(const name of ['changePositionMode','changeMarginType','setLeverage','cancelSymbolOrders','placeOrders']) {
  const members=owners[0].members.filter(n=>n.name?.getText(ast)===name);assert.equal(members.length,1,`WRITE method ${name}`);
@@ -36,7 +39,7 @@ async function run(method,fixture){
  const emit=message=>{record('emit',message);if(fixture.emitFail)throw err('emit failed','emit');};
  const positions=(fixture.contractsBits??[]).map(contracts=>({contracts:fromBits(contracts)}));
  const owner={store:{positions,setSetting:(key,value)=>{record('setting',key,value);if(fixture.settingFail)throw err('setting failed','setting');},updatePositions:updates=>{record('updates',updates);if(fixture.updateFail)throw err('update failed','update');}},emitAndLogError:emit,xhr:{post:async(url,body)=>{record('post',url,body);if(fixture.postFail)throw postError;return {accepted:true};}}};
- const context={ENDPOINTS,PositionSide:types.PositionSide,createPositionId};
+ const context={ENDPOINTS,PositionSide:types.PositionSide,createPositionId,isTerminalOrder};
  owner[method]=vm.runInNewContext(arrows[method],context,{filename:file}).call(owner);
  let ack={ack:true},result,error;
  try{

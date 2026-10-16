@@ -14,6 +14,7 @@ import { forEachSeries, map, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { mapOkxPositionHistory } from '../../journal/okx.position-adapter';
+import { isTerminalOrder } from '../../store/store.base';
 import {
   Balance,
   Candle,
@@ -1530,7 +1531,9 @@ export class OKXExchange extends BaseExchange {
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    const orders = this.store.orders.filter((o) => o.symbol === symbol);
+    // A filled order still in the store makes OKX answer the whole batch with code 2
+    // (51400 for that row), which throws even though the live orders were canceled.
+    const orders = this.store.orders.filter((o) => o.symbol === symbol && !isTerminalOrder(o));
     await this.cancelOrders(orders);
   };
 

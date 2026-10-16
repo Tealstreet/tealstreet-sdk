@@ -14,6 +14,7 @@ import { forEachSeries, mapSeries } from 'p-iteration';
 
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { mapBlofinPositionHistory } from '../../journal/blofin.position-adapter';
+import { isTerminalOrder } from '../../store/store.base';
 import {
   Balance,
   Candle,
@@ -634,7 +635,7 @@ export class BlofinExchange extends BaseExchange {
 
         // If all fetches returned empty but we had orders before, something might be wrong
         // Log a warning but still return the result (empty is valid if user has no orders)
-        if (allOrders.length === 0 && this.store.orders.length > 0) {
+        if (allOrders.length === 0 && this.store.orders.some((o) => !isTerminalOrder(o))) {
           this.log(
             'Warning: fetchOrders returned empty but store had orders. Could be valid or API issue.',
             LogSeverity.Warning,
@@ -1438,7 +1439,7 @@ export class BlofinExchange extends BaseExchange {
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    const orders = this.store.orders.filter((o) => o.symbol === symbol);
+    const orders = this.store.orders.filter((o) => o.symbol === symbol && !isTerminalOrder(o));
     await this.cancelOrders(orders);
   };
 

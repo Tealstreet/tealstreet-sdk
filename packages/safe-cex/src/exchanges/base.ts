@@ -16,6 +16,7 @@ import { sleep } from '@tealstreet/sleep/src/sleep';
 import { createApiWithSecondaryKey } from '../createApiWithSecondaryKey';
 import { exchangeMetadata, getExchangeMetadata } from '../exchangeMetadata';
 import { buildFoldedPositionRecords } from '../journal/buildRecords';
+import { isTerminalOrder } from '../store/store.base';
 import {
   AccountGreeks,
   Candle,
@@ -970,14 +971,14 @@ export class BaseExchange implements Exchange {
   };
 
   cancelSymbolOrders = async (symbol: string) => {
-    const orders = this.store.orders.filter((o) => o.symbol === symbol);
+    const orders = this.store.orders.filter((o) => o.symbol === symbol && !isTerminalOrder(o));
     if (orders.length > 0) {
       await this.cancelOrders(orders);
     }
   };
 
   cancelAllOrders = async () => {
-    const symbols = uniq(this.store.orders.map((order) => order.symbol));
+    const symbols = uniq(this.store.orders.filter((order) => !isTerminalOrder(order)).map((order) => order.symbol));
 
     await forEachSeries(symbols, async (symbol) => {
       if (!this.isDisposed) {

@@ -444,7 +444,7 @@ Order book amounts from WS are contract counts. Keep them in native contracts in
 ### Position-Order Consistency
 
 - **Tick loop** (`tick`): Runs every 10 seconds. Fetches balance+positions and orders independently -- one failing does not block the other.
-- **Order preservation on failure**: If `fetchOrders` returns empty but the store had orders, a warning is logged but the empty result is accepted. Each normal, TPSL, and trigger order family is an atomic paginated snapshot: a first-page or later-page transport/API failure, an invalid/non-advancing cursor, or the pagination safety cap rejects the whole attempt instead of returning partial rows. On complete failure (all 3 retries exhausted), existing store orders are returned to prevent data loss (see `fetchOrdersWithRetry`).
+- **Order preservation on failure**: If `fetchOrders` returns empty but the store still has non-terminal orders, a warning is logged but the empty result is accepted. Filled/canceled rows alone do not trigger that warning. Each normal, TPSL, and trigger order family is an atomic paginated snapshot: a first-page or later-page transport/API failure, an invalid/non-advancing cursor, or the pagination safety cap rejects the whole attempt instead of returning partial rows. On complete failure (all 3 retries exhausted), existing store orders are returned to prevent data loss (see `fetchOrdersWithRetry`).
 - **Order update guard** in tick: Only updates orders if new fetch returned results or store was already empty.
 
 ### WebSocket vs REST

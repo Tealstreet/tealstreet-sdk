@@ -769,10 +769,12 @@ pub fn cancel_symbol_orders(
         let filter = h.member(&orders, "filter")?;
         let live = h.clone();
         let callback = h.function(Rc::new(move |args| {
-            Ok(AccountValue::Boolean(eq(
-                &live.get(args.first().unwrap_or(&AccountValue::Undefined), "symbol")?,
-                &symbol,
-            )))
+            let order = args.first().unwrap_or(&AccountValue::Undefined);
+            if !eq(&live.get(order, "symbol")?, &symbol) {
+                return Ok(AccountValue::Boolean(false));
+            }
+            let terminal = live.global("isTerminalOrder")?.call(&[order.clone()])?;
+            Ok(AccountValue::Boolean(!terminal.truthy()))
         }))?;
         let orders = filter.call(&[callback])?;
         if num(h.get(&orders, "length")?)? > 0.0 {
