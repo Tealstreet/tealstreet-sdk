@@ -120,3 +120,7 @@ Their native host inputs retain each API's signing/transport/retry middleware.
 Private MEXC fills must reach the venue emitter; retain the weak callback when
 adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
 native request signatures against a local server.
+
+TxFlow is constructible only as the source Phase-0 scaffold. Native inputs build
+its HTTP client, while start emits the exact refusal before IO. Keep its existing
+source start boundary and test both mainnet/testnet construction without network.
