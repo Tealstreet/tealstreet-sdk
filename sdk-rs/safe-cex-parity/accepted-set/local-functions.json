@@ -190,12 +190,6 @@
     "reason": "Inside public_depth_snapshot: admits only two-string arrays with nonblank, finite, positive price and amount, refusing the whole snapshot otherwise. Raw JSON admission; its runtime owner's probes exercise it.",
     "sourceSha256": "e3fcc6733e6ad17eb313d95e8a518a281228c07a421e7801b46b0ff7801055f2"
   },
-  "safe-cex-venue-bitunix/src/event_models.rs::LOCAL_FUNCTION:precision": {
-    "category": "decoder-helper",
-    "runtimeOwner": "safe_cex_venue_bitunix::event_models::subtract",
-    "reason": "Inside subtract: derives decimal precision from a raw string or JS-number value, defaulting to 2 for absent/null. Raw JSON to f64; its runtime owner's probes exercise it.",
-    "sourceSha256": "99748c9bba555d8823565ad5e467c637b791e15c515da0f12a90968a2b668d9d"
-  },
   "safe-cex-venue-hyperliquid/src/rate_limit.rs::LOCAL_FUNCTION:text": {
     "category": "decoder-helper",
     "runtimeOwner": "safe_cex_venue_hyperliquid::rate_limit::raw_number",

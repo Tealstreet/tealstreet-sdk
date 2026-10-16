@@ -181,28 +181,28 @@ pub(crate) struct Client {
     pub(crate) secondary: Rc<Lane>,
     pub(crate) base: Rc<BaseExchange>,
 }
-fn query_profile(value: &Value) -> Result<String, String> {
-    fn query(v: &Value) -> safe_cex_types::QueryValue {
-        use safe_cex_types::QueryValue as Q;
-        match v {
-            Value::Null => Q::Null,
-            Value::Bool(b) => Q::Bool(*b),
-            Value::Number(n) => Q::Number(n.as_f64().unwrap_or(f64::NAN)),
-            Value::String(s) => Q::String(s.clone()),
-            Value::Array(a) => Q::Array(a.iter().map(query).collect()),
-            Value::Object(o) => {
-                let mut keys: Vec<_> = o.iter().collect();
-                keys.sort_by_key(|(a, _)| *a);
-                Q::Object(
-                    keys.into_iter()
-                        .map(|(k, v)| (k.clone(), query(v)))
-                        .collect(),
-                )
-            }
+fn query_value(v: &Value) -> safe_cex_types::QueryValue {
+    use safe_cex_types::QueryValue as Q;
+    match v {
+        Value::Null => Q::Null,
+        Value::Bool(b) => Q::Bool(*b),
+        Value::Number(n) => Q::Number(n.as_f64().unwrap_or(f64::NAN)),
+        Value::String(s) => Q::String(s.clone()),
+        Value::Array(a) => Q::Array(a.iter().map(query_value).collect()),
+        Value::Object(o) => {
+            let mut keys: Vec<_> = o.iter().collect();
+            keys.sort_by_key(|(a, _)| *a);
+            Q::Object(
+                keys.into_iter()
+                    .map(|(k, v)| (k.clone(), query_value(v)))
+                    .collect(),
+            )
         }
     }
+}
+fn query_profile(value: &Value) -> Result<String, String> {
     safe_cex_transport::query::render_query(
-        &query(value),
+        &query_value(value),
         safe_cex_transport::query::QueryProfile {
             key_order: safe_cex_transport::query::QueryKeyOrder::Preserve,
             arrays: safe_cex_transport::query::QueryArrayFormat::Repeat,
