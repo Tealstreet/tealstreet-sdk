@@ -325,25 +325,25 @@
   },
   {
     "function": "create",
-    "body": "09ccdab3250875d2",
+    "body": "bbc19b0f38d9af75",
     "call": "venue . is_public_data_only ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "09ccdab3250875d2",
+    "body": "bbc19b0f38d9af75",
     "call": "venue . fetch_and_set_private_snapshot (tries)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "09ccdab3250875d2",
+    "body": "bbc19b0f38d9af75",
     "call": "venue . fetch_and_set_orders (symbols)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "09ccdab3250875d2",
+    "body": "bbc19b0f38d9af75",
     "call": "base . dispose ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
