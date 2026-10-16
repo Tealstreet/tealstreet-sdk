@@ -314,7 +314,11 @@ impl Js {
                 out.into()
             }
             Js::Object(o) => {
-                if o.class == "Error" {
+                if o.class == "Buffer" && self.get("toString")?.is_callable() {
+                    self.call_method("toString", vec![])?.to_js_string()?
+                } else if o.class == "Blob" || o.class == "ArrayBuffer" {
+                    utf16(&format!("[object {}]", o.class))
+                } else if o.class == "Error" {
                     let name = self.get("name")?;
                     let message = self.get("message")?;
                     let name = if name.is_undefined() {
