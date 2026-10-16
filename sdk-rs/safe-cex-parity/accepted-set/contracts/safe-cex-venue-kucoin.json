@@ -1,0 +1,4552 @@
+{
+  "safe_cex_venue_kucoin::account_mode::KucoinAccountMode": {
+    "shape": "string",
+    "literals": [
+      "CLASSIC",
+      "UNIFIED"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed actual String::deserialize admission before the private Wire enum; exact native variant identity is observed for every literal. Existing source/metadata tests separately retain all tag/object refusals.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>{let first=match decoded{$type::Classic=>true,$type::Unified=>false};serde_json::json!({\"ok\":true,\"firstVariant\":first,\"variantName\":if first{\"first\"}else{\"second\"}})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "firstVariant",
+        "variantName"
+      ],
+      "cases": [
+        {
+          "input": "CLASSIC",
+          "output": {
+            "ok": true,
+            "firstVariant": true,
+            "variantName": "first"
+          }
+        },
+        {
+          "input": "UNIFIED",
+          "output": {
+            "ok": true,
+            "firstVariant": false,
+            "variantName": "second"
+          }
+        },
+        {
+          "input": {
+            "CLASSIC": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "UNIFIED": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kucoin::ws_helpers::KucoinPublicRole": {
+    "shape": "string",
+    "literals": [
+      "detail",
+      "snapshot"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed actual String::deserialize admission before the private Wire enum; exact native variant identity is observed for every literal. Existing source/metadata tests separately retain all tag/object refusals.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>{let first=match decoded{$type::Detail=>true,$type::Snapshot=>false};serde_json::json!({\"ok\":true,\"firstVariant\":first,\"variantName\":if first{\"first\"}else{\"second\"}})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "firstVariant",
+        "variantName"
+      ],
+      "cases": [
+        {
+          "input": "detail",
+          "output": {
+            "ok": true,
+            "firstVariant": true,
+            "variantName": "first"
+          }
+        },
+        {
+          "input": "snapshot",
+          "output": {
+            "ok": true,
+            "firstVariant": false,
+            "variantName": "second"
+          }
+        },
+        {
+          "input": {
+            "detail": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "snapshot": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kucoin::spot_types::KucoinSpotWsServer": {
+    "shape": "map",
+    "sample": {
+      "endpoint": "wss://native-a.invalid",
+      "encrypt": true,
+      "protocol": "websocket",
+      "pingInterval": 17.5,
+      "pingTimeout": 3.25
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed the actual whole-entry JsNumberInput capture, private map-only Wire admission and each required/optional field. Native raw-text observations preserve declared numeric bits, field identity, nested list state and optional presence. Existing numeric/source controls remain separate; this already guarded owner needs no production repair.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"endpoint\":decoded.endpoint,\"encrypt\":decoded.encrypt,\"protocol\":decoded.protocol,\"intervalBits\":format!(\"{:016x}\",decoded.ping_interval.to_bits()),\"timeoutBits\":format!(\"{:016x}\",decoded.ping_timeout.to_bits())}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "endpoint",
+        "encrypt",
+        "protocol",
+        "intervalBits",
+        "timeoutBits"
+      ],
+      "cases": [
+        {
+          "input": "{\"endpoint\":\"wss://native-a.invalid\",\"encrypt\":true,\"protocol\":\"websocket\",\"pingInterval\":17.5,\"pingTimeout\":3.25}",
+          "output": {
+            "ok": true,
+            "endpoint": "wss://native-a.invalid",
+            "encrypt": true,
+            "protocol": "websocket",
+            "intervalBits": "4031800000000000",
+            "timeoutBits": "400a000000000000"
+          }
+        },
+        {
+          "input": "{\"endpoint\":\"wss://native-b.invalid\",\"encrypt\":false,\"protocol\":\"native-protocol-b\",\"pingInterval\":29.25,\"pingTimeout\":7.5}",
+          "output": {
+            "ok": true,
+            "endpoint": "wss://native-b.invalid",
+            "encrypt": false,
+            "protocol": "native-protocol-b",
+            "intervalBits": "403d400000000000",
+            "timeoutBits": "401e000000000000"
+          }
+        },
+        {
+          "input": "[\"wss://native-a.invalid\",true,\"websocket\",17.5,3.25]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"endpoint\":\"wss://bits.invalid\",\"encrypt\":true,\"protocol\":\"bits\",\"pingInterval\":-0,\"pingTimeout\":1e400}",
+          "output": {
+            "ok": true,
+            "endpoint": "wss://bits.invalid",
+            "encrypt": true,
+            "protocol": "bits",
+            "intervalBits": "8000000000000000",
+            "timeoutBits": "7ff0000000000000"
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kucoin::spot_types::KucoinSpotWsTokenData": {
+    "shape": "map",
+    "sample": {
+      "token": "synthetic-token-a",
+      "instanceServers": [
+        {
+          "endpoint": "wss://native-a.invalid",
+          "encrypt": true,
+          "protocol": "websocket",
+          "pingInterval": 17.5,
+          "pingTimeout": 3.25
+        },
+        {
+          "endpoint": "wss://native-b.invalid",
+          "encrypt": false,
+          "protocol": "native-protocol-b",
+          "pingInterval": 29.25,
+          "pingTimeout": 7.5
+        }
+      ]
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed the actual whole-entry JsNumberInput capture, private map-only Wire admission and each required/optional field. Native raw-text observations preserve declared numeric bits, field identity, nested list state and optional presence. Existing numeric/source controls remain separate; this already guarded owner needs no production repair.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"token\":decoded.token,\"serverCount\":decoded.instance_servers.len(),\"firstEndpoint\":decoded.instance_servers.first().map(|s|s.endpoint.as_str()),\"firstTimeoutBits\":decoded.instance_servers.first().map(|s|format!(\"{:016x}\",s.ping_timeout.to_bits()))}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "token",
+        "serverCount",
+        "firstEndpoint",
+        "firstTimeoutBits"
+      ],
+      "cases": [
+        {
+          "input": "{\"token\":\"synthetic-token-a\",\"instanceServers\":[{\"endpoint\":\"wss://native-a.invalid\",\"encrypt\":true,\"protocol\":\"websocket\",\"pingInterval\":17.5,\"pingTimeout\":3.25},{\"endpoint\":\"wss://native-b.invalid\",\"encrypt\":false,\"protocol\":\"native-protocol-b\",\"pingInterval\":29.25,\"pingTimeout\":7.5}]}",
+          "output": {
+            "ok": true,
+            "token": "synthetic-token-a",
+            "serverCount": 2,
+            "firstEndpoint": "wss://native-a.invalid",
+            "firstTimeoutBits": "400a000000000000"
+          }
+        },
+        {
+          "input": "{\"token\":\"synthetic-token-b\",\"instanceServers\":[{\"endpoint\":\"wss://native-b.invalid\",\"encrypt\":false,\"protocol\":\"native-protocol-b\",\"pingInterval\":29.25,\"pingTimeout\":7.5}]}",
+          "output": {
+            "ok": true,
+            "token": "synthetic-token-b",
+            "serverCount": 1,
+            "firstEndpoint": "wss://native-b.invalid",
+            "firstTimeoutBits": "401e000000000000"
+          }
+        },
+        {
+          "input": "[\"synthetic-token-a\",[{\"endpoint\":\"wss://native-a.invalid\",\"encrypt\":true,\"protocol\":\"websocket\",\"pingInterval\":17.5,\"pingTimeout\":3.25},{\"endpoint\":\"wss://native-b.invalid\",\"encrypt\":false,\"protocol\":\"native-protocol-b\",\"pingInterval\":29.25,\"pingTimeout\":7.5}]]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kucoin::spot_types::KucoinSpotWsTokenResponse": {
+    "shape": "map",
+    "sample": {
+      "code": "200000",
+      "data": {
+        "token": "synthetic-token-a",
+        "instanceServers": [
+          {
+            "endpoint": "wss://native-a.invalid",
+            "encrypt": true,
+            "protocol": "websocket",
+            "pingInterval": 17.5,
+            "pingTimeout": 3.25
+          }
+        ]
+      },
+      "msg": "native-msg-a"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed the actual whole-entry JsNumberInput capture, private map-only Wire admission and each required/optional field. Native raw-text observations preserve declared numeric bits, field identity, nested list state and optional presence. Existing numeric/source controls remain separate; this already guarded owner needs no production repair.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"code\":decoded.code,\"hasData\":decoded.data.is_some(),\"token\":decoded.data.as_ref().map(|d|d.token.as_str()),\"message\":decoded.msg}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "code",
+        "hasData",
+        "token",
+        "message"
+      ],
+      "cases": [
+        {
+          "input": "{\"code\":\"200000\",\"data\":{\"token\":\"synthetic-token-a\",\"instanceServers\":[{\"endpoint\":\"wss://native-a.invalid\",\"encrypt\":true,\"protocol\":\"websocket\",\"pingInterval\":17.5,\"pingTimeout\":3.25}]},\"msg\":\"native-msg-a\"}",
+          "output": {
+            "ok": true,
+            "code": "200000",
+            "hasData": true,
+            "token": "synthetic-token-a",
+            "message": "native-msg-a"
+          }
+        },
+        {
+          "input": "{\"code\":\"400001\",\"msg\":\"native-msg-b\"}",
+          "output": {
+            "ok": true,
+            "code": "400001",
+            "hasData": false,
+            "token": null,
+            "message": "native-msg-b"
+          }
+        },
+        {
+          "input": "[\"200000\",{\"token\":\"synthetic-token-a\",\"instanceServers\":[{\"endpoint\":\"wss://native-a.invalid\",\"encrypt\":true,\"protocol\":\"websocket\",\"pingInterval\":17.5,\"pingTimeout\":3.25}]},\"native-msg-a\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kucoin::account_mode::KucoinAccountModeDetection": {
+    "shape": "union",
+    "positive": [
+      {
+        "status": "identified",
+        "accountMode": "CLASSIC",
+        "classicSubAccount": [
+          3,
+          5
+        ],
+        "unifiedSubAccount": [
+          7
+        ]
+      },
+      {
+        "status": "identified",
+        "accountMode": "UNIFIED",
+        "classicSubAccount": [
+          11
+        ],
+        "unifiedSubAccount": [
+          13,
+          17
+        ]
+      },
+      {
+        "status": "unknown",
+        "reason": "unknown-self-account-mode"
+      },
+      {
+        "status": "malformed",
+        "reason": "invalid-envelope"
+      },
+      {
+        "status": "malformed",
+        "reason": "invalid-success-code"
+      },
+      {
+        "status": "malformed",
+        "reason": "invalid-data"
+      },
+      {
+        "status": "malformed",
+        "reason": "invalid-self-account-mode"
+      }
+    ],
+    "negative": [
+      null,
+      [],
+      {},
+      {
+        "status": "unknown",
+        "reason": "wrong"
+      },
+      {
+        "status": "identified",
+        "accountMode": "CLASSIC",
+        "classicSubAccount": []
+      },
+      [
+        "identified",
+        "CLASSIC",
+        [],
+        []
+      ]
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the exact status/reason branches and whole-entry capture before private tagged Wire admission. Direct native enum/list observations cover both Identified modes and numeric overflow/signed zero before JSON serialization; no enum serialization or re-decode.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>match decoded{$type::Identified{account_mode,classic_sub_account,unified_sub_account}=>serde_json::json!({\"ok\":true,\"variant\":if account_mode==crate::account_mode::KucoinAccountMode::Classic{\"classic\"}else{\"unified\"},\"classicCount\":classic_sub_account.len(),\"unifiedCount\":unified_sub_account.len(),\"classicFirstBits\":classic_sub_account.first().map(|n|format!(\"{:016x}\",n.to_bits())),\"unifiedFirstBits\":unified_sub_account.first().map(|n|format!(\"{:016x}\",n.to_bits()))}),_=>serde_json::json!({\"ok\":true,\"variant\":\"other\",\"classicCount\":0,\"unifiedCount\":0,\"classicFirstBits\":null,\"unifiedFirstBits\":null})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "classicCount",
+        "unifiedCount",
+        "classicFirstBits",
+        "unifiedFirstBits"
+      ],
+      "cases": [
+        {
+          "input": "{\"status\": \"identified\", \"accountMode\": \"CLASSIC\", \"classicSubAccount\": [3, 5], \"unifiedSubAccount\": [7]}",
+          "output": {
+            "ok": true,
+            "variant": "classic",
+            "classicCount": 2,
+            "unifiedCount": 1,
+            "classicFirstBits": "4008000000000000",
+            "unifiedFirstBits": "401c000000000000"
+          }
+        },
+        {
+          "input": "{\"status\": \"identified\", \"accountMode\": \"UNIFIED\", \"classicSubAccount\": [11], \"unifiedSubAccount\": [13, 17]}",
+          "output": {
+            "ok": true,
+            "variant": "unified",
+            "classicCount": 1,
+            "unifiedCount": 2,
+            "classicFirstBits": "4026000000000000",
+            "unifiedFirstBits": "402a000000000000"
+          }
+        },
+        {
+          "input": "{\"status\":\"identified\",\"accountMode\":\"CLASSIC\",\"classicSubAccount\":[-0],\"unifiedSubAccount\":[1e400]}",
+          "output": {
+            "ok": true,
+            "variant": "classic",
+            "classicCount": 1,
+            "unifiedCount": 1,
+            "classicFirstBits": "8000000000000000",
+            "unifiedFirstBits": "7ff0000000000000"
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kucoin::account_mode::KucoinClassicRuntimeDecision": {
+    "shape": "union",
+    "entrypoints": [],
+    "positive": [
+      {
+        "eligible": true,
+        "reason": "classic-account-mode-confirmed",
+        "route": "existing-classic-runtime",
+        "utaRuntimeActivationEnabled": false
+      },
+      {
+        "eligible": false,
+        "reason": "unified-account-mode-unsupported",
+        "route": "blocked",
+        "utaRuntimeActivationEnabled": false
+      },
+      {
+        "eligible": false,
+        "reason": "account-mode-unknown",
+        "route": "blocked",
+        "utaRuntimeActivationEnabled": false
+      },
+      {
+        "eligible": false,
+        "reason": "account-mode-response-malformed",
+        "route": "blocked",
+        "utaRuntimeActivationEnabled": false
+      }
+    ],
+    "negative": [
+      null,
+      [],
+      [
+        true,
+        "classic-account-mode-confirmed",
+        "existing-classic-runtime",
+        false
+      ],
+      {
+        "eligible": true,
+        "reason": "classic-account-mode-confirmed",
+        "route": "existing-classic-runtime",
+        "utaRuntimeActivationEnabled": true
+      },
+      {
+        "eligible": true,
+        "reason": "wrong",
+        "route": "existing-classic-runtime",
+        "utaRuntimeActivationEnabled": false
+      }
+    ],
+    "evidence": "Reviewed the actual map-only Wire decoder and all four exact correlated eligible/reason/route combinations with false activation. Native variant identities are checked without serializing the owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>{let variant=match decoded{$type::Classic=>\"classic\",$type::Unified=>\"unified\",$type::Unknown=>\"unknown\",$type::Malformed=>\"malformed\"};serde_json::json!({\"ok\":true,\"variant\":variant,\"classic\":matches!(decoded,$type::Classic)})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "variant",
+        "classic"
+      ],
+      "cases": [
+        {
+          "input": {
+            "eligible": true,
+            "reason": "classic-account-mode-confirmed",
+            "route": "existing-classic-runtime",
+            "utaRuntimeActivationEnabled": false
+          },
+          "output": {
+            "ok": true,
+            "variant": "classic",
+            "classic": true
+          }
+        },
+        {
+          "input": {
+            "eligible": false,
+            "reason": "unified-account-mode-unsupported",
+            "route": "blocked",
+            "utaRuntimeActivationEnabled": false
+          },
+          "output": {
+            "ok": true,
+            "variant": "unified",
+            "classic": false
+          }
+        },
+        {
+          "input": {
+            "eligible": false,
+            "reason": "account-mode-unknown",
+            "route": "blocked",
+            "utaRuntimeActivationEnabled": false
+          },
+          "output": {
+            "ok": true,
+            "variant": "unknown",
+            "classic": false
+          }
+        },
+        {
+          "input": {
+            "eligible": false,
+            "reason": "account-mode-response-malformed",
+            "route": "blocked",
+            "utaRuntimeActivationEnabled": false
+          },
+          "output": {
+            "ok": true,
+            "variant": "malformed",
+            "classic": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            true,
+            "classic-account-mode-confirmed",
+            "existing-classic-runtime",
+            false
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "eligible": true,
+            "reason": "classic-account-mode-confirmed",
+            "route": "existing-classic-runtime",
+            "utaRuntimeActivationEnabled": true
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "eligible": true,
+            "reason": "wrong",
+            "route": "existing-classic-runtime",
+            "utaRuntimeActivationEnabled": false
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kucoin::spot_types::present": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "present",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed the exact generic helper: deserialize the selected field T and wrap Some, so explicit null is refused for String rather than becoming absent. Execute actual String monomorphization; no claim for every T.",
+    "call": "{match $type::<_,String>($value.clone()){Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": "native-a",
+        "output": {
+          "ok": true,
+          "value": "native-a"
+        }
+      },
+      {
+        "input": "native-b",
+        "output": {
+          "ok": true,
+          "value": "native-b"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": 17,
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::order_helpers::parse_margin_type": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_margin_type",
+      "signature": {
+        "inputs": [
+          [
+            "margin_mode",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "cross_mode",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::MarginType",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed actual parseMarginType body against maintained TS: truthy mode is coerced/uppercased first, recognized labels precede the strict false fallback. Observe actual native MarginType identity.",
+    "call": "{match $type($value.get(\"mode\"),$value.get(\"cross\")){Ok(v)=>serde_json::json!({\"isolated\":v==safe_cex_types::MarginType::Isolated}),Err(e)=>serde_json::json!({\"error\":e.to_string()})}}",
+    "cases": [
+      {
+        "input": {
+          "mode": "fixed"
+        },
+        "output": {
+          "isolated": true
+        }
+      },
+      {
+        "input": {
+          "mode": "cross",
+          "cross": false
+        },
+        "output": {
+          "isolated": false
+        }
+      },
+      {
+        "input": {
+          "cross": false
+        },
+        "output": {
+          "isolated": true
+        }
+      },
+      {
+        "input": {
+          "cross": 0
+        },
+        "output": {
+          "isolated": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::order_helpers::parse_position_mode": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_position_mode",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::PositionMode",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed parsePositionMode string coercion and four exact uppercased hedge labels; inspect native PositionMode, including unknown fallback.",
+    "call": "{match $type(Some($value)){Ok(v)=>serde_json::json!({\"hedged\":v==safe_cex_types::PositionMode::Hedged}),Err(e)=>serde_json::json!({\"error\":e.to_string()})}}",
+    "cases": [
+      {
+        "input": "double_hold",
+        "output": {
+          "hedged": true
+        }
+      },
+      {
+        "input": "1",
+        "output": {
+          "hedged": true
+        }
+      },
+      {
+        "input": "BOTH",
+        "output": {
+          "hedged": false
+        }
+      },
+      {
+        "input": "other",
+        "output": {
+          "hedged": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::order_helpers::parse_row_position_mode": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_row_position_mode",
+      "signature": {
+        "inputs": [
+          [
+            "row",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::PositionMode",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed parseRowPositionMode native map lookup: any truthy non-BOTH positionSide returns hedged; otherwise truthy positionMode suppresses holdMode before actual parser. Native identity pins branch priority.",
+    "call": "{match $type($value.as_object().unwrap()){Ok(v)=>serde_json::json!({\"hedged\":v==safe_cex_types::PositionMode::Hedged}),Err(e)=>serde_json::json!({\"error\":e.to_string()})}}",
+    "cases": [
+      {
+        "input": {
+          "positionSide": "LONG",
+          "positionMode": "other"
+        },
+        "output": {
+          "hedged": true
+        }
+      },
+      {
+        "input": {
+          "positionSide": "BOTH",
+          "positionMode": "other"
+        },
+        "output": {
+          "hedged": false
+        }
+      },
+      {
+        "input": {
+          "positionSide": "BOTH",
+          "holdMode": "HEDGE"
+        },
+        "output": {
+          "hedged": true
+        }
+      },
+      {
+        "input": {
+          "positionSide": 0,
+          "positionMode": "other",
+          "holdMode": "HEDGE"
+        },
+        "output": {
+          "hedged": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::broker::trim_string": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "trim_string",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed trimString: only actual strings admitted, ECMAScript whitespace trimmed, empty/non-string returns absent. Observe actual optional String without coercing numeric inputs.",
+    "call": "{serde_json::json!($type(Some($value)))}",
+    "cases": [
+      {
+        "input": "  broker-a\u00a0",
+        "output": "broker-a"
+      },
+      {
+        "input": "\ufeff\t broker-b \n",
+        "output": "broker-b"
+      },
+      {
+        "input": " \n",
+        "output": null
+      },
+      {
+        "input": 17,
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::broker::get_header": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_header",
+      "signature": {
+        "inputs": [
+          [
+            "headers",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "indexmap::map::IndexMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed normalized string-header boundary: case-insensitive first matching key is cloned; absent stays absent. No claim that this typed map admits all Axios executable header values.",
+    "call": "{let mut headers=indexmap::IndexMap::new();headers.insert(\"kC-aPi-TimeStamp\".to_owned(),\"17\".to_owned());headers.insert(\"Other\".to_owned(),\"29\".to_owned());serde_json::json!($type(&headers,$value.as_str().unwrap()))}",
+    "cases": [
+      {
+        "input": "KC-API-TIMESTAMP",
+        "output": "17"
+      },
+      {
+        "input": "other",
+        "output": "29"
+      },
+      {
+        "input": "absent",
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::broker::get_kucoin_request_timestamp": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_kucoin_request_timestamp",
+      "signature": {
+        "inputs": [
+          [
+            "headers",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "indexmap::map::IndexMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed actual optional normalized-header reader: absent map or absent timestamp yields None; explicit mixed case returns original text. Adapter constructs actual maintained IndexMap, no synthetic decoder.",
+    "call": "{let headers=$value.as_object().map(|m|m.iter().map(|(k,v)|(k.clone(),v.as_str().unwrap().to_owned())).collect::<indexmap::IndexMap<String,String>>());serde_json::json!($type(headers.as_ref()))}",
+    "cases": [
+      {
+        "input": {
+          "kc-api-timestamp": "stamp-a"
+        },
+        "output": "stamp-a"
+      },
+      {
+        "input": {
+          "KC-API-TIMESTAMP": "stamp-b"
+        },
+        "output": "stamp-b"
+      },
+      {
+        "input": {},
+        "output": null
+      },
+      {
+        "input": null,
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::ws_helpers::parse_number": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "f64"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed actual parse_number numeric parser against maintained websocket source: nullish clock fallback, shared parseFloat/parseInt base10, exact magnitude thresholds and native signed-zero bits observed before JSON. No decoded owner serialization.",
+    "call": "{match $type(Some($value)){Ok(v)=>serde_json::json!({\"bits\":v.map(|v|format!(\"{:016x}\",v.to_bits()))}),Err(e)=>serde_json::json!({\"error\":e})}}",
+    "cases": [
+      {
+        "input": "17.25tail",
+        "output": {
+          "bits": "4031400000000000"
+        }
+      },
+      {
+        "input": "-0",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "Infinity",
+        "output": {
+          "bits": null
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "bits": null
+        }
+      },
+      {
+        "input": "nonsense",
+        "output": {
+          "bits": null
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::ws_helpers::timestamp": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "timestamp",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "now_ms",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed actual timestamp numeric parser against maintained websocket source: nullish clock fallback, shared parseFloat/parseInt base10, exact magnitude thresholds and native signed-zero bits observed before JSON. No decoded owner serialization.",
+    "call": "{match $type(Some($value),1700000000123.0){Ok(v)=>serde_json::json!({\"bits\":format!(\"{:016x}\",v.to_bits())}),Err(e)=>serde_json::json!({\"error\":e})}}",
+    "cases": [
+      {
+        "input": "-0",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "1700000000123tail",
+        "output": {
+          "bits": "4278bcfe5687b000"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "bits": "4278bcfe5687b000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::ws_helpers::normalize_timestamp": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalize_timestamp",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "now_ms",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed actual normalize_timestamp numeric parser against maintained websocket source: nullish clock fallback, shared parseFloat/parseInt base10, exact magnitude thresholds and native signed-zero bits observed before JSON. No decoded owner serialization.",
+    "call": "{match $type(Some($value),1700000000123.0){Ok(v)=>serde_json::json!({\"bits\":format!(\"{:016x}\",v.to_bits())}),Err(e)=>serde_json::json!({\"error\":e})}}",
+    "cases": [
+      {
+        "input": "-0",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "1700000000123tail",
+        "output": {
+          "bits": "41d954fc40000000"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "bits": "41d954fc40000000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::ws_helpers::normalize_millis": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "normalize_millis",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "now_ms",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed actual normalize_millis numeric parser against maintained websocket source: nullish clock fallback, shared parseFloat/parseInt base10, exact magnitude thresholds and native signed-zero bits observed before JSON. No decoded owner serialization.",
+    "call": "{match $type(Some($value),1700000000123.0){Ok(v)=>serde_json::json!({\"bits\":format!(\"{:016x}\",v.to_bits())}),Err(e)=>serde_json::json!({\"error\":e})}}",
+    "cases": [
+      {
+        "input": "-0",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "17tail",
+        "output": {
+          "bits": "40d09a0000000000"
+        }
+      },
+      {
+        "input": "1700000000123tail",
+        "output": {
+          "bits": "4278bcfe5687b000"
+        }
+      },
+      {
+        "input": "1700000000123456",
+        "output": {
+          "bits": "4278bcfe5687b000"
+        }
+      },
+      {
+        "input": "1700000000123456789",
+        "output": {
+          "bits": "4278bcfe5687b000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::ws_helpers::get_candle_handler_topic": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_candle_handler_topic",
+      "signature": {
+        "inputs": [
+          [
+            "topic",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed actual TS two successive split destructurings; native parser preserves omitted interval undefined text and missing first separator failure. Observe returned topic/error directly.",
+    "call": "{match $type($value.as_str().unwrap()){Ok(v)=>serde_json::json!({\"topic\":v}),Err(e)=>serde_json::json!({\"error\":e})}}",
+    "cases": [
+      {
+        "input": "candles:BTC-USDT_1min",
+        "output": {
+          "topic": "candle_BTC-USDT_1min"
+        }
+      },
+      {
+        "input": "candles:ETH-USDT",
+        "output": {
+          "topic": "candle_ETH-USDT_undefined"
+        }
+      },
+      {
+        "input": "bad",
+        "output": {
+          "error": "TypeError: Cannot read properties of undefined (reading 'split')"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::api_helpers::is_public_endpoint": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_public_endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "url",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed public-route predicate and maintained exact public endpoint table: nonempty prefix match, not substring. Execute actual boolean decision with public/private/absent URLs.",
+    "call": "{serde_json::json!($type($value.as_str()))}",
+    "cases": [
+      {
+        "input": "/api/v1/bullet-public?x=1",
+        "output": true
+      },
+      {
+        "input": "/api/v1/bullet-private",
+        "output": false
+      },
+      {
+        "input": "",
+        "output": false
+      },
+      {
+        "input": null,
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_venue_kucoin::api_helpers::entries": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "entries",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "visit",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(&str, &JsJsonValue)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Traverses an existing outgoing JsJsonValue Object/Array in ECMAScript key order and invokes the caller callback; no inbound typed schema.",
+    "evidence": "Individually reviewed actual api_helpers.rs::entries body and maintained qs.stringify request boundary. Traverses an existing outgoing JsJsonValue Object/Array in ECMAScript key order and invokes the caller callback; no inbound typed schema."
+  },
+  "safe_cex_venue_kucoin::api_helpers::append": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "append",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "encode",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Serializes existing outgoing query values recursively into bracket keys and scalar request strings, omitting undefined; no inbound response admission.",
+    "evidence": "Individually reviewed actual api_helpers.rs::append body and maintained qs.stringify request boundary. Serializes existing outgoing query values recursively into bracket keys and scalar request strings, omitting undefined; no inbound response admission."
+  },
+  "safe_cex_venue_kucoin::api_helpers::escape": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "escape",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Percent-encodes outgoing UTF-8 query bytes with RFC3986 unreserved characters; no raw-to-typed decoder or grammar admission.",
+    "evidence": "Individually reviewed actual api_helpers.rs::escape body and maintained qs.stringify request boundary. Percent-encodes outgoing UTF-8 query bytes with RFC3986 unreserved characters; no raw-to-typed decoder or grammar admission."
+  },
+  "safe_cex_venue_kucoin::bootstrap_reads::call": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "call",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::bootstrap_reads::BootstrapOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Captures an existing named bootstrap executable before evaluating its supplied argument closure, then invokes it unchanged; the name selects a capability, not a data grammar.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Captures an existing named bootstrap executable before evaluating its supplied argument closure, then invokes it unchanged; the name selects a capability, not a data grammar."
+  },
+  "safe_cex_venue_kucoin::bootstrap_reads::optional": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::bootstrap_reads::BootstrapOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Returns the existing undefined handle for a nullish receiver or forwards one property read; it constructs no typed response or parsed field.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Returns the existing undefined handle for a nullish receiver or forwards one property read; it constructs no typed response or parsed field."
+  },
+  "safe_cex_venue_kucoin::bootstrap_reads::define": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "define",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::bootstrap_reads::BootstrapOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "object",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "generic": "V"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Defines an outgoing loaded-state field via the existing define-field intrinsic with original receiver/value handles; key is a property selector, not raw schema admission.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Defines an outgoing loaded-state field via the existing define-field intrinsic with original receiver/value handles; key is a property selector, not raw schema admission."
+  },
+  "safe_cex_venue_kucoin::bootstrap_reads::loaded": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "loaded",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::bootstrap_reads::BootstrapOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "fields",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Copies existing loaded-state fields into an outgoing object and marks supplied internal field names true. It builds a patch and admits no inbound record.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Copies existing loaded-state fields into an outgoing object and marks supplied internal field names true. It builds a patch and admits no inbound record."
+  },
+  "safe_cex_venue_kucoin::bootstrap_reads::request": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "request",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::bootstrap_reads::BootstrapOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Captures the supplied internal endpoint, invokes existing xhr.get, awaits the original promise and forwards response.data without validating or projecting a response schema. Actual response consumers retain separate decoder obligations.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Captures the supplied internal endpoint, invokes existing xhr.get, awaits the original promise and forwards response.data without validating or projecting a response schema. Actual response consumers retain separate decoder obligations."
+  },
+  "safe_cex_venue_kucoin::spot_bodies::call": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "call",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::spot_bodies::SpotBodyOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "path",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Captures an existing spot executable by internal path before evaluating supplied arguments and forwards the original result/error; no data normalization.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Captures an existing spot executable by internal path before evaluating supplied arguments and forwards the original result/error; no data normalization."
+  },
+  "safe_cex_venue_kucoin::spot_bodies::member": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "member",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::spot_bodies::SpotBodyOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Captures an existing spot receiver member before evaluating its argument closure and invokes that original executable; key selects a method, not a protocol field schema.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Captures an existing spot receiver member before evaluating its argument closure and invokes that original executable; key selects a method, not a protocol field schema."
+  },
+  "safe_cex_venue_kucoin::spot_bodies::optional": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::spot_bodies::SpotBodyOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Selects existing undefined on a nullish receiver or forwards a property value, preserving VM handles and getter errors without typed decoding.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Selects existing undefined on a nullish receiver or forwards a property value, preserving VM handles and getter errors without typed decoding."
+  },
+  "safe_cex_venue_kucoin::spot_bodies::intrinsic": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "intrinsic",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::spot_bodies::SpotBodyOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Forwards an internal operation name and existing VM arguments to the supplied intrinsic capability unchanged. Each registered operation and concrete consumer has its own decoding obligation.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Forwards an internal operation name and existing VM arguments to the supplied intrinsic capability unchanged. Each registered operation and concrete consumer has its own decoding obligation."
+  },
+  "safe_cex_venue_kucoin::spot_bodies::loaded": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "loaded",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::spot_bodies::SpotBodyOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "fields",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs an outgoing loaded-state patch by spreading the current store.loaded handle then defining internal field names true; no inbound admission.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Constructs an outgoing loaded-state patch by spreading the current store.loaded handle then defining internal field names true; no inbound admission."
+  },
+  "safe_cex_venue_kucoin::spot_bodies::await_call": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "await_call",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::spot_bodies::SpotBodyOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "path",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Captures and invokes an existing no-argument spot method and awaits its original value/error; no typed response or grammar is introduced.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Captures and invokes an existing no-argument spot method and awaits its original value/error; no typed response or grammar is introduced."
+  },
+  "safe_cex_venue_kucoin::order_lifecycle::call": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "call",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::order_lifecycle::OrderLifecycleOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "path",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Selects an existing order lifecycle executable by internal path, evaluates the supplied arguments after capture, and forwards invocation unchanged.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Selects an existing order lifecycle executable by internal path, evaluates the supplied arguments after capture, and forwards invocation unchanged."
+  },
+  "safe_cex_venue_kucoin::order_lifecycle::member": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "member",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::order_lifecycle::OrderLifecycleOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Selects an existing lifecycle receiver member and invokes it after supplied argument evaluation, preserving original executable/receiver handling; no raw-to-typed projection.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Selects an existing lifecycle receiver member and invokes it after supplied argument evaluation, preserving original executable/receiver handling; no raw-to-typed projection."
+  },
+  "safe_cex_venue_kucoin::order_lifecycle::optional": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::order_lifecycle::OrderLifecycleOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Returns an existing undefined handle for a nullish lifecycle value or forwards the selected property/getter result; no typed model is admitted.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Returns an existing undefined handle for a nullish lifecycle value or forwards the selected property/getter result; no typed model is admitted."
+  },
+  "safe_cex_venue_kucoin::order_lifecycle::intrinsic": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "intrinsic",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_kucoin::order_lifecycle::OrderLifecycleOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Forwards an existing lifecycle operation name and VM values to the supplied intrinsic, with no local parsing or model construction. Actual registered operations remain independently inventoried.",
+    "evidence": "Individually read the exact maintained function body and its source boundary; this is an explicit role classification, not an executed native decoder claim. Forwards an existing lifecycle operation name and VM values to the supplied intrinsic, with no local parsing or model construction. Actual registered operations remain independently inventoried."
+  }
+}
