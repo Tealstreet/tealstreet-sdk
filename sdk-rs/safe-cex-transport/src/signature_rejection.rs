@@ -87,10 +87,16 @@ pub fn resend_on_signature_rejection(
     retry: &SignatureRetry,
     is_rejection: &IsSignatureRejection,
 ) -> Result<bool, RestFailure> {
-    if retry.has_retried()
-        || !is_rejection(&response_data(&execution.response))
-            .map_err(|cause| coercion_failure(cause, &execution.config))?
-    {
+    resend_on_rejected_data(&response_data(&execution.response), retry, is_rejection)
+        .map_err(|cause| coercion_failure(cause, &execution.config))
+}
+/// The same decision for a client that surfaces only the resolved `response.data`.
+pub fn resend_on_rejected_data(
+    data: &Value,
+    retry: &SignatureRetry,
+    is_rejection: &IsSignatureRejection,
+) -> Result<bool, JsCoercionError> {
+    if retry.has_retried() || !is_rejection(data)? {
         return Ok(false);
     }
     retry.stamp();

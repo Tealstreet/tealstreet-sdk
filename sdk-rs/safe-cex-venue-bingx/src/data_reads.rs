@@ -22,6 +22,16 @@ use std::{cell::Cell, rc::Rc};
 /// Configured HTTP capability; signing and double parsing remain upstream.
 pub trait ReadTransport {
     fn send(&self, request: RestRequest) -> ExchangeFuture<'_, JsNumberInput>;
+    /// The source stamps the request config; a client whose retry policy approves
+    /// signature rejections must share this one stamp with the response resend.
+    fn send_with_signature_retry(
+        &self,
+        request: RestRequest,
+        retry: &safe_cex_transport::signature_rejection::SignatureRetry,
+    ) -> ExchangeFuture<'_, JsNumberInput> {
+        let _ = retry;
+        self.send(request)
+    }
 }
 #[derive(Clone, Debug, Serialize)]
 pub struct RawTickers {
