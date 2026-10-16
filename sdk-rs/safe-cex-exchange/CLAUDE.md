@@ -931,10 +931,20 @@ than the venue allows. Request interceptors still run again to refresh signing.
 
 ## Native host (`native` feature)
 
+The JS socket constructor forwards protocols and connection tuning. Required
+upgrade headers refuse unsupported hosts before a dial. A retained header
+provider runs in each core-owned dial preparation; a thrown auth error prevents
+that attempt. Native reconnects call the venue's constructor path again, so the
+next attempt regenerates headers. The native host accepts the source's header
+wrapper selection as a plain authenticated socket; the core owns reconnects.
+Header-less requests for a host-managed reconnecting wrapper still refuse.
+`ws_options` tests compare actual source constructor inputs and verify two fresh
+upgrade headers at a real loopback server, failed preparation and host refusal.
+
 `native::native_runtime()` is the production `ExchangeRuntime` + `WsRuntime` on a
 tokio `LocalSet` over the direct transport; `NativeHttpHost` drives the adapter
 once. Sockets are plain (`enable_reconnecting` false): the core owns
-reconnection, and a `reconnecting` dial is refused rather than faked. The
+reconnection, and a header-less `reconnecting` dial is refused. The
 feature's dependencies are target-gated, so `--all-features` wasm builds stay
 I/O-free. Inherent `impl` blocks inside cfg-gated modules fail the parity
 indexer closed; native modules use free functions and trait impls only.

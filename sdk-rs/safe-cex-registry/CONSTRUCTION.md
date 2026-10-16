@@ -1,8 +1,8 @@
 # Rust venue construction through the registry
 
 Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, Coinbase (`coinbase`, `coinbasespot`),
-the Kraken family (`kraken`, `krakenspot`), `hyperliquid`, the Binance family (`binance`, `binancepm`,
+`bitgetusdc`), `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`), Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
+`hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`) and `polymarket`, 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
@@ -37,6 +37,12 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   - `blofin`, built with `BlofinNativeExchange::new` from a registry-built
     `BaseExchange` and `BlofinDependencies` (runtime, the common HTTP builder,
     optional externalPublicData provider, remote-signer account name).
+  - `bybit` and `bybitdemo`, built with `BybitExchange::create`. The host supplies
+    the wire, HTTP host, runtime clocks and external-data factory. Hosted signing
+    uses the shared signer bridge for both the source receiver and typed API
+    clients; account names and availability follow the same capability. Native
+    sockets start on the direct path. `tests/native_host_bybit.rs` verifies both
+    names over local HTTP, including HMAC bytes with empty local credentials.
   - `coinbase` and `coinbasespot`, one constructor around `CoinbaseExchange::new`.
     `CoinbaseDependencies` carries the shared HTTP/runtime hosts, signing cache,
     external-data factory and local-wall-time conversion. The native host retains
@@ -81,7 +87,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bybit`, `kucoin`, `mexc`, `lighter`
+follow-up PR. Expected next: `bybitspot`, `bybitinverse`, `hyrotrader`, `kucoin`, `mexc`, `lighter`
 and `woo`.
 
 Each follow-up does four things:
@@ -209,6 +215,24 @@ separate from the venue's local-key signing interceptor.
 trait methods over local reqwest HTTP, verifies signed action/nonce bytes on the
 server, and checks both network origins, proxy preservation, info bypass, repeat
 query encoding and limiter identity across separate account hosts.
+
+## Bybit registry proof
+
+`tests/native_host_bybit.rs` constructs Bybit and Demo through the production
+native host and calls `get_account` over loopback HTTP. Each name is exercised
+with local credentials and with a hosted signer plus account name and empty local
+credentials. The server independently verifies the timestamp, API key, receive
+window and generated `requestId` query bytes against HMAC-SHA256. Dropping either
+table entry makes construction fail; dropping typed signer forwarding makes the
+secretless test fail. All three controls were compiled, observed failing, and
+restored before the passing two-test run. The existing 13 registry membership/
+construction tests and 20 Bybit binding tests also pass (one live oracle ignored).
+
+The untouched-origin witness records the terminal request before any URL rewrite.
+It proves Bybit mainnet selects `api.bybit.com`, Demo mainnet selects
+`api-demo.bybit.com`, and both testnet variants select `api-testnet.bybit.com`.
+The old constructor failed specifically on Demo mainnet. Demo's source receiver
+and socket connection options derive the same subclass flag by name.
 
 KuCoin futures, KuCoin Spot and MEXC use their existing concrete venue bindings.
 The native host supplies KuCoin's per-options HTTP inputs, shared virtual clock
