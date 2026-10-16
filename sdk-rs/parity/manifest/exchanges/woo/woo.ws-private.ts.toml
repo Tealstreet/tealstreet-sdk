@@ -40,7 +40,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-woo/src/legacy_socket_control.rs::private_subscribe"
 status = "ported"
-note = "Preserves disposal guard, logged executionreport and algoexecutionreportv2 frames with topic-before-event property order, then private ping; no readiness gate is invented in the method. Native method body over compatible Host primitives, with pure construction and resolved call tokens. Exact-source socket oracle/native assertions cover finite control cases, not completed socket-class/runtime registration; class/data-handler rows remain separately pending."
+note = "Preserves disposal guard, logged executionreport and algoexecutionreportv2 frames with topic-before-event property order, then private ping; no readiness gate is invented in the method. Native method body over compatible Host primitives, with pure construction and resolved call tokens. Exact-source socket oracle/native assertions cover finite control cases, not completed socket-class/runtime registration; class/data-handler rows remain separately pending. Renamed Rust target: safe-cex-venue-woo/src/legacy_socket_control.rs::private_subscribe."
 
 [[symbol]]
 ts = "WooPrivateWebscoket.ping"

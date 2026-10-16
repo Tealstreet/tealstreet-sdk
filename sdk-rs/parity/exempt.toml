@@ -7220,3 +7220,99 @@ reason = "Rust-only boxed future/result carrier for host asynchronous loader ope
 [[exempt]]
 rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeLoopFn"
 reason = "Rust-only owned callback carrier for the host loop scheduler's anonymous asynchronous function argument; no standalone TypeScript declaration. Loop behavior remains in its mapped operations. Accepted-set alias identity and raw-construction probes remain mandatory. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_data_reads.rs::Binding"
+reason = "C3: dataless resolved-callee token passed to legacy_data_reads Host::prepare so the host can return the captured imported helper or bound method (normalizeSymbol, reverseSymbol, setInterval, emitter, ...) used by the mapped startFundingRatesRefresh, refreshFundingRates, fetchMarketIocTouchPrice, fetchOHLCV, listenOHLCV, listenOrderBook, fetchPositionMetadata and fetchPositions bodies; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_data_reads.rs::Transport"
+reason = "C3: dataless selector between the main and proxy xhr clients for the Binding::Get host call in the mapped refreshFundingRates, fetchMarketIocTouchPrice and fetchOHLCV bodies; mirrors this.xhr vs this.proxyXhr property choice, no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_fill_recovery.rs::Binding"
+reason = "C3: dataless resolved-callee token passed to legacy_fill_recovery Host::prepare for the captured imported helpers and bound methods used by the mapped scheduleFillPositionRefresh, refreshPositionForSymbolFromFill, applyOptimisticOneWayPositionFromFill, handleFillForPositionSync, dispose, handleExecutionReport and handleAlgoExecutionReport bodies; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_fill_recovery.rs::Map"
+reason = "C3: dataless handle naming which private class field (_fillPositionRefreshTimers, _fillPositionRefreshInFlight, _fillExpectedPositionSignatureBySymbol) a Host map_get/map_has/map_set/map_delete/map_clear call targets in the mapped fill-recovery and dispose bodies; the fields have no manifest rows and the token carries no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_market_reads.rs::Call"
+reason = "C3: dataless resolved-callee token passed to legacy_market_reads Host::prepare for the captured bound methods and error constructors used by the mapped getAccount, fetchBalance, validateAccount, fetchTickersRaw, fetchTickers and fetchPositionsAndBalance bodies; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_market_reads.rs::Transport"
+reason = "C3: dataless selector between the main, primary and secondary xhr clients for Host::get in the mapped validateAccount, fetchMarkets and fetchTickersRaw bodies; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_order_control.rs::Call"
+reason = "C3: dataless token naming the bound fetchLimitOrders/fetchAlgoOrders/getPositionMode calls the mapped fetchOrders and getPositionSideForOrder bodies await through Host::call; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_order_control.rs::Operation"
+reason = "C3: dataless resolved-callee token passed to legacy_order_control Host::prepare for the captured xhr.delete, mappers, isAlgoOrder, placeOrder, emitter, parseInt, reverseSymbol and order-update calls used by the mapped fetchOrders, cancelOrders, cancelAlgoOrder and getPositionSideForOrder bodies; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_order_control.rs::Options"
+reason = "C3: dataless selector for the request-options shape (none, { params }, { data }) a prepared call is invoked with in the mapped cancelOrders, cancelAlgoOrder and getPositionSideForOrder bodies; object literals in TypeScript, no declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_order_writes.rs::Binding"
+reason = "C3: dataless resolved-callee token passed to legacy_order_writes Host::prepare for the captured xhr verbs, imported pricing/symbol helpers and bound order methods used by the mapped updateOrder, updateAlgoOrder, placeOrder, placeAlgoOrder, placeStopMarket, placeTrailingStopLossOrder, placePositionalAlgoOrder, fetchHistoricalOrders and fetchOpenPositions bodies; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_socket_control.rs::Callee"
+reason = "C3: dataless resolved-callee token passed to legacy_socket_control Host::prepare for the socket constructor, ws.send, emitter error and execution-report handler calls used by the mapped connectAndSubscribe, onOpen and onMessage bodies; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_socket_control.rs::Channel"
+reason = "C3: dataless public/private discriminator for Host::ping and Host::subscribe so the shared WooPublicWebsocket and WooPrivateWebscoket connectAndSubscribe/onOpen/subscribe/onMessage bodies reach the right socket class; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_socket_control.rs::Listener"
+reason = "C3: dataless handle for the this.onOpen/this.onMessage/this.onClose method references the mapped connectAndSubscribe body registers through Host::add_listener in open/message/close order; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_metadata.rs::JsString"
+reason = "C3: Vec<u16> UTF-16 string alias shared by every legacy_* Host contract so JS strings, including lone surrogates, cross the boundary unchanged; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_metadata.rs::Task"
+reason = "C3: boxed-future alias standing in for the Promise returned by every mapped async legacy_* method body; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_metadata.rs::Field"
+reason = "C3: text-or-number value carrier for the object-literal params/body entries the mapped setLeverage, changePositionMode and fetchPositionMetadataForSymbol bodies pass to Host::get/post; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/legacy_metadata.rs::Fields"
+reason = "C3: ordered (key, Field) list alias carrying those object-literal request params/bodies, preserving source key order; no TypeScript declaration and no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::Value"
+reason = "Bodyless required member of the exempted ShadowErrorReference structural-Error constraint (C3); mirrors the ECMAScript built-in Error's name/message/stack/cause or the referent handle, not a WOO declaration, and has no default body or behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::Failure"
+reason = "Bodyless required member of the exempted ShadowErrorReference structural-Error constraint (C3); mirrors the ECMAScript built-in Error's name/message/stack/cause or the referent handle, not a WOO declaration, and has no default body or behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::native"
+reason = "Bodyless required member of the exempted ShadowErrorReference structural-Error constraint (C3); mirrors the ECMAScript built-in Error's name/message/stack/cause or the referent handle, not a WOO declaration, and has no default body or behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::name"
+reason = "Bodyless required member of the exempted ShadowErrorReference structural-Error constraint (C3); mirrors the ECMAScript built-in Error's name/message/stack/cause or the referent handle, not a WOO declaration, and has no default body or behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::message"
+reason = "Bodyless required member of the exempted ShadowErrorReference structural-Error constraint (C3); mirrors the ECMAScript built-in Error's name/message/stack/cause or the referent handle, not a WOO declaration, and has no default body or behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::stack"
+reason = "Bodyless required member of the exempted ShadowErrorReference structural-Error constraint (C3); mirrors the ECMAScript built-in Error's name/message/stack/cause or the referent handle, not a WOO declaration, and has no default body or behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-woo/src/shadow_compare.rs::ShadowErrorReference::cause"
+reason = "Bodyless required member of the exempted ShadowErrorReference structural-Error constraint (C3); mirrors the ECMAScript built-in Error's name/message/stack/cause or the referent handle, not a WOO declaration, and has no default body or behavior."
