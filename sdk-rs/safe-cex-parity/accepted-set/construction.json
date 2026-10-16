@@ -362,5 +362,17 @@
       "core::clone::Clone"
     ],
     "reason": "Reviewed library.rs::Decimal: derived Clone copies its owned BigInt coefficient and i64 scale for reusable bignumber arithmetic. The private fields carry numeric value data, no consumed nonce, validation witness or task authority. This classifies duplication only; parse/format/arithmetic behavior retains its separate inventory and tests."
+  },
+  "safe_cex_venue_grvt::binding::private::Key": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed private.rs::Key is a retained Js value used with SameValueZero equality; derived Clone copies that Js carrier, retaining object identity rather than issuing a token or allocating a new protocol resource. accepted_clone_tests::key_clone_retains_value_identity_and_same_value_zero executes the actual clone, shared native field mutation, NaN and signed-zero equality. Decoder/API acceptance remains separately gated."
+  },
+  "safe_cex_venue_grvt::binding::runtime::Host": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed runtime.rs::Host wraps Scope<Extra>; its Clone retains the same Rc<ScopeShared<Extra>> and Js receiver rather than initializing a second exchange, socket or one-use capability. accepted_clone_tests::host_clone_retains_shared_scope_and_receiver_identity executes actual Host::clone, native Rc/receiver identity, signed-zero field sharing and shared nonce-cache visibility. Host raw APIs and their effects remain separately gated."
   }
 }
