@@ -343,6 +343,7 @@ fn native_spot_positions_preserve_nonfinite_fields_and_identity() {
         info: None,
         extra: None,
         last_update: None,
+        option: None,
     }]);
     let forwarded = input.clone();
     let returned = run(fetch_binance_spot_positions(|| {

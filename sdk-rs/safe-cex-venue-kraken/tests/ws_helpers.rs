@@ -53,6 +53,7 @@ fn market(symbol: &str, active: bool) -> Market {
                 min: 1.0,
                 max: 20.0,
             },
+            price: None,
         },
         contract_size: None,
         is_expiring: None,
@@ -63,6 +64,7 @@ fn market(symbol: &str, active: bool) -> Market {
         taker_fee: None,
         maker_fee: None,
         info: None,
+        option: None,
     }
 }
 

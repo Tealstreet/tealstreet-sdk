@@ -1,0 +1,259 @@
+//! tealstreetTunnel on the production native host: Binance REST goes over the HOW
+//! tunnel (rpc.http frames) to a local tradetunnel, authenticated with the account's
+//! proxy token, and never reaches the venue origin directly.
+#![cfg(not(target_arch = "wasm32"))]
+mod support;
+use futures_util::{SinkExt, StreamExt};
+use hmac::{Hmac, Mac};
+use safe_cex_exchange::native::native_tealstreet_runtime_with;
+use safe_cex_transport::{
+    TransportFuture,
+    native::NativeTunnelHost,
+    socket::{SocketCapabilities, TunnelDialOptions, TunnelHost, TunnelSocket, TunnelTask},
+};
+use serde_json::{Value, json};
+use std::{cell::RefCell, collections::HashMap, future::Future, pin::Pin, rc::Rc};
+use support::*;
+use tokio::net::TcpListener;
+use tokio_tungstenite::tungstenite::Message;
+
+/// An unexpired proxy JWT (exp 2100-01-01); the tunnel checks expiry, not the signature.
+const TOKEN: &str =
+    "eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJzdWIiOiJhY2N0LTEiLCJleHAiOjQxMDI0NDQ4MDB9.c2ln";
+
+/// Production tunnel dials, pointed at the local tradetunnel.
+struct LocalTunnel {
+    inner: NativeTunnelHost,
+    origin: String,
+}
+impl TunnelHost for LocalTunnel {
+    fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn TunnelTask> {
+        self.inner.spawn_local(future)
+    }
+    fn capabilities(&self) -> SocketCapabilities {
+        self.inner.capabilities()
+    }
+    fn now_ms(&self) -> u64 {
+        self.inner.now_ms()
+    }
+    fn sleep_until(&self, deadline_ms: u64) -> TransportFuture<'static, ()> {
+        self.inner.sleep_until(deadline_ms)
+    }
+    fn connect(
+        &self,
+        url: String,
+        options: TunnelDialOptions,
+    ) -> TransportFuture<'static, Rc<dyn TunnelSocket>> {
+        self.inner.connect(rewrite(&url, &self.origin), options)
+    }
+    fn proxy_token(&self) -> TransportFuture<'_, String> {
+        self.inner.proxy_token()
+    }
+    fn is_token_expired(&self, token: &str) -> bool {
+        self.inner.is_token_expired(token)
+    }
+    fn sync_server_time(&self, server_time: u64) {
+        self.inner.sync_server_time(server_time)
+    }
+}
+
+fn encode(value: &str) -> String {
+    value
+        .bytes()
+        .map(|b| match b {
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'_' | b'.' | b'~' => {
+                (b as char).to_string()
+            }
+            _ => format!("%{b:02X}"),
+        })
+        .collect()
+}
+fn query_of(params: &serde_json::Map<String, Value>) -> String {
+    params
+        .iter()
+        .map(|(key, value)| {
+            let text = match value {
+                Value::String(text) => text.clone(),
+                other => other.to_string(),
+            };
+            format!("{}={}", encode(key), encode(&text))
+        })
+        .collect::<Vec<_>>()
+        .join("&")
+}
+
+#[derive(Default)]
+struct Tunnel {
+    tokens: RefCell<Vec<String>>,
+    frames: RefCell<Vec<Value>>,
+    seen: RefCell<Vec<Seen>>,
+}
+/// A local tradetunnel: serverTime on connect, rpc.auth accepted, rpc.http answered
+/// from the shared route table with the venue response as the raw or JSON body.
+async fn serve_tunnel(listener: TcpListener, handler: Handler, tunnel: Rc<Tunnel>) {
+    loop {
+        let Ok((stream, _)) = listener.accept().await else {
+            return;
+        };
+        let (handler, tunnel) = (handler.clone(), tunnel.clone());
+        tokio::task::spawn_local(async move {
+            let Ok(socket) = tokio_tungstenite::accept_async(stream).await else {
+                return;
+            };
+            let (mut sink, mut source) = socket.split();
+            let time = json!({"type":"serverTime","serverTime":1_700_000_000_000u64});
+            if sink.send(Message::text(time.to_string())).await.is_err() {
+                return;
+            }
+            while let Some(Ok(message)) = source.next().await {
+                let Message::Text(text) = message else {
+                    continue;
+                };
+                let frame: Value = serde_json::from_str(&text).unwrap_or_default();
+                let reply = match frame["type"].as_str() {
+                    Some("rpc.auth") => {
+                        tunnel
+                            .tokens
+                            .borrow_mut()
+                            .push(frame["token"].as_str().unwrap_or_default().into());
+                        json!({"type":"rpc.auth","status":"success"})
+                    }
+                    Some("rpc.http") => {
+                        tunnel.frames.borrow_mut().push(frame.clone());
+                        let arg = &frame["arg"];
+                        let url = arg["url"].as_str().unwrap_or_default();
+                        let path = url
+                            .split_once("://")
+                            .and_then(|(_, rest)| rest.find('/').map(|i| rest[i..].to_owned()))
+                            .unwrap_or_default();
+                        let request = Seen {
+                            method: arg["method"].as_str().unwrap_or_default().into(),
+                            path,
+                            query: query_of(arg["params"].as_object().unwrap()),
+                            headers: arg["headers"]
+                                .as_object()
+                                .unwrap()
+                                .iter()
+                                .map(|(k, v)| {
+                                    (k.to_ascii_lowercase(), v.as_str().unwrap_or("").into())
+                                })
+                                .collect::<HashMap<_, _>>(),
+                        };
+                        let answer = handler(&request);
+                        tunnel.seen.borrow_mut().push(request);
+                        let (status, body) = match answer {
+                            Some(body) => (200, body),
+                            None => (404, json!({"code":-1,"msg":"no route"})),
+                        };
+                        let mut data = json!({"config":{"url":url},"status":status,
+                            "status_text":"OK","headers":{"content-type":"application/json"}});
+                        if frame["format"] == "raw" {
+                            data["data_raw"] = json!(body.to_string());
+                        } else {
+                            data["data"] = body;
+                        }
+                        json!({"type":"rpc.http","nonce":frame["nonce"],"data":data})
+                    }
+                    _ => continue,
+                };
+                if sink.send(Message::text(reply.to_string())).await.is_err() {
+                    return;
+                }
+            }
+        });
+    }
+}
+
+#[test]
+fn binance_rest_runs_over_the_tealstreet_tunnel_with_the_proxy_token() {
+    run_local(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("ws://{}", listener.local_addr().unwrap());
+        let tunnel = Rc::new(Tunnel::default());
+        tokio::task::spawn_local(serve_tunnel(
+            listener,
+            handler(Rc::new(|_| None)),
+            tunnel.clone(),
+        ));
+        let runtime = native_tealstreet_runtime_with(
+            Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) })),
+            Rc::new(LocalTunnel {
+                inner: NativeTunnelHost,
+                origin,
+            }),
+        );
+        let Harness { exchange, seen, .. } = binance_harness_over(
+            Rc::new(|_| None),
+            json!({"key":"native-key","secret":SECRET,"tealstreetTunnel":true}),
+            None,
+            runtime,
+        )
+        .await;
+
+        exchange.start().await.expect("start over the HOW tunnel");
+        let order: safe_cex_types::PlaceOrderOpts = serde_json::from_value(
+            json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":10}),
+        )
+        .unwrap();
+        let ids = exchange
+            .base()
+            .place_order(exchange.as_ref(), order)
+            .await
+            .expect("placeOrder over the HOW tunnel");
+        assert_eq!(ids, vec!["9001"]);
+
+        assert!(
+            seen.borrow().is_empty(),
+            "no REST request reached the venue origin directly: {:?}",
+            seen.borrow()
+        );
+        let tunneled = tunnel.seen.borrow();
+        for route in [
+            "GET /fapi/v1/exchangeInfo",
+            "POST /fapi/v1/listenKey",
+            "POST /fapi/v1/order",
+        ] {
+            assert!(
+                tunneled
+                    .iter()
+                    .any(|s| format!("{} {}", s.method, s.path) == route),
+                "{route} went over the tunnel"
+            );
+        }
+        assert!(!tunnel.tokens.borrow().is_empty());
+        assert!(
+            tunnel.tokens.borrow().iter().all(|t| t == TOKEN),
+            "the tunnel authenticated with the account's proxy token"
+        );
+        assert!(
+            tunnel.frames.borrow().iter().all(|f| f["format"] == "raw"),
+            "futures clients take the bigInt (raw) tunnel adapter"
+        );
+
+        let placed = tunneled
+            .iter()
+            .rev()
+            .find(|s| s.path == "/fapi/v1/order")
+            .cloned()
+            .unwrap();
+        assert_eq!(
+            placed.headers.get("x-mbx-apikey").map(String::as_str),
+            Some("native-key")
+        );
+        let signature = query_value(&placed.query, "signature").expect("signed params");
+        let signed = placed.query.split("&signature=").next().unwrap();
+        let mut mac = Hmac::<sha2::Sha256>::new_from_slice(SECRET.as_bytes()).unwrap();
+        mac.update(signed.as_bytes());
+        let expected: String = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(
+            signature, expected,
+            "tunnel-verified HMAC over the params sent"
+        );
+        exchange.dispose().expect("dispose");
+    });
+}

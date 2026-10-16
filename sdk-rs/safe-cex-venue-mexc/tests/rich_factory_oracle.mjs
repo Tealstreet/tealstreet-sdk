@@ -10,13 +10,14 @@ const retryModule=require('axios-retry');const retry=retryModule.default??retryM
 const qs=require('qs');
 const filename=root+'packages/safe-cex/src/exchanges/mexc/mexc.api.ts';
 const source=fs.readFileSync(filename,'utf8');const ast=ts.createSourceFile(filename,source,ts.ScriptTarget.Latest,true);
-const names=new Set(['createAPI','serializeMexcParams','signMexcRequest','isMexcPublicEndpoint','normalizeRequestData','getQueryString']);
+const names=new Set(['createAPI','serializeMexcParams','signMexcRequest','isMexcPublicEndpoint','normalizeRequestData','getQueryString','isMexcSignatureRejection']);
 const selected=ast.statements.filter(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>names.has(d.name.getText(ast))));
-assert.equal(selected.length,6,'SOURCE independent six real factory/helper declarations');
+assert.equal(selected.length,7,'SOURCE independent seven real factory/helper declarations');
 const code=ts.transpileModule(selected.map(n=>n.getText(ast)).join('\n'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
 const types=load('packages/safe-cex/src/exchanges/mexc/mexc.types.ts');
 const {markSkipRemoteSigning}=load('packages/safe-cex/src/remoteSigningAdapter.ts');
 const {networkErrorOnRead}=load('packages/safe-cex/src/utils/retryReadsOnly.ts');
+const {resendOnSignatureRejection,signatureRejectedResponse}=load('packages/safe-cex/src/utils/signatureRejection.ts');
 const {bigIntAsStringJsonParse}=load('packages/json-parse/src/jsonParse.ts');
 const bits=value=>{if(Number.isNaN(value))return'7ff8000000000000';const b=Buffer.alloc(8);b.writeDoubleBE(value);return b.toString('hex');};
 const observe=value=>typeof value==='number'?{number:bits(value)}:Array.isArray(value)?value.map(observe):value&&typeof value==='object'?Object.fromEntries(Object.entries(value).map(([k,v])=>[k,observe(v)])):value;
@@ -41,7 +42,7 @@ const outputs=[];const originalNow=Date.now;const originalSetTimeout=globalThis.
 Date.now=()=>{dateCalls++;return 1791800000123+(active?.attempt??0);};
 globalThis.setTimeout=(callback,delay,...args)=>{timerCalls++;timerDelays.push(delay);return originalSetTimeout(callback,delay,...args);};
 try{
- const context={exports:{},...types,AxiosHeaders:axios.AxiosHeaders,retry,qs,networkErrorOnRead,bigIntAsStringJsonParse,markSkipRemoteSigning,
+ const context={exports:{},...types,AxiosHeaders:axios.AxiosHeaders,retry,qs,networkErrorOnRead,resendOnSignatureRejection,signatureRejectedResponse,bigIntAsStringJsonParse,markSkipRemoteSigning,
   virtualClock:{getCurrentTimeMs(){clocks++;active.clock++;return 1791800000123+active.attempt;}},
   createHmac(...args){const hash=realHmac(...args);const update=hash.update.bind(hash);hash.update=value=>{hmacCalls++;active.preimages.push(value);return update(value);};return hash;},
   // Declared shared-factory child boundary. Actual MEXC body, Axios, headers,

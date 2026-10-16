@@ -2,9 +2,12 @@
 //! interceptors (FIFO), axios-retry and axios-rate-limit spacing.
 use super::{
     promise::{JsFuture, Promise, await_js},
-    value::{Js, Thrown, arg},
+    value::{Js, Thrown, arg, from_json, to_json},
 };
 use crate::runtime::ExchangeRuntime;
+use safe_cex_transport::{
+    RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
+};
 use std::{cell::RefCell, rc::Rc};
 
 /// What a client needs from its host: the runtime owning launched requests and
@@ -27,8 +30,9 @@ struct ClientState {
     responses: Vec<Js>,
     retries: u32,
     retry_condition: Option<Js>,
-    max_rps: Option<f64>,
-    sent_at: Vec<f64>,
+    /// axios-rate-limit windows `(maxRequests, perMilliseconds, sent)`; a chained
+    /// limiter adds a window and a request waits until every window has room.
+    windows: Vec<(f64, f64, Vec<f64>)>,
 }
 
 /// safeCexAxiosCreate(config): a client object whose verbs run the full pipeline.
@@ -116,7 +120,20 @@ pub fn create(host: Host, defaults: Js) -> Js {
     let _ = client.define(
         "__configureRateLimit",
         Js::function("__configureRateLimit", move |_, a| {
-            limit_state.borrow_mut().max_rps = Some(arg(&a, 0).get("maxRPS")?.to_number()?);
+            let opts = arg(&a, 0);
+            let rps = opts.get("maxRPS")?;
+            let window = if rps.is_undefined() {
+                (
+                    opts.get("maxRequests")?.to_number()?,
+                    opts.get("perMilliseconds")?.to_number()?,
+                )
+            } else {
+                (rps.to_number()?, 1000.0)
+            };
+            limit_state
+                .borrow_mut()
+                .windows
+                .push((window.0, window.1, vec![]));
             Ok(Js::Undefined)
         }),
     );
@@ -211,21 +228,28 @@ async fn send_once(
 }
 
 async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) {
-    let Some(max) = state.borrow().max_rps.filter(|m| *m > 0.0) else {
-        return;
-    };
     loop {
         let runtime = host.runtime();
         let now = runtime.monotonic_now_ms();
         let wait = {
             let mut s = state.borrow_mut();
-            s.sent_at.retain(|t| now - t < 1000.0);
-            if (s.sent_at.len() as f64) < max {
-                s.sent_at.push(now);
-                None
-            } else {
-                Some(1000.0 - (now - s.sent_at[0]))
+            let mut wait: Option<f64> = None;
+            for (max, per, sent) in s.windows.iter_mut() {
+                if *max <= 0.0 {
+                    continue;
+                }
+                sent.retain(|t| now - t < *per);
+                if sent.len() as f64 >= *max {
+                    let ms = *per - (now - sent[0]);
+                    wait = Some(wait.map_or(ms, |w| w.max(ms)));
+                }
             }
+            if wait.is_none() {
+                for (_, _, sent) in s.windows.iter_mut() {
+                    sent.push(now);
+                }
+            }
+            wait
         };
         match wait {
             None => return,
@@ -233,5 +257,263 @@ async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) {
                 let _ = runtime.sleep(ms.max(1.0) as u64).await;
             }
         }
+    }
+}
+
+fn optional(v: &Js, key: &str) -> Result<Js, Thrown> {
+    if v.is_nullish() {
+        Ok(Js::Undefined)
+    } else {
+        v.get(key)
+    }
+}
+
+fn rest_response(response: &Js) -> Result<RestResponse, Thrown> {
+    let status = response.get("status")?.to_number().unwrap_or(200.0);
+    Ok(RestResponse {
+        status: if status.is_finite() { status as u16 } else { 0 },
+        reason: None,
+        headers: Default::default(),
+        body: RestResponseBody::Untransformed(to_json(&response.get("data")?)?),
+    })
+}
+
+/// A JS Axios client as a typed `RestAdapter`: requests run the client's whole
+/// pipeline (interceptors, signing, retry). A rejection keeps its JS value so
+/// [`JsRestAdapter::thrown`] can rethrow it unchanged.
+pub struct JsRestAdapter {
+    xhr: Js,
+    rejection: RefCell<Option<Thrown>>,
+}
+
+impl JsRestAdapter {
+    pub fn new(xhr: Js) -> Self {
+        Self {
+            xhr,
+            rejection: RefCell::default(),
+        }
+    }
+    async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
+        let config = Js::object(
+            request
+                .params
+                .iter()
+                .map(|params| ("params", from_json(params)))
+                .collect(),
+        );
+        let url = Js::str(&request.url);
+        // Axios normalizes the verb; RestRequest callers send "GET" as often as "get".
+        let method = request.method.to_lowercase();
+        let pending = if method == "post" {
+            let data = match &request.body {
+                Some(body) => {
+                    let bytes = body
+                        .wire_bytes()
+                        .map_err(|e| Thrown::error("Error", &e.to_string()))?;
+                    let text = String::from_utf8_lossy(&bytes);
+                    from_json(
+                        &serde_json::from_str(&text)
+                            .unwrap_or(serde_json::Value::String(text.into_owned())),
+                    )
+                }
+                None => Js::Undefined,
+            };
+            self.xhr.call_method("post", vec![url, data, config])?
+        } else {
+            self.xhr.call_method(&method, vec![url, config])?
+        };
+        rest_response(&await_js(pending).await?)
+    }
+    /// The body's `RestFailure` as JS: this adapter's own rejection as-is, else a host Error.
+    pub fn thrown(&self, failure: RestFailure) -> Thrown {
+        if let Some(original) = self.rejection.borrow_mut().take() {
+            return original;
+        }
+        let name = failure
+            .context
+            .as_deref()
+            .and_then(|c| c.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Error")
+            .to_owned();
+        Thrown::error(&name, &failure.message)
+    }
+}
+
+impl RestAdapter for JsRestAdapter {
+    fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+        Box::pin(async move {
+            match self.send(&request).await {
+                Ok(response) => Ok(response),
+                Err(thrown) => {
+                    let response = optional(&thrown.value, "response")
+                        .ok()
+                        .filter(|r| !r.is_nullish())
+                        .and_then(|r| rest_response(&r).ok());
+                    let code = optional(&thrown.value, "code")
+                        .ok()
+                        .filter(Js::is_string)
+                        .map(|c| String::from_utf16_lossy(&c.to_js_string().unwrap_or_default()));
+                    let failure = RestFailure {
+                        code,
+                        message: thrown.message(),
+                        transport_error: None,
+                        response: response.map(Box::new),
+                        request: Box::new(request),
+                        context: None,
+                    };
+                    *self.rejection.borrow_mut() = Some(thrown);
+                    Err(failure)
+                }
+            }
+        })
+    }
+}
+
+/// The production `JsHttpHost`: the post-interceptor config becomes a
+/// `RestRequest` for a terminal adapter. Status handling stays with the client.
+struct RestHttpHost {
+    runtime: Rc<dyn ExchangeRuntime>,
+    adapter: std::sync::Arc<dyn RestAdapter>,
+}
+
+pub fn rest_http_host(
+    runtime: Rc<dyn ExchangeRuntime>,
+    adapter: std::sync::Arc<dyn RestAdapter>,
+) -> Rc<dyn JsHttpHost> {
+    Rc::new(RestHttpHost { runtime, adapter })
+}
+
+fn optional_text(config: &Js, key: &str) -> Result<Option<String>, Thrown> {
+    let value = config.get(key)?;
+    Ok(if value.is_nullish() {
+        None
+    } else {
+        Some(String::from_utf16_lossy(&value.to_js_string()?))
+    })
+}
+
+fn rest_request(config: &Js) -> Result<RestRequest, Thrown> {
+    let mut headers = indexmap::IndexMap::new();
+    let config_headers = config.get("headers")?;
+    if !config_headers.is_nullish() {
+        for (name, value) in config_headers.own_entries()? {
+            if !value.is_nullish() {
+                headers.insert(
+                    String::from_utf16_lossy(&name),
+                    String::from_utf16_lossy(&value.to_js_string()?),
+                );
+            }
+        }
+    }
+    let data = config.get("data")?;
+    let body = match &data {
+        Js::Undefined | Js::Null => None,
+        Js::String(text) => Some(RestBody::Encoded(
+            String::from_utf16_lossy(text).into_bytes(),
+        )),
+        other => Some(RestBody::Untransformed(to_json(other)?)),
+    };
+    let mut url = optional_text(config, "url")?.unwrap_or_default();
+    let mut params = config.get("params")?;
+    // Axios: a configured paramsSerializer (function or `{ serialize }`) owns the query.
+    let serializer = config.get("paramsSerializer")?;
+    let serialize = if serializer.is_callable() {
+        serializer
+    } else if serializer.is_object() {
+        super::scope::bound_member(&serializer, "serialize")?
+    } else {
+        Js::Undefined
+    };
+    if serialize.is_callable() && !params.is_nullish() {
+        let query = serialize.call(Js::Undefined, vec![params])?;
+        let query = String::from_utf16_lossy(&query.to_js_string()?);
+        if !query.is_empty() {
+            if let Some(hash) = url.find('#') {
+                url.truncate(hash);
+            }
+            url.push(if url.contains('?') { '&' } else { '?' });
+            url.push_str(&query);
+        }
+        params = Js::Undefined;
+    }
+    let timeout = config.get("timeout")?;
+    Ok(RestRequest {
+        method: optional_text(config, "method")?
+            .unwrap_or_else(|| "get".into())
+            .to_lowercase(),
+        url,
+        base_url: optional_text(config, "baseURL")?,
+        headers,
+        body,
+        timeout_ms: timeout
+            .as_f64()
+            .filter(|ms| ms.is_finite() && *ms > 0.0)
+            .map(|ms| ms as i64),
+        params: if params.is_nullish() {
+            None
+        } else {
+            Some(to_json(&params)?)
+        },
+        ..Default::default()
+    })
+}
+
+/// Axios' default transformResponse: JSON text parses, anything else stays text.
+fn response_data(body: RestResponseBody) -> Js {
+    match body {
+        RestResponseBody::Encoded(bytes) => {
+            let text = String::from_utf8_lossy(&bytes).into_owned();
+            serde_json::from_str(&text).map_or_else(|_| Js::str(&text), |v| from_json(&v))
+        }
+        RestResponseBody::Untransformed(value) | RestResponseBody::Transformed(value) => {
+            from_json(&value)
+        }
+    }
+}
+
+fn js_response(response: RestResponse, config: Js) -> Js {
+    let headers = Js::object(vec![]);
+    for (name, value) in &response.headers {
+        let _ = headers.define(name, Js::str(value));
+    }
+    Js::object(vec![
+        ("data", response_data(response.body)),
+        ("status", Js::Number(f64::from(response.status))),
+        (
+            "statusText",
+            Js::str(response.reason.as_deref().unwrap_or_default()),
+        ),
+        ("headers", headers),
+        ("config", config),
+    ])
+}
+
+impl JsHttpHost for RestHttpHost {
+    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+        self.runtime.clone()
+    }
+    fn send(&self, config: Js) -> JsFuture<'static> {
+        let adapter = self.adapter.clone();
+        Box::pin(async move {
+            let request = rest_request(&config)?;
+            match adapter.execute(request).await {
+                Ok(response) => Ok(js_response(response, config)),
+                // A status failure still carries the response; the client classifies it.
+                Err(RestFailure {
+                    response: Some(response),
+                    ..
+                }) => Ok(js_response(*response, config)),
+                Err(failure) => {
+                    let error = super::value::error_object("AxiosError", &failure.message);
+                    if let Some(code) = &failure.code {
+                        error.define("code", Js::str(code))?;
+                    }
+                    error.define("config", config)?;
+                    error.define("isAxiosError", Js::Bool(true))?;
+                    Err(Thrown::new(error))
+                }
+            }
+        })
     }
 }

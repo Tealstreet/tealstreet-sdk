@@ -68,7 +68,8 @@ constructors, free-function decoder candidates and custom trait methods, even
 without Deserialize. Raw-input functions remain candidates when they return unit
 and mutate an output argument. Generic bounds and local aliases participate in
 discovery. Unsupported trait receivers and uninstantiated decoder defaults fail
-closed. Owner-local compiler trait probes cover
+closed unless `../accepted-set/receiver-traits.json` reviews them against a
+whole-source pin (`non-decoder` or `delegated` only). `PatchSource` counts as raw input. Owner-local compiler trait probes cover
 block-local declarations rustdoc omits. Nested functions and local Visitor/Seed
 helpers require explicit whole-source fingerprints; decoder helpers also name
 an inventoried production decoder whose probes execute. Deserialize decoder helpers additionally require direct input/output witnesses
@@ -78,8 +79,10 @@ These classifications are not independent runtime proof. Unknown local custom tr
 to module scope for concrete API classification; local unions/generics and
 unknown procedural expansion fail closed. Function-local `macro_rules!`
 definitions and their invocations are ignored by public-surface discovery
-because lexical block scope makes them unnameable outside that body; hoisting the
-same macro to module scope fails closed by scope. Macro binding guards still
+because lexical block scope makes them unnameable outside that body. A
+module-scope `macro_rules!` is accepted only when every same-name definition in
+the target is unconditional and every arm transcribes without a declaration
+keyword or `item` fragment; each invocation's arguments get the same check. Macro binding guards still
 reject local shadowing of trusted expression/derive/attribute names and
 namespaces. A separate
 source module walk rejects doc-dependent cfg predicates before rustdoc, including

@@ -610,11 +610,21 @@ fn position_notification_error_belongs_to_origin_not_shared_fetch_waiter() {
     assert!(poll(waiter.as_mut()).is_pending());
     *venue.positions.result.borrow_mut() = Some(Ok(vec![position()]));
     venue.runtime.pump();
+    let original = expected.clone();
     expected.store_subscriber_ids.push(0);
-    assert!(
-        matches!(poll(origin.as_mut()), Poll::Ready(Err(error)) if error == expected),
-        "origin must observe Store notification failure"
+    let Poll::Ready(Err(mut error)) = poll(origin.as_mut()) else {
+        panic!("origin must observe Store notification failure");
+    };
+    // The recovered error retains the opaque notification cause it came through.
+    let cause = error
+        .store_subscriber_cause
+        .take()
+        .expect("origin retains the Store notification cause");
+    assert_eq!(
+        std::error::Error::source(&cause).and_then(|inner| inner.downcast_ref::<ExchangeError>()),
+        Some(&original)
     );
+    assert_eq!(error, expected);
     assert!(
         matches!(poll(waiter.as_mut()), Poll::Ready(Ok(rows)) if rows.len() == 1),
         "shared waiter awaits fetch only, not origin notification"

@@ -1437,6 +1437,7 @@ pub fn normalize_coinbase_starbase_order(
     let info = private_order_info(gateway);
     CoinbaseStarbaseParityResult::Ready {
         value: safe_cex_types::Order {
+            client_order_id: None,
             id: gateway.id.clone(),
             parent_id: None,
             status: map_order_status(gateway.state),

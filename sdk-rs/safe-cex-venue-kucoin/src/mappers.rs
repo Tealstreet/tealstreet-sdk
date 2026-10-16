@@ -55,6 +55,7 @@ fn typed<T>(hit: TableHit<T>, field: &str) -> Result<T, String> {
 }
 fn base_order(id: String, symbol: String, row: &Map<String, Value>) -> Order {
     Order {
+        client_order_id: None,
         id,
         parent_id: None,
         status: OrderStatus::Open,

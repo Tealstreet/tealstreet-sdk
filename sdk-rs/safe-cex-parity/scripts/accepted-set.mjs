@@ -59,7 +59,8 @@ for (const pkg of members) {
   const numberOutputDefinition = verifiedNumberOutputDefinition(doc, pkg, metadata, artifacts, scanner);
   if (numberOutputDefinition) macroOrigins.push(numberOutputDefinition.selfOrigin);
   const defaultTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/default-traits.json'), 'utf8'));
-  const result = inventory(doc, { defaultTraits, readSource: file => fs.readFileSync(path.resolve(root, file)) });
+  const receiverTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/receiver-traits.json'), 'utf8'));
+  const result = inventory(doc, { defaultTraits, receiverTraits, readSource: file => fs.readFileSync(path.resolve(root, file)) });
   let nativeEntry;
   if (target.kind.includes('bin') && configuration.target === 'native') {
     const mains = doc.index[String(doc.root)].inner.module.items.map(id => doc.index[String(id)]).filter(item => item?.name === 'main' && item.inner.function);
@@ -118,6 +119,15 @@ for (const pkg of members) {
     const [file, ident, row, column] = line.split('\t');
     if ((ident.startsWith('LOCAL_FUNCTION:') || ident.startsWith('LOCAL_TRAIT_IMPL:'))) {
       const label = `${path.relative(root, file)}::${ident}`;
+      const enclosing = ident.startsWith('LOCAL_TRAIT_IMPL:') ? ident.match(/@([A-Za-z_][A-Za-z0-9_]*)$/)?.[1] : undefined;
+      if (enclosing) {
+        const owners = result.types.filter(owner => owner.deserialize && owner.ident === enclosing && fs.realpathSync(path.resolve(root, owner.span.filename)) === fs.realpathSync(file));
+        assert.equal(owners.length, 1, `${label}: accepted-set assertion: serde helper needs its unique enclosing Deserialize owner`);
+        const contractPath = args.find(arg => arg.startsWith('--contracts='))?.slice(12) ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/contracts.json');
+        requireNativeDecoderObservations(owners[0], JSON.parse(fs.readFileSync(contractPath, 'utf8'))[owners[0].name], label);
+        delegatedLocals.push({ name: `${label}@${row}:${column}`, runtimeOwner: owners[0].name });
+        return null;
+      }
       const contract = localFunctionContracts[label];
       assert.ok(['non-decoder', 'decoder-helper'].includes(contract?.category) && contract.reason?.trim(), `${label}: accepted-set assertion: unclassified nested free function; move decoders to module scope`);
       if (contract.category === 'decoder-helper') {
@@ -145,6 +155,10 @@ for (const pkg of members) {
     }
     return { file, ident, line: Number(row), column: Number(column), label: `${path.relative(root, file)}::${ident}` };
   }).filter(Boolean);
+  // Same-name block-local types in different bodies are distinct declarations;
+  // their declaration position names them. Identical positions still fail closed.
+  const spellings = locals.reduce((counts, item) => counts.set(item.label, (counts.get(item.label) ?? 0) + 1), new Map());
+  for (const item of locals) if (spellings.get(item.label) > 1) item.label = `${item.label}@${item.line}:${item.column}`;
   assert.equal(new Set(locals.map(item => item.label)).size, locals.length, `${pkg.name}: ambiguous local type names need explicit scope support`);
   // Follow compiler identity, never the spelling of an alias. Scoped runs include
   // the complete owning package so its decoders receive ordinary runtime probes.

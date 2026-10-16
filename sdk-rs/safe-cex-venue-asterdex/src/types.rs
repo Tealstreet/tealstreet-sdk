@@ -2810,6 +2810,7 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for AsterDEXPlaceOrderOpts {
             client_order_id: _,
             max_slippage_pct,
             close: _,
+            implied_volatility: _,
         } = order;
         AsterDEXPlaceOrderNumbers {
             amount: *amount,

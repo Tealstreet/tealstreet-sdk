@@ -42,6 +42,17 @@ async fn call<T: serde::de::DeserializeOwned>(
         .map_err(|e| (*e).clone())?;
     typed(&value).map_err(|e| (*e).clone())
 }
+async fn income_call(
+    owner: &Rc<ExchangeOwner>,
+    method: Method,
+    args: Result<Vec<EventValue>, Failure>,
+) -> Result<Vec<IncomeRecord>, ExchangeError> {
+    let args = args.map_err(|e| (*e).clone())?;
+    let value = class_jobs::reaction(owner.invoke(method, args))
+        .await
+        .map_err(|e| (*e).clone())?;
+    income_records(&value).map_err(|e| (*e).clone())
+}
 async fn unit(
     owner: &Rc<ExchangeOwner>,
     method: Method,
@@ -71,6 +82,13 @@ fn cleanup(
     Ok(Box::new(move || {
         cleanup().map_err(|error| (*error).clone())
     }))
+}
+
+/// TS `BaseExchange` default these classes inherit: `await Promise.reject(new Error('Not implemented'))`
+/// (base.ts getAccount L734, fetchSymbolMaxLeverage L799, setLeverage L808, changePositionMode L832,
+/// changeMarginType L836, scheduleCancel L989, fetchPublicTrades L1138). No request, no emit.
+fn base_exchange_rejection<'a, T: 'a>() -> ExchangeFuture<'a, T> {
+    Box::pin(async { Err(ExchangeError::new("Not implemented")) })
 }
 
 impl Exchange for BinanceExchange {
@@ -246,7 +264,7 @@ impl Exchange for BinanceExchange {
         &self,
         opts: Option<IncomeHistoryOptions>,
     ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-        Box::pin(call(
+        Box::pin(income_call(
             &self.0,
             Method::IncomeHistory,
             optional_argument(opts),
@@ -258,7 +276,7 @@ impl Exchange for BinanceExchange {
         to: f64,
         kind: Option<String>,
     ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-        Box::pin(call(
+        Box::pin(income_call(
             &self.0,
             Method::IncomeRange,
             Ok(vec![
@@ -308,6 +326,12 @@ impl Exchange for BinanceExchange {
             .state
             .after_method_called_in_worker(method.as_str().expect("worker method string"), args)
             .map_err(|e| (*e).clone())
+    }
+    fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
+        base_exchange_rejection()
+    }
+    fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
     }
 }
 
@@ -436,6 +460,19 @@ impl Exchange for BinancePMExchange {
             ]),
         ))
     }
+    fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
+        base_exchange_rejection()
+    }
+    fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
+    }
+    fn fetch_public_trades(
+        &self,
+        _symbol: String,
+        _limit: Option<f64>,
+    ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
+        base_exchange_rejection()
+    }
 }
 
 impl Exchange for BinanceSpotExchange {
@@ -527,5 +564,43 @@ impl Exchange for BinanceSpotExchange {
             )
         });
         cleanup(result)
+    }
+    fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
+        base_exchange_rejection()
+    }
+    fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
+    }
+    fn fetch_public_trades(
+        &self,
+        _symbol: String,
+        _limit: Option<f64>,
+    ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
+        base_exchange_rejection()
+    }
+    fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
+        base_exchange_rejection()
+    }
+    fn set_leverage(
+        &self,
+        _symbol: String,
+        _leverage: f64,
+        _side: Option<PositionSide>,
+    ) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
+    }
+    fn change_position_mode(
+        &self,
+        _hedged: bool,
+        _symbol: Option<String>,
+    ) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
+    }
+    fn change_margin_type(
+        &self,
+        _isolated: bool,
+        _symbol: Option<String>,
+    ) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
     }
 }

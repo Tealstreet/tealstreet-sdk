@@ -235,6 +235,11 @@ pub const EXCHANGE_REGISTRY: &[ExchangeRegistration] = &[
         constructor: "TealstreetDEXExchange",
     },
     ExchangeRegistration {
+        name: ExchangeName::Txflow,
+        module: "./txflow/txflow.exchange",
+        constructor: "TxFlowExchange",
+    },
+    ExchangeRegistration {
         name: ExchangeName::What,
         module: "./orderly/exchanges/what/what.exchange",
         constructor: "WhatExchange",

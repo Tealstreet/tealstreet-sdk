@@ -4,6 +4,10 @@ version.workspace = true
 edition.workspace = true
 publish.workspace = true
 
+[features]
+# Production native host: real HTTP/WS via safe-cex-exchange's native runtime.
+native = ["safe-cex-exchange/native", "safe-cex-transport/native"]
+
 [lints]
 workspace = true
 

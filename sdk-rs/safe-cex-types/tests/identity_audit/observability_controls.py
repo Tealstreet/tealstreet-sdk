@@ -48,13 +48,9 @@ for label, mutation in [('source-empty', 'rows.length = 0;'), ('source-subset', 
     control(label, oracle, lambda s, mutation=mutation: s.replace(
         'process.stdout.write', mutation + '\nprocess.stdout.write'), cargo,
         'IMPORT-OBSERVABILITY source total')
-diagnostic = 'sdk-rs/safe-cex-types/tests/diagnostic_observability.test.cjs'
-node = ['node', '--test', diagnostic]
-control('diagnostic-consumer-replacement', diagnostic, lambda s: s.replace(
-    'receive(subject.capWsDiagnosticPayload(input));',
-    'receive(subject.capWsDiagnosticPayload(input).replaceAll(String.fromCharCode(0xd83d), String.fromCharCode(0xfffd)));'),
-    node, 'DIAGNOSTIC-OBSERVABILITY post-consumer lone unit')
-for label, command in [('import', cargo), ('diagnostic', node)]:
+# The diagnostic consumer control moved with its test to tealstreet-next
+# scripts/sdk-diagnostic-observability.test.cjs; its consumer is apps/web.
+for label, command in [('import', cargo)]:
     result = subprocess.run(command, capture_output=True, text=True)
     Path('/tmp/p4-observability-' + label + '-restored.log').write_text(result.stdout + result.stderr)
     assert result.returncode == 0, result.stdout + result.stderr

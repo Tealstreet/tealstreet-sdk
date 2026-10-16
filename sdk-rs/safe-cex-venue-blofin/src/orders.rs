@@ -205,6 +205,7 @@ fn map_orders_with_projection(
                     reduce_only,
                     time_in_force,
                     last_update| Order {
+            client_order_id: None,
             id,
             parent_id: None,
             status,
