@@ -48,8 +48,9 @@ targets; expanded aliases, root identity and actual conversion traits still
 need their normal checks. Selected census keys do not establish complete
 discovery, local-scope coverage or the feature/wasm matrix.
 
-For positional-array widening of TS object records, use the shared
-[object-only ingress recipe and proof requirements](MAP-ONLY-INGRESS.md).
+For positional-array widening of TS object records or tagged-map widening of
+string-literal enums, use the shared
+[ingress recipes and proof requirements](MAP-ONLY-INGRESS.md).
 
 Use the maintained boundary decisions when reviewing
 [strings](../../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary),
