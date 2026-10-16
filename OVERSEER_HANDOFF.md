@@ -185,17 +185,30 @@ candidate declares the job, so the tier cannot be deleted from both.
 `rust-ci-wiring:check` stays monorepo-only by nature: it asserts things about
 `rust.yml` itself.
 
-**Still to build, and deliberately not done:** this repo's root manifest
-(authored as `mirrors/tealstreet-sdk/package.json`) does not yet declare the
-Rust gate scripts, does not list `sdk-rs/parity/extract-ts` as a workspace, and
-has no `tsx` — all three are needed before `parity:extract` and the venue
-oracles can be invoked here. Adding dependencies also means regenerating
-`mirrors/tealstreet-sdk/yarn.lock` the documented way: assemble the slice in a
-scratch directory, **seed it with the monorepo's root `yarn.lock`** so shared
-ranges resolve identically, then `yarn install`. An unseeded resolve re-floats
-versions, and Yarn 1's `--frozen-lockfile` does not error on an absent entry —
-it silently resolves fresh, which is how the tealchart mirror once typechecked
-against a different `setKey` signature than the monorepo.
+**The gate scripts are now declared here** — all 35 of them (`parity:*`,
+`registry:check`, `crypto:*`, `layers:check`, `routing:check`, `wasm:*`,
+`venue-oracle:*`, `worker-oracle`, `ffi:*`, `check:rust-wasm-policy`), with
+`sdk-rs/parity/extract-ts` as a workspace and `tsx` as a devDependency. The
+lockfile was regenerated the documented way, by installing over the EXISTING
+mirror lock so shared ranges resolve identically rather than re-floating: the
+diff is 15 added lines, `tsx`, `smol-toml` and an `esbuild` range merge, and no
+resolution was removed. Yarn 1's `--frozen-lockfile` does not error on an absent
+entry — it silently resolves fresh — which is why that matters.
+
+Proved in a real clone of this repo: `yarn layers:check` exits 0.
+
+**`parity:extract --check` CANNOT pass here, and it is not a wiring problem.**
+Three of the extractor's nine source roots are outside the slice and absent from
+this repo — `packages/safe-cex-web`, `packages/safe-cex-server` and
+`packages/safe-cex-react-native`, the P3b candleCache roots. Measured in that
+clone: `Would update 35 manifests; 112 added, 20 orphaned symbols`, which is the
+extractor correctly reporting that the TypeScript those rows map to is missing,
+not drift. Two ways out, and it is a publication decision rather than a fix:
+add those three packages to the slice (five path-set encodings, `gitleaks dir`
+over each, and a seed per package since they already exist), or leave the
+coverage gate monorepo-only and accept that it runs after the import. Everything
+else — build, clippy, fmt, layers, routing, registry, the venue oracles, the
+crypto and worker oracles — has all its inputs here.
 
 ## 5. The three red gates, with the measurement
 
