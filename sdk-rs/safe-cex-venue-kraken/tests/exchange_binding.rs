@@ -710,3 +710,17 @@ fn spot_order_resend_retains_the_unsigned_order_fields() {
         );
     }
 }
+
+#[test]
+fn source_identity_flags_survive_spot_facade_construction() {
+    for name in [ExchangeName::Kraken, ExchangeName::Krakenspot] {
+        let h = harness(name.clone(), options(), |_| {});
+        assert_eq!(
+            h.venue().base().is_spot,
+            name == ExchangeName::Krakenspot,
+            "Kraken source isSpot flag reaches typed base"
+        );
+        assert!(!h.venue().base().is_demo);
+        h.venue().dispose().unwrap();
+    }
+}
