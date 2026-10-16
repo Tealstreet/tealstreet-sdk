@@ -10,6 +10,8 @@ use safe_cex_transport::{
 };
 use std::{cell::RefCell, rc::Rc};
 
+pub mod factory;
+
 /// What a client needs from its host: the runtime owning launched requests and
 /// the wire send, which receives the config after the request interceptors ran
 /// and resolves the Axios response object `{ data, status, headers, config }`.
@@ -45,7 +47,7 @@ struct ClientState {
     windows: Vec<(f64, f64, Vec<f64>)>,
 }
 
-/// safeCexAxiosCreate(config): a client object whose verbs run the full pipeline.
+/// Low-level Axios client; source safeCexAxiosCreate routing lives in [`factory`].
 pub fn create(host: Host, defaults: Js) -> Js {
     let state = Rc::new(RefCell::new(ClientState::default()));
     let client = Js::object_with_class("Axios", vec![("defaults", defaults.clone())]);
@@ -479,7 +481,12 @@ async fn dispatch_request(
     config: Js,
 ) -> Result<Js, Thrown> {
     throttle(host, state).await?;
-    let response = host.send(config.clone()).await?;
+    let adapter = config.get("adapter")?;
+    let response = if adapter.is_callable() {
+        await_js(adapter.call(Js::Undefined, vec![config.clone()])?).await?
+    } else {
+        host.send(config.clone()).await?
+    };
     if !response.get("config")?.is_object() {
         response.define("config", config.clone())?;
     }
@@ -906,7 +913,7 @@ impl JsHttpHost for RestHttpHost {
             } else {
                 adapter
             };
-            let request = rest_request(&config, remote.is_none())?;
+            let request = rest_request(&config, remote.is_none() && adapter.query_in_url())?;
             match adapter.execute_with_receipt(request).await {
                 Ok(execution) => {
                     let config = if remote.is_some() {

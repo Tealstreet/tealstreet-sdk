@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "207 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "208 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1649,9 +1649,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "757043620aaa7cc03e21928930ffddd500ea4b3af43e7672fbc52f8b0f5a5184",
+      "producer_sha256": "0a109f226dfba4b27890731cf13ebfbb56e04e0e51e6fcc8d9e8f32203808195",
       "classification": "no-owned-latch",
-      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop."
+      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop. Reviewed transport installation: the query_in_url decision is synchronous and preserves HOW frame params. It changes no owner registration or child-future ownership."
     },
     {
       "owner": "src/js_runtime/client.rs::dispatch",
@@ -2696,11 +2696,12 @@
       "boundaries": [
         "async-function",
         "await",
+        "await",
         "await"
       ],
-      "producer_sha256": "fc6e9d268585e1f3a9e9fbf6ac71d365c0dc0c1e5ec7496be636521845183762",
+      "producer_sha256": "0daa4a3ec3b6604b9523c2d680e8f1c2b43f58077687019d13fffb4fbb97730c",
       "classification": "no-owned-latch",
-      "reason": "One caller-owned adapter attempt awaits the existing throttle then the supplied host send. No RefCell borrow spans either await; it publishes no independent in-flight slot. Host sleep failure propagates and response rejection handlers retain the chain settlement."
+      "reason": "One caller-owned adapter attempt awaits the existing throttle then the supplied host send. No RefCell borrow spans either await; it publishes no independent in-flight slot. Host sleep failure propagates and response rejection handlers retain the chain settlement. Reviewed callable adapter dispatch: awaits the selected source adapter Promise instead of host send, after the same throttle. No new reservation, RefCell borrow or independent retry/task registry is introduced."
     },
     {
       "owner": "src/js_runtime/base_exchange.rs::js_remote_signer",
@@ -2712,6 +2713,16 @@
       "classification": "delegated",
       "delegate": "src/js_runtime/promise.rs::Promise::spawn",
       "reason": "The capability callback creates an eager runtime-owned Promise around RemoteSigner::sign. Dropping a JS awaiter releases only its Promise wait; the runtime retains the signing task, matching other source async capability callbacks."
+    },
+    {
+      "owner": "src/js_runtime/client/factory.rs::create",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "61374ff945a2efa34769dd0250f4407506f6883502772d697671095d8f4791eb",
+      "classification": "no-owned-latch",
+      "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send."
     }
   ]
 }

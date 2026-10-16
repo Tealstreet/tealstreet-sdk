@@ -977,6 +977,19 @@ worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
 completion hook and reconstructed error properties. Arguments/results use the
 existing JSON worker boundary; it does not create a parallel worker protocol.
 
+JS venue imports of safeCexAxiosCreate use `js_runtime::client::factory::create`
+with the venue runtime's TransportProvider. Raw `client::create` only supplies
+Axios mechanics and does not select proxy routing. The factory resolves provider
+REST defaults eagerly, forces the source 20-second timeout, and authorizes a
+proxied attempt after venue request interceptors, before hosted signing. It
+applies only provider changes, preserving unchanged JS values and AxiosHeaders.
+Venues that explicitly call source installTransportAdapter use the matching
+factory helper; no implicit HOW installation is inferred from the tunnel flag.
+Installed adapters retain the same hosted signer, and HOW keeps frame params
+rather than calling a URL serializer. `http_factory` tests compare actual source
+Axios behavior and observe proxy-auth/sign/query/send ordering through the native
+terminal bridge. Existing source bindings continue to own telemetry callbacks.
+
 Configured js_runtime retries retain `config["axios-retry"]` through the effective
 failed-config replay. The source condition sees the current retryCount; retryDelay
 sees its incremented value. The shared runtime owns the delay, and request start
