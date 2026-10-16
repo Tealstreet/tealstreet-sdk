@@ -68195,5 +68195,2151 @@
       }
     ],
     "evidence": "Actual native amendment helper reads snapshots through the concrete production OrderFrame. Complete retained payloads observe trigger, quantity and LIMIT execution-price precision separately; unchanged opposite legs retain raw snapshot values. Position-level updates skip quantity/execution fields, absent snapshots leave the original payload intact, and invalid trigger/quantity/execution values retain their exact partial mutation and error-event order. Real snapshot decoder/Store bindings retain separate accepted obligations."
+  },
+  "safe_cex_venue_bitunix::position_reads::fetch_positions": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "fetch_positions",
+      "signature": {
+        "inputs": [
+          [
+            "read",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "settings",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "tuple": [
+                              {
+                                "resolved_path": {
+                                  "path": "core::option::Option",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_types::MarginType",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "core::option::Option",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "primitive": "f64"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "account_mode",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "safe_cex_types::PositionMode",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "markets",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "alloc::vec::Vec",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::string::String",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "cached",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "alloc::vec::Vec",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_types::Position",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "report",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::Position",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, Value) -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> (Option<MarginType>, Option<f64>)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "tuple": [
+                                {
+                                  "resolved_path": {
+                                    "path": "core::option::Option",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_types::MarginType",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "core::option::Option",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "primitive": "f64"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> PositionMode",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::PositionMode",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Vec<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Vec<Position>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::Position",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&E)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "E"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "E"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::From",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          },
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "core::option::Option",
+                                                  "args": {
+                                                    "angle_bracketed": {
+                                                      "args": [
+                                                        {
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "serde_json::value::Value",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      ],
+                                                      "constraints": []
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without an external scheduler\")} fn project(p:safe_cex_types::Position)->serde_json::Value{let bit=|v:f64|format!(\"{:016x}\",v.to_bits());serde_json::json!({\"id\":p.id,\"symbol\":p.symbol,\"side\":match p.side{safe_cex_types::PositionSide::Long=>\"long\",safe_cex_types::PositionSide::Short=>\"short\"},\"margin\":p.margin_type.map(|m|match m{safe_cex_types::MarginType::Cross=>\"cross\",safe_cex_types::MarginType::Isolated=>\"isolated\"}),\"mode\":p.position_mode.map(|m|match m{safe_cex_types::PositionMode::Hedged=>\"hedged\",safe_cex_types::PositionMode::OneWay=>\"oneway\"}),\"bits\":([p.entry_price,p.notional,p.leverage,p.unrealized_pnl,p.contracts,p.liquidation_price].map(bit)),\"realized\":p.realized_pnl.map(bit),\"marginSize\":p.margin_size.map(bit),\"info\":p.info,\"extra\":p.extra.map(|e|serde_json::json!({\"contracts\":e.contracts_native.map(bit),\"pnl\":e.unrealized_pnl_native.map(bit)})),\"lastUpdate\":p.last_update.map(bit),\"option\":p.option.map(|o|{assert!(o.greeks.is_none(),\"bounded absent greeks fixture\");serde_json::json!({\"greeksAbsent\":true})})})}let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let response=$value.get(\"response\").cloned();let mut cached:Vec<safe_cex_types::Position>=serde_json::from_value($value[\"cached\"].clone()).unwrap();if let Some(bits)=$value.get(\"cachedBits\"){let bit=|key:&str|f64::from_bits(u64::from_str_radix(bits[key].as_str().unwrap(),16).unwrap());cached[0].unrealized_pnl=bit(\"pnl\");cached[0].realized_pnl=Some(bit(\"realized\"));cached[0].extra.as_mut().unwrap().unrealized_pnl_native=Some(bit(\"extraPnl\"));}let result=run($type(|endpoint,config|{trace.borrow_mut().push(serde_json::json!({\"read\":endpoint,\"config\":config}));std::future::ready(if $value[\"fail\"]==true{Err(safe_cex_num::JsCoercionError{name:\"Error\".into(),message:\"transport failed\".into()})}else{Ok(response)})},|symbol|{trace.borrow_mut().push(serde_json::json!({\"settings\":symbol}));if symbol==\"BTCUSDT\"{(Some(safe_cex_types::MarginType::Cross),Some(10.0))}else{(Some(safe_cex_types::MarginType::Isolated),Some(5.0))}},||{trace.borrow_mut().push(serde_json::json!({\"accountMode\":true}));if $value[\"oneway\"]==true{safe_cex_types::PositionMode::OneWay}else{safe_cex_types::PositionMode::Hedged}},||{trace.borrow_mut().push(serde_json::json!({\"markets\":true}));$value[\"markets\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap().to_owned()).collect()},||{trace.borrow_mut().push(serde_json::json!({\"cached\":true}));cached},|error|trace.borrow_mut().push(serde_json::json!({\"report\":error.message}))));serde_json::json!({\"positions\":result.into_iter().map(project).collect::<Vec<_>>(),\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {
+          "markets": [
+            "BTCUSDT",
+            "ETHUSDT"
+          ],
+          "cached": [],
+          "response": {
+            "data": {
+              "list": [
+                {
+                  "symbol": "BTCUSDT",
+                  "side": "BUY",
+                  "qty": "2",
+                  "maxQty": "7",
+                  "positionMode": "HEDGE",
+                  "marginMode": "ISOLATION",
+                  "leverage": "8",
+                  "avgOpenPrice": "12.5",
+                  "entryValue": "25",
+                  "unrealizedPNL": "1.25",
+                  "realizedPNL": "-0",
+                  "liqPrice": "2.5"
+                },
+                {
+                  "symbol": "ETHUSDT",
+                  "side": "SELL",
+                  "qty": "-3",
+                  "positionMode": "ONE_WAY",
+                  "marginMode": "CROSS"
+                }
+              ]
+            }
+          }
+        },
+        "output": {
+          "positions": [
+            {
+              "id": "BTCUSDT:long",
+              "symbol": "BTCUSDT",
+              "side": "long",
+              "mode": "hedged",
+              "margin": "isolated",
+              "bits": [
+                "4029000000000000",
+                "4039000000000000",
+                "4020000000000000",
+                "3ff4000000000000",
+                "4000000000000000",
+                "4004000000000000"
+              ],
+              "realized": "8000000000000000",
+              "marginSize": null,
+              "info": {
+                "symbol": "BTCUSDT",
+                "side": "BUY",
+                "qty": "2",
+                "maxQty": "7",
+                "positionMode": "HEDGE",
+                "marginMode": "ISOLATION",
+                "leverage": "8",
+                "avgOpenPrice": "12.5",
+                "entryValue": "25",
+                "unrealizedPNL": "1.25",
+                "realizedPNL": "-0",
+                "liqPrice": "2.5"
+              },
+              "extra": null,
+              "lastUpdate": null,
+              "option": null
+            },
+            {
+              "id": "ETHUSDT",
+              "symbol": "ETHUSDT",
+              "side": "short",
+              "mode": "oneway",
+              "margin": "cross",
+              "bits": [
+                "0000000000000000",
+                "0000000000000000",
+                "4014000000000000",
+                "0000000000000000",
+                "4008000000000000",
+                "0000000000000000"
+              ],
+              "realized": "0000000000000000",
+              "marginSize": null,
+              "info": {
+                "symbol": "ETHUSDT",
+                "side": "SELL",
+                "qty": "-3",
+                "positionMode": "ONE_WAY",
+                "marginMode": "CROSS"
+              },
+              "extra": null,
+              "lastUpdate": null,
+              "option": null
+            },
+            {
+              "id": "BTCUSDT:short",
+              "symbol": "BTCUSDT",
+              "side": "short",
+              "mode": "hedged",
+              "margin": "cross",
+              "bits": [
+                "0000000000000000",
+                "0000000000000000",
+                "4024000000000000",
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000"
+              ],
+              "realized": null,
+              "marginSize": null,
+              "info": null,
+              "extra": null,
+              "lastUpdate": null,
+              "option": null
+            },
+            {
+              "id": "ETHUSDT:long",
+              "symbol": "ETHUSDT",
+              "side": "long",
+              "mode": "hedged",
+              "margin": "isolated",
+              "bits": [
+                "0000000000000000",
+                "0000000000000000",
+                "4014000000000000",
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000"
+              ],
+              "realized": null,
+              "marginSize": null,
+              "info": null,
+              "extra": null,
+              "lastUpdate": null,
+              "option": null
+            },
+            {
+              "id": "ETHUSDT:short",
+              "symbol": "ETHUSDT",
+              "side": "short",
+              "mode": "hedged",
+              "margin": "isolated",
+              "bits": [
+                "0000000000000000",
+                "0000000000000000",
+                "4014000000000000",
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000"
+              ],
+              "realized": null,
+              "marginSize": null,
+              "info": null,
+              "extra": null,
+              "lastUpdate": null,
+              "option": null
+            }
+          ],
+          "trace": [
+            {
+              "read": "/api/v1/futures/position/get_pending_positions",
+              "config": {}
+            },
+            {
+              "settings": "BTCUSDT"
+            },
+            {
+              "settings": "ETHUSDT"
+            },
+            {
+              "accountMode": true
+            },
+            {
+              "markets": true
+            },
+            {
+              "settings": "BTCUSDT"
+            },
+            {
+              "settings": "BTCUSDT"
+            },
+            {
+              "settings": "ETHUSDT"
+            },
+            {
+              "settings": "ETHUSDT"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            "BTCUSDT",
+            "ETHUSDT"
+          ],
+          "cached": [],
+          "response": [],
+          "oneway": true
+        },
+        "output": {
+          "positions": [
+            {
+              "id": "BTCUSDT",
+              "symbol": "BTCUSDT",
+              "side": "long",
+              "mode": "oneway",
+              "margin": "cross",
+              "bits": [
+                "0000000000000000",
+                "0000000000000000",
+                "4024000000000000",
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000"
+              ],
+              "realized": null,
+              "marginSize": null,
+              "info": null,
+              "extra": null,
+              "lastUpdate": null,
+              "option": null
+            },
+            {
+              "id": "ETHUSDT",
+              "symbol": "ETHUSDT",
+              "side": "long",
+              "mode": "oneway",
+              "margin": "isolated",
+              "bits": [
+                "0000000000000000",
+                "0000000000000000",
+                "4014000000000000",
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000"
+              ],
+              "realized": null,
+              "marginSize": null,
+              "info": null,
+              "extra": null,
+              "lastUpdate": null,
+              "option": null
+            }
+          ],
+          "trace": [
+            {
+              "read": "/api/v1/futures/position/get_pending_positions",
+              "config": {}
+            },
+            {
+              "accountMode": true
+            },
+            {
+              "markets": true
+            },
+            {
+              "settings": "BTCUSDT"
+            },
+            {
+              "settings": "BTCUSDT"
+            },
+            {
+              "settings": "ETHUSDT"
+            },
+            {
+              "settings": "ETHUSDT"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            "BTCUSDT",
+            "ETHUSDT"
+          ],
+          "cached": [
+            {
+              "id": "cached-A",
+              "symbol": "BTCUSDT",
+              "side": "long",
+              "entryPrice": 1.25,
+              "notional": 2.5,
+              "leverage": 3,
+              "unrealizedPnl": -0.0,
+              "contracts": 2,
+              "liquidationPrice": 0.125,
+              "realizedPnl": -0.0,
+              "marginSize": 0.25,
+              "marginType": "cross",
+              "positionMode": "hedged",
+              "info": {
+                "tag": false
+              },
+              "extra": {
+                "contractsNative": 5,
+                "unrealizedPnlNative": -0.0
+              },
+              "lastUpdate": 123,
+              "option": {}
+            },
+            {
+              "id": "cached-B",
+              "symbol": "ETHUSDT",
+              "side": "short",
+              "entryPrice": 4,
+              "notional": 8,
+              "leverage": 5,
+              "unrealizedPnl": -1,
+              "contracts": 3,
+              "liquidationPrice": 2
+            }
+          ],
+          "fail": true,
+          "cachedBits": {
+            "pnl": "8000000000000000",
+            "realized": "8000000000000000",
+            "extraPnl": "8000000000000000"
+          }
+        },
+        "output": {
+          "positions": [
+            {
+              "id": "cached-A",
+              "symbol": "BTCUSDT",
+              "side": "long",
+              "mode": "hedged",
+              "margin": "cross",
+              "bits": [
+                "3ff4000000000000",
+                "4004000000000000",
+                "4008000000000000",
+                "8000000000000000",
+                "4000000000000000",
+                "3fc0000000000000"
+              ],
+              "realized": "8000000000000000",
+              "marginSize": "3fd0000000000000",
+              "info": {
+                "tag": false
+              },
+              "extra": {
+                "contracts": "4014000000000000",
+                "pnl": "8000000000000000"
+              },
+              "lastUpdate": "405ec00000000000",
+              "option": {
+                "greeksAbsent": true
+              }
+            },
+            {
+              "id": "cached-B",
+              "symbol": "ETHUSDT",
+              "side": "short",
+              "mode": null,
+              "margin": null,
+              "bits": [
+                "4010000000000000",
+                "4020000000000000",
+                "4014000000000000",
+                "bff0000000000000",
+                "4008000000000000",
+                "4000000000000000"
+              ],
+              "realized": null,
+              "marginSize": null,
+              "info": null,
+              "extra": null,
+              "lastUpdate": null,
+              "option": null
+            }
+          ],
+          "trace": [
+            {
+              "read": "/api/v1/futures/position/get_pending_positions",
+              "config": {}
+            },
+            {
+              "report": "transport failed"
+            },
+            {
+              "cached": true
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "markets": [],
+          "cached": [],
+          "response": [
+            {
+              "symbol": "",
+              "qty": 2
+            }
+          ]
+        },
+        "output": {
+          "positions": [],
+          "trace": [
+            {
+              "read": "/api/v1/futures/position/get_pending_positions",
+              "config": {}
+            },
+            {
+              "accountMode": true
+            },
+            {
+              "markets": true
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "The production position read orchestrator executes with bounded ready native callbacks. Independently authored BTC/ETH rows distinguish qty from maxQty, live versus cached leverage, side/mode/margin variants, absolute contracts, signed-zero realized PnL and complete info presence. All native Position fields are inspected, including defaults and every optional field; error fallback retains two distinct native cached positions and report-before-cache ordering. Default insertion and first-ID dedup retain the complete ordered five-position result and a separate one-way two-position result. Callback request/config and order are observed. No complete transport/runtime, arbitrary coercion or executable object coverage is inferred."
+  },
+  "safe_cex_venue_bitunix::order_models::update_standalone_tpsl_order": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "update_standalone_tpsl_order",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "order",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "update",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}let(venue,rt,store,wire)=harness::fixture();let events=std::rc::Rc::new(std::cell::RefCell::new(Vec::<serde_json::Value>::new()));let captured=events.clone();let fail=$value[\"listenerFail\"]==true;venue.base.on(\"error\",std::rc::Rc::new(move|name,payload|{captured.borrow_mut().push(serde_json::json!({\"event\":name,\"payload\":payload}));if fail{Err(safe_cex_exchange::runtime::ExchangeError::new(\"listener failed\"))}else{Ok(())}}));let mut host=venue.order_frame();fn run<F:std::future::Future>(rt:&harness::Runtime,f:F)->F::Output{let mut f=std::pin::pin!(f);for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){return v;}rt.now.set(rt.now.get()+1000.0);rt.pump();}panic!(\"fixture must settle\")}if let Some(orders)=$value.get(\"orders\"){let orders:Vec<safe_cex_types::Order>=serde_json::from_value(orders.clone()).unwrap();safe_cex_store::Store::update(store.as_ref(),safe_cex_store::StoreUpdate{orders:Some(orders),..Default::default()},false).unwrap();}for endpoint in [\"/api/v1/futures/trade/modify_order\",\"/api/v1/futures/tpsl/modify_order\",\"/api/v1/futures/tpsl/position/modify_order\"]{wire.bodies.lock().unwrap().insert(endpoint.into(),$value.get(\"response\").cloned().unwrap_or(serde_json::json!({\"code\":0})));}let result=run(&rt,$type(&mut host,&$value[\"order\"],&$value[\"update\"]));let requests=wire.requests.lock().unwrap().iter().map(|request|{let body=match request.body.as_ref().expect(\"amendment body\"){safe_cex_transport::RestBody::Encoded(bytes)=>serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),safe_cex_transport::RestBody::Untransformed(v)=>v.clone(),safe_cex_transport::RestBody::Transformed(v)=>match v.value(){serde_json::Value::String(text)=>serde_json::from_str(text).unwrap(),v=>v.clone()}};serde_json::json!({\"method\":request.method.to_uppercase(),\"url\":request.url,\"body\":body})}).collect::<Vec<_>>();let events=events.borrow().clone();match result{Ok(ids)=>serde_json::json!({\"ids\":ids,\"events\":events,\"requests\":requests}),Err(error)=>serde_json::json!({\"error\":error.0.message,\"events\":events,\"requests\":requests})}}",
+    "cases": [
+      {
+        "input": {
+          "order": {
+            "id": "leg",
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 2,
+            "price": 120.25,
+            "info": {
+              "orderId": "raw",
+              "tpPrice": 120.25,
+              "tpQty": 2,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "ids": [
+            "leg"
+          ],
+          "requests": [
+            {
+              "method": "POST",
+              "url": "/api/v1/futures/tpsl/modify_order",
+              "body": {
+                "orderId": "raw",
+                "tpPrice": "123.5",
+                "tpStopType": "MARK_PRICE",
+                "tpQty": "1.235",
+                "tpOrderType": "LIMIT",
+                "tpOrderPrice": "121.8"
+              }
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "sl-leg",
+            "symbol": "BTCUSDT",
+            "type": "stop_market",
+            "side": "sell",
+            "amount": 2,
+            "price": 120.25,
+            "info": {
+              "orderId": "raw",
+              "slPrice": 90.123,
+              "slQty": 2,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "MARKET"
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "ids": [
+            "sl-leg"
+          ],
+          "requests": [
+            {
+              "method": "POST",
+              "url": "/api/v1/futures/tpsl/modify_order",
+              "body": {
+                "orderId": "raw",
+                "slPrice": "123.5",
+                "slStopType": "LAST_PRICE",
+                "slQty": "1.235",
+                "slOrderType": "MARKET"
+              }
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "leg",
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 0,
+            "price": 120.25,
+            "info": {
+              "orderId": "raw",
+              "tpPrice": 120.25,
+              "tpQty": 2,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789,
+              "positionId": "pos",
+              "type": "POSITION_TPSL"
+            }
+          },
+          "update": {
+            "price": 123.456
+          }
+        },
+        "output": {
+          "ids": [
+            "leg"
+          ],
+          "requests": [
+            {
+              "method": "POST",
+              "url": "/api/v1/futures/tpsl/position/modify_order",
+              "body": {
+                "symbol": "BTCUSDT",
+                "positionId": "pos",
+                "tpPrice": "123.5",
+                "tpStopType": "MARK_PRICE"
+              }
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "leg",
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 0,
+            "price": 120.25,
+            "info": {
+              "orderId": "raw",
+              "tpPrice": 120.25,
+              "tpQty": 2,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789,
+              "positionId": "pos",
+              "type": "POSITION_TPSL"
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "error": "Bitunix full-position TP/SL quantity cannot be amended",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Bitunix full-position TP/SL quantity cannot be amended",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ],
+          "requests": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "leg",
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 2,
+            "price": 120.25,
+            "info": {
+              "orderId": "raw",
+              "tpPrice": 120.25,
+              "tpQty": 2,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          },
+          "response": {
+            "code": 7,
+            "msg": "denied"
+          }
+        },
+        "output": {
+          "error": "denied",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: denied",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            },
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: denied",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ],
+          "requests": [
+            {
+              "method": "POST",
+              "url": "/api/v1/futures/tpsl/modify_order",
+              "body": {
+                "orderId": "raw",
+                "tpPrice": "123.5",
+                "tpStopType": "MARK_PRICE",
+                "tpQty": "1.235",
+                "tpOrderType": "LIMIT",
+                "tpOrderPrice": "121.8"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "leg",
+            "symbol": "NONE",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 2,
+            "price": 120.25,
+            "info": {
+              "orderId": "raw",
+              "tpPrice": 120.25,
+              "tpQty": 2,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "error": "Market NONE not found",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Market NONE not found",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ],
+          "requests": []
+        }
+      }
+    ],
+    "evidence": "Actual generic standalone amendment executes on the real concrete OrderFrame/venue/Store and scripted native transport. Complete wire payloads distinguish partial TP/SL from full-position updates, including amount, trigger and LIMIT execution precision with distinct steps. Native returned IDs, endpoint selection, error event ordering, full-position quantity refusal and nonzero response errors are observed. A truthy response msg emits first in the actual native HTTP interceptor and then in the amendment catch; both real error events are retained. These are bounded concrete fixtures; sibling preservation and arbitrary callback behavior retain separate obligations."
+  },
+  "safe_cex_venue_bitunix::order_models::update_order": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "update_order",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "order",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "update",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}let(venue,rt,store,wire)=harness::fixture();let events=std::rc::Rc::new(std::cell::RefCell::new(Vec::<serde_json::Value>::new()));let captured=events.clone();let fail=$value[\"listenerFail\"]==true;venue.base.on(\"error\",std::rc::Rc::new(move|name,payload|{captured.borrow_mut().push(serde_json::json!({\"event\":name,\"payload\":payload}));if fail{Err(safe_cex_exchange::runtime::ExchangeError::new(\"listener failed\"))}else{Ok(())}}));let mut host=venue.order_frame();fn run<F:std::future::Future>(rt:&harness::Runtime,f:F)->F::Output{let mut f=std::pin::pin!(f);for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){return v;}rt.now.set(rt.now.get()+1000.0);rt.pump();}panic!(\"fixture must settle\")}if let Some(orders)=$value.get(\"orders\"){let orders:Vec<safe_cex_types::Order>=serde_json::from_value(orders.clone()).unwrap();safe_cex_store::Store::update(store.as_ref(),safe_cex_store::StoreUpdate{orders:Some(orders),..Default::default()},false).unwrap();}for endpoint in [\"/api/v1/futures/trade/modify_order\",\"/api/v1/futures/tpsl/modify_order\",\"/api/v1/futures/tpsl/position/modify_order\"]{wire.bodies.lock().unwrap().insert(endpoint.into(),$value.get(\"response\").cloned().unwrap_or(serde_json::json!({\"code\":0})));}let result=run(&rt,$type(&mut host,&$value[\"order\"],&$value[\"update\"]));let requests=wire.requests.lock().unwrap().iter().map(|request|{let body=match request.body.as_ref().expect(\"amendment body\"){safe_cex_transport::RestBody::Encoded(bytes)=>serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),safe_cex_transport::RestBody::Untransformed(v)=>v.clone(),safe_cex_transport::RestBody::Transformed(v)=>match v.value(){serde_json::Value::String(text)=>serde_json::from_str(text).unwrap(),v=>v.clone()}};serde_json::json!({\"method\":request.method.to_uppercase(),\"url\":request.url,\"body\":body})}).collect::<Vec<_>>();let events=events.borrow().clone();match result{Ok(ids)=>serde_json::json!({\"ids\":ids,\"events\":events,\"requests\":requests}),Err(error)=>serde_json::json!({\"error\":error.0.message,\"events\":events,\"requests\":requests})}}",
+    "cases": [
+      {
+        "input": {
+          "order": {
+            "id": "raw",
+            "status": "open",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "buy",
+            "amount": 2.23456,
+            "price": 100.123,
+            "filled": 0.25,
+            "remaining": 1.98456,
+            "reduceOnly": false,
+            "lastUpdate": 0,
+            "info": {
+              "orderId": "raw",
+              "orderType": "LIMIT",
+              "reduceOnly": false,
+              "tpPrice": 120.456,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789,
+              "slPrice": 90.123,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "LIMIT",
+              "slOrderPrice": 89.678
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          },
+          "response": {
+            "code": 0,
+            "data": {
+              "orderId": "ack"
+            }
+          }
+        },
+        "output": {
+          "ids": [
+            "ack"
+          ],
+          "requests": [
+            {
+              "method": "POST",
+              "url": "/api/v1/futures/trade/modify_order",
+              "body": {
+                "orderId": "raw",
+                "symbol": "BTCUSDT",
+                "qty": "1.235",
+                "price": "123.5",
+                "tpPrice": "120.5",
+                "tpStopType": "MARK_PRICE",
+                "tpOrderType": "LIMIT",
+                "tpOrderPrice": "121.8",
+                "slPrice": "90.1",
+                "slStopType": "LAST_PRICE",
+                "slOrderType": "LIMIT",
+                "slOrderPrice": "89.7"
+              }
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "raw",
+            "status": "open",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "buy",
+            "amount": 2.23456,
+            "price": 100.123,
+            "filled": 0.25,
+            "remaining": 1.98456,
+            "reduceOnly": false,
+            "lastUpdate": 0,
+            "info": {
+              "orderId": "raw",
+              "orderType": "LIMIT",
+              "reduceOnly": false,
+              "tpPrice": 120.456,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789,
+              "slPrice": 90.123,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "LIMIT",
+              "slOrderPrice": 89.678
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "ids": [
+            "raw"
+          ],
+          "requests": [
+            {
+              "method": "POST",
+              "url": "/api/v1/futures/trade/modify_order",
+              "body": {
+                "orderId": "raw",
+                "symbol": "BTCUSDT",
+                "qty": "1.235",
+                "price": "123.5",
+                "tpPrice": "120.5",
+                "tpStopType": "MARK_PRICE",
+                "tpOrderType": "LIMIT",
+                "tpOrderPrice": "121.8",
+                "slPrice": "90.1",
+                "slStopType": "LAST_PRICE",
+                "slOrderType": "LIMIT",
+                "slOrderPrice": "89.7"
+              }
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "raw__tp",
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 2,
+            "price": 120.25,
+            "info": {
+              "orderId": "raw",
+              "tpPrice": 120.25,
+              "tpQty": 2,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789
+            }
+          },
+          "orders": [
+            {
+              "id": "raw",
+              "status": "open",
+              "symbol": "BTCUSDT",
+              "type": "limit",
+              "side": "buy",
+              "amount": 2.23456,
+              "price": 100.123,
+              "filled": 0.25,
+              "remaining": 1.98456,
+              "reduceOnly": false,
+              "lastUpdate": 0,
+              "info": {
+                "orderId": "raw",
+                "orderType": "LIMIT",
+                "reduceOnly": false,
+                "tpPrice": 120.456,
+                "tpStopType": "MARK_PRICE",
+                "tpOrderType": "LIMIT",
+                "tpOrderPrice": 121.789,
+                "slPrice": 90.123,
+                "slStopType": "LAST_PRICE",
+                "slOrderType": "LIMIT",
+                "slOrderPrice": 89.678
+              }
+            }
+          ],
+          "update": {
+            "price": 130.456
+          },
+          "response": {
+            "code": 0,
+            "data": {
+              "orderId": "ack"
+            }
+          }
+        },
+        "output": {
+          "ids": [
+            "ack__tp"
+          ],
+          "requests": [
+            {
+              "method": "POST",
+              "url": "/api/v1/futures/trade/modify_order",
+              "body": {
+                "orderId": "raw",
+                "symbol": "BTCUSDT",
+                "qty": "2.235",
+                "price": "100.1",
+                "tpPrice": "130.5",
+                "tpStopType": "MARK_PRICE",
+                "tpOrderType": "LIMIT",
+                "tpOrderPrice": "121.8",
+                "slPrice": "90.1",
+                "slStopType": "LAST_PRICE",
+                "slOrderType": "LIMIT",
+                "slOrderPrice": "89.7"
+              }
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "raw__tp",
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 2,
+            "price": 120.25,
+            "info": {
+              "orderId": "raw",
+              "tpPrice": 120.25,
+              "tpQty": 2,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789
+            }
+          },
+          "orders": [
+            {
+              "id": "raw",
+              "status": "open",
+              "symbol": "BTCUSDT",
+              "type": "limit",
+              "side": "buy",
+              "amount": 2.23456,
+              "price": 100.123,
+              "filled": 0.25,
+              "remaining": 1.98456,
+              "reduceOnly": false,
+              "lastUpdate": 0,
+              "info": {
+                "orderId": "raw",
+                "orderType": "LIMIT",
+                "reduceOnly": false,
+                "tpPrice": 120.456,
+                "tpStopType": "MARK_PRICE",
+                "tpOrderType": "LIMIT",
+                "tpOrderPrice": 121.789,
+                "slPrice": 90.123,
+                "slStopType": "LAST_PRICE",
+                "slOrderType": "LIMIT",
+                "slOrderPrice": 89.678
+              }
+            }
+          ],
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "error": "Bitunix attached TP/SL quantity cannot be amended independently of its parent order",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Bitunix attached TP/SL quantity cannot be amended independently of its parent order",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ],
+          "requests": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "raw",
+            "status": "open",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "buy",
+            "amount": 2.23456,
+            "price": 100.123,
+            "filled": 0.25,
+            "remaining": 1.98456,
+            "reduceOnly": false,
+            "lastUpdate": 0,
+            "info": {
+              "orderId": "other",
+              "orderType": "LIMIT",
+              "reduceOnly": false,
+              "tpPrice": 120.456,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789,
+              "slPrice": 90.123,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "LIMIT",
+              "slOrderPrice": 89.678
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "error": "Bitunix cannot safely amend raw: exact pending LIMIT order identity is not reconciled",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Bitunix cannot safely amend raw: exact pending LIMIT order identity is not reconciled",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ],
+          "requests": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "raw",
+            "status": "open",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "buy",
+            "amount": 2.23456,
+            "price": 100.123,
+            "filled": 0.25,
+            "remaining": 1.98456,
+            "reduceOnly": false,
+            "lastUpdate": 0,
+            "info": {
+              "orderId": "raw",
+              "orderType": "LIMIT",
+              "reduceOnly": false,
+              "tpPrice": 120.456,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789,
+              "slPrice": 90.123,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "LIMIT",
+              "slOrderPrice": 89.678
+            }
+          },
+          "update": {
+            "amount": 0.2,
+            "price": 123.456
+          }
+        },
+        "output": {
+          "error": "Bitunix amended order quantity must exceed the already-filled quantity",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Bitunix amended order quantity must exceed the already-filled quantity",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ],
+          "requests": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "raw",
+            "status": "open",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "buy",
+            "amount": 2.23456,
+            "price": 100.123,
+            "filled": 0.25,
+            "remaining": 1.98456,
+            "reduceOnly": false,
+            "lastUpdate": 0,
+            "info": {
+              "orderId": "raw",
+              "orderType": "LIMIT",
+              "reduceOnly": false,
+              "tpPrice": 120.456,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789,
+              "slPrice": 90.123,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "LIMIT",
+              "slOrderPrice": 89.678
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          },
+          "response": {
+            "code": 7
+          }
+        },
+        "output": {
+          "error": "Bitunix modify order failed with code 7",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Bitunix modify order failed with code 7",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ],
+          "requests": [
+            {
+              "method": "POST",
+              "url": "/api/v1/futures/trade/modify_order",
+              "body": {
+                "orderId": "raw",
+                "symbol": "BTCUSDT",
+                "qty": "1.235",
+                "price": "123.5",
+                "tpPrice": "120.5",
+                "tpStopType": "MARK_PRICE",
+                "tpOrderType": "LIMIT",
+                "tpOrderPrice": "121.8",
+                "slPrice": "90.1",
+                "slStopType": "LAST_PRICE",
+                "slOrderType": "LIMIT",
+                "slOrderPrice": "89.7"
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "leg",
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 2,
+            "price": 120.25,
+            "info": {
+              "orderId": "raw",
+              "tpPrice": 120.25,
+              "tpQty": 2,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 121.789
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "ids": [
+            "leg"
+          ],
+          "requests": [
+            {
+              "method": "POST",
+              "url": "/api/v1/futures/tpsl/modify_order",
+              "body": {
+                "orderId": "raw",
+                "tpPrice": "123.5",
+                "tpStopType": "MARK_PRICE",
+                "tpQty": "1.235",
+                "tpOrderType": "LIMIT",
+                "tpOrderPrice": "121.8"
+              }
+            }
+          ],
+          "events": []
+        }
+      }
+    ],
+    "evidence": "Actual generic native amendment uses the production concrete OrderFrame, Store reconciliation and transport. Complete request bodies independently observe amount, main LIMIT price, both TP/SL triggers and both LIMIT execution prices with distinct amount/price steps. Source attached-leg routing retains parent quantity/main price while changing only the selected trigger and appending its leg to acknowledged IDs; response ID fallback and standalone delegation execute. Exact identity mismatch, already-filled quantity and nonzero response errors remain separate native outcomes. No arbitrary host/caller or complete venue coverage is inferred."
   }
 }
