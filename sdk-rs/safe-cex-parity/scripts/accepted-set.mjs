@@ -59,7 +59,8 @@ for (const pkg of members) {
   const numberOutputDefinition = verifiedNumberOutputDefinition(doc, pkg, metadata, artifacts, scanner);
   if (numberOutputDefinition) macroOrigins.push(numberOutputDefinition.selfOrigin);
   const defaultTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/default-traits.json'), 'utf8'));
-  const result = inventory(doc, { defaultTraits, readSource: file => fs.readFileSync(path.resolve(root, file)) });
+  const receiverTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/receiver-traits.json'), 'utf8'));
+  const result = inventory(doc, { defaultTraits, receiverTraits, readSource: file => fs.readFileSync(path.resolve(root, file)) });
   let nativeEntry;
   if (target.kind.includes('bin') && configuration.target === 'native') {
     const mains = doc.index[String(doc.root)].inner.module.items.map(id => doc.index[String(id)]).filter(item => item?.name === 'main' && item.inner.function);

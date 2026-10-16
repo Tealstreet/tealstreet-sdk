@@ -280,6 +280,7 @@ impl<'ast> Visit<'ast> for LocalMacroEffects {
             matches!(
                 name.to_string().as_str(),
                 "allow"
+                    | "expect"
                     | "warn"
                     | "deny"
                     | "forbid"
@@ -1213,6 +1214,7 @@ fn known_attribute(meta: &syn::Meta) -> bool {
     matches!(
         name.as_str(),
         "allow"
+            | "expect"
             | "warn"
             | "deny"
             | "forbid"
@@ -1776,6 +1778,21 @@ mod tests {
                 visitor.names
             );
         }
+    }
+
+    #[test]
+    fn lint_expectations_are_inert_attributes() {
+        let source = "#![cfg_attr(not(test), expect(dead_code, reason = \"pending\"))] #[expect(clippy::arc_with_non_send_sync)] fn f() {}";
+        let syntax = syn::parse_file(source).unwrap();
+        let mut visitor = verified_test_visitor();
+        visitor.visit_file(&syntax);
+        assert!(visitor.names.is_empty(), "{:?}", visitor.names);
+        let mut guards = DocGuards(false);
+        guards.visit_file(&syntax);
+        assert!(
+            !guards.0,
+            "cfg_attr selecting a lint expectation is not doc-dependent"
+        );
     }
 
     #[test]

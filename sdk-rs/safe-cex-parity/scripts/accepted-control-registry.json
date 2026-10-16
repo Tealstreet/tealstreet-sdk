@@ -100,7 +100,8 @@
       "alternate constructors returning a local type alias remain inventoried",
       "explicit owner regression scope cannot turn the default matrix inventory green",
       "inherent factories returning a different decoded owner remain inventoried",
-      "alias defaults respect lexical parameter scopes and nested applications without weakening cycle refusal"
+      "alias defaults respect lexical parameter scopes and nested applications without weakening cycle refusal",
+      "unsupported receivers and uninstantiated defaults pass only with a reviewed source pin"
     ],
     "accepted-loader-future-native.test.mjs": [
       "loader future actual compiler coverage refuses removal and restores the named assertion"
