@@ -8,6 +8,21 @@
   },
   "delegations": [
     {
+      "file": "safe-cex-venue-apexomni/src/binding/hosts.rs",
+      "finding": "public_data_only bypasses dynamic hook can_sign through base",
+      "kind": "no-venue-override",
+      "member": "canSign",
+      "classes": [
+        "ApexOmniExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/base.ts",
+          "contains": "return this.options.publicDataOnly === true || !this.canSign;"
+        }
+      ]
+    },
+    {
       "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs",
       "finding": "dispose_base bypasses dynamic hook dispose through base",
       "kind": "source-super",

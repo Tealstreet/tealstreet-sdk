@@ -659,8 +659,9 @@ After those measurements, origin0286f63437e4320e8c12886d5fef8fc6dfa2eac3 was mer
 
 ## Assembled Exchange/registry binding
 
-Measured before the final master refresh:
--26 assembled tests pass:16 mandatory methods,2 listeners, caller ID, private
+Measured after master dd0e266704 integration:
+
+-27 assembled tests pass:16 mandatory methods,2 listeners, caller ID, private
   login/subscription/Pong, one legacy resend, repeated refusal, HTTP400 metadata,
   write503 non-replay and two disposal continuations.
 - `binding-signature.cjs` executes actual source placeOrder and signContract with
@@ -676,15 +677,15 @@ Measured before the final master refresh:
   order through private WS and cancels it. A subscriber records the WS update
   immediately so later REST snapshots cannot erase proof of delivery. HMAC uses
   the source's base64-spelled UTF8 key and authenticates actual transmitted form
-  bytes. Native proof plus12 registry tests pass.
+  bytes. Native proof plus13 registry tests pass.
 - Removing the actual Apex table entry compiles and fails native construction
   naming the missing Rust-constructed venue; restored native proof passes.
-- Global parity passes with0 findings (7459rows/17101public items). All new
+- Global parity passes with0 findings (7459rows/17119public items). All new
   binding helpers map to actual class/constructor assembly; imported SDK crypto
   retains its separate primitive witnesses. No regenerated manifests.
 
-Controls are reproducible through the three scripts named in CLAUDE.md. Logs
-for this execution are /tmp/apex-{binding-controls,precision-controls,registry-controls}.txt.
+Controls are reproducible through the four scripts named in CLAUDE.md. Logs
+for this execution are /tmp/apex-{binding-controls,precision-controls,registry-controls,capability-controls}.txt.
 The source bodies' existing divergences remain; late-disposal refusal and owned
 book snapshots are explicitly priced. Six inherited methods genuinely reject in
 TypeScript; those are exact source behavior, not newly implemented endpoints.
@@ -692,3 +693,20 @@ TypeScript; those are exact source behavior, not newly implemented endpoints.
 Final full-venue/oracle, host/wasm lint and post-master integration results are
 recorded in the PR validation text. No live credentials or external venue orders
 were used; P4 live verification remains separately parked on Sam.
+
+The shared-factory regression adds a real custom adapter to the test transport
+provider. Both initial signing and legacy resend preserve the callable adapter
+and serializer; the fixed20-second factory timeout remains independent of the
+venue receive window. Two compiled substitutions each lose one of these
+capabilities and fail the named adapter witness; restoration passes.
+
+Post-integration gates: full source oracle153 tests (72 exchange,7 pure,9 record,
+28 schema,6 signer,7 signing,21 transaction,11 utility);27 assembled binding E2Es;
+native registry1+13; host all-targets Clippy for venue and registry; wasm library
+Clippy for venue; fmt; registry equivalence; layers88; global parity0. The source
+oracle retains the actual four-position late-disposal observation while asserting
+the chosen P4 native guard leaves the initial positions unchanged; other state
+axes still compare directly. Read-only extractor reports no ApexOmni drift; only
+Polymarket and registry.native metadata were stale at this integration base.
+The dispatch inventory updates only reviewed ApexOmni calls; public_data_only's
+base can_sign delegation is guarded against a future source canSign override.

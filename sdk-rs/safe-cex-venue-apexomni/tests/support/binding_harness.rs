@@ -31,6 +31,7 @@ pub struct Runtime {
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
+    pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -150,7 +151,10 @@ impl WsSocket for Socket {
 }
 impl WsRuntime for Runtime {
     fn transport(&self) -> Arc<dyn TransportProvider> {
-        Arc::new(safe_cex_transport::DirectTransport)
+        self.provider
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| Arc::new(safe_cex_transport::DirectTransport))
     }
     fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
         panic!("BingX binding E2E never tunnels")
@@ -222,6 +226,7 @@ pub struct Request {
     pub data: Value,
     pub data_raw: Value,
     pub headers: Value,
+    pub serializer_callable: bool,
 }
 
 /// Scripted HTTP: (method, path) -> queue of responses; the last one repeats.
@@ -311,6 +316,9 @@ impl JsHttpHost for Http {
             },
             data_raw: read("data"),
             headers: read("headers"),
+            serializer_callable: config
+                .get("paramsSerializer")
+                .is_ok_and(|v| v.is_callable()),
         });
         if let Some(runtime) = self.runtime.borrow().as_ref() {
             runtime.now.set(runtime.now.get() + self.advance_ms.get());

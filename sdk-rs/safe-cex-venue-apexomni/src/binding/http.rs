@@ -6,56 +6,23 @@ use crate::{
 use safe_cex_exchange::{
     exchange::BaseExchange,
     js_runtime::{
-        client::{self, JsHttpHost},
-        promise::{JsFuture, Promise, await_js},
+        client,
+        promise::{Promise, await_js},
         value::{Js, Thrown, arg, to_js_json},
     },
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
 };
 use safe_cex_num::JsJsonValue as J;
-use safe_cex_transport::{
-    RestAdapterContext, RestAdapterVariant, RestRequest, RestTransportContext,
-};
+use safe_cex_transport::{RestAdapterVariant, RestRequest};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use std::{
-    cell::{OnceCell, RefCell},
+    cell::OnceCell,
     rc::{Rc, Weak},
 };
 
-struct Route {
-    scope: Rc<Shared>,
-    sender: RefCell<Rc<dyn JsHttpHost>>,
-    authorize: Option<std::sync::Arc<dyn safe_cex_transport::RestAuthorizer>>,
-}
-impl JsHttpHost for Route {
-    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
-        self.scope.runtime.clone()
-    }
-    fn send(&self, config: Js) -> JsFuture<'static> {
-        let sender = self.sender.borrow().clone();
-        let auth = self.authorize.clone();
-        Box::pin(async move {
-            if let Some(auth) = auth {
-                let mut request = RestRequest {
-                    method: config.get("method")?.to_display(),
-                    url: config.get("url")?.to_display(),
-                    ..Default::default()
-                };
-                auth.authorize(&mut request)
-                    .await
-                    .map_err(|e| Thrown::error("Error", &e.to_string()))?;
-                for (name, value) in request.headers {
-                    config.get("headers")?.define(&name, Js::str(&value))?;
-                }
-            }
-            sender.send(config).await
-        })
-    }
-}
 struct ApiHost {
     scope: Rc<Shared>,
     client: OnceCell<Js>,
-    route: OnceCell<Rc<Route>>,
 }
 pub(super) struct ApiBridge {
     // Own the API while its installed interceptors retain only Weak<ApexApi>.
@@ -72,7 +39,6 @@ impl ApiBridge {
         let host = Rc::new(ApiHost {
             scope,
             client: OnceCell::new(),
-            route: OnceCell::new(),
         });
         let api = crate::api_runtime::create_api(options, base, host.clone())?;
         if let Some(max) = max_rps {
@@ -131,30 +97,12 @@ impl ApexApiHost for ApiHost {
         _: &Rc<BaseExchange>,
     ) -> Result<(), ExchangeError> {
         let provider = self.scope.runtime.transport();
-        let request = RestRequest {
-            base_url: Some(config.base_url.into()),
-            ..Default::default()
-        };
-        let routing = provider
-            .rest(RestTransportContext {
-                exchange: &ExchangeName::Apexomni,
-                options,
-                config: &request,
-            })
-            .map_err(|e| ExchangeError::new(e.to_string()))?;
-        let route = Rc::new(Route {
-            scope: self.scope.clone(),
-            sender: RefCell::new(self.scope.http.clone()),
-            authorize: routing.authorize,
-        });
         let serializer = config.params_serializer;
-        let client = client::create(
-            route.clone(),
+        let client = client::factory::create(
+            self.scope.http.clone(),
+            provider.as_ref(),
             Js::object(vec![
-                (
-                    "baseURL",
-                    Js::str(routing.base_url.as_deref().unwrap_or(config.base_url)),
-                ),
+                ("baseURL", Js::str(config.base_url)),
                 ("timeout", Js::Number(config.timeout_ms)),
                 ("headers", js(&config.headers)),
                 (
@@ -166,10 +114,10 @@ impl ApexApiHost for ApiHost {
                     }),
                 ),
             ]),
-        );
-        self.route
-            .set(route)
-            .map_err(|_| ExchangeError::new("duplicate Apex route"))?;
+            &safe_cex_exchange::js_runtime::value::from_typed(options).map_err(error)?,
+            ExchangeName::Apexomni,
+        )
+        .map_err(error)?;
         self.client
             .set(client)
             .map_err(|_| ExchangeError::new("duplicate Apex client"))?;
@@ -232,10 +180,10 @@ impl ApexApiHost for ApiHost {
                         let owner = api
                             .upgrade()
                             .ok_or_else(|| Thrown::error("Error", "Apex API released"))?;
-                        let result = owner
-                            .request_handler(&to_js_json(&arg(&args, 0))?)
-                            .map_err(Thrown::from)?;
-                        Ok(js(&result))
+                        let original = arg(&args, 0);
+                        let before = to_js_json(&original)?;
+                        let result = owner.request_handler(&before).map_err(Thrown::from)?;
+                        carry_config(&original, &before, &result)
                     })],
                 )
             })
@@ -276,21 +224,17 @@ impl ApexApiHost for ApiHost {
         options: &ExchangeOptions,
         _: &str,
     ) -> Result<(), ExchangeError> {
-        if let Some(adapter) = self
-            .scope
-            .runtime
-            .transport()
-            .rest_adapter(RestAdapterContext {
-                exchange: &ExchangeName::Apexomni,
-                options,
-                variant: RestAdapterVariant::Default,
-            })
-        {
-            *self.route.get().expect("route created").sender.borrow_mut() =
-                client::rest_http_host(self.scope.runtime.clone(), adapter);
-        }
-        Ok(())
+        client::factory::install_transport_adapter(
+            self.scope.http.clone(),
+            self.scope.runtime.transport().as_ref(),
+            self.client(),
+            &safe_cex_exchange::js_runtime::value::from_typed(options).map_err(error)?,
+            ExchangeName::Apexomni,
+            RestAdapterVariant::Default,
+        )
+        .map_err(error)
     }
+
     fn now_ms(&self) -> f64 {
         self.scope.runtime.now_ms()
     }
@@ -316,9 +260,24 @@ impl ApexApiHost for ApiHost {
     }
     fn request_retry(&self, config: J) -> ExchangeFuture<'_, J> {
         Box::pin(async move {
+            let config = js(&config);
+            // The typed response ABI omits functions. Per-request capabilities
+            // are not exposed by ApexRequest; restore this client's original
+            // adapter/serializer defaults when preparing a legacy resend.
+            for (name, value) in self
+                .client()
+                .get("defaults")
+                .map_err(error)?
+                .own_entries()
+                .map_err(error)?
+            {
+                if value.is_callable() && config.get_key(&name).map_err(error)?.is_undefined() {
+                    config.define_key(&name, value).map_err(error)?;
+                }
+            }
             let response = await_js(
                 self.client()
-                    .call_method("request", vec![js(&config)])
+                    .call_method("request", vec![config])
                     .map_err(error)?,
             )
             .await
@@ -326,4 +285,35 @@ impl ApexApiHost for ApiHost {
             to_js_json(&response).map_err(error)
         })
     }
+}
+
+// Preserve executable capabilities from the shared config, replacing only the
+// fields the typed source interceptor changed. A data-only roundtrip would erase
+// paramsSerializer and the transport adapter before the terminal request.
+fn carry_config(original: &Js, before: &J, after: &J) -> Result<Js, Thrown> {
+    let next = original.spread_object()?;
+    let J::Object(fields) = after else {
+        return Err(Thrown::type_error("Apex config requires an object"));
+    };
+    for (name, value) in fields {
+        if crate::data::get(before, name) == value {
+            continue;
+        }
+        let mut projected = js(value);
+        if name == "headers" {
+            let old = original.get("headers")?;
+            if let (Js::Object(old), Js::Object(_)) = (&old, &projected) {
+                let headers = Js::object_with_class("AxiosHeaders", vec![]);
+                if let Js::Object(new) = &headers {
+                    *new.proto.borrow_mut() = old.proto.borrow().clone();
+                }
+                for (key, value) in projected.own_entries()? {
+                    headers.define_key(&key, value)?;
+                }
+                projected = headers;
+            }
+        }
+        next.define(name, projected)?;
+    }
+    Ok(next)
 }

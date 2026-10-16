@@ -278,6 +278,11 @@ kinds return explicit errors. Missing/invalid seeds are visible to account
 validation; hosted signing is explicitly unavailable on this host. External
 public data requires an injected factory.
 
+The shared HTTP factory owns default timeout, headers, tunnel routing and adapter
+selection. Signing preserves callable adapter/serializer values and unchanged
+config identity; the typed legacy response bridge restores those client-default
+capabilities before resend.
+
 Network failures retry reads only. Apex's signature code20016/401/message
 rejection in an HTTP200 envelope resends once through the existing legacy
 signing body. HTTP failures do not enter that resend. Native errors retain HTTP
@@ -294,10 +299,12 @@ Store positions untouched. Order-book callbacks own snapshots; retaining the
 callback result after cleanup differs from source's cleared shared object and
 is declared in the row note.
 
-`tests/binding.rs` has26 assembled tests, including all16 methods, both listeners,
+`tests/binding.rs` has27 assembled tests, including all16 methods, both listeners,
 legacy replay limits, HTTP metadata, write non-replay and disposal. Run
-`scripts/binding-controls.py`, `binding-precision-controls.py` and
-`registry-control.py` serially: they temporarily mutate production bodies and
+`scripts/binding-controls.py`, `binding-precision-controls.py`,
+`binding-capability-controls.py` and `registry-control.py` serially: they temporarily mutate production bodies and
 restore in finally. The18 method/listener controls and two independent precision
 swaps compile/fail their named assertion; missing registry membership fails the
-real native-host test and restores to pass.
+real native-host test and restores to pass. Two capability controls independently
+remove callable preservation before initial signing and legacy resend; each
+compiles and fails the custom-adapter witness before restoration passes.
