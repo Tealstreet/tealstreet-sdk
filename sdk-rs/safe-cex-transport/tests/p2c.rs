@@ -9,18 +9,16 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
-fn retry_signature_rejection<'a>(
+async fn retry_signature_rejection(
     request: ClassifiedRequest,
-    adapter: &'a dyn RestAdapter,
+    adapter: &dyn RestAdapter,
     retries: usize,
     venue: SignatureRetryVenue,
-    clock: &'a dyn RateLimitClock,
-) -> impl Future<Output = Result<RestResponse, safe_cex_transport::RestFailure>> + 'a {
-    async move {
-        retry_signature_rejection_with_receipt(request, adapter, retries, venue, clock)
-            .await
-            .map(|execution| execution.response)
-    }
+    clock: &dyn RateLimitClock,
+) -> Result<RestResponse, safe_cex_transport::RestFailure> {
+    retry_signature_rejection_with_receipt(request, adapter, retries, venue, clock)
+        .await
+        .map(|execution| execution.response)
 }
 fn run<T>(future: impl Future<Output = T>) -> T {
     let waker = Waker::noop();
