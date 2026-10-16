@@ -1,7 +1,7 @@
 # Rust venue construction through the registry
 
 Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`, `bybitspot`),
+`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, `breakoutprop`, Bybit (`bybit`, `bybitdemo`, `bybitspot`),
 Coinbase (`coinbase`, `coinbasespot`), `cryptocom`, `phemex`,
 the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid` and `hyperliquidspot`, the Binance family (`binance`, `binancepm`,
@@ -35,7 +35,11 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     credentials and proxy override. The native host routes signed requests through
     the shared transport stack and supplies the external-data gateway factory.
     `tests/native_host_asterdex.rs` verifies a signed account read server-side.
-  - `backpack`, built with `BackpackExchange::new`.
+  - `backpack`, built with `BackpackExchange::new`. Its native inputs retain
+    the shared hosted HTTP signer and account name. Public requests bypass signing;
+    private WebSocket auth continues to use the local secret as TypeScript does.
+    `native_host_backpack_hosted` checks real HTTP and source failure/log behavior;
+    `scripts/backpack-hosted-controls.py` proves signer, capability and log omissions.
   - `binance`, built with `BinanceExchange::new`.
   - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around
     `BitgetExchange::new`; `BitgetDependencies` carries the runtime and a
@@ -324,3 +328,18 @@ secrets; the source's nonempty API-key rule remains. Its raw clock HTTP bypasses
 hosted signing. `native_host_asterdex` covers metadata, exact returned wire
 configuration and the key refusal; its four compiled controls live in
 `scripts/asterdex-hosted-controls.py`.
+
+Paradex's Rust entry calls `native_exchange::ParadexExchange::new` with shared
+runtime HTTP and external-data hosts. `native_host_paradex` constructs the
+production registry route over local HTTP and checks native amount/price steps,
+venue identity and source fetchMarkets Store purity. The native host explicitly
+refuses remoteSigner until the SDK account capability is bound; it never falls
+back to local credentials for a hosted account.
+
+Breakout Prop is the legacy DXtrade adapter, assembled through its existing
+constructor and ProductionHost rather than another venue's implementation.
+All 16 trait methods dispatch on shared js_runtime, including seven exact
+inherited source rejections. Native HTTP preserves DXAPI headers and the
+transport-resolved baseURL; tunnel installation follows the source hook.
+Hosted login refuses visibly. Native offset-less dates use an explicit UTC
+realm; embeddings with other timezone policies supply local_to_utc.
