@@ -60,6 +60,10 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
         "tickersById",
         Rc::new(|st| from_typed(&*st.tickers_by_id())),
     );
+    getter(
+        "fetchedLeverage",
+        Rc::new(|st| from_typed(&*st.fetched_leverage())),
+    );
 
     let method = |name: &str, f: Rc<dyn Fn(&dyn Store, Vec<Js>) -> Result<Js, Thrown>>| {
         let store = store.clone();
@@ -173,6 +177,38 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
             let status: OrderStatus = to_typed(&arg(&a, 1))?;
             st.update_order_status(&arg(&a, 0).to_display(), status)
                 .map_err(mutation)?;
+            Ok(Js::Undefined)
+        }),
+    );
+    method(
+        "updateOrdersStatus",
+        Rc::new(|st, a| {
+            let orders = arg(&a, 0).array_values().unwrap_or_default();
+            if orders.is_empty() || st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            // ts: buildIdLookup keys on `items[i].id`, so every element is read as an object.
+            let mut keys = vec![];
+            for order in orders {
+                keys.push(String::from_utf16_lossy(&order.get("id")?.to_js_string()?));
+            }
+            let status: OrderStatus = to_typed(&arg(&a, 1))?;
+            let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+            st.update_orders_status(&refs, status).map_err(mutation)?;
+            Ok(Js::Undefined)
+        }),
+    );
+    method(
+        "setSetting",
+        Rc::new(|st, a| {
+            let key = arg(&a, 0).to_display();
+            if key != "isHedged" {
+                return Err(Thrown::type_error(&format!(
+                    "store options carry only isHedged (setting '{key}')"
+                )));
+            }
+            let value: bool = to_typed(&arg(&a, 1))?;
+            st.set_setting(&key, value).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
