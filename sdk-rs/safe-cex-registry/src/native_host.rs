@@ -277,6 +277,7 @@ impl RustVenueHost for NativeVenueHost {
         Ok(
             safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
                 runtime: self.runtime.clone(),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
                 http: Arc::new(HyperliquidHttp(client)),
                 limiter: self.hyperliquid_limiter.clone(),
                 signers: safe_cex_exchange::runtime::ExchangeSigners {

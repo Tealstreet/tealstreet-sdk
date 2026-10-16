@@ -283,7 +283,10 @@ Declared realm choices: promise reactions run as runtime tasks, not a V8
 microtask queue; store reads are snapshots (writes go through Store methods);
 the cross cache is per realm and memory-only (no BroadcastChannel or
 sessionStorage on native hosts); `close` listeners are not invoked because the
-core socket runs the close/reconnect path; external public data rejects visibly.
+core socket runs the close/reconnect path. External public data uses the shared
+BaseExchange initialization and host-supplied provider factory, retaining the
+same Store and provider disposal owner. The native host supplies its gateway
+factory; custom embeddings must supply one when the option is configured.
 Signing converts actions with `undefined` members retained, matching msgpack nil.
 
 The production host supplies `ExchangeSigners` through the existing dependency
