@@ -13,8 +13,21 @@ makes no claim about arbitrary generic arguments.
 
 Fresh native/default compiler discovery retains 532 owners, 36 aliases and two
 construction obligations. The 37 installed contracts match the actual compiler
-API lists and pass static contract eligibility. The other 533 census obligations
-remain unreviewed. No package, dependency, feature or wasm acceptance is claimed.
+API lists and pass static contract eligibility. Two additional construction reviews classify only the derived Clone of
+`HelperObserver<V,E>` and `SigningPayload`; their owner APIs remain independent.
+The other 531 census obligations remain unreviewed. No package, dependency, feature or wasm acceptance is claimed.
+
+The two construction witnesses pass against actual native owners. HelperObserver
+clones share pending state and preserve fulfillment/rejection object identity,
+registered wakers and late-clone completion. SigningPayload clones retain both
+independent wire and encoding snapshots, including native infinity, omitted JSON
+fields and signing nil members. Changing either clone implementation independently
+compiles and fails its named assertion; exact restoration passes both witnesses.
+Run `scripts/accepted-construction-controls.py` for the two mutation controls, or
+`scripts/accepted-leaf-native.py` for the 37 direct owner witnesses. These scripts
+restore every temporarily edited source byte in `finally`. Neither script grants
+compiler, local, namespace, alias, dependency or target-matrix acceptance. Strict
+native all-targets clippy passes with both permanent Clone witnesses installed.
 
 Production imports in 25 files now name their actual dependencies explicitly.
 After removing use declarations, each file is byte-identical to its prior body;
@@ -25,9 +38,12 @@ A fresh source scan removes all import/attribute-scope refusals, while retaining
 305 events: both actual core namespace refusals, 146 local OnlyMap types, 146
 visitor implementations, ten nested functions and one Step type. Both core
 modules remain intact. Compiler artifacts, verified macro origins, source hashes
-and the complete scan were preserved for the shared namespace review. The formal
-accepted-set preflight still refuses those unresolved scopes; no scanner or
-policy exemption was introduced.
+and the complete scan were preserved for the shared namespace review. The focused
+preflight still refuses those unresolved scopes. The ordinary package gate stops
+earlier at `private_class::PrivateValue<H>`: the actual associated-type projection
+`<H as WsPingHost>::Value` is unsupported by the direct-identity generic alias
+probe. It produces no native acceptance receipts. The exact alias remains public
+and unclassified; no scanner or alias-policy exemption was introduced.
 
 # Placement-record decoder boundary proof
 
