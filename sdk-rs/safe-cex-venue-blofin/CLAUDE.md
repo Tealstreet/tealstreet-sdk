@@ -14,6 +14,10 @@ the consuming method. Required fields stay required; optional fields distinguish
 omission from present null (null refuses). Records use shared map-only decoding.
 The batch leverage side is a closed net/long/short enum. Unknown properties
 are omitted; shared ingress enforces its recursion budget before projection.
+Its decoder admits strings before delegating to a private remote enum companion,
+so ordinary Serde and qualified decoding also refuse tagged records such as
+`{"long": null}`. Keep the three rename attributes and serialization unchanged;
+`batch_position_side_accepts_only_declared_strings` covers the ingress paths.
 Duplicate JSON keys follow the shared capture’s last-value semantics. No opaque passthrough
 fields exist in this slice. Future open-record readers must capture opaque
 fields before constructing Value. Constant tables hold static JSON data only;

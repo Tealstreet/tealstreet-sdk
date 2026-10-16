@@ -1,6 +1,7 @@
 //! BybitExchange members with no earlier port, and adapters onto the typed lifecycle state.
 pub(crate) mod account;
 pub(crate) mod amend;
+pub(crate) mod batch;
 pub(crate) mod cancel;
 pub(crate) mod controls;
 pub(crate) mod fills;
