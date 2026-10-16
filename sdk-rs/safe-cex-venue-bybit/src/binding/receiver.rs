@@ -279,6 +279,15 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(Js::Undefined)
     });
 
+    // Startup (members/startup.rs, primary_startup.rs).
+    method(&this, rt, "fetchApiKeyInfo", |rt, _| {
+        members::startup::fetch_api_key_info(rt)
+    });
+    method(&this, rt, "fetchAndCacheApiKeyInfo", |rt, _| {
+        members::startup::fetch_and_cache_api_key_info(rt)
+    });
+    method(&this, rt, "start", |rt, _| Ok(members::startup::start(rt)));
+
     // Account (members/account.rs).
     method(&this, rt, "getAccount", |rt, _| {
         members::account::get_account(rt)

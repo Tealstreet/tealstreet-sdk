@@ -435,3 +435,104 @@ fn change_margin_type_switches_the_account_and_restamps_positions() {
         .expect_err("a reason refuses the switch");
     assert_eq!(error.message, "Insufficient margin");
 }
+
+#[test]
+fn start_loads_public_and_private_state_and_dials_both_sockets() {
+    let h = harness(options(), |w| {
+        w.ok(
+            "GET",
+            "/v5/account/info",
+            json!({"marginMode": "ISOLATED_MARGIN", "unifiedMarginStatus": 6}),
+        );
+        w.ok("GET", "/v5/user/query-api", json!({"vipLevel": "No VIP"}));
+        w.ok("GET", "/v5/account/fee-rate", json!({"list": []}));
+        w.ok(
+            "GET",
+            "/v5/market/instruments-info",
+            json!({"list": [instrument("BTCUSDT", "Trading")]}),
+        );
+        w.route_when(
+            "GET",
+            "/v5/market/instruments-info",
+            "status",
+            "PreLaunch",
+            json!({"retCode": 0, "retMsg": "OK", "result": {"list": []}}),
+        );
+        w.ok(
+            "GET",
+            "/v5/market/tickers",
+            json!({"list": [{"symbol": "BTCUSDT", "lastPrice": "25000", "bid1Price": "1",
+                "ask1Price": "1", "markPrice": "1", "indexPrice": "1", "price24hPcnt": "0",
+                "openInterest": "0", "fundingRate": "0", "nextFundingTime": "0",
+                "volume24h": "0", "turnover24h": "0"}]}),
+        );
+        w.ok(
+            "GET",
+            "/v5/order/realtime",
+            json!({"list": [order_row("o-1", "BTCUSDT")], "nextPageCursor": ""}),
+        );
+        w.ok("GET", "/v5/position/list", position_list("10"));
+        w.ok("GET", "/v5/account/wallet-balance", wallet());
+    });
+    h.drive(h.venue().start()).expect("start");
+    for _ in 0..40 {
+        h.runtime.pump();
+        h.runtime.now.set(h.runtime.now.get() + 50.0);
+    }
+    let store = h.store.as_ref();
+    let loaded = safe_cex_store::Store::loaded(store).clone();
+    assert!(
+        loaded.markets && loaded.tickers,
+        "public state loaded: {loaded:?}"
+    );
+    assert!(
+        loaded.orders && loaded.positions && loaded.balance,
+        "private snapshot loaded: {loaded:?}"
+    );
+    assert_eq!(safe_cex_store::Store::markets(store).len(), 1);
+    assert_eq!(safe_cex_store::Store::tickers(store)[0].last, 25000.0);
+    assert!(
+        safe_cex_store::Store::orders(store)
+            .iter()
+            .any(|o| o.id == "o-1"),
+        "orders snapshot stored"
+    );
+    assert!(
+        safe_cex_store::Store::positions(store)
+            .iter()
+            .all(|p| p.margin_type == Some(safe_cex_types::MarginType::Isolated)),
+        "the margin probe ran before positions were stamped"
+    );
+    let dialed: Vec<String> = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .map(|(url, _)| url.clone())
+        .collect();
+    assert!(
+        dialed.iter().any(|u| u.contains("/v5/public/linear")),
+        "public socket dialed after markets: {dialed:?}"
+    );
+    assert!(
+        dialed.iter().any(|u| u.contains("/v5/private")),
+        "private socket dialed: {dialed:?}"
+    );
+    let public = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.contains("/v5/public/linear"))
+        .map(|(_, s)| s.clone())
+        .unwrap();
+    assert!(
+        public
+            .sent
+            .borrow()
+            .iter()
+            .any(|frame| frame.contains("tickers.BTCUSDT")),
+        "the public socket subscribed the loaded market: {:?}",
+        public.sent.borrow()
+    );
+}
