@@ -46,6 +46,14 @@ share an ID with a production struct, so name membership alone is insufficient.
 and decoded manifests. Its disjoint structural groups are candidate repair
 families, not automatic rename, split or provenance authorizations.
 
+`parity-check --invention-crate <package>` requires explicit `--manifest` and
+`--exempt` inputs. It builds the complete maintained workspace index, preserving
+canonical local/shared reexport resolution and every mapping target, then narrows
+only public invention obligations to that package. Status, target resolution and
+source-provenance checks still apply to every supplied row. Global/default gates
+are unchanged; report/progress do not accept this scope. The split-mapping CLI
+fixture also requires unmapped-item and missing-provenance failures and restoration.
+
 **Progress shares report counters.** `parity:progress` builds the same source
 index and calls validated `report`, then formats its total, phase buckets and
 ten largest pending source files. It does not count symbols itself. Phase
@@ -243,12 +251,3 @@ admits. Every ordinary alternate trait detector still runs. The general borrowed
 AliasProbe guard and DeserializeOwned bound remain unchanged. The finite route
 policy cannot classify another alias, type argument, target, package or adapter;
 a reviewed consumer contract and all 36 route witnesses are still required.
-
-
-`parity-check --invention-crate <package>` requires explicit `--manifest` and
-`--exempt` inputs. It builds the complete maintained workspace index, preserving
-canonical local/shared reexport resolution and every mapping target, then narrows
-only public invention obligations to that package. Status, target resolution and
-source-provenance checks still apply to every supplied row. Global/default gates
-are unchanged; report/progress do not accept this scope. The split-mapping CLI
-fixture also requires unmapped-item and missing-provenance failures and restoration.
