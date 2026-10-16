@@ -699,6 +699,7 @@ fn table_members_are_exactly_the_bound_venues() {
     assert_eq!(
         names,
         [
+            ExchangeName::Asterdex,
             ExchangeName::Backpack,
             ExchangeName::Binance,
             ExchangeName::Binancepm,

@@ -186,6 +186,40 @@ impl RustVenueHost for NativeVenueHost {
             },
         )
     }
+    #[expect(clippy::arc_with_non_send_sync)]
+    fn asterdex(
+        &self,
+    ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for asterdex on the native host",
+            ));
+        }
+        let runtime = self.runtime.clone();
+        let adapter = self.adapter.clone();
+        Ok(
+            safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies {
+                runtime: self.runtime.clone(),
+                http: Rc::new(move |options| {
+                    if options.remote_signer.is_some() {
+                        return Err(ExchangeError::new(
+                            "remoteSigner is not wired for asterdex on the native host",
+                        ));
+                    }
+                    Ok(safe_cex_exchange::js_runtime::client::rest_http_host(
+                        runtime.clone(),
+                        Arc::new(AsterRest {
+                            runtime: runtime.clone(),
+                            adapter: adapter.clone(),
+                            options: options.clone(),
+                        }),
+                    ))
+                }),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
     fn hosted_signer(&self) -> Option<HostedSigner> {
         self.remote.clone()
     }
@@ -326,6 +360,44 @@ impl RestAdapter for HyperliquidHttp {
     ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestExecution> {
         request.base_url = None;
         Box::pin(self.0.execute_with_receipt(request))
+    }
+}
+
+// The source API factory supplies its base URL after choosing primary/secondary
+// options. Route the final post-signing request through the shared HTTP stack.
+struct AsterRest {
+    runtime: Rc<dyn WsRuntime>,
+    adapter: AdapterFactory,
+    options: safe_cex_types::ExchangeOptions,
+}
+impl RestAdapter for AsterRest {
+    fn execute(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        Box::pin(async move {
+            let client = native_client(
+                &self.runtime,
+                &self.adapter,
+                safe_cex_types::ExchangeName::Asterdex,
+                &self.options,
+                request.clone(),
+                None,
+                None,
+            )
+            .map_err(|error| {
+                safe_cex_transport::RestFailure::pre_transmit(error.message, request.clone())
+            })?;
+            safe_cex_exchange::http::install_transport_adapter(
+                &client,
+                &safe_cex_transport::TransportRegistry::default(),
+                &self.options,
+                Some(&self.runtime.transport()),
+                safe_cex_transport::RestAdapterVariant::Default,
+            );
+            request.base_url = None;
+            client.execute(request).await
+        })
     }
 }
 

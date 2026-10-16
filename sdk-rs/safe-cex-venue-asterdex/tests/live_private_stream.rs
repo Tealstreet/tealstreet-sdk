@@ -489,7 +489,7 @@ fn balance(b: &Balance, e: &Value, label: &str) {
                 "{label} currencies keys"
             );
             for (k, v) in c {
-                balance(v, &expected[k], label);
+                balance(v.as_balance().unwrap(), &expected[k], label);
             }
         }
         (None, None) => {}
@@ -923,7 +923,15 @@ fn disclosed_native_boundaries_are_observable() {
         vec!["USDT", "__proto__"],
         "native own currency boundary"
     );
-    assert_eq!(currencies.get("__proto__").unwrap().total, 2.0);
+    assert_eq!(
+        currencies
+            .get("__proto__")
+            .unwrap()
+            .as_balance()
+            .unwrap()
+            .total,
+        2.0
+    );
     assert_eq!(source["currencyKeys"], json!(["USDT"]));
     assert_eq!(source["prototypeTotal"], 2);
     assert_eq!(source["reconcile"], true);

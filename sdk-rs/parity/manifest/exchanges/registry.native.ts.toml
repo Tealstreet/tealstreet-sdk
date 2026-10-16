@@ -38,9 +38,9 @@ note = "CHOSEN: native_apexomni selects the actual source module ./apexomni/apex
 ts = "exchangeRegistry.asterdex"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_asterdex"
+rs = [ "safe-cex-registry/src/loaders.rs::native_asterdex", "safe-cex-registry/src/rust_venues.rs::asterdex_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::asterdex" ]
 status = "divergent"
-note = "CHOSEN: native_asterdex selects the actual source module ./asterdex/asterdex.exchange and export AsterDEXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_asterdex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::asterdex_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::asterdex supply the AsterDEX runtime, per-lane HTTP factory and external-data provider for Rust construction. CHOSEN: native_asterdex selects the actual source module ./asterdex/asterdex.exchange and export AsterDEXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_asterdex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.backpack"

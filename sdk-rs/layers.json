@@ -217,6 +217,7 @@
   "registryConstructors": {
     "from": "safe-cex-registry",
     "venues": [
+      "safe-cex-venue-asterdex",
       "safe-cex-venue-backpack",
       "safe-cex-venue-binance",
       "safe-cex-venue-bitget",
