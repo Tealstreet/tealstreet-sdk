@@ -12,6 +12,7 @@ pub mod health;
 pub mod http;
 pub mod income_paging;
 pub mod journal;
+pub mod js_runtime;
 pub mod lifecycle;
 pub mod order_operations;
 pub mod position_intervals;
