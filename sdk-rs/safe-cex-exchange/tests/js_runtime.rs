@@ -508,7 +508,11 @@ fn string_method(receiver: &str, name: &str, args: Vec<Js>) -> Js {
 #[test]
 fn string_methods_dispatch_a_regexp_argument_to_its_symbol_method() {
     // ts: normalizeSymbolForMatching(symbol).replace(/[-_/]/g, '')
-    let replaced = string_method("eth-usd_x/y", "replace", vec![regex("[-_/]", "g"), Js::str("")]);
+    let replaced = string_method(
+        "eth-usd_x/y",
+        "replace",
+        vec![regex("[-_/]", "g"), Js::str("")],
+    );
     assert_eq!(replaced.to_display(), "ethusdxy");
     // Captures are spliced into a regex split, as interval parsing relies on.
     let parts = string_method("1h30m", "split", vec![regex(r"(\d+)", "")]);
@@ -521,11 +525,16 @@ fn string_methods_dispatch_a_regexp_argument_to_its_symbol_method() {
         Js::Null
     ));
     assert_eq!(
-        string_method("abc", "search", vec![regex("c", "")]).to_number().unwrap(),
+        string_method("abc", "search", vec![regex("c", "")])
+            .to_number()
+            .unwrap(),
         2.0
     );
     // A plain string pattern keeps the first-occurrence string semantics.
-    assert_eq!(string_method("a-b-c", "replace", vec![Js::str("-"), Js::str("+")]).to_display(), "a+b-c");
+    assert_eq!(
+        string_method("a-b-c", "replace", vec![Js::str("-"), Js::str("+")]).to_display(),
+        "a+b-c"
+    );
     assert_eq!(
         to_json(&string_method("a,b", "split", vec![Js::str(",")])).unwrap(),
         json!(["a", "b"])

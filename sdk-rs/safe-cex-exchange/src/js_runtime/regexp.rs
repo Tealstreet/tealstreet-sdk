@@ -211,7 +211,9 @@ impl Parser<'_> {
             '(' => {
                 let index = if self.eat('?') {
                     if !self.eat(':') {
-                        return Err("Invalid group (lookaround and named groups are not supported by the host RegExp)");
+                        return Err(
+                            "Invalid group (lookaround and named groups are not supported by the host RegExp)",
+                        );
                     }
                     None
                 } else {
@@ -351,7 +353,11 @@ fn class_item(atom: Result<u16, ClassItem>) -> ClassItem {
 
 /// ASCII view of a pattern unit; non-ASCII never aliases a syntax character.
 fn ascii(c: u16) -> char {
-    if c < 0x80 { c as u8 as char } else { '\u{FFFD}' }
+    if c < 0x80 {
+        c as u8 as char
+    } else {
+        '\u{FFFD}'
+    }
 }
 
 const MAX_DEPTH: usize = 20_000;
@@ -381,8 +387,7 @@ impl Matcher<'_> {
         let lower = lowercase(c);
         hit(c)
             || (self.icase
-                && (hit(canonicalize(c))
-                    || (canonicalize(lower) == canonicalize(c) && hit(lower))))
+                && (hit(canonicalize(c)) || (canonicalize(lower) == canonicalize(c) && hit(lower))))
     }
     fn unit(&self, pos: usize) -> u16 {
         let c = self.input[pos];
@@ -398,7 +403,9 @@ impl Matcher<'_> {
         let matched = match node {
             Node::Char(c) => pos < len && self.unit(pos) == *c && k(self, pos + 1),
             Node::Any => {
-                pos < len && (self.dot_all || !is_line_terminator(self.input[pos])) && k(self, pos + 1)
+                pos < len
+                    && (self.dot_all || !is_line_terminator(self.input[pos]))
+                    && k(self, pos + 1)
             }
             Node::Class(items, negated) => {
                 pos < len && self.class_hit(items, self.input[pos]) != *negated && k(self, pos + 1)
@@ -408,7 +415,8 @@ impl Matcher<'_> {
                     && k(self, pos)
             }
             Node::End => {
-                (pos == len || (self.multiline && is_line_terminator(self.input[pos]))) && k(self, pos)
+                (pos == len || (self.multiline && is_line_terminator(self.input[pos])))
+                    && k(self, pos)
             }
             Node::WordBoundary(negated) => {
                 let before = pos > 0 && is_word(self.input[pos - 1]);
@@ -452,9 +460,9 @@ impl Matcher<'_> {
     fn sequence(&mut self, items: &[Node], pos: usize, k: Continuation<'_>) -> bool {
         match items.split_first() {
             None => k(self, pos),
-            Some((first, rest)) => {
-                self.node(first, pos, &mut |m: &mut Matcher<'_>, next| m.sequence(rest, next, k))
-            }
+            Some((first, rest)) => self.node(first, pos, &mut |m: &mut Matcher<'_>, next| {
+                m.sequence(rest, next, k)
+            }),
         }
     }
     fn repeat(
@@ -626,7 +634,10 @@ fn substitute(template: &[u16], input: &[u16], found: &Match) -> Vec<u16> {
     let mut out = vec![];
     let mut i = 0;
     let dollar = u16::from(b'$');
-    let digit = |c: Option<&u16>| c.filter(|c| (0x30..=0x39).contains(*c)).map(|c| usize::from(c - 0x30));
+    let digit = |c: Option<&u16>| {
+        c.filter(|c| (0x30..=0x39).contains(*c))
+            .map(|c| usize::from(c - 0x30))
+    };
     while i < template.len() {
         let c = template[i];
         let next = template.get(i + 1).copied();
@@ -770,7 +781,11 @@ fn split(program: &Program, input: &[u16], limit: &Js) -> Result<Js, Thrown> {
         u32::MAX as usize
     } else {
         let n = limit.to_number()?;
-        if n.is_finite() { (n.trunc() as i64).rem_euclid(1 << 32) as usize } else { 0 }
+        if n.is_finite() {
+            (n.trunc() as i64).rem_euclid(1 << 32) as usize
+        } else {
+            0
+        }
     };
     let mut out = vec![];
     if limit == 0 {
@@ -914,13 +929,19 @@ mod tests {
         assert!(!test(auth, "i", "invalid auth: wrong key"));
         assert_eq!(replace_all("[-_/]", "eth-usd_x/y", ""), "ethusdxy");
         assert_eq!(replace_all(r"[_\s-]", "a_b c-d", ""), "abcd");
-        assert!(test("0x[a-fA-F0-9]{40}", "", &format!("0x{}", "aB".repeat(20))));
+        assert!(test(
+            "0x[a-fA-F0-9]{40}",
+            "",
+            &format!("0x{}", "aB".repeat(20))
+        ));
         assert!(!test("0x[a-fA-F0-9]{40}", "", "0x1234"));
     }
 
     #[test]
     fn exec_returns_captures_and_tracks_last_index() {
-        let found = re(r"(\d+)", "").call_method("exec", vec![Js::str("1h30m")]).unwrap();
+        let found = re(r"(\d+)", "")
+            .call_method("exec", vec![Js::str("1h30m")])
+            .unwrap();
         assert_eq!(found.to_display(), "1,1");
         let global = re(r"\d", "g");
         let first = global.call_method("exec", vec![Js::str("a1b2")]).unwrap();
@@ -936,9 +957,16 @@ mod tests {
     fn flags_and_text_are_canonical() {
         let r = re("a/b", "yig");
         assert_eq!(r.get("flags").unwrap().to_display(), "giy");
-        assert_eq!(r.call_method("toString", vec![]).unwrap().to_display(), "/a/b/giy");
+        assert_eq!(
+            r.call_method("toString", vec![]).unwrap().to_display(),
+            "/a/b/giy"
+        );
         assert_eq!(re("", "").get("source").unwrap().to_display(), "(?:)");
-        assert!(r.own_keys().iter().all(|k| String::from_utf16_lossy(k) == "lastIndex"));
+        assert!(
+            r.own_keys()
+                .iter()
+                .all(|k| String::from_utf16_lossy(k) == "lastIndex")
+        );
     }
 
     #[test]
