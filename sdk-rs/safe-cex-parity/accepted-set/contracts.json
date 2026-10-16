@@ -136339,5 +136339,57 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_blofin::types::BatchPositionSide": {
+    "shape": "string",
+    "literals": [
+      "net",
+      "long",
+      "short"
+    ],
+    "evidence": "FETCH_BATCH_LEV_RESPONSE.data.positionSide in the maintained blofin.types.ts is the closed string union net|long|short. Native schema and string boundaries remain those declared in its existing divergent manifest row; TS type annotations do not validate arbitrary runtime values. Actual enum variant observations and string-only shape probes execute this production decoder.",
+    "entrypoints": [],
+    "observation": {
+      "call": "{match <$type as serde::Deserialize>::deserialize($value.clone()){Ok(side)=>serde_json::json!({\"ok\":true,\"side\":match side{super::BatchPositionSide::Net=>\"net\",super::BatchPositionSide::Long=>\"long\",super::BatchPositionSide::Short=>\"short\"}}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "cases": [
+        {
+          "input": "net",
+          "output": {
+            "ok": true,
+            "side": "net"
+          }
+        },
+        {
+          "input": "long",
+          "output": {
+            "ok": true,
+            "side": "long"
+          }
+        },
+        {
+          "input": "short",
+          "output": {
+            "ok": true,
+            "side": "short"
+          }
+        },
+        {
+          "input": {
+            "net": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "long": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }
