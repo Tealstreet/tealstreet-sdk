@@ -141,18 +141,18 @@ note = "Owns optional exchange/default Axios creation, production/testnet config
 [[symbol]]
 ts = "withoutSigningFields"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::without_signing_fields"
+status = "ported"
+note = "Renamed target `safe-cex-venue-asterdex/src/api_helpers.rs::without_signing_fields`. Copies admitted object/array own fields in JavaScript key order and drops the previous signing fields before a resend. Witness: tests/live_api.rs and tests/runtime_assembly.rs cover the signing-field list and re-signing."
 
 [[symbol]]
 ts = "createAPI"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/api_runtime.rs::create_api"
+rs = [ "safe-cex-venue-asterdex/src/api_runtime.rs::create_api", "safe-cex-venue-asterdex/src/api_runtime.rs::resend_v1_signature_rejection" ]
 status = "ported"
-note = "Owns both interceptors and factory configuration: public/remote bypass, optional time sync, unsigned cache, API key and V1/V3/code signing, timestamp resync/retry-once with unsigned data retention, lite/HTTP error formatting and suppression, status logs and read-only retry/rate setup. Primitive dependencies bind mapped helpers/shared crypto/clock/transport owners. Source floors 12 request, four fulfilled-response, twelve rejection and five retry cases; native values and original request/response/error identities precede wire observations."
+note = "Owns both interceptors and factory configuration: public/remote bypass, optional time sync, unsigned cache, API key and V1/V3/code signing, timestamp resync/retry-once with unsigned data retention, lite/HTTP error formatting and suppression, status logs and read-only retry/rate setup. Primitive dependencies bind mapped helpers/shared crypto/clock/transport owners. Source floors 12 request, four fulfilled-response, twelve rejection and five retry cases; native values and original request/response/error identities precede wire observations. Split member `safe-cex-venue-asterdex/src/api_runtime.rs::resend_v1_signature_rejection`. The source-local V1 resend helper is invoked before success/rejection side effects; V3 URLs and an existing signature stamp skip it. Runtime assembly source oracle includes five added cases (floor75)."
 
 [[symbol]]
 ts = "createAPIInstances"

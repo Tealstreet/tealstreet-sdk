@@ -116,8 +116,8 @@
       {
         "algorithm": "sha256",
         "key": "fixture-secret",
-        "preimage": "1700000000123POST/api/v1/orders?symbol=BTC USDT&nested[key]=a+b&ids[0]=1&ids[1]=2\"{\\\"raw\\\":\\\"body\\\"}\"",
-        "digest": "KpiXx5RtXSmCH3K/zyZopgJBU/Lxr6ShNlk2YHdupTo="
+        "preimage": "1700000000123POST/api/v1/orders?symbol=BTC USDT&nested[key]=a+b&ids[0]=1&ids[1]=2{\"raw\":\"body\"}",
+        "digest": "kY/SHnsp4/Tkcw8iW8ucy02jLCOJEl4sQbLuzYBf4WE="
       },
       {
         "algorithm": "sha256",
@@ -137,7 +137,7 @@
       "KC-API-PARTNER-SIGN": "zlmSpKCKSej1xdgIbRN266wvY2/aR4xuRDPYGx6Tb8k=",
       "KC-BROKER-NAME": "broker-name",
       "KC-API-PARTNER-VERIFY": "true",
-      "KC-API-SIGN": "KpiXx5RtXSmCH3K/zyZopgJBU/Lxr6ShNlk2YHdupTo="
+      "KC-API-SIGN": "kY/SHnsp4/Tkcw8iW8ucy02jLCOJEl4sQbLuzYBf4WE="
     },
     "baseURL": "https://api-futures.kucoin.com",
     "timeout": 20000,
@@ -165,8 +165,8 @@
       {
         "algorithm": "sha256",
         "key": "fixture-secret",
-        "preimage": "1700000000123POST/api/v1/orders?symbol=BTC USDT&nested[key]=a+b&ids[0]=1&ids[1]=2\"raw body\"",
-        "digest": "YHdtXhLI/Iw5qb5FhnPaYLrh6iU/PwR+PvgbFezdNRs="
+        "preimage": "1700000000123POST/api/v1/orders?symbol=BTC USDT&nested[key]=a+b&ids[0]=1&ids[1]=2raw body",
+        "digest": "L7SY311pX/wvG7qryn4X62fsYADymUumxTTBbsgJIig="
       },
       {
         "algorithm": "sha256",
@@ -186,7 +186,7 @@
       "KC-API-PARTNER-SIGN": "zlmSpKCKSej1xdgIbRN266wvY2/aR4xuRDPYGx6Tb8k=",
       "KC-BROKER-NAME": "broker-name",
       "KC-API-PARTNER-VERIFY": "true",
-      "KC-API-SIGN": "YHdtXhLI/Iw5qb5FhnPaYLrh6iU/PwR+PvgbFezdNRs="
+      "KC-API-SIGN": "L7SY311pX/wvG7qryn4X62fsYADymUumxTTBbsgJIig="
     },
     "baseURL": "https://api-futures.kucoin.com",
     "timeout": 20000,
@@ -279,8 +279,8 @@
       {
         "algorithm": "sha256",
         "key": "broker-key",
-        "preimage": "123partnerfixture-key",
-        "digest": "HpE292/JWuG8OvC6cWsI5AUlD+46bDFHZZe7kJm8ny4="
+        "preimage": "1700000000123partnerfixture-key",
+        "digest": "zlmSpKCKSej1xdgIbRN266wvY2/aR4xuRDPYGx6Tb8k="
       }
     ],
     "headers": {
@@ -289,9 +289,9 @@
       "KC-API-KEY": "fixture-key",
       "KC-API-PASSPHRASE": "xu0a1Ibu9r1s+Neo6/0q4L3c4y1cLvFd6c7ObyBWG4o=",
       "KC-API-KEY-VERSION": "2",
-      "kc-api-timestamp": "123",
+      "kc-api-timestamp": "1700000000123",
       "KC-API-PARTNER": "partner",
-      "KC-API-PARTNER-SIGN": "HpE292/JWuG8OvC6cWsI5AUlD+46bDFHZZe7kJm8ny4=",
+      "KC-API-PARTNER-SIGN": "zlmSpKCKSej1xdgIbRN266wvY2/aR4xuRDPYGx6Tb8k=",
       "KC-BROKER-NAME": "broker-name",
       "KC-API-PARTNER-VERIFY": "true"
     },
@@ -419,8 +419,8 @@
       {
         "algorithm": "sha256",
         "key": "fixture-secret",
-        "preimage": "1700000000123POST/api/v1/orders?symbol=BTC%20USDT&nested%5Bkey%5D=a%2Bb&ids%5B0%5D=1&ids%5B1%5D=2\"{\\\"raw\\\":\\\"body\\\"}\"",
-        "digest": "h9DBVqfo8tSpwkE++G207vOo2/CZ1p7eNxWi9CxQTGM="
+        "preimage": "1700000000123POST/api/v1/orders?symbol=BTC%20USDT&nested%5Bkey%5D=a%2Bb&ids%5B0%5D=1&ids%5B1%5D=2{\"raw\":\"body\"}",
+        "digest": "Hz3RpSNB0kXQcS+iBhXigr+GdJB7bNCOxz4GNwIgxNQ="
       },
       {
         "algorithm": "sha256",
@@ -438,7 +438,7 @@
       "KC-BROKER-NAME": "broker-name",
       "KC-API-PARTNER-VERIFY": "true",
       "KC-API-KEY": "fixture-key",
-      "KC-API-SIGN": "h9DBVqfo8tSpwkE++G207vOo2/CZ1p7eNxWi9CxQTGM=",
+      "KC-API-SIGN": "Hz3RpSNB0kXQcS+iBhXigr+GdJB7bNCOxz4GNwIgxNQ=",
       "KC-API-PASSPHRASE": "xu0a1Ibu9r1s+Neo6/0q4L3c4y1cLvFd6c7ObyBWG4o=",
       "KC-API-KEY-VERSION": "2"
     },
@@ -468,8 +468,8 @@
       {
         "algorithm": "sha256",
         "key": "fixture-secret",
-        "preimage": "1700000000123POST/api/v1/orders?symbol=BTC%20USDT&nested%5Bkey%5D=a%2Bb&ids%5B0%5D=1&ids%5B1%5D=2\"raw body\"",
-        "digest": "FazlOQAe21cG/eusCCIstKK1wvKX6sT82ly2qlnJUvM="
+        "preimage": "1700000000123POST/api/v1/orders?symbol=BTC%20USDT&nested%5Bkey%5D=a%2Bb&ids%5B0%5D=1&ids%5B1%5D=2raw body",
+        "digest": "VMPpd+EWronTEY0asB3Krn/5VDn8VZMXvuBCzSWdrVI="
       },
       {
         "algorithm": "sha256",
@@ -487,7 +487,7 @@
       "KC-BROKER-NAME": "broker-name",
       "KC-API-PARTNER-VERIFY": "true",
       "KC-API-KEY": "fixture-key",
-      "KC-API-SIGN": "FazlOQAe21cG/eusCCIstKK1wvKX6sT82ly2qlnJUvM=",
+      "KC-API-SIGN": "VMPpd+EWronTEY0asB3Krn/5VDn8VZMXvuBCzSWdrVI=",
       "KC-API-PASSPHRASE": "xu0a1Ibu9r1s+Neo6/0q4L3c4y1cLvFd6c7ObyBWG4o=",
       "KC-API-KEY-VERSION": "2"
     },
@@ -582,16 +582,16 @@
       {
         "algorithm": "sha256",
         "key": "broker-key",
-        "preimage": "123partnerfixture-key",
-        "digest": "HpE292/JWuG8OvC6cWsI5AUlD+46bDFHZZe7kJm8ny4="
+        "preimage": "1700000000123partnerfixture-key",
+        "digest": "zlmSpKCKSej1xdgIbRN266wvY2/aR4xuRDPYGx6Tb8k="
       }
     ],
     "headers": {
       "X-CHANNEL-API-CODE": "3zexp",
       "Content-Type": "application/json",
-      "kc-api-timestamp": "123",
+      "kc-api-timestamp": "1700000000123",
       "KC-API-PARTNER": "partner",
-      "KC-API-PARTNER-SIGN": "HpE292/JWuG8OvC6cWsI5AUlD+46bDFHZZe7kJm8ny4=",
+      "KC-API-PARTNER-SIGN": "zlmSpKCKSej1xdgIbRN266wvY2/aR4xuRDPYGx6Tb8k=",
       "KC-BROKER-NAME": "broker-name",
       "KC-API-PARTNER-VERIFY": "true"
     },

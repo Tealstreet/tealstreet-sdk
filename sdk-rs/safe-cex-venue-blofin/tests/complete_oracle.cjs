@@ -7,7 +7,7 @@ const venue=path.join(root,'packages/safe-cex/src/exchanges/blofin');
 function source(file,name){const text=fs.readFileSync(path.join(venue,file),'utf8'),ast=ts.createSourceFile(file,text,ts.ScriptTarget.Latest,true);const klass=ast.statements.find(s=>ts.isClassDeclaration(s)&&s.name?.text===name);assert(klass,name);return {ast,klass};}
 const exchange=source('blofin.exchange.ts','BlofinExchange'),priv=source('blofin.ws-private.ts','BlofinPrivateWebsocket');
 const sourceMembers=exchange.klass.members.map(m=>ts.isConstructorDeclaration(m)?'constructor':m.name?.text).filter(Boolean);
-assert.equal(sourceMembers.length,70,'independent full exchange member floor');
+assert.equal(sourceMembers.length,71,'independent full exchange member floor');
 const sourcePrivate=priv.klass.members.map(m=>m.name?.text).filter(Boolean);
 assert.equal(sourcePrivate.length,16,'independent full private member floor');
 const shared={...load(path.join(root,'packages/safe-cex/src/types.ts')),...load(path.join(venue,'blofin.types.ts')),...load(path.join(root,'packages/safe-cex/src/utils/safe-math.ts')),...load(path.join(root,'packages/safe-cex/src/utils/roundUSD.ts')),...load(path.join(root,'packages/safe-cex/src/utils/createPositionId.ts')),...load(path.join(root,'packages/safe-cex/src/utils/inverseObj.ts')),...load(path.join(root,'packages/safe-cex/src/exchanges/clientOrderId.ts')),...load(path.join(root,'packages/json-parse/src/jsonParse.ts'))};

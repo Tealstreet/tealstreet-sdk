@@ -397,10 +397,10 @@ note = "CHOSEN: retained UtilityInput reads own JSON worker result/argument fiel
 [[symbol]]
 ts = "BlofinExchange#applyConfirmedMarginType"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-blofin/src/modes.rs::apply_confirmed_margin_type"
+status = "ported"
+note = "Renamed target `safe-cex-venue-blofin/src/modes.rs::apply_confirmed_margin_type`. Updates the confirmed account margin mode, existing fetched leverage rows and flat positions; source response marginMode is authoritative in the caller. Fallible Store updates preserve committed-before-notification behavior. Witnesses: tests/complete.rs and tests/order_rest.rs with their actual-source oracles."
 
 [[symbol]]
 ts = "BlofinExchange#applyConfirmedPositionMode"
