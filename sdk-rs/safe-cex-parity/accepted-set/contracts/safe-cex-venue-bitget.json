@@ -1,0 +1,3241 @@
+{
+  "safe_cex_venue_bitget::types::FetchSingleAccountResponseData": {
+    "shape": "map",
+    "sample": {
+      "marginCoin": "17.25",
+      "locked": "17.25",
+      "available": "17.25",
+      "crossedMaxAvailable": "17.25",
+      "isolatedMaxAvailable": "17.25",
+      "maxTransferOut": "17.25",
+      "accountEquity": "17.25",
+      "usdtEquity": "17.25",
+      "btcEquity": "17.25",
+      "crossedRiskRate": "17.25",
+      "crossedMarginLeverage": "17.25",
+      "isolatedLongLever": "17.25",
+      "isolatedShortLever": "17.25",
+      "marginMode": "17.25",
+      "posMode": "17.25",
+      "unrealizedPL": "17.25",
+      "coupon": "17.25",
+      "assetMode": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_SINGLE_ACCOUNT_RESPONSE/data: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"marginCoin\":decoded.margin_coin,\"locked\":decoded.locked,\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "marginCoin",
+        "locked",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "marginCoin": "alpha-marginCoin",
+            "locked": "alpha-locked",
+            "available": "17.25",
+            "crossedMaxAvailable": "17.25",
+            "isolatedMaxAvailable": "17.25",
+            "maxTransferOut": "17.25",
+            "accountEquity": "17.25",
+            "usdtEquity": "17.25",
+            "btcEquity": "17.25",
+            "crossedRiskRate": "17.25",
+            "crossedMarginLeverage": "17.25",
+            "isolatedLongLever": "17.25",
+            "isolatedShortLever": "17.25",
+            "marginMode": "17.25",
+            "posMode": "17.25",
+            "unrealizedPL": "17.25",
+            "coupon": "17.25",
+            "assetMode": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "marginCoin": "alpha-marginCoin",
+            "locked": "alpha-locked",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "marginCoin": "beta-marginCoin",
+            "locked": "beta-locked",
+            "available": "17.25",
+            "crossedMaxAvailable": "17.25",
+            "isolatedMaxAvailable": "17.25",
+            "maxTransferOut": "17.25",
+            "accountEquity": "17.25",
+            "usdtEquity": "17.25",
+            "btcEquity": "17.25",
+            "crossedRiskRate": "17.25",
+            "crossedMarginLeverage": "17.25",
+            "isolatedLongLever": "17.25",
+            "isolatedShortLever": "17.25",
+            "marginMode": "17.25",
+            "posMode": "17.25",
+            "unrealizedPL": "17.25",
+            "coupon": "17.25",
+            "assetMode": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "marginCoin": "beta-marginCoin",
+            "locked": "beta-locked",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchSingleAccountResponse": {
+    "shape": "map",
+    "sample": {
+      "code": "17.25",
+      "data": {
+        "marginCoin": "17.25",
+        "locked": "17.25",
+        "available": "17.25",
+        "crossedMaxAvailable": "17.25",
+        "isolatedMaxAvailable": "17.25",
+        "maxTransferOut": "17.25",
+        "accountEquity": "17.25",
+        "usdtEquity": "17.25",
+        "btcEquity": "17.25",
+        "crossedRiskRate": "17.25",
+        "crossedMarginLeverage": "17.25",
+        "isolatedLongLever": "17.25",
+        "isolatedShortLever": "17.25",
+        "marginMode": "17.25",
+        "posMode": "17.25",
+        "unrealizedPL": "17.25",
+        "coupon": "17.25",
+        "assetMode": "17.25"
+      },
+      "msg": "17.25",
+      "requestTime": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_SINGLE_ACCOUNT_RESPONSE: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"code\":decoded.code,\"msg\":decoded.msg,\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "code",
+        "msg",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "code": "alpha-code",
+            "data": {
+              "marginCoin": "17.25",
+              "locked": "17.25",
+              "available": "17.25",
+              "crossedMaxAvailable": "17.25",
+              "isolatedMaxAvailable": "17.25",
+              "maxTransferOut": "17.25",
+              "accountEquity": "17.25",
+              "usdtEquity": "17.25",
+              "btcEquity": "17.25",
+              "crossedRiskRate": "17.25",
+              "crossedMarginLeverage": "17.25",
+              "isolatedLongLever": "17.25",
+              "isolatedShortLever": "17.25",
+              "marginMode": "17.25",
+              "posMode": "17.25",
+              "unrealizedPL": "17.25",
+              "coupon": "17.25",
+              "assetMode": "17.25"
+            },
+            "msg": "alpha-msg",
+            "requestTime": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "code": "alpha-code",
+            "msg": "alpha-msg",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "code": "beta-code",
+            "data": {
+              "marginCoin": "17.25",
+              "locked": "17.25",
+              "available": "17.25",
+              "crossedMaxAvailable": "17.25",
+              "isolatedMaxAvailable": "17.25",
+              "maxTransferOut": "17.25",
+              "accountEquity": "17.25",
+              "usdtEquity": "17.25",
+              "btcEquity": "17.25",
+              "crossedRiskRate": "17.25",
+              "crossedMarginLeverage": "17.25",
+              "isolatedLongLever": "17.25",
+              "isolatedShortLever": "17.25",
+              "marginMode": "17.25",
+              "posMode": "17.25",
+              "unrealizedPL": "17.25",
+              "coupon": "17.25",
+              "assetMode": "17.25"
+            },
+            "msg": "beta-msg",
+            "requestTime": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "code": "beta-code",
+            "msg": "beta-msg",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            {
+              "marginCoin": "17.25",
+              "locked": "17.25",
+              "available": "17.25",
+              "crossedMaxAvailable": "17.25",
+              "isolatedMaxAvailable": "17.25",
+              "maxTransferOut": "17.25",
+              "accountEquity": "17.25",
+              "usdtEquity": "17.25",
+              "btcEquity": "17.25",
+              "crossedRiskRate": "17.25",
+              "crossedMarginLeverage": "17.25",
+              "isolatedLongLever": "17.25",
+              "isolatedShortLever": "17.25",
+              "marginMode": "17.25",
+              "posMode": "17.25",
+              "unrealizedPL": "17.25",
+              "coupon": "17.25",
+              "assetMode": "17.25"
+            },
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaAccountAssetsResponseDataAssetsItem": {
+    "shape": "map",
+    "sample": {
+      "coin": "17.25",
+      "equity": "17.25",
+      "usdValue": "17.25",
+      "balance": "17.25",
+      "available": "17.25",
+      "debt": "17.25",
+      "locked": "17.25",
+      "bonus": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_ACCOUNT_ASSETS_RESPONSE/data/assets/0: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"coin\":decoded.coin,\"equity\":decoded.equity.as_deref(),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "coin",
+        "equity",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "coin": "alpha-coin",
+            "equity": "alpha-equity",
+            "usdValue": "17.25",
+            "balance": "17.25",
+            "available": "17.25",
+            "debt": "17.25",
+            "locked": "17.25",
+            "bonus": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "coin": "alpha-coin",
+            "equity": "alpha-equity",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "coin": "beta-coin",
+            "equity": "beta-equity",
+            "usdValue": "17.25",
+            "balance": "17.25",
+            "available": "17.25",
+            "debt": "17.25",
+            "locked": "17.25",
+            "bonus": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "coin": "beta-coin",
+            "equity": "beta-equity",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaAccountAssetsResponseData": {
+    "shape": "map",
+    "sample": {
+      "accountEquity": "17.25",
+      "usdtEquity": "17.25",
+      "btcEquity": "17.25",
+      "unrealisedPnl": "17.25",
+      "usdtUnrealisedPnl": "17.25",
+      "btcUnrealizedPnl": "17.25",
+      "effEquity": "17.25",
+      "mmr": "17.25",
+      "imr": "17.25",
+      "mgnRatio": "17.25",
+      "positionMgnRatio": "17.25",
+      "positionValue": "17.25",
+      "leverage": "17.25",
+      "assets": [
+        {
+          "coin": "17.25",
+          "equity": "17.25",
+          "usdValue": "17.25",
+          "balance": "17.25",
+          "available": "17.25",
+          "debt": "17.25",
+          "locked": "17.25",
+          "bonus": "17.25"
+        }
+      ]
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_ACCOUNT_ASSETS_RESPONSE/data: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"accountEquity\":decoded.account_equity.as_deref(),\"usdtEquity\":decoded.usdt_equity.as_deref(),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "accountEquity",
+        "usdtEquity",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "accountEquity": "alpha-accountEquity",
+            "usdtEquity": "alpha-usdtEquity",
+            "btcEquity": "17.25",
+            "unrealisedPnl": "17.25",
+            "usdtUnrealisedPnl": "17.25",
+            "btcUnrealizedPnl": "17.25",
+            "effEquity": "17.25",
+            "mmr": "17.25",
+            "imr": "17.25",
+            "mgnRatio": "17.25",
+            "positionMgnRatio": "17.25",
+            "positionValue": "17.25",
+            "leverage": "17.25",
+            "assets": [
+              {
+                "coin": "17.25",
+                "equity": "17.25",
+                "usdValue": "17.25",
+                "balance": "17.25",
+                "available": "17.25",
+                "debt": "17.25",
+                "locked": "17.25",
+                "bonus": "17.25"
+              }
+            ],
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "accountEquity": "alpha-accountEquity",
+            "usdtEquity": "alpha-usdtEquity",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "accountEquity": "beta-accountEquity",
+            "usdtEquity": "beta-usdtEquity",
+            "btcEquity": "17.25",
+            "unrealisedPnl": "17.25",
+            "usdtUnrealisedPnl": "17.25",
+            "btcUnrealizedPnl": "17.25",
+            "effEquity": "17.25",
+            "mmr": "17.25",
+            "imr": "17.25",
+            "mgnRatio": "17.25",
+            "positionMgnRatio": "17.25",
+            "positionValue": "17.25",
+            "leverage": "17.25",
+            "assets": [
+              {
+                "coin": "17.25",
+                "equity": "17.25",
+                "usdValue": "17.25",
+                "balance": "17.25",
+                "available": "17.25",
+                "debt": "17.25",
+                "locked": "17.25",
+                "bonus": "17.25"
+              }
+            ],
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "accountEquity": "beta-accountEquity",
+            "usdtEquity": "beta-usdtEquity",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            [
+              {
+                "coin": "17.25",
+                "equity": "17.25",
+                "usdValue": "17.25",
+                "balance": "17.25",
+                "available": "17.25",
+                "debt": "17.25",
+                "locked": "17.25",
+                "bonus": "17.25"
+              }
+            ],
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaAccountAssetsResponse": {
+    "shape": "map",
+    "sample": {
+      "code": "17.25",
+      "msg": "17.25",
+      "requestTime": 1714810266272,
+      "data": {
+        "accountEquity": "17.25",
+        "usdtEquity": "17.25",
+        "btcEquity": "17.25",
+        "unrealisedPnl": "17.25",
+        "usdtUnrealisedPnl": "17.25",
+        "btcUnrealizedPnl": "17.25",
+        "effEquity": "17.25",
+        "mmr": "17.25",
+        "imr": "17.25",
+        "mgnRatio": "17.25",
+        "positionMgnRatio": "17.25",
+        "positionValue": "17.25",
+        "leverage": "17.25",
+        "assets": [
+          {
+            "coin": "17.25",
+            "equity": "17.25",
+            "usdValue": "17.25",
+            "balance": "17.25",
+            "available": "17.25",
+            "debt": "17.25",
+            "locked": "17.25",
+            "bonus": "17.25"
+          }
+        ]
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_ACCOUNT_ASSETS_RESPONSE: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner. Numeric native cases carry original JSON text through the JS orchestrator so negative zero cannot be erased before the actual from_str call.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"code\":decoded.code,\"msg\":decoded.msg,\"timeBits\":format!(\"{:016x}\",decoded.request_time.to_bits()),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "code",
+        "msg",
+        "timeBits",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": "{\"code\":\"alpha-code\",\"msg\":\"alpha-msg\",\"requestTime\":-0.0,\"data\":{\"accountEquity\":\"17.25\",\"usdtEquity\":\"17.25\",\"btcEquity\":\"17.25\",\"unrealisedPnl\":\"17.25\",\"usdtUnrealisedPnl\":\"17.25\",\"btcUnrealizedPnl\":\"17.25\",\"effEquity\":\"17.25\",\"mmr\":\"17.25\",\"imr\":\"17.25\",\"mgnRatio\":\"17.25\",\"positionMgnRatio\":\"17.25\",\"positionValue\":\"17.25\",\"leverage\":\"17.25\",\"assets\":[{\"coin\":\"17.25\",\"equity\":\"17.25\",\"usdValue\":\"17.25\",\"balance\":\"17.25\",\"available\":\"17.25\",\"debt\":\"17.25\",\"locked\":\"17.25\",\"bonus\":\"17.25\"}]},\"nativeWitness\":\"extra-alpha\"}",
+          "output": {
+            "ok": true,
+            "code": "alpha-code",
+            "msg": "alpha-msg",
+            "timeBits": "8000000000000000",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": "{\"code\":\"beta-code\",\"msg\":\"beta-msg\",\"requestTime\":1.2345678901234567,\"data\":{\"accountEquity\":\"17.25\",\"usdtEquity\":\"17.25\",\"btcEquity\":\"17.25\",\"unrealisedPnl\":\"17.25\",\"usdtUnrealisedPnl\":\"17.25\",\"btcUnrealizedPnl\":\"17.25\",\"effEquity\":\"17.25\",\"mmr\":\"17.25\",\"imr\":\"17.25\",\"mgnRatio\":\"17.25\",\"positionMgnRatio\":\"17.25\",\"positionValue\":\"17.25\",\"leverage\":\"17.25\",\"assets\":[{\"coin\":\"17.25\",\"equity\":\"17.25\",\"usdValue\":\"17.25\",\"balance\":\"17.25\",\"available\":\"17.25\",\"debt\":\"17.25\",\"locked\":\"17.25\",\"bonus\":\"17.25\"}]},\"nativeWitness\":\"extra-beta\"}",
+          "output": {
+            "ok": true,
+            "code": "beta-code",
+            "msg": "beta-msg",
+            "timeBits": "3ff3c0ca428c59fb",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": "[\"17.25\",\"17.25\",1714810266272,{\"accountEquity\":\"17.25\",\"usdtEquity\":\"17.25\",\"btcEquity\":\"17.25\",\"unrealisedPnl\":\"17.25\",\"usdtUnrealisedPnl\":\"17.25\",\"btcUnrealizedPnl\":\"17.25\",\"effEquity\":\"17.25\",\"mmr\":\"17.25\",\"imr\":\"17.25\",\"mgnRatio\":\"17.25\",\"positionMgnRatio\":\"17.25\",\"positionValue\":\"17.25\",\"leverage\":\"17.25\",\"assets\":[{\"coin\":\"17.25\",\"equity\":\"17.25\",\"usdValue\":\"17.25\",\"balance\":\"17.25\",\"available\":\"17.25\",\"debt\":\"17.25\",\"locked\":\"17.25\",\"bonus\":\"17.25\"}]},{}]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaAccountSettingsResponseDataSymbolConfigListItem": {
+    "shape": "map",
+    "sample": {
+      "category": "17.25",
+      "symbol": "17.25",
+      "marginMode": "17.25",
+      "leverage": "17.25",
+      "longLeverage": "17.25",
+      "shortLeverage": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE/data/symbolConfigList/0: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"category\":decoded.category.as_deref(),\"symbol\":decoded.symbol.as_deref(),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "category",
+        "symbol",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "category": "alpha-category",
+            "symbol": "alpha-symbol",
+            "marginMode": "17.25",
+            "leverage": "17.25",
+            "longLeverage": "17.25",
+            "shortLeverage": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "category": "alpha-category",
+            "symbol": "alpha-symbol",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "category": "beta-category",
+            "symbol": "beta-symbol",
+            "marginMode": "17.25",
+            "leverage": "17.25",
+            "longLeverage": "17.25",
+            "shortLeverage": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "category": "beta-category",
+            "symbol": "beta-symbol",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaAccountSettingsResponseData": {
+    "shape": "map",
+    "sample": {
+      "accountMode": "17.25",
+      "accountLevel": "17.25",
+      "assetMode": "17.25",
+      "holdMode": "17.25",
+      "symbolConfigList": [
+        {
+          "category": "17.25",
+          "symbol": "17.25",
+          "marginMode": "17.25",
+          "leverage": "17.25",
+          "longLeverage": "17.25",
+          "shortLeverage": "17.25"
+        }
+      ]
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE/data: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"accountMode\":decoded.account_mode.as_deref(),\"accountLevel\":decoded.account_level.as_deref(),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "accountMode",
+        "accountLevel",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "accountMode": "alpha-accountMode",
+            "accountLevel": "alpha-accountLevel",
+            "assetMode": "17.25",
+            "holdMode": "17.25",
+            "symbolConfigList": [
+              {
+                "category": "17.25",
+                "symbol": "17.25",
+                "marginMode": "17.25",
+                "leverage": "17.25",
+                "longLeverage": "17.25",
+                "shortLeverage": "17.25"
+              }
+            ],
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "accountMode": "alpha-accountMode",
+            "accountLevel": "alpha-accountLevel",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "accountMode": "beta-accountMode",
+            "accountLevel": "beta-accountLevel",
+            "assetMode": "17.25",
+            "holdMode": "17.25",
+            "symbolConfigList": [
+              {
+                "category": "17.25",
+                "symbol": "17.25",
+                "marginMode": "17.25",
+                "leverage": "17.25",
+                "longLeverage": "17.25",
+                "shortLeverage": "17.25"
+              }
+            ],
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "accountMode": "beta-accountMode",
+            "accountLevel": "beta-accountLevel",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            [
+              {
+                "category": "17.25",
+                "symbol": "17.25",
+                "marginMode": "17.25",
+                "leverage": "17.25",
+                "longLeverage": "17.25",
+                "shortLeverage": "17.25"
+              }
+            ],
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaAccountSettingsResponse": {
+    "shape": "map",
+    "sample": {
+      "code": "17.25",
+      "msg": "17.25",
+      "requestTime": 1714810266272,
+      "data": {
+        "accountMode": "17.25",
+        "accountLevel": "17.25",
+        "assetMode": "17.25",
+        "holdMode": "17.25",
+        "symbolConfigList": [
+          {
+            "category": "17.25",
+            "symbol": "17.25",
+            "marginMode": "17.25",
+            "leverage": "17.25",
+            "longLeverage": "17.25",
+            "shortLeverage": "17.25"
+          }
+        ]
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_ACCOUNT_SETTINGS_RESPONSE: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner. Numeric native cases carry original JSON text through the JS orchestrator so negative zero cannot be erased before the actual from_str call.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"code\":decoded.code,\"msg\":decoded.msg,\"timeBits\":format!(\"{:016x}\",decoded.request_time.to_bits()),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "code",
+        "msg",
+        "timeBits",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": "{\"code\":\"alpha-code\",\"msg\":\"alpha-msg\",\"requestTime\":-0.0,\"data\":{\"accountMode\":\"17.25\",\"accountLevel\":\"17.25\",\"assetMode\":\"17.25\",\"holdMode\":\"17.25\",\"symbolConfigList\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"marginMode\":\"17.25\",\"leverage\":\"17.25\",\"longLeverage\":\"17.25\",\"shortLeverage\":\"17.25\"}]},\"nativeWitness\":\"extra-alpha\"}",
+          "output": {
+            "ok": true,
+            "code": "alpha-code",
+            "msg": "alpha-msg",
+            "timeBits": "8000000000000000",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": "{\"code\":\"beta-code\",\"msg\":\"beta-msg\",\"requestTime\":1.2345678901234567,\"data\":{\"accountMode\":\"17.25\",\"accountLevel\":\"17.25\",\"assetMode\":\"17.25\",\"holdMode\":\"17.25\",\"symbolConfigList\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"marginMode\":\"17.25\",\"leverage\":\"17.25\",\"longLeverage\":\"17.25\",\"shortLeverage\":\"17.25\"}]},\"nativeWitness\":\"extra-beta\"}",
+          "output": {
+            "ok": true,
+            "code": "beta-code",
+            "msg": "beta-msg",
+            "timeBits": "3ff3c0ca428c59fb",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": "[\"17.25\",\"17.25\",1714810266272,{\"accountMode\":\"17.25\",\"accountLevel\":\"17.25\",\"assetMode\":\"17.25\",\"holdMode\":\"17.25\",\"symbolConfigList\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"marginMode\":\"17.25\",\"leverage\":\"17.25\",\"longLeverage\":\"17.25\",\"shortLeverage\":\"17.25\"}]},{}]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::BitgetUtaPosition": {
+    "shape": "map",
+    "sample": {
+      "category": "17.25",
+      "symbol": "17.25",
+      "marginCoin": "17.25",
+      "holdMode": "17.25",
+      "posSide": "17.25",
+      "holdSide": "17.25",
+      "marginMode": "17.25",
+      "positionBalance": "17.25",
+      "marginSize": "17.25",
+      "available": "17.25",
+      "frozen": "17.25",
+      "total": "17.25",
+      "size": "17.25",
+      "leverage": "17.25",
+      "curRealisedPnl": "17.25",
+      "avgPrice": "17.25",
+      "openPriceAvg": "17.25",
+      "positionStatus": "17.25",
+      "unrealisedPnl": "17.25",
+      "unrealizedPL": "17.25",
+      "liquidationPrice": "17.25",
+      "liqPrice": "17.25",
+      "mmr": "17.25",
+      "profitRate": "17.25",
+      "markPrice": "17.25",
+      "breakEvenPrice": "17.25",
+      "totalFunding": "17.25",
+      "totalFee": "17.25",
+      "openFeeTotal": "17.25",
+      "closeFeeTotal": "17.25",
+      "deductedFee": "17.25",
+      "cashDividend": "17.25",
+      "createdTime": "17.25",
+      "updatedTime": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed BITGET_UTA_POSITION: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"category\":decoded.category.as_deref(),\"symbol\":decoded.symbol.as_deref(),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "category",
+        "symbol",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "category": "alpha-category",
+            "symbol": "alpha-symbol",
+            "marginCoin": "17.25",
+            "holdMode": "17.25",
+            "posSide": "17.25",
+            "holdSide": "17.25",
+            "marginMode": "17.25",
+            "positionBalance": "17.25",
+            "marginSize": "17.25",
+            "available": "17.25",
+            "frozen": "17.25",
+            "total": "17.25",
+            "size": "17.25",
+            "leverage": "17.25",
+            "curRealisedPnl": "17.25",
+            "avgPrice": "17.25",
+            "openPriceAvg": "17.25",
+            "positionStatus": "17.25",
+            "unrealisedPnl": "17.25",
+            "unrealizedPL": "17.25",
+            "liquidationPrice": "17.25",
+            "liqPrice": "17.25",
+            "mmr": "17.25",
+            "profitRate": "17.25",
+            "markPrice": "17.25",
+            "breakEvenPrice": "17.25",
+            "totalFunding": "17.25",
+            "totalFee": "17.25",
+            "openFeeTotal": "17.25",
+            "closeFeeTotal": "17.25",
+            "deductedFee": "17.25",
+            "cashDividend": "17.25",
+            "createdTime": "17.25",
+            "updatedTime": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "category": "alpha-category",
+            "symbol": "alpha-symbol",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "category": "beta-category",
+            "symbol": "beta-symbol",
+            "marginCoin": "17.25",
+            "holdMode": "17.25",
+            "posSide": "17.25",
+            "holdSide": "17.25",
+            "marginMode": "17.25",
+            "positionBalance": "17.25",
+            "marginSize": "17.25",
+            "available": "17.25",
+            "frozen": "17.25",
+            "total": "17.25",
+            "size": "17.25",
+            "leverage": "17.25",
+            "curRealisedPnl": "17.25",
+            "avgPrice": "17.25",
+            "openPriceAvg": "17.25",
+            "positionStatus": "17.25",
+            "unrealisedPnl": "17.25",
+            "unrealizedPL": "17.25",
+            "liquidationPrice": "17.25",
+            "liqPrice": "17.25",
+            "mmr": "17.25",
+            "profitRate": "17.25",
+            "markPrice": "17.25",
+            "breakEvenPrice": "17.25",
+            "totalFunding": "17.25",
+            "totalFee": "17.25",
+            "openFeeTotal": "17.25",
+            "closeFeeTotal": "17.25",
+            "deductedFee": "17.25",
+            "cashDividend": "17.25",
+            "createdTime": "17.25",
+            "updatedTime": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "category": "beta-category",
+            "symbol": "beta-symbol",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaPositionsResponseData": {
+    "shape": "map",
+    "sample": {
+      "list": [
+        {
+          "category": "17.25",
+          "symbol": "17.25",
+          "marginCoin": "17.25",
+          "holdMode": "17.25",
+          "posSide": "17.25",
+          "holdSide": "17.25",
+          "marginMode": "17.25",
+          "positionBalance": "17.25",
+          "marginSize": "17.25",
+          "available": "17.25",
+          "frozen": "17.25",
+          "total": "17.25",
+          "size": "17.25",
+          "leverage": "17.25",
+          "curRealisedPnl": "17.25",
+          "avgPrice": "17.25",
+          "openPriceAvg": "17.25",
+          "positionStatus": "17.25",
+          "unrealisedPnl": "17.25",
+          "unrealizedPL": "17.25",
+          "liquidationPrice": "17.25",
+          "liqPrice": "17.25",
+          "mmr": "17.25",
+          "profitRate": "17.25",
+          "markPrice": "17.25",
+          "breakEvenPrice": "17.25",
+          "totalFunding": "17.25",
+          "totalFee": "17.25",
+          "openFeeTotal": "17.25",
+          "closeFeeTotal": "17.25",
+          "deductedFee": "17.25",
+          "cashDividend": "17.25",
+          "createdTime": "17.25",
+          "updatedTime": "17.25"
+        }
+      ]
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_POSITIONS_RESPONSE/data: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"length\":decoded.list.as_ref().map(Vec::len),\"firstSymbol\":decoded.list.as_ref().and_then(|items|items.first()).and_then(|row|row.symbol.as_deref()),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "length",
+        "firstSymbol",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "list": [
+              {
+                "symbol": "BTCUSDT"
+              }
+            ],
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "length": 1,
+            "firstSymbol": "BTCUSDT",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "list": [
+              {
+                "symbol": "ETHUSDT"
+              },
+              {
+                "symbol": "SOLUSDT"
+              }
+            ],
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "length": 2,
+            "firstSymbol": "ETHUSDT",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            [
+              {
+                "category": "17.25",
+                "symbol": "17.25",
+                "marginCoin": "17.25",
+                "holdMode": "17.25",
+                "posSide": "17.25",
+                "holdSide": "17.25",
+                "marginMode": "17.25",
+                "positionBalance": "17.25",
+                "marginSize": "17.25",
+                "available": "17.25",
+                "frozen": "17.25",
+                "total": "17.25",
+                "size": "17.25",
+                "leverage": "17.25",
+                "curRealisedPnl": "17.25",
+                "avgPrice": "17.25",
+                "openPriceAvg": "17.25",
+                "positionStatus": "17.25",
+                "unrealisedPnl": "17.25",
+                "unrealizedPL": "17.25",
+                "liquidationPrice": "17.25",
+                "liqPrice": "17.25",
+                "mmr": "17.25",
+                "profitRate": "17.25",
+                "markPrice": "17.25",
+                "breakEvenPrice": "17.25",
+                "totalFunding": "17.25",
+                "totalFee": "17.25",
+                "openFeeTotal": "17.25",
+                "closeFeeTotal": "17.25",
+                "deductedFee": "17.25",
+                "cashDividend": "17.25",
+                "createdTime": "17.25",
+                "updatedTime": "17.25"
+              }
+            ],
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaPositionsResponse": {
+    "shape": "map",
+    "sample": {
+      "code": "17.25",
+      "msg": "17.25",
+      "requestTime": 1714810266272,
+      "data": {
+        "list": [
+          {
+            "category": "17.25",
+            "symbol": "17.25",
+            "marginCoin": "17.25",
+            "holdMode": "17.25",
+            "posSide": "17.25",
+            "holdSide": "17.25",
+            "marginMode": "17.25",
+            "positionBalance": "17.25",
+            "marginSize": "17.25",
+            "available": "17.25",
+            "frozen": "17.25",
+            "total": "17.25",
+            "size": "17.25",
+            "leverage": "17.25",
+            "curRealisedPnl": "17.25",
+            "avgPrice": "17.25",
+            "openPriceAvg": "17.25",
+            "positionStatus": "17.25",
+            "unrealisedPnl": "17.25",
+            "unrealizedPL": "17.25",
+            "liquidationPrice": "17.25",
+            "liqPrice": "17.25",
+            "mmr": "17.25",
+            "profitRate": "17.25",
+            "markPrice": "17.25",
+            "breakEvenPrice": "17.25",
+            "totalFunding": "17.25",
+            "totalFee": "17.25",
+            "openFeeTotal": "17.25",
+            "closeFeeTotal": "17.25",
+            "deductedFee": "17.25",
+            "cashDividend": "17.25",
+            "createdTime": "17.25",
+            "updatedTime": "17.25"
+          }
+        ]
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_POSITIONS_RESPONSE: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner. Numeric native cases carry original JSON text through the JS orchestrator so negative zero cannot be erased before the actual from_str call.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"code\":decoded.code,\"msg\":decoded.msg,\"timeBits\":format!(\"{:016x}\",decoded.request_time.to_bits()),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "code",
+        "msg",
+        "timeBits",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": "{\"code\":\"alpha-code\",\"msg\":\"alpha-msg\",\"requestTime\":-0.0,\"data\":{\"list\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"marginCoin\":\"17.25\",\"holdMode\":\"17.25\",\"posSide\":\"17.25\",\"holdSide\":\"17.25\",\"marginMode\":\"17.25\",\"positionBalance\":\"17.25\",\"marginSize\":\"17.25\",\"available\":\"17.25\",\"frozen\":\"17.25\",\"total\":\"17.25\",\"size\":\"17.25\",\"leverage\":\"17.25\",\"curRealisedPnl\":\"17.25\",\"avgPrice\":\"17.25\",\"openPriceAvg\":\"17.25\",\"positionStatus\":\"17.25\",\"unrealisedPnl\":\"17.25\",\"unrealizedPL\":\"17.25\",\"liquidationPrice\":\"17.25\",\"liqPrice\":\"17.25\",\"mmr\":\"17.25\",\"profitRate\":\"17.25\",\"markPrice\":\"17.25\",\"breakEvenPrice\":\"17.25\",\"totalFunding\":\"17.25\",\"totalFee\":\"17.25\",\"openFeeTotal\":\"17.25\",\"closeFeeTotal\":\"17.25\",\"deductedFee\":\"17.25\",\"cashDividend\":\"17.25\",\"createdTime\":\"17.25\",\"updatedTime\":\"17.25\"}]},\"nativeWitness\":\"extra-alpha\"}",
+          "output": {
+            "ok": true,
+            "code": "alpha-code",
+            "msg": "alpha-msg",
+            "timeBits": "8000000000000000",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": "{\"code\":\"beta-code\",\"msg\":\"beta-msg\",\"requestTime\":1.2345678901234567,\"data\":{\"list\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"marginCoin\":\"17.25\",\"holdMode\":\"17.25\",\"posSide\":\"17.25\",\"holdSide\":\"17.25\",\"marginMode\":\"17.25\",\"positionBalance\":\"17.25\",\"marginSize\":\"17.25\",\"available\":\"17.25\",\"frozen\":\"17.25\",\"total\":\"17.25\",\"size\":\"17.25\",\"leverage\":\"17.25\",\"curRealisedPnl\":\"17.25\",\"avgPrice\":\"17.25\",\"openPriceAvg\":\"17.25\",\"positionStatus\":\"17.25\",\"unrealisedPnl\":\"17.25\",\"unrealizedPL\":\"17.25\",\"liquidationPrice\":\"17.25\",\"liqPrice\":\"17.25\",\"mmr\":\"17.25\",\"profitRate\":\"17.25\",\"markPrice\":\"17.25\",\"breakEvenPrice\":\"17.25\",\"totalFunding\":\"17.25\",\"totalFee\":\"17.25\",\"openFeeTotal\":\"17.25\",\"closeFeeTotal\":\"17.25\",\"deductedFee\":\"17.25\",\"cashDividend\":\"17.25\",\"createdTime\":\"17.25\",\"updatedTime\":\"17.25\"}]},\"nativeWitness\":\"extra-beta\"}",
+          "output": {
+            "ok": true,
+            "code": "beta-code",
+            "msg": "beta-msg",
+            "timeBits": "3ff3c0ca428c59fb",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": "[\"17.25\",\"17.25\",1714810266272,{\"list\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"marginCoin\":\"17.25\",\"holdMode\":\"17.25\",\"posSide\":\"17.25\",\"holdSide\":\"17.25\",\"marginMode\":\"17.25\",\"positionBalance\":\"17.25\",\"marginSize\":\"17.25\",\"available\":\"17.25\",\"frozen\":\"17.25\",\"total\":\"17.25\",\"size\":\"17.25\",\"leverage\":\"17.25\",\"curRealisedPnl\":\"17.25\",\"avgPrice\":\"17.25\",\"openPriceAvg\":\"17.25\",\"positionStatus\":\"17.25\",\"unrealisedPnl\":\"17.25\",\"unrealizedPL\":\"17.25\",\"liquidationPrice\":\"17.25\",\"liqPrice\":\"17.25\",\"mmr\":\"17.25\",\"profitRate\":\"17.25\",\"markPrice\":\"17.25\",\"breakEvenPrice\":\"17.25\",\"totalFunding\":\"17.25\",\"totalFee\":\"17.25\",\"openFeeTotal\":\"17.25\",\"closeFeeTotal\":\"17.25\",\"deductedFee\":\"17.25\",\"cashDividend\":\"17.25\",\"createdTime\":\"17.25\",\"updatedTime\":\"17.25\"}]},{}]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::BitgetUtaOrderFeeDetailItem": {
+    "shape": "map",
+    "sample": {
+      "feeCoin": "17.25",
+      "fee": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed BITGET_UTA_ORDER/feeDetail/0: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"feeCoin\":decoded.fee_coin.as_deref(),\"fee\":decoded.fee.as_deref(),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "feeCoin",
+        "fee",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "feeCoin": "alpha-feeCoin",
+            "fee": "alpha-fee",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "feeCoin": "alpha-feeCoin",
+            "fee": "alpha-fee",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "feeCoin": "beta-feeCoin",
+            "fee": "beta-fee",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "feeCoin": "beta-feeCoin",
+            "fee": "beta-fee",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::BitgetUtaOrder": {
+    "shape": "map",
+    "sample": {
+      "category": "17.25",
+      "symbol": "17.25",
+      "orderId": "17.25",
+      "clientOid": "17.25",
+      "requestId": "17.25",
+      "price": "17.25",
+      "qty": "17.25",
+      "amount": "17.25",
+      "holdMode": "17.25",
+      "holdSide": "17.25",
+      "posSide": "17.25",
+      "delegateType": "17.25",
+      "tradeSide": "17.25",
+      "orderType": "17.25",
+      "timeInForce": "17.25",
+      "side": "17.25",
+      "marginMode": "17.25",
+      "marginCoin": "17.25",
+      "reduceOnly": "17.25",
+      "cumExecQty": "17.25",
+      "cumExecValue": "17.25",
+      "avgPrice": "17.25",
+      "orderStatus": "17.25",
+      "cancelReason": "17.25",
+      "leverage": "17.25",
+      "feeDetail": [
+        {
+          "feeCoin": "17.25",
+          "fee": "17.25"
+        }
+      ],
+      "createdTime": "17.25",
+      "updatedTime": "17.25",
+      "takeProfit": "17.25",
+      "stopLoss": "17.25",
+      "tpTriggerBy": "17.25",
+      "slTriggerBy": "17.25",
+      "tpOrderType": "17.25",
+      "slOrderType": "17.25",
+      "tpLimitPrice": "17.25",
+      "slLimitPrice": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed BITGET_UTA_ORDER: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"orderId\":decoded.order_id.as_deref(),\"symbol\":decoded.symbol.as_deref(),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "orderId",
+        "symbol",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "category": "17.25",
+            "symbol": "alpha-symbol",
+            "orderId": "alpha-orderId",
+            "clientOid": "17.25",
+            "requestId": "17.25",
+            "price": "17.25",
+            "qty": "17.25",
+            "amount": "17.25",
+            "holdMode": "17.25",
+            "holdSide": "17.25",
+            "posSide": "17.25",
+            "delegateType": "17.25",
+            "tradeSide": "17.25",
+            "orderType": "17.25",
+            "timeInForce": "17.25",
+            "side": "17.25",
+            "marginMode": "17.25",
+            "marginCoin": "17.25",
+            "reduceOnly": "17.25",
+            "cumExecQty": "17.25",
+            "cumExecValue": "17.25",
+            "avgPrice": "17.25",
+            "orderStatus": "17.25",
+            "cancelReason": "17.25",
+            "leverage": "17.25",
+            "feeDetail": [
+              {
+                "feeCoin": "17.25",
+                "fee": "17.25"
+              }
+            ],
+            "createdTime": "17.25",
+            "updatedTime": "17.25",
+            "takeProfit": "17.25",
+            "stopLoss": "17.25",
+            "tpTriggerBy": "17.25",
+            "slTriggerBy": "17.25",
+            "tpOrderType": "17.25",
+            "slOrderType": "17.25",
+            "tpLimitPrice": "17.25",
+            "slLimitPrice": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "orderId": "alpha-orderId",
+            "symbol": "alpha-symbol",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "category": "17.25",
+            "symbol": "beta-symbol",
+            "orderId": "beta-orderId",
+            "clientOid": "17.25",
+            "requestId": "17.25",
+            "price": "17.25",
+            "qty": "17.25",
+            "amount": "17.25",
+            "holdMode": "17.25",
+            "holdSide": "17.25",
+            "posSide": "17.25",
+            "delegateType": "17.25",
+            "tradeSide": "17.25",
+            "orderType": "17.25",
+            "timeInForce": "17.25",
+            "side": "17.25",
+            "marginMode": "17.25",
+            "marginCoin": "17.25",
+            "reduceOnly": "17.25",
+            "cumExecQty": "17.25",
+            "cumExecValue": "17.25",
+            "avgPrice": "17.25",
+            "orderStatus": "17.25",
+            "cancelReason": "17.25",
+            "leverage": "17.25",
+            "feeDetail": [
+              {
+                "feeCoin": "17.25",
+                "fee": "17.25"
+              }
+            ],
+            "createdTime": "17.25",
+            "updatedTime": "17.25",
+            "takeProfit": "17.25",
+            "stopLoss": "17.25",
+            "tpTriggerBy": "17.25",
+            "slTriggerBy": "17.25",
+            "tpOrderType": "17.25",
+            "slOrderType": "17.25",
+            "tpLimitPrice": "17.25",
+            "slLimitPrice": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "orderId": "beta-orderId",
+            "symbol": "beta-symbol",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            [
+              {
+                "feeCoin": "17.25",
+                "fee": "17.25"
+              }
+            ],
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaOrdersResponseData": {
+    "shape": "map",
+    "sample": {
+      "list": [
+        {
+          "category": "17.25",
+          "symbol": "17.25",
+          "orderId": "17.25",
+          "clientOid": "17.25",
+          "requestId": "17.25",
+          "price": "17.25",
+          "qty": "17.25",
+          "amount": "17.25",
+          "holdMode": "17.25",
+          "holdSide": "17.25",
+          "posSide": "17.25",
+          "delegateType": "17.25",
+          "tradeSide": "17.25",
+          "orderType": "17.25",
+          "timeInForce": "17.25",
+          "side": "17.25",
+          "marginMode": "17.25",
+          "marginCoin": "17.25",
+          "reduceOnly": "17.25",
+          "cumExecQty": "17.25",
+          "cumExecValue": "17.25",
+          "avgPrice": "17.25",
+          "orderStatus": "17.25",
+          "cancelReason": "17.25",
+          "leverage": "17.25",
+          "feeDetail": [
+            {
+              "feeCoin": "17.25",
+              "fee": "17.25"
+            }
+          ],
+          "createdTime": "17.25",
+          "updatedTime": "17.25",
+          "takeProfit": "17.25",
+          "stopLoss": "17.25",
+          "tpTriggerBy": "17.25",
+          "slTriggerBy": "17.25",
+          "tpOrderType": "17.25",
+          "slOrderType": "17.25",
+          "tpLimitPrice": "17.25",
+          "slLimitPrice": "17.25"
+        }
+      ],
+      "cursor": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_ORDERS_RESPONSE/data: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"length\":decoded.list.as_ref().map(Vec::len),\"firstSymbol\":decoded.list.as_ref().and_then(|items|items.first()).and_then(|row|row.symbol.as_deref()),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "length",
+        "firstSymbol",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "list": [
+              {
+                "symbol": "BTCUSDT"
+              }
+            ],
+            "cursor": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "length": 1,
+            "firstSymbol": "BTCUSDT",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "list": [
+              {
+                "symbol": "ETHUSDT"
+              },
+              {
+                "symbol": "SOLUSDT"
+              }
+            ],
+            "cursor": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "length": 2,
+            "firstSymbol": "ETHUSDT",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            [
+              {
+                "category": "17.25",
+                "symbol": "17.25",
+                "orderId": "17.25",
+                "clientOid": "17.25",
+                "requestId": "17.25",
+                "price": "17.25",
+                "qty": "17.25",
+                "amount": "17.25",
+                "holdMode": "17.25",
+                "holdSide": "17.25",
+                "posSide": "17.25",
+                "delegateType": "17.25",
+                "tradeSide": "17.25",
+                "orderType": "17.25",
+                "timeInForce": "17.25",
+                "side": "17.25",
+                "marginMode": "17.25",
+                "marginCoin": "17.25",
+                "reduceOnly": "17.25",
+                "cumExecQty": "17.25",
+                "cumExecValue": "17.25",
+                "avgPrice": "17.25",
+                "orderStatus": "17.25",
+                "cancelReason": "17.25",
+                "leverage": "17.25",
+                "feeDetail": [
+                  {
+                    "feeCoin": "17.25",
+                    "fee": "17.25"
+                  }
+                ],
+                "createdTime": "17.25",
+                "updatedTime": "17.25",
+                "takeProfit": "17.25",
+                "stopLoss": "17.25",
+                "tpTriggerBy": "17.25",
+                "slTriggerBy": "17.25",
+                "tpOrderType": "17.25",
+                "slOrderType": "17.25",
+                "tpLimitPrice": "17.25",
+                "slLimitPrice": "17.25"
+              }
+            ],
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaOrdersResponse": {
+    "shape": "map",
+    "sample": {
+      "code": "17.25",
+      "msg": "17.25",
+      "requestTime": 1714810266272,
+      "data": {
+        "list": [
+          {
+            "category": "17.25",
+            "symbol": "17.25",
+            "orderId": "17.25",
+            "clientOid": "17.25",
+            "requestId": "17.25",
+            "price": "17.25",
+            "qty": "17.25",
+            "amount": "17.25",
+            "holdMode": "17.25",
+            "holdSide": "17.25",
+            "posSide": "17.25",
+            "delegateType": "17.25",
+            "tradeSide": "17.25",
+            "orderType": "17.25",
+            "timeInForce": "17.25",
+            "side": "17.25",
+            "marginMode": "17.25",
+            "marginCoin": "17.25",
+            "reduceOnly": "17.25",
+            "cumExecQty": "17.25",
+            "cumExecValue": "17.25",
+            "avgPrice": "17.25",
+            "orderStatus": "17.25",
+            "cancelReason": "17.25",
+            "leverage": "17.25",
+            "feeDetail": [
+              {
+                "feeCoin": "17.25",
+                "fee": "17.25"
+              }
+            ],
+            "createdTime": "17.25",
+            "updatedTime": "17.25",
+            "takeProfit": "17.25",
+            "stopLoss": "17.25",
+            "tpTriggerBy": "17.25",
+            "slTriggerBy": "17.25",
+            "tpOrderType": "17.25",
+            "slOrderType": "17.25",
+            "tpLimitPrice": "17.25",
+            "slLimitPrice": "17.25"
+          }
+        ],
+        "cursor": "17.25"
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_ORDERS_RESPONSE: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner. Numeric native cases carry original JSON text through the JS orchestrator so negative zero cannot be erased before the actual from_str call.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"code\":decoded.code,\"msg\":decoded.msg,\"timeBits\":format!(\"{:016x}\",decoded.request_time.to_bits()),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "code",
+        "msg",
+        "timeBits",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": "{\"code\":\"alpha-code\",\"msg\":\"alpha-msg\",\"requestTime\":-0.0,\"data\":{\"list\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"orderId\":\"17.25\",\"clientOid\":\"17.25\",\"requestId\":\"17.25\",\"price\":\"17.25\",\"qty\":\"17.25\",\"amount\":\"17.25\",\"holdMode\":\"17.25\",\"holdSide\":\"17.25\",\"posSide\":\"17.25\",\"delegateType\":\"17.25\",\"tradeSide\":\"17.25\",\"orderType\":\"17.25\",\"timeInForce\":\"17.25\",\"side\":\"17.25\",\"marginMode\":\"17.25\",\"marginCoin\":\"17.25\",\"reduceOnly\":\"17.25\",\"cumExecQty\":\"17.25\",\"cumExecValue\":\"17.25\",\"avgPrice\":\"17.25\",\"orderStatus\":\"17.25\",\"cancelReason\":\"17.25\",\"leverage\":\"17.25\",\"feeDetail\":[{\"feeCoin\":\"17.25\",\"fee\":\"17.25\"}],\"createdTime\":\"17.25\",\"updatedTime\":\"17.25\",\"takeProfit\":\"17.25\",\"stopLoss\":\"17.25\",\"tpTriggerBy\":\"17.25\",\"slTriggerBy\":\"17.25\",\"tpOrderType\":\"17.25\",\"slOrderType\":\"17.25\",\"tpLimitPrice\":\"17.25\",\"slLimitPrice\":\"17.25\"}],\"cursor\":\"17.25\"},\"nativeWitness\":\"extra-alpha\"}",
+          "output": {
+            "ok": true,
+            "code": "alpha-code",
+            "msg": "alpha-msg",
+            "timeBits": "8000000000000000",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": "{\"code\":\"beta-code\",\"msg\":\"beta-msg\",\"requestTime\":1.2345678901234567,\"data\":{\"list\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"orderId\":\"17.25\",\"clientOid\":\"17.25\",\"requestId\":\"17.25\",\"price\":\"17.25\",\"qty\":\"17.25\",\"amount\":\"17.25\",\"holdMode\":\"17.25\",\"holdSide\":\"17.25\",\"posSide\":\"17.25\",\"delegateType\":\"17.25\",\"tradeSide\":\"17.25\",\"orderType\":\"17.25\",\"timeInForce\":\"17.25\",\"side\":\"17.25\",\"marginMode\":\"17.25\",\"marginCoin\":\"17.25\",\"reduceOnly\":\"17.25\",\"cumExecQty\":\"17.25\",\"cumExecValue\":\"17.25\",\"avgPrice\":\"17.25\",\"orderStatus\":\"17.25\",\"cancelReason\":\"17.25\",\"leverage\":\"17.25\",\"feeDetail\":[{\"feeCoin\":\"17.25\",\"fee\":\"17.25\"}],\"createdTime\":\"17.25\",\"updatedTime\":\"17.25\",\"takeProfit\":\"17.25\",\"stopLoss\":\"17.25\",\"tpTriggerBy\":\"17.25\",\"slTriggerBy\":\"17.25\",\"tpOrderType\":\"17.25\",\"slOrderType\":\"17.25\",\"tpLimitPrice\":\"17.25\",\"slLimitPrice\":\"17.25\"}],\"cursor\":\"17.25\"},\"nativeWitness\":\"extra-beta\"}",
+          "output": {
+            "ok": true,
+            "code": "beta-code",
+            "msg": "beta-msg",
+            "timeBits": "3ff3c0ca428c59fb",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": "[\"17.25\",\"17.25\",1714810266272,{\"list\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"orderId\":\"17.25\",\"clientOid\":\"17.25\",\"requestId\":\"17.25\",\"price\":\"17.25\",\"qty\":\"17.25\",\"amount\":\"17.25\",\"holdMode\":\"17.25\",\"holdSide\":\"17.25\",\"posSide\":\"17.25\",\"delegateType\":\"17.25\",\"tradeSide\":\"17.25\",\"orderType\":\"17.25\",\"timeInForce\":\"17.25\",\"side\":\"17.25\",\"marginMode\":\"17.25\",\"marginCoin\":\"17.25\",\"reduceOnly\":\"17.25\",\"cumExecQty\":\"17.25\",\"cumExecValue\":\"17.25\",\"avgPrice\":\"17.25\",\"orderStatus\":\"17.25\",\"cancelReason\":\"17.25\",\"leverage\":\"17.25\",\"feeDetail\":[{\"feeCoin\":\"17.25\",\"fee\":\"17.25\"}],\"createdTime\":\"17.25\",\"updatedTime\":\"17.25\",\"takeProfit\":\"17.25\",\"stopLoss\":\"17.25\",\"tpTriggerBy\":\"17.25\",\"slTriggerBy\":\"17.25\",\"tpOrderType\":\"17.25\",\"slOrderType\":\"17.25\",\"tpLimitPrice\":\"17.25\",\"slLimitPrice\":\"17.25\"}],\"cursor\":\"17.25\"},{}]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::BitgetUtaFillFeeDetailItem": {
+    "shape": "map",
+    "sample": {
+      "feeCoin": "17.25",
+      "fee": "17.25",
+      "totalFee": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed BITGET_UTA_FILL/feeDetail/0: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"feeCoin\":decoded.fee_coin.as_deref(),\"fee\":decoded.fee.as_deref(),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "feeCoin",
+        "fee",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "feeCoin": "alpha-feeCoin",
+            "fee": "alpha-fee",
+            "totalFee": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "feeCoin": "alpha-feeCoin",
+            "fee": "alpha-fee",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "feeCoin": "beta-feeCoin",
+            "fee": "beta-fee",
+            "totalFee": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "feeCoin": "beta-feeCoin",
+            "fee": "beta-fee",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::BitgetUtaFill": {
+    "shape": "map",
+    "sample": {
+      "category": "17.25",
+      "symbol": "17.25",
+      "execId": "17.25",
+      "execLinkId": "17.25",
+      "orderId": "17.25",
+      "clientOid": "17.25",
+      "orderType": "17.25",
+      "side": "17.25",
+      "posSide": "17.25",
+      "execPrice": "17.25",
+      "execQty": "17.25",
+      "execValue": "17.25",
+      "tradeScope": "17.25",
+      "tradeSide": "17.25",
+      "feeDetail": [
+        {
+          "feeCoin": "17.25",
+          "fee": "17.25",
+          "totalFee": "17.25"
+        }
+      ],
+      "createdTime": "17.25",
+      "updatedTime": "17.25",
+      "execPnl": "17.25",
+      "isRPI": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed BITGET_UTA_FILL: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"orderId\":decoded.order_id.as_deref(),\"symbol\":decoded.symbol.as_deref(),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "orderId",
+        "symbol",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "category": "17.25",
+            "symbol": "alpha-symbol",
+            "execId": "17.25",
+            "execLinkId": "17.25",
+            "orderId": "alpha-orderId",
+            "clientOid": "17.25",
+            "orderType": "17.25",
+            "side": "17.25",
+            "posSide": "17.25",
+            "execPrice": "17.25",
+            "execQty": "17.25",
+            "execValue": "17.25",
+            "tradeScope": "17.25",
+            "tradeSide": "17.25",
+            "feeDetail": [
+              {
+                "feeCoin": "17.25",
+                "fee": "17.25",
+                "totalFee": "17.25"
+              }
+            ],
+            "createdTime": "17.25",
+            "updatedTime": "17.25",
+            "execPnl": "17.25",
+            "isRPI": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "orderId": "alpha-orderId",
+            "symbol": "alpha-symbol",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "category": "17.25",
+            "symbol": "beta-symbol",
+            "execId": "17.25",
+            "execLinkId": "17.25",
+            "orderId": "beta-orderId",
+            "clientOid": "17.25",
+            "orderType": "17.25",
+            "side": "17.25",
+            "posSide": "17.25",
+            "execPrice": "17.25",
+            "execQty": "17.25",
+            "execValue": "17.25",
+            "tradeScope": "17.25",
+            "tradeSide": "17.25",
+            "feeDetail": [
+              {
+                "feeCoin": "17.25",
+                "fee": "17.25",
+                "totalFee": "17.25"
+              }
+            ],
+            "createdTime": "17.25",
+            "updatedTime": "17.25",
+            "execPnl": "17.25",
+            "isRPI": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "orderId": "beta-orderId",
+            "symbol": "beta-symbol",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            [
+              {
+                "feeCoin": "17.25",
+                "fee": "17.25",
+                "totalFee": "17.25"
+              }
+            ],
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaFillsResponseData": {
+    "shape": "map",
+    "sample": {
+      "list": [
+        {
+          "category": "17.25",
+          "symbol": "17.25",
+          "execId": "17.25",
+          "execLinkId": "17.25",
+          "orderId": "17.25",
+          "clientOid": "17.25",
+          "orderType": "17.25",
+          "side": "17.25",
+          "posSide": "17.25",
+          "execPrice": "17.25",
+          "execQty": "17.25",
+          "execValue": "17.25",
+          "tradeScope": "17.25",
+          "tradeSide": "17.25",
+          "feeDetail": [
+            {
+              "feeCoin": "17.25",
+              "fee": "17.25",
+              "totalFee": "17.25"
+            }
+          ],
+          "createdTime": "17.25",
+          "updatedTime": "17.25",
+          "execPnl": "17.25",
+          "isRPI": "17.25"
+        }
+      ],
+      "cursor": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_FILLS_RESPONSE/data: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"length\":decoded.list.as_ref().map(Vec::len),\"firstSymbol\":decoded.list.as_ref().and_then(|items|items.first()).and_then(|row|row.symbol.as_deref()),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "length",
+        "firstSymbol",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "list": [
+              {
+                "symbol": "BTCUSDT"
+              }
+            ],
+            "cursor": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "length": 1,
+            "firstSymbol": "BTCUSDT",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "list": [
+              {
+                "symbol": "ETHUSDT"
+              },
+              {
+                "symbol": "SOLUSDT"
+              }
+            ],
+            "cursor": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "length": 2,
+            "firstSymbol": "ETHUSDT",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            [
+              {
+                "category": "17.25",
+                "symbol": "17.25",
+                "execId": "17.25",
+                "execLinkId": "17.25",
+                "orderId": "17.25",
+                "clientOid": "17.25",
+                "orderType": "17.25",
+                "side": "17.25",
+                "posSide": "17.25",
+                "execPrice": "17.25",
+                "execQty": "17.25",
+                "execValue": "17.25",
+                "tradeScope": "17.25",
+                "tradeSide": "17.25",
+                "feeDetail": [
+                  {
+                    "feeCoin": "17.25",
+                    "fee": "17.25",
+                    "totalFee": "17.25"
+                  }
+                ],
+                "createdTime": "17.25",
+                "updatedTime": "17.25",
+                "execPnl": "17.25",
+                "isRPI": "17.25"
+              }
+            ],
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchUtaFillsResponse": {
+    "shape": "map",
+    "sample": {
+      "code": "17.25",
+      "msg": "17.25",
+      "requestTime": 1714810266272,
+      "data": {
+        "list": [
+          {
+            "category": "17.25",
+            "symbol": "17.25",
+            "execId": "17.25",
+            "execLinkId": "17.25",
+            "orderId": "17.25",
+            "clientOid": "17.25",
+            "orderType": "17.25",
+            "side": "17.25",
+            "posSide": "17.25",
+            "execPrice": "17.25",
+            "execQty": "17.25",
+            "execValue": "17.25",
+            "tradeScope": "17.25",
+            "tradeSide": "17.25",
+            "feeDetail": [
+              {
+                "feeCoin": "17.25",
+                "fee": "17.25",
+                "totalFee": "17.25"
+              }
+            ],
+            "createdTime": "17.25",
+            "updatedTime": "17.25",
+            "execPnl": "17.25",
+            "isRPI": "17.25"
+          }
+        ],
+        "cursor": "17.25"
+      }
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_UTA_FILLS_RESPONSE: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner. Numeric native cases carry original JSON text through the JS orchestrator so negative zero cannot be erased before the actual from_str call.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"code\":decoded.code,\"msg\":decoded.msg,\"timeBits\":format!(\"{:016x}\",decoded.request_time.to_bits()),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "code",
+        "msg",
+        "timeBits",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": "{\"code\":\"alpha-code\",\"msg\":\"alpha-msg\",\"requestTime\":-0.0,\"data\":{\"list\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"execId\":\"17.25\",\"execLinkId\":\"17.25\",\"orderId\":\"17.25\",\"clientOid\":\"17.25\",\"orderType\":\"17.25\",\"side\":\"17.25\",\"posSide\":\"17.25\",\"execPrice\":\"17.25\",\"execQty\":\"17.25\",\"execValue\":\"17.25\",\"tradeScope\":\"17.25\",\"tradeSide\":\"17.25\",\"feeDetail\":[{\"feeCoin\":\"17.25\",\"fee\":\"17.25\",\"totalFee\":\"17.25\"}],\"createdTime\":\"17.25\",\"updatedTime\":\"17.25\",\"execPnl\":\"17.25\",\"isRPI\":\"17.25\"}],\"cursor\":\"17.25\"},\"nativeWitness\":\"extra-alpha\"}",
+          "output": {
+            "ok": true,
+            "code": "alpha-code",
+            "msg": "alpha-msg",
+            "timeBits": "8000000000000000",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": "{\"code\":\"beta-code\",\"msg\":\"beta-msg\",\"requestTime\":1.2345678901234567,\"data\":{\"list\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"execId\":\"17.25\",\"execLinkId\":\"17.25\",\"orderId\":\"17.25\",\"clientOid\":\"17.25\",\"orderType\":\"17.25\",\"side\":\"17.25\",\"posSide\":\"17.25\",\"execPrice\":\"17.25\",\"execQty\":\"17.25\",\"execValue\":\"17.25\",\"tradeScope\":\"17.25\",\"tradeSide\":\"17.25\",\"feeDetail\":[{\"feeCoin\":\"17.25\",\"fee\":\"17.25\",\"totalFee\":\"17.25\"}],\"createdTime\":\"17.25\",\"updatedTime\":\"17.25\",\"execPnl\":\"17.25\",\"isRPI\":\"17.25\"}],\"cursor\":\"17.25\"},\"nativeWitness\":\"extra-beta\"}",
+          "output": {
+            "ok": true,
+            "code": "beta-code",
+            "msg": "beta-msg",
+            "timeBits": "3ff3c0ca428c59fb",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": "[\"17.25\",\"17.25\",1714810266272,{\"list\":[{\"category\":\"17.25\",\"symbol\":\"17.25\",\"execId\":\"17.25\",\"execLinkId\":\"17.25\",\"orderId\":\"17.25\",\"clientOid\":\"17.25\",\"orderType\":\"17.25\",\"side\":\"17.25\",\"posSide\":\"17.25\",\"execPrice\":\"17.25\",\"execQty\":\"17.25\",\"execValue\":\"17.25\",\"tradeScope\":\"17.25\",\"tradeSide\":\"17.25\",\"feeDetail\":[{\"feeCoin\":\"17.25\",\"fee\":\"17.25\",\"totalFee\":\"17.25\"}],\"createdTime\":\"17.25\",\"updatedTime\":\"17.25\",\"execPnl\":\"17.25\",\"isRPI\":\"17.25\"}],\"cursor\":\"17.25\"},{}]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchPositionsV2ResponseDataItem": {
+    "shape": "map",
+    "sample": {
+      "marginCoin": "17.25",
+      "symbol": "17.25",
+      "holdSide": "17.25",
+      "openDelegateSize": "17.25",
+      "marginSize": "17.25",
+      "available": "17.25",
+      "locked": "17.25",
+      "total": "17.25",
+      "leverage": "17.25",
+      "achievedProfits": "17.25",
+      "openPriceAvg": "17.25",
+      "marginMode": "17.25",
+      "posMode": "17.25",
+      "unrealizedPL": "17.25",
+      "liquidationPrice": "17.25",
+      "keepMarginRate": "17.25",
+      "markPrice": "17.25",
+      "breakEvenPrice": "17.25",
+      "totalFee": "17.25",
+      "deductedFee": "17.25",
+      "takeProfit": "17.25",
+      "stopLoss": "17.25",
+      "takeProfitId": "17.25",
+      "stopLossId": "17.25",
+      "marginRatio": "17.25",
+      "assetMode": "17.25",
+      "cTime": "17.25",
+      "uTime": "17.25"
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_POSITIONS_V2_RESPONSE/data/0: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"symbol\":decoded.symbol,\"holdSide\":decoded.hold_side,\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "symbol",
+        "holdSide",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": {
+            "marginCoin": "17.25",
+            "symbol": "alpha-symbol",
+            "holdSide": "alpha-holdSide",
+            "openDelegateSize": "17.25",
+            "marginSize": "17.25",
+            "available": "17.25",
+            "locked": "17.25",
+            "total": "17.25",
+            "leverage": "17.25",
+            "achievedProfits": "17.25",
+            "openPriceAvg": "17.25",
+            "marginMode": "17.25",
+            "posMode": "17.25",
+            "unrealizedPL": "17.25",
+            "liquidationPrice": "17.25",
+            "keepMarginRate": "17.25",
+            "markPrice": "17.25",
+            "breakEvenPrice": "17.25",
+            "totalFee": "17.25",
+            "deductedFee": "17.25",
+            "takeProfit": "17.25",
+            "stopLoss": "17.25",
+            "takeProfitId": "17.25",
+            "stopLossId": "17.25",
+            "marginRatio": "17.25",
+            "assetMode": "17.25",
+            "cTime": "17.25",
+            "uTime": "17.25",
+            "nativeWitness": "extra-alpha"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "alpha-symbol",
+            "holdSide": "alpha-holdSide",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": {
+            "marginCoin": "17.25",
+            "symbol": "beta-symbol",
+            "holdSide": "beta-holdSide",
+            "openDelegateSize": "17.25",
+            "marginSize": "17.25",
+            "available": "17.25",
+            "locked": "17.25",
+            "total": "17.25",
+            "leverage": "17.25",
+            "achievedProfits": "17.25",
+            "openPriceAvg": "17.25",
+            "marginMode": "17.25",
+            "posMode": "17.25",
+            "unrealizedPL": "17.25",
+            "liquidationPrice": "17.25",
+            "keepMarginRate": "17.25",
+            "markPrice": "17.25",
+            "breakEvenPrice": "17.25",
+            "totalFee": "17.25",
+            "deductedFee": "17.25",
+            "takeProfit": "17.25",
+            "stopLoss": "17.25",
+            "takeProfitId": "17.25",
+            "stopLossId": "17.25",
+            "marginRatio": "17.25",
+            "assetMode": "17.25",
+            "cTime": "17.25",
+            "uTime": "17.25",
+            "nativeWitness": "extra-beta"
+          },
+          "output": {
+            "ok": true,
+            "symbol": "beta-symbol",
+            "holdSide": "beta-holdSide",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": [
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            "17.25",
+            {}
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::FetchPositionsV2Response": {
+    "shape": "map",
+    "sample": {
+      "code": "17.25",
+      "msg": "17.25",
+      "requestTime": 1714810266272,
+      "data": [
+        {
+          "marginCoin": "17.25",
+          "symbol": "17.25",
+          "holdSide": "17.25",
+          "openDelegateSize": "17.25",
+          "marginSize": "17.25",
+          "available": "17.25",
+          "locked": "17.25",
+          "total": "17.25",
+          "leverage": "17.25",
+          "achievedProfits": "17.25",
+          "openPriceAvg": "17.25",
+          "marginMode": "17.25",
+          "posMode": "17.25",
+          "unrealizedPL": "17.25",
+          "liquidationPrice": "17.25",
+          "keepMarginRate": "17.25",
+          "markPrice": "17.25",
+          "breakEvenPrice": "17.25",
+          "totalFee": "17.25",
+          "deductedFee": "17.25",
+          "takeProfit": "17.25",
+          "stopLoss": "17.25",
+          "takeProfitId": "17.25",
+          "stopLossId": "17.25",
+          "marginRatio": "17.25",
+          "assetMode": "17.25",
+          "cTime": "17.25",
+          "uTime": "17.25"
+        }
+      ]
+    },
+    "entrypoints": [],
+    "evidence": "Reviewed FETCH_POSITIONS_V2_RESPONSE: existing derived flatten collector enforces outer objects and retains unknown fields. Native observations execute the actual owner and inspect explicitly named Rust members, optional/list state, extras and declared requestTime bits where present; no owner serialization/redecode. The source corpus supplies valid complete declarations independently of Rust; full native field-identity and numeric-ingress source tests remain supplementary. No map repair is needed for this owner. Numeric native cases carry original JSON text through the JS orchestrator so negative zero cannot be erased before the actual from_str call.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(decoded)=>serde_json::json!({\"ok\":true,\"code\":decoded.code,\"msg\":decoded.msg,\"timeBits\":format!(\"{:016x}\",decoded.request_time.to_bits()),\"extra\":decoded.extra.get(\"nativeWitness\").and_then(serde_json::Value::as_str)}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "code",
+        "msg",
+        "timeBits",
+        "extra"
+      ],
+      "cases": [
+        {
+          "input": "{\"code\":\"alpha-code\",\"msg\":\"alpha-msg\",\"requestTime\":-0.0,\"data\":[{\"marginCoin\":\"17.25\",\"symbol\":\"17.25\",\"holdSide\":\"17.25\",\"openDelegateSize\":\"17.25\",\"marginSize\":\"17.25\",\"available\":\"17.25\",\"locked\":\"17.25\",\"total\":\"17.25\",\"leverage\":\"17.25\",\"achievedProfits\":\"17.25\",\"openPriceAvg\":\"17.25\",\"marginMode\":\"17.25\",\"posMode\":\"17.25\",\"unrealizedPL\":\"17.25\",\"liquidationPrice\":\"17.25\",\"keepMarginRate\":\"17.25\",\"markPrice\":\"17.25\",\"breakEvenPrice\":\"17.25\",\"totalFee\":\"17.25\",\"deductedFee\":\"17.25\",\"takeProfit\":\"17.25\",\"stopLoss\":\"17.25\",\"takeProfitId\":\"17.25\",\"stopLossId\":\"17.25\",\"marginRatio\":\"17.25\",\"assetMode\":\"17.25\",\"cTime\":\"17.25\",\"uTime\":\"17.25\"}],\"nativeWitness\":\"extra-alpha\"}",
+          "output": {
+            "ok": true,
+            "code": "alpha-code",
+            "msg": "alpha-msg",
+            "timeBits": "8000000000000000",
+            "extra": "extra-alpha"
+          }
+        },
+        {
+          "input": "{\"code\":\"beta-code\",\"msg\":\"beta-msg\",\"requestTime\":1.2345678901234567,\"data\":[{\"marginCoin\":\"17.25\",\"symbol\":\"17.25\",\"holdSide\":\"17.25\",\"openDelegateSize\":\"17.25\",\"marginSize\":\"17.25\",\"available\":\"17.25\",\"locked\":\"17.25\",\"total\":\"17.25\",\"leverage\":\"17.25\",\"achievedProfits\":\"17.25\",\"openPriceAvg\":\"17.25\",\"marginMode\":\"17.25\",\"posMode\":\"17.25\",\"unrealizedPL\":\"17.25\",\"liquidationPrice\":\"17.25\",\"keepMarginRate\":\"17.25\",\"markPrice\":\"17.25\",\"breakEvenPrice\":\"17.25\",\"totalFee\":\"17.25\",\"deductedFee\":\"17.25\",\"takeProfit\":\"17.25\",\"stopLoss\":\"17.25\",\"takeProfitId\":\"17.25\",\"stopLossId\":\"17.25\",\"marginRatio\":\"17.25\",\"assetMode\":\"17.25\",\"cTime\":\"17.25\",\"uTime\":\"17.25\"}],\"nativeWitness\":\"extra-beta\"}",
+          "output": {
+            "ok": true,
+            "code": "beta-code",
+            "msg": "beta-msg",
+            "timeBits": "3ff3c0ca428c59fb",
+            "extra": "extra-beta"
+          }
+        },
+        {
+          "input": "[\"17.25\",\"17.25\",1714810266272,[{\"marginCoin\":\"17.25\",\"symbol\":\"17.25\",\"holdSide\":\"17.25\",\"openDelegateSize\":\"17.25\",\"marginSize\":\"17.25\",\"available\":\"17.25\",\"locked\":\"17.25\",\"total\":\"17.25\",\"leverage\":\"17.25\",\"achievedProfits\":\"17.25\",\"openPriceAvg\":\"17.25\",\"marginMode\":\"17.25\",\"posMode\":\"17.25\",\"unrealizedPL\":\"17.25\",\"liquidationPrice\":\"17.25\",\"keepMarginRate\":\"17.25\",\"markPrice\":\"17.25\",\"breakEvenPrice\":\"17.25\",\"totalFee\":\"17.25\",\"deductedFee\":\"17.25\",\"takeProfit\":\"17.25\",\"stopLoss\":\"17.25\",\"takeProfitId\":\"17.25\",\"stopLossId\":\"17.25\",\"marginRatio\":\"17.25\",\"assetMode\":\"17.25\",\"cTime\":\"17.25\",\"uTime\":\"17.25\"}],{}]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::BitgetUtaCategory": {
+    "shape": "string",
+    "literals": [
+      "USDT-FUTURES",
+      "USDC-FUTURES",
+      "COIN-FUTURES"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the existing String::deserialize front door and private remote enum: all three TS literal tags remain exact; object-tag forms are refused. Native projections inspect actual public enum variants, not a serialization round trip. Existing category inventory tests pin source literals and tagged-shape refusals.",
+    "nativeObservation": {
+      "call": "{let decoded: $type=serde_json::from_value($value.clone()).expect(\"reviewed category\");let (variant,coin)=match decoded{$type::Usdt=>(\"usdt\",false),$type::Usdc=>(\"usdc\",false),$type::Coin=>(\"coin\",true)};serde_json::json!({\"ok\":true,\"variant\":variant,\"coin\":coin})}",
+      "nativeFields": [
+        "variant",
+        "coin"
+      ],
+      "cases": [
+        {
+          "input": "USDT-FUTURES",
+          "output": {
+            "variant": "usdt",
+            "coin": false,
+            "ok": true
+          }
+        },
+        {
+          "input": "USDC-FUTURES",
+          "output": {
+            "variant": "usdc",
+            "coin": false,
+            "ok": true
+          }
+        },
+        {
+          "input": "COIN-FUTURES",
+          "output": {
+            "variant": "coin",
+            "coin": true,
+            "ok": true
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_bitget::types::present": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "present",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed actual generic field-presence helper and its declared string-field consumers. These witnesses execute the concrete String instantiation and inspect native Option/value identity; no claim is made for arbitrary T. present rejects null; field omission remains the separate serde default policy.",
+    "call": "{match $type::<_,String>($value.clone()){Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": "native-alpha",
+        "output": {
+          "ok": true,
+          "value": "native-alpha"
+        }
+      },
+      {
+        "input": "native-beta",
+        "output": {
+          "ok": true,
+          "value": "native-beta"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_bitget::types::nullable": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "nullable",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed actual generic field-presence helper and its declared string-field consumers. These witnesses execute the concrete String instantiation and inspect native Option/value identity; no claim is made for arbitrary T. nullable retains present null as None; required field omission remains the enclosing field policy.",
+    "call": "{match $type::<_,String>($value.clone()){Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": "native-alpha",
+        "output": {
+          "ok": true,
+          "value": "native-alpha"
+        }
+      },
+      {
+        "input": "native-beta",
+        "output": {
+          "ok": true,
+          "value": "native-beta"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "ok": true,
+          "value": null
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_bitget::types::request_time": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "request_time",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed the scalar numeric admission before flattened extras: raw JSON number lexemes enter JsNumberInput before strict f64 projection. Execute the real helper with a raw serde_json Deserializer, compare independently authored IEEE-754 bits for signed zero, decimal, wide rounding and overflow, and reject string/null/bool/array/object shapes. Existing six-owner source oracle adds 108 full-record direct decode witnesses.",
+    "call": "{let text=$value.as_str().unwrap();let mut input=serde_json::Deserializer::from_str(text);match $type(&mut input){Ok(number)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits())}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+    "cases": [
+      {
+        "input": "-0",
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "1.2345678901234567",
+        "output": {
+          "ok": true,
+          "bits": "3ff3c0ca428c59fb"
+        }
+      },
+      {
+        "input": "9007199254740993",
+        "output": {
+          "ok": true,
+          "bits": "4340000000000000"
+        }
+      },
+      {
+        "input": "1e400",
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "true",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "[]",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "{}",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "\"12.5\"",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_bitget::account_predicates::ApiCode": {
+    "shape": "union",
+    "positive": [
+      "40085",
+      "synthetic-denial",
+      40085,
+      1.25
+    ],
+    "negative": [
+      null,
+      false,
+      [],
+      {},
+      {
+        "Text": "40085"
+      }
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the declared API error code string-or-number boundary. Native observations decode original JSON text, inspect actual Text/Number variants and binary64 bits before serialization, including valid decimals, signed zero, wide rounding and overflow. Objects, arrays, booleans and null are not members of this scalar union.",
+    "nativeObservation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok($type::Text(text))=>serde_json::json!({\"ok\":true,\"kind\":\"text\",\"text\":text,\"bits\":null}),Ok($type::Number(number))=>serde_json::json!({\"ok\":true,\"kind\":\"number\",\"text\":null,\"bits\":format!(\"{:016x}\",number.to_bits())}),Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "nativeFields": [
+        "kind",
+        "text",
+        "bits"
+      ],
+      "cases": [
+        {
+          "input": "\"40085\"",
+          "output": {
+            "ok": true,
+            "kind": "text",
+            "text": "40085",
+            "bits": null
+          }
+        },
+        {
+          "input": "\"synthetic-denial\"",
+          "output": {
+            "ok": true,
+            "kind": "text",
+            "text": "synthetic-denial",
+            "bits": null
+          }
+        },
+        {
+          "input": "40085",
+          "output": {
+            "ok": true,
+            "kind": "number",
+            "text": null,
+            "bits": "40e392a000000000"
+          }
+        },
+        {
+          "input": "1.25",
+          "output": {
+            "ok": true,
+            "kind": "number",
+            "text": null,
+            "bits": "3ff4000000000000"
+          }
+        },
+        {
+          "input": "-0",
+          "output": {
+            "ok": true,
+            "kind": "number",
+            "text": null,
+            "bits": "8000000000000000"
+          }
+        },
+        {
+          "input": "9007199254740993",
+          "output": {
+            "ok": true,
+            "kind": "number",
+            "text": null,
+            "bits": "4340000000000000"
+          }
+        },
+        {
+          "input": "1e400",
+          "output": {
+            "ok": true,
+            "kind": "number",
+            "text": null,
+            "bits": "7ff0000000000000"
+          }
+        }
+      ]
+    }
+  }
+}
