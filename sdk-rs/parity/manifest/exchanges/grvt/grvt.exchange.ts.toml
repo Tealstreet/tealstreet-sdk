@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/grvt/grvt.exchange.ts"
-rust_files = [ "safe-cex-venue-grvt/src/signing_metadata.rs", "safe-cex-venue-grvt/src/order_semantics.rs", "safe-cex-venue-grvt/src/snapshots.rs", "safe-cex-venue-grvt/src/markets.rs", "safe-cex-venue-grvt/src/order_controls.rs", "safe-cex-venue-grvt/src/data_reads.rs", "safe-cex-venue-grvt/src/account_runtime.rs", "safe-cex-venue-grvt/src/session_host.rs", "safe-cex-venue-grvt/src/composition.rs" ]
+rust_files = [ "safe-cex-venue-grvt/src/signing_metadata.rs", "safe-cex-venue-grvt/src/order_semantics.rs", "safe-cex-venue-grvt/src/snapshots.rs", "safe-cex-venue-grvt/src/markets.rs", "safe-cex-venue-grvt/src/order_controls.rs", "safe-cex-venue-grvt/src/data_reads.rs", "safe-cex-venue-grvt/src/account_runtime.rs", "safe-cex-venue-grvt/src/session_host.rs", "safe-cex-venue-grvt/src/composition.rs", "safe-cex-venue-grvt/src/trading_runtime.rs" ]
 
 [[symbol]]
 ts = "GrvtExchange"
@@ -144,7 +144,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-grvt/src/account_runtime.rs::start"
 status = "ported"
-note = "Source body against AccountHost/SessionHost operations preserving opaque values, method receivers, live reads, JS iteration, raw exception identity and eager async ownership/adoption. Actual TS member bodies execute in tests/account-runtime-source.cjs; decoded native values, effects, state and identity are asserted in tests/account_runtime.rs. Ten targets stop at 129 fixture cases. Concrete client/Store adapters and class/constructor assembly remain outside this slice."
+note = "Source body against AccountHost/SessionHost operations preserving opaque values, method receivers, live reads, JS iteration, raw exception identity and eager async ownership/adoption. Actual TS member bodies execute in tests/account-runtime-source.cjs; decoded native values, effects, state and identity are asserted in tests/account_runtime.rs. Ten targets stop at 129 fixture cases. Concrete client/Store adapters and class/constructor assembly remain outside this slice. Rename target: `safe-cex-venue-grvt/src/account_runtime.rs::start`."
 
 [[symbol]]
 ts = "GrvtExchange.fetchMarkets"
@@ -248,7 +248,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-grvt/src/trading_runtime.rs::place_order"
 status = "ported"
-note = "Source body over bound AccountHost/TradingHost operations: caller normalization outside catch, frozen signing fields before builder await, live account/metadata after await, radix 10, numeric toString calls, SDK message and request fields, triggers, captured create receiver across endpoint await, ordered failure/success effects and typed-error identity. Native source floor 37 through number-string-error; required SDK/Wallet/network bindings remain adapter operations."
+note = "Source body over bound AccountHost/TradingHost operations: caller normalization outside catch, frozen signing fields before builder await, live account/metadata after await, radix 10, numeric toString calls, SDK message and request fields, triggers, captured create receiver across endpoint await, ordered failure/success effects and typed-error identity. Native source floor 37 through number-string-error; required SDK/Wallet/network bindings remain adapter operations. Rename target: `safe-cex-venue-grvt/src/trading_runtime.rs::place_order`."
 
 [[symbol]]
 ts = "GrvtExchange.cancelOrder"
@@ -360,4 +360,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-grvt/src/trading_runtime.rs::fetch_fills_for_order_ids"
 status = "ported"
-note = "Source bounded reconciliation: caller Map and length outside catch; account captured, normalized Set and nonce collision map, undefined-only creation-time floor, live fill iteration, client/real ambiguity and exact decimal grammar, aggregate before cursor validation, own n precedence, repeated/missing cursor checks and 20-page bound. Native source floor 29 through iterator-append; errors rethrow original after warning."
+note = "Source bounded reconciliation: caller Map and length outside catch; account captured, normalized Set and nonce collision map, undefined-only creation-time floor, live fill iteration, client/real ambiguity and exact decimal grammar, aggregate before cursor validation, own n precedence, repeated/missing cursor checks and 20-page bound. Native source floor 29 through iterator-append; errors rethrow original after warning. Rename target: `safe-cex-venue-grvt/src/trading_runtime.rs::fetch_fills_for_order_ids`."

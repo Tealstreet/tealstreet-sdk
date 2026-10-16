@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/grvt/grvt.api.ts"
-rust_files = [ "safe-cex-venue-grvt/src/session_host.rs" ]
+rust_files = [ "safe-cex-venue-grvt/src/session_host.rs", "safe-cex-venue-grvt/src/api_runtime.rs" ]
 
 [[symbol]]
 ts = "createAPI"

@@ -22,7 +22,7 @@ note = "CHOSEN shared UTF-8 string boundary (parity/MANIFEST-SPEC.md#shared-utf8
 ts = "BreakoutpropExchange"
 kind = "class"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::lifecycle::BreakoutpropExchange"
+rs = "safe-cex-venue-breakoutprop/src/lifecycle.rs::BreakoutpropExchange"
 status = "divergent"
 note = "MIXED: FORCED shared ExchangeName/ExchangeOptions UTF-8/enum boundaries. CHOSEN explicit single-thread Rc owner, required API/rate-limit/inherited-polling host bindings, staged nullable construction slots, immutable Grafana slices, native own-key recent-request table and owned login task replace ambient JS class/prototype/Promise objects. Uses real shared BaseExchange and Store, real polling and token bodies; existing read/format rows retain their independent free-helper interfaces. API interceptors, orders and start/tick now have separate concrete native targets. Clients/ancestor adapters bind native ownership and should retain weak exchange references to avoid cycles."
 
@@ -30,7 +30,7 @@ note = "MIXED: FORCED shared ExchangeName/ExchangeOptions UTF-8/enum boundaries.
 ts = "BreakoutpropExchange.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::lifecycle::BreakoutpropExchange::new"
+rs = "safe-cex-venue-breakoutprop/src/lifecycle.rs::BreakoutpropExchange::new"
 status = "divergent"
 note = "MIXED: FORCED shared name/options identifiers. CHOSEN native staged Rc construction, Result errors and mandatory API/rate-limit/ancestor dependencies replace JS receiver objects; source options stay a live JS object whereas native Base options expose owned snapshots (sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias). Constructs real Base first, calls first API then maxRPS=5 limiter and assigns xhr, creates independent unlimited API, constructs public polling context last; initializes actual null token/account/request, positive-zero expiry and empty recent requests. API factory/interceptor body is now mapped in api.rs."
 
@@ -38,7 +38,7 @@ note = "MIXED: FORCED shared name/options identifiers. CHOSEN native staged Rc c
 ts = "BreakoutpropExchange.dispose"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::lifecycle::BreakoutpropExchange::dispose"
+rs = "safe-cex-venue-breakoutprop/src/lifecycle.rs::BreakoutpropExchange::dispose"
 status = "ported"
 note = "Calls the live inherited BaseExchange disposal first and only after success reads the current public socket and invokes its disposal, preserving repeated calls and no child call on parent failure. Shared class/Base representation boundaries keep their own rows. A missing construction slot produces the source undefined-member TypeError after parent disposal. Native parent-disposed state, child-call count and subscriber-error cutover are asserted before actual-source comparisons."
 
@@ -54,7 +54,7 @@ note = "CHOSEN owned error outputs and logger arguments (parity/MANIFEST-SPEC.md
 ts = "BreakoutpropExchange.getSessionToken"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::lifecycle::BreakoutpropExchange::get_session_token"
+rs = "safe-cex-venue-breakoutprop/src/lifecycle.rs::BreakoutpropExchange::get_session_token"
 status = "divergent"
 note = "MIXED: FORCED shared UTF-8 token/credential/timeout strings. CHOSEN declared LoginResponse decoding rejects malformed/missing/null fields before the source truthiness/split paths; strict native String result refuses a token changed to null by a reentrant clock hook. Retains the native DTO instead of another dynamic response graph. Owned coalesced LoginTask and per-caller exactly-once finally replace JS Promise/microtask objects: ready futures can settle in the same poll. Re-reads live token after both cached clock check and login expiry clock write; expiry uses binary64 Date.now plus actual timeout parser. Dropped awaiters continue/clear markers and report failed login through a mandatory host hook; a retained unpolled native awaiter is not automatically classified as a browser unhandled rejection, and reporting follows native drop/host timing. Native/source witnesses cover shared pending identity, one network request, exact expiry refresh, empty token/invalid timeout, clock reentry, dropped success and dropped-vs-handled failure. Longer interleavings are a floor."
 
@@ -198,41 +198,41 @@ note = "CHOSEN ts-bug: source lookup admits truthy inherited functions/objects i
 ts = "BreakoutpropExchange.cancelOrder"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::runtime::BreakoutRuntime::cancel_order"
+rs = "safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::cancel_order"
 status = "divergent"
-note = "MIXED: FORCED UTF-8 order/account identifiers. CHOSEN concrete BreakoutRuntime read context binds already-mapped account/session/HTTP operations, with lazy post-await work instead of autonomous JS Promise continuation for a standalone dropped call. Session prefix is eager; account then DELETE accounts/{accountCode}/orders/{orderCode}, original code returned. Native ExchangeError preserves metadata on rethrow and reporter failure; source msg||message selection is coerced into the shared textual reporting input, rather than retaining arbitrary JS error values. Batch calls separately retain owned continuations. Witness final_cancel_batches_and_update verifies native request values and error cutover before actual-source observation."
+note = "MIXED: FORCED UTF-8 order/account identifiers. CHOSEN concrete BreakoutRuntime read context binds already-mapped account/session/HTTP operations, with lazy post-await work instead of autonomous JS Promise continuation for a standalone dropped call. Session prefix is eager; account then DELETE accounts/{accountCode}/orders/{orderCode}, original code returned. Native ExchangeError preserves metadata on rethrow and reporter failure; source msg||message selection is coerced into the shared textual reporting input, rather than retaining arbitrary JS error values. Batch calls separately retain owned continuations. Witness final_cancel_batches_and_update verifies native request values and error cutover before actual-source observation. Rename target: `safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::cancel_order`."
 
 [[symbol]]
 ts = "BreakoutpropExchange.cancelOrders"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::runtime::BreakoutRuntime::cancel_orders"
+rs = "safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::cancel_orders"
 status = "divergent"
-note = "CHOSEN owned Vec<Order> snapshot and native host polling order replace live JS element aliases and Promise microtask settlement order, to reuse shared order models and deterministic local futures. Constructs every cancel in each lot of 10 before any aggregation poll; does not start a later lot after rejection. Owned sibling tasks continue after Promise-all-equivalent rejection/caller drop and retain their original business errors; no unconditional successful cancellation result is substituted. If multiple errors are ready on one aggregate poll, vector order wins rather than source chronological settlement order. Witness final_cancel_batches_and_update covers 11 orders, held first lot, rejected lot, and retained losing sibling; this enumeration stops after the second lot. Dropping the outer aggregate lets current-lot owned siblings finish but prevents later lots; source discarded Promises continue later lots on success."
+note = "CHOSEN owned Vec<Order> snapshot and native host polling order replace live JS element aliases and Promise microtask settlement order, to reuse shared order models and deterministic local futures. Constructs every cancel in each lot of 10 before any aggregation poll; does not start a later lot after rejection. Owned sibling tasks continue after Promise-all-equivalent rejection/caller drop and retain their original business errors; no unconditional successful cancellation result is substituted. If multiple errors are ready on one aggregate poll, vector order wins rather than source chronological settlement order. Witness final_cancel_batches_and_update covers 11 orders, held first lot, rejected lot, and retained losing sibling; this enumeration stops after the second lot. Dropping the outer aggregate lets current-lot owned siblings finish but prevents later lots; source discarded Promises continue later lots on success. Rename target: `safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::cancel_orders`."
 
 [[symbol]]
 ts = "BreakoutpropExchange.updateOrder"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::runtime::BreakoutRuntime::update_order"
+rs = "safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::update_order"
 status = "divergent"
-note = "CHOSEN projects the shared closed Order into PlaceOrderOpts instead of spreading arbitrary own JS properties, and accepts explicit native OrderUpdate price presence/undefined and amount value. Inherited update properties and present-undefined amount are outside this native patch contract, to avoid a parallel dynamic options graph. Copies symbol/type/side/price/amount/reduceOnly and supported trigger/close fields, applies price/amount, then awaits actual cancel_orders before actual place_order. Owned order/patch snapshots do not observe caller mutation across cancellation. Returns raw retained JSON orderId including arrays, not normalized IDs. Witness final_cancel_batches_and_update asserts DELETE-before-POST and distinct patched price/quantity before source comparisons. Dropping this outer native future stops later orchestration; a discarded source Promise remains scheduled."
+note = "CHOSEN projects the shared closed Order into PlaceOrderOpts instead of spreading arbitrary own JS properties, and accepts explicit native OrderUpdate price presence/undefined and amount value. Inherited update properties and present-undefined amount are outside this native patch contract, to avoid a parallel dynamic options graph. Copies symbol/type/side/price/amount/reduceOnly and supported trigger/close fields, applies price/amount, then awaits actual cancel_orders before actual place_order. Owned order/patch snapshots do not observe caller mutation across cancellation. Returns raw retained JSON orderId including arrays, not normalized IDs. Witness final_cancel_batches_and_update asserts DELETE-before-POST and distinct patched price/quantity before source comparisons. Dropping this outer native future stops later orchestration; a discarded source Promise remains scheduled. Rename target: `safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::update_order`."
 
 [[symbol]]
 ts = "BreakoutpropExchange.placeOrder"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::runtime::BreakoutRuntime::place_order"
+rs = "safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::place_order"
 status = "divergent"
-note = "MIXED: FORCED native UTF-8/closed shared order inputs. CHOSEN owned opts and captured Market snapshots across auth awaits rather than source caller/market aliases, and own-key market lookup rather than inherited plain-object values, to use native Store models. Caller-ID preflight stays outside the catch, missing-market catch runs at call prefix, session then account follows. Real adjust/to_dx_order_type bodies compute separate native quantity/price/trigger values; typed DxPlacePayload retains negative zero and Infinity before the source JSON.stringify nonfinite-to-null wire boundary. UUID host primitive is called only after validation; inverse side, CLOSE/OPEN, GTC, optional price omission and raw JSON orderId truthiness are retained. Arbitrary response-object identity is an owned retained snapshot. Witness final_place_native_numeric_payload_and_failures checks native binary64 fields before any serialized payload/source assertions; fixture corpus is a floor. Dropping this outer native future stops later orchestration; a discarded source Promise remains scheduled."
+note = "MIXED: FORCED native UTF-8/closed shared order inputs. CHOSEN owned opts and captured Market snapshots across auth awaits rather than source caller/market aliases, and own-key market lookup rather than inherited plain-object values, to use native Store models. Caller-ID preflight stays outside the catch, missing-market catch runs at call prefix, session then account follows. Real adjust/to_dx_order_type bodies compute separate native quantity/price/trigger values; typed DxPlacePayload retains negative zero and Infinity before the source JSON.stringify nonfinite-to-null wire boundary. UUID host primitive is called only after validation; inverse side, CLOSE/OPEN, GTC, optional price omission and raw JSON orderId truthiness are retained. Arbitrary response-object identity is an owned retained snapshot. Witness final_place_native_numeric_payload_and_failures checks native binary64 fields before any serialized payload/source assertions; fixture corpus is a floor. Dropping this outer native future stops later orchestration; a discarded source Promise remains scheduled. Rename target: `safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::place_order`."
 
 [[symbol]]
 ts = "BreakoutpropExchange.start"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::runtime::BreakoutRuntime::start"
+rs = "safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::start"
 status = "divergent"
-note = "CHOSEN explicit Rc runtime/read context and polled futures replace JS bound receiver methods and autonomous Promise continuation; NativeReads concretely binds existing session/account/raw/market/quote helpers and inherited external-data initializer. Shared typed Store/formatters keep their independently documented strict-record/owned snapshot boundaries. Executes external init, private account lookup, optional market/ticker updates with fresh loaded snapshots and post-await disposal guards, public-only loaded flags, portfolio formatting/update, then actual tick. Store notification errors preserve complete shared ExchangeError metadata. Source methods are dependency bindings rather than new defaults. Witness final_start_tick_native_order_and_disposal checks native call order and stored values before source, with public-only and disposal cases; external live provider/browser behavior is not claimed. NativeReads primes the inherited initializer future to preserve provider construction/connect at call prefix; subsequent startup is caller-polled, and dropping that outer future prevents later reads/updates unlike a discarded source Promise. Configured external-provider behavior has no fixture proof here."
+note = "CHOSEN explicit Rc runtime/read context and polled futures replace JS bound receiver methods and autonomous Promise continuation; NativeReads concretely binds existing session/account/raw/market/quote helpers and inherited external-data initializer. Shared typed Store/formatters keep their independently documented strict-record/owned snapshot boundaries. Executes external init, private account lookup, optional market/ticker updates with fresh loaded snapshots and post-await disposal guards, public-only loaded flags, portfolio formatting/update, then actual tick. Store notification errors preserve complete shared ExchangeError metadata. Source methods are dependency bindings rather than new defaults. Witness final_start_tick_native_order_and_disposal checks native call order and stored values before source, with public-only and disposal cases; external live provider/browser behavior is not claimed. NativeReads primes the inherited initializer future to preserve provider construction/connect at call prefix; subsequent startup is caller-polled, and dropping that outer future prevents later reads/updates unlike a discarded source Promise. Configured external-provider behavior has no fixture proof here. Rename target: `safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::start`."
 
 [[symbol]]
 ts = "BreakoutpropExchange.fetchOHLCV"
@@ -246,7 +246,7 @@ note = "CHOSEN shared UTF-8 (parity/MANIFEST-SPEC.md#shared-utf8-string-boundary
 ts = "BreakoutpropExchange.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::lifecycle::BreakoutpropExchange::listen_ohlcv"
+rs = "safe-cex-venue-breakoutprop/src/lifecycle.rs::BreakoutpropExchange::listen_ohlcv"
 status = "ported"
 note = "Forwards symbol/interval/options and the identical opaque candle callback to the current public polling socket, returning its original cleanup callable with no wrapper, serialization or added invocation. Source undefined-member TypeError is retained for incomplete construction. Polling/class record boundaries are separately mapped; this forwarding body introduces no additional projection."
 
@@ -254,7 +254,7 @@ note = "Forwards symbol/interval/options and the identical opaque candle callbac
 ts = "BreakoutpropExchange.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::lifecycle::BreakoutpropExchange::listen_order_book"
+rs = "safe-cex-venue-breakoutprop/src/lifecycle.rs::BreakoutpropExchange::listen_order_book"
 status = "ported"
 note = "Forwards the supplied symbol and identical opaque book callback to the current public polling socket and returns its original cleanup callable. No extra conversion, copies of book data or callback wrapper are introduced. Source undefined-member TypeError is retained for incomplete construction. Native subscription key/callback effects and cleanup precede actual-source comparison."
 
@@ -262,6 +262,6 @@ note = "Forwards the supplied symbol and identical opaque book callback to the c
 ts = "BreakoutpropExchange.tick"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_venue_breakoutprop::runtime::BreakoutRuntime::tick"
+rs = "safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::tick"
 status = "divergent"
-note = "CHOSEN typed owned ticker/portfolio snapshots and native required loop/local-date hooks replace live JS raw arrays, browser timer and Promise objects. Actual reads/formatters update the real shared Store; checks disposal after each await and before scheduling, skips public-only, catches/logs message and schedules actual tick callback with inherited interval. Captures live handler table, dispatches book before candle, captures each handler-array identity and initial length while rereading each index so replacement/appending behavior is retained. Native callback receives immutable typed Ticker, so source callbacks mutating ticker.symbol or arbitrary fields during delivery are outside this shared model. Witness final_start_tick_native_order_and_disposal asserts native stored bid, callback order, retained old array and length, public-only return and disposed scheduling; tested iterations are a floor. Dropping this outer native future stops later orchestration; a discarded source Promise remains scheduled."
+note = "CHOSEN typed owned ticker/portfolio snapshots and native required loop/local-date hooks replace live JS raw arrays, browser timer and Promise objects. Actual reads/formatters update the real shared Store; checks disposal after each await and before scheduling, skips public-only, catches/logs message and schedules actual tick callback with inherited interval. Captures live handler table, dispatches book before candle, captures each handler-array identity and initial length while rereading each index so replacement/appending behavior is retained. Native callback receives immutable typed Ticker, so source callbacks mutating ticker.symbol or arbitrary fields during delivery are outside this shared model. Witness final_start_tick_native_order_and_disposal asserts native stored bid, callback order, retained old array and length, public-only return and disposed scheduling; tested iterations are a floor. Dropping this outer native future stops later orchestration; a discarded source Promise remains scheduled. Rename target: `safe-cex-venue-breakoutprop/src/runtime.rs::BreakoutRuntime::tick`."

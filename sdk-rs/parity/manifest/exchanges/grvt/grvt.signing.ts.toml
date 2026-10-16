@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/grvt/grvt.signing.ts"
-rust_files = [ "safe-cex-venue-grvt/src/records.rs", "safe-cex-venue-grvt/src/signing_clock.rs" ]
+rust_files = [ "safe-cex-venue-grvt/src/records.rs", "safe-cex-venue-grvt/src/signing_clock.rs", "safe-cex-venue-grvt/src/signing_runtime.rs" ]
 
 [[symbol]]
 ts = "GrvtSignature"

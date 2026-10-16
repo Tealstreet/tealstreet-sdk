@@ -184,7 +184,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitrue/src/collection_reads.rs::open_positions"
 status = "ported"
-note = "Complete source read body over original opaque runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#bitrue-account-order-and-history-read-bodies. Actual-TypeScript/native witness tests/collection_reads.rs::open_native; compiled family control scripts/collection-reads-controls.py. Original rows/errors, live post-await members, symbol-scoped fallback, serial priority/disposal and history filtering retained. Intrinsics, underlying methods/helpers/HTTP and scheduler are dependencies; no fixed exchange/Store/network assembly claim."
+note = "Complete source read body over original opaque runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#bitrue-account-order-and-history-read-bodies. Actual-TypeScript/native witness tests/collection_reads.rs::open_native; compiled family control scripts/collection-reads-controls.py. Original rows/errors, live post-await members, symbol-scoped fallback, serial priority/disposal and history filtering retained. Intrinsics, underlying methods/helpers/HTTP and scheduler are dependencies; no fixed exchange/Store/network assembly claim. Rename target: `safe-cex-venue-bitrue/src/collection_reads.rs::open_positions`."
 
 [[symbol]]
 ts = "BitrueExchange#getPositionAccounts"
@@ -224,7 +224,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitrue/src/collection_reads.rs::balance_positions"
 status = "ported"
-note = "Complete source read body over original opaque runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#bitrue-account-order-and-history-read-bodies. Actual-TypeScript/native witness tests/collection_reads.rs::balance_native; compiled family control scripts/collection-reads-controls.py. Original rows/errors, live post-await members, symbol-scoped fallback, serial priority/disposal and history filtering retained. Intrinsics, underlying methods/helpers/HTTP and scheduler are dependencies; no fixed exchange/Store/network assembly claim."
+note = "Complete source read body over original opaque runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#bitrue-account-order-and-history-read-bodies. Actual-TypeScript/native witness tests/collection_reads.rs::balance_native; compiled family control scripts/collection-reads-controls.py. Original rows/errors, live post-await members, symbol-scoped fallback, serial priority/disposal and history filtering retained. Intrinsics, underlying methods/helpers/HTTP and scheduler are dependencies; no fixed exchange/Store/network assembly claim. Rename target: `safe-cex-venue-bitrue/src/collection_reads.rs::balance_positions`."
 
 [[symbol]]
 ts = "BitrueExchange.parsePositions"
@@ -312,7 +312,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitrue/src/trading_rest.rs::place"
 status = "ported"
-note = "Complete source REST trading/market body over original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#bitrue-rest-trading-and-market-bodies. Actual-source/native witness tests/trading_rest.rs::place_native; compiled family control scripts/trading-rest-controls.py. Original values/errors and live members/options, caller-ID checks,5/50 batching, completion-order IDs and uncancelled siblings retained. Intrinsics/helpers,HTTP,Promise scheduler and underlying methods are dependencies; no fixed exchange/Store/network assembly claim."
+note = "Complete source REST trading/market body over original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#bitrue-rest-trading-and-market-bodies. Actual-source/native witness tests/trading_rest.rs::place_native; compiled family control scripts/trading-rest-controls.py. Original values/errors and live members/options, caller-ID checks,5/50 batching, completion-order IDs and uncancelled siblings retained. Intrinsics/helpers,HTTP,Promise scheduler and underlying methods are dependencies; no fixed exchange/Store/network assembly claim. Rename target: `safe-cex-venue-bitrue/src/trading_rest.rs::place`."
 
 [[symbol]]
 ts = "BitrueExchange.placeOrders"
@@ -368,7 +368,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitrue/src/trading_rest.rs::cancel"
 status = "ported"
-note = "Complete source REST trading/market body over original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#bitrue-rest-trading-and-market-bodies. Actual-source/native witness tests/trading_rest.rs::cancel_native; compiled family control scripts/trading-rest-controls.py. Original values/errors and live members/options, caller-ID checks,5/50 batching, completion-order IDs and uncancelled siblings retained. Intrinsics/helpers,HTTP,Promise scheduler and underlying methods are dependencies; no fixed exchange/Store/network assembly claim."
+note = "Complete source REST trading/market body over original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#bitrue-rest-trading-and-market-bodies. Actual-source/native witness tests/trading_rest.rs::cancel_native; compiled family control scripts/trading-rest-controls.py. Original values/errors and live members/options, caller-ID checks,5/50 batching, completion-order IDs and uncancelled siblings retained. Intrinsics/helpers,HTTP,Promise scheduler and underlying methods are dependencies; no fixed exchange/Store/network assembly claim. Rename target: `safe-cex-venue-bitrue/src/trading_rest.rs::cancel`."
 
 [[symbol]]
 ts = "BitrueExchange.listenOHLCV"
