@@ -15,6 +15,13 @@ use std::{rc::Rc, sync::Arc};
 const AGENT_KEY: &str = "0x0123456789012345678901234567890123456789012345678901234567890123";
 const MASTER: &str = "0x14dc79964da2c08b23698b3d3cc7ca32193d9955";
 
+fn agent_address() -> String {
+    safe_cex_crypto::wallet_utils::create_wallet_from_private_key(AGENT_KEY)
+        .unwrap()
+        .address()
+        .to_string()
+}
+
 struct Fixture {
     host: Rc<Host>,
     routes: Arc<Routes>,
@@ -25,7 +32,7 @@ fn fixture(routes: Vec<(&str, Value)>) -> Fixture {
     let routes = Routes::new(routes);
     let clock = Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(host.clone()));
     let options = serde_json::from_value(json!({
-        "key": "0x5e6bE1C1cBdE7d1D1b2d4ff9Ab6F6DA1db1D1e6F",
+        "key": agent_address(),
         "secret": AGENT_KEY,
         "applicationId": MASTER,
     }))
@@ -93,7 +100,24 @@ fn start_loads_markets_balance_and_dials_both_sockets() {
     f.host.settle();
     assert!(result.is_ok(), "start: {result:?}; reports {:?}", f.host.reports.borrow());
     let store = f.exchange.base().store.clone();
-    assert_eq!(store.markets().len(), 2, "core perp markets loaded");
+    assert_eq!(
+        store.markets().len(),
+        2,
+        "core perp markets loaded; requests {:?}; console {:?}; reports {:?}",
+        f.routes.requests.borrow().iter().map(|(r, _)| r.clone()).collect::<Vec<_>>(),
+        f.host.console.borrow(),
+        f.host.reports.borrow()
+    );
     assert!(store.loaded().markets && store.loaded().tickers, "loaded flags {:?}", *store.loaded());
     assert_eq!(f.host.sockets.borrow().len(), 2, "public and private sockets dialed");
+    let problems: Vec<_> = f
+        .host
+        .console
+        .borrow()
+        .iter()
+        .filter(|(severity, _)| severity == "error" || severity == "warning")
+        .cloned()
+        .collect();
+    assert!(problems.is_empty(), "startup logged {problems:?}");
+    assert!(f.host.reports.borrow().is_empty(), "startup reported {:?}", f.host.reports.borrow());
 }

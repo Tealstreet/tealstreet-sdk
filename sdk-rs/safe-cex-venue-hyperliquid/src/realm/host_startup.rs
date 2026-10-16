@@ -94,3 +94,22 @@ impl StartupHost for Realm {
         self.get_str(&severity, "Warning")
     }
 }
+
+impl crate::browser_approval_flows::BrowserApprovalHost for Realm {
+    /// `typeof name` on a global: an unbound name is "undefined", not a throw.
+    fn global_typeof(&mut self, name: &str) -> Result<Value, Value> {
+        let globals = Value::Object(self.state.globals.clone());
+        let key = PropKey::str(name);
+        if self.state.imports.borrow().contains_key(name) || self.has_property(&globals, &key)? {
+            let v = self.global_binding(name)?;
+            return Ok(Value::str(v.type_of()));
+        }
+        Ok(Value::str("undefined"))
+    }
+    fn construct_value(&mut self, c: &Value, args: &[Value]) -> Result<Value, Value> {
+        Realm::construct(self, c, args, None)
+    }
+    fn error_value(&self, error: &Value) -> Value {
+        error.clone()
+    }
+}

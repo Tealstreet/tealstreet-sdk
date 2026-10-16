@@ -19,9 +19,11 @@ pub mod facade_socket;
 pub mod facade_store;
 pub mod imports;
 pub mod imports_utils;
+pub mod imports_venue;
 mod host_classes;
 mod host_core;
 mod host_leaves;
+mod host_market;
 mod host_startup;
 
 use crate::spot_json::JsString;
@@ -158,7 +160,7 @@ impl Realm {
         }
         Err(self.error_of("ReferenceError", &format!("{name} is not defined")))
     }
-    pub fn set_global(&mut self, name: &str, value: Value) {
+    pub fn set_global(&self, name: &str, value: Value) {
         self.state
             .globals
             .borrow_mut()

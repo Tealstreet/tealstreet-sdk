@@ -91,6 +91,7 @@ pub fn bind(realm: &Realm) {
     bind_startup(realm);
     super::imports_utils::bind(realm);
     super::ccxt::bind(realm);
+    super::imports_venue::bind(realm);
 }
 
 /// Imported async helpers return a promise over the ported body.

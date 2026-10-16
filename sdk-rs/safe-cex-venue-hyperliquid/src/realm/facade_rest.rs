@@ -115,6 +115,7 @@ fn client_object(realm: &Realm, client: Client) -> Value {
 
 /// Bind the three API factory imports for one exchange instance.
 pub fn bind_api_factories(realm: &Realm, base: Rc<BaseExchange>, deps: RestDependencies) {
+    let deps_for_fetch = deps.http.clone();
     for (name, kind) in [("createExchangeAPI", ClientKind::Exchange), ("createInfoAPI", ClientKind::Info)] {
         let deps = deps.clone();
         let base = base.clone();
@@ -138,4 +139,63 @@ pub fn bind_api_factories(realm: &Realm, base: Rc<BaseExchange>, deps: RestDepen
         Ok(client_object(r, Client { kind: client.kind, options: client.options.clone(), api }))
     });
     realm.bind_import("rateLimit", rate_limit);
+    bind_fetch(realm, deps_for_fetch);
+}
+
+/// WHATWG `fetch(url, { method, headers, body })` over the host transport, for
+/// the few source paths that call it directly (builder-fee approval checks).
+fn bind_fetch(realm: &Realm, http: Arc<dyn RestAdapter>) {
+    let fetch = realm.native("fetch", 2, move |r, _, args| {
+        let url = r.to_rust_string(&arg(args, 0))?;
+        let init = arg(args, 1);
+        let mut request = safe_cex_transport::RestRequest {
+            method: "GET".into(),
+            url,
+            ..Default::default()
+        };
+        if init.object().is_some() {
+            let method = r.get_str(&init, "method")?;
+            if !method.is_nullish() {
+                request.method = r.to_rust_string(&method)?.to_uppercase();
+            }
+            let headers = r.get_str(&init, "headers")?;
+            if headers.object().is_some() {
+                for (k, v) in r.own_entries(&headers)? {
+                    let value = r.to_rust_string(&v)?;
+                    request.headers.insert(String::from_utf16_lossy(k.units().unwrap_or_default()), value);
+                }
+            }
+            let body = r.get_str(&init, "body")?;
+            if !body.is_nullish() {
+                let text = r.to_rust_string(&body)?;
+                request.body = Some(safe_cex_transport::RestBody::Encoded(text.into_bytes()));
+            }
+        }
+        let http = http.clone();
+        let realm = r.clone();
+        Ok(r.spawn_value(Box::pin(async move {
+            let mut realm = realm;
+            let response = http.execute(request).await.map_err(|f| thrown_from(&mut realm, ExchangeError::from(f)))?;
+            let text = match &response.body {
+                RestResponseBody::Encoded(bytes) => String::from_utf8_lossy(bytes).into_owned(),
+                RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v.to_string(),
+            };
+            let status = response.status;
+            let out = realm.object_from(vec![
+                ("ok", Value::Bool((200..300).contains(&status))),
+                ("status", Value::Number(status as f64)),
+            ]);
+            let body = text.clone();
+            let json = realm.native("json", 0, move |r, _, _| {
+                let units: Vec<u16> = body.encode_utf16().collect();
+                let parsed = r.parse_json(&units);
+                Ok(r.settled_promise(parsed))
+            });
+            realm.define_hidden(&out, PropKey::str("json"), json);
+            let text_fn = realm.native("text", 0, move |r, _, _| Ok(r.settled_promise(Ok(Value::str(&text)))));
+            realm.define_hidden(&out, PropKey::str("text"), text_fn);
+            Ok(out)
+        })))
+    });
+    realm.set_global("fetch", fetch);
 }
