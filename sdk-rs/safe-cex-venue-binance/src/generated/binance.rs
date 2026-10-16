@@ -368,6 +368,50 @@ pub enum BinanceIncomeType {
     #[serde(rename = "POSITION_LIMIT_INCREASE_FEE")]
     PositionLimitIncreaseFee,
 }
+#[derive(serde::Deserialize)]
+#[serde(remote = "BinanceIncomeType")]
+// Remote variants must retain the public source-derived identifiers.
+#[allow(clippy::upper_case_acronyms)]
+enum BinanceIncomeTypeWire {
+    #[serde(rename = "TRANSFER")]
+    TRANSFER,
+    #[serde(rename = "WELCOME_BONUS")]
+    WelcomeBonus,
+    #[serde(rename = "REALIZED_PNL")]
+    RealizedPnl,
+    #[serde(rename = "FUNDING_FEE")]
+    FundingFee,
+    #[serde(rename = "COMMISSION")]
+    COMMISSION,
+    #[serde(rename = "INSURANCE_CLEAR")]
+    InsuranceClear,
+    #[serde(rename = "REFERRAL_KICKBACK")]
+    ReferralKickback,
+    #[serde(rename = "COMMISSION_REBATE")]
+    CommissionRebate,
+    #[serde(rename = "API_REBATE")]
+    ApiRebate,
+    #[serde(rename = "CONTEST_REWARD")]
+    ContestReward,
+    #[serde(rename = "CROSS_COLLATERAL_TRANSFER")]
+    CrossCollateralTransfer,
+    #[serde(rename = "OPTIONS_PREMIUM_FEE")]
+    OptionsPremiumFee,
+    #[serde(rename = "OPTIONS_SETTLE_PROFIT")]
+    OptionsSettleProfit,
+    #[serde(rename = "INTERNAL_TRANSFER")]
+    InternalTransfer,
+    #[serde(rename = "AUTO_EXCHANGE")]
+    AutoExchange,
+    #[serde(rename = "DELIVERED_SETTELMENT")]
+    DeliveredSettelment,
+    #[serde(rename = "COIN_SWAP_DEPOSIT")]
+    CoinSwapDeposit,
+    #[serde(rename = "COIN_SWAP_WITHDRAW")]
+    CoinSwapWithdraw,
+    #[serde(rename = "POSITION_LIMIT_INCREASE_FEE")]
+    PositionLimitIncreaseFee,
+}
 impl safe_cex_num::numeric_ingress::JsNumberOutput for BinanceIncomeType {
     fn check_number_output(&self) {
         safe_cex_num::js_number_output!(self, enum { TRANSFER,WelcomeBonus,RealizedPnl,FundingFee,COMMISSION,InsuranceClear,ReferralKickback,CommissionRebate,ApiRebate,ContestReward,CrossCollateralTransfer,OptionsPremiumFee,OptionsSettleProfit,InternalTransfer,AutoExchange,DeliveredSettelment,CoinSwapDeposit,CoinSwapWithdraw,PositionLimitIncreaseFee });
@@ -375,73 +419,10 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for BinanceIncomeType {
 }
 impl<'de> serde::Deserialize<'de> for BinanceIncomeType {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(serde::Deserialize)]
-        enum Wire {
-            #[serde(rename = "TRANSFER")]
-            Transfer,
-            #[serde(rename = "WELCOME_BONUS")]
-            WelcomeBonus,
-            #[serde(rename = "REALIZED_PNL")]
-            RealizedPnl,
-            #[serde(rename = "FUNDING_FEE")]
-            FundingFee,
-            #[serde(rename = "COMMISSION")]
-            Commission,
-            #[serde(rename = "INSURANCE_CLEAR")]
-            InsuranceClear,
-            #[serde(rename = "REFERRAL_KICKBACK")]
-            ReferralKickback,
-            #[serde(rename = "COMMISSION_REBATE")]
-            CommissionRebate,
-            #[serde(rename = "API_REBATE")]
-            ApiRebate,
-            #[serde(rename = "CONTEST_REWARD")]
-            ContestReward,
-            #[serde(rename = "CROSS_COLLATERAL_TRANSFER")]
-            CrossCollateralTransfer,
-            #[serde(rename = "OPTIONS_PREMIUM_FEE")]
-            OptionsPremiumFee,
-            #[serde(rename = "OPTIONS_SETTLE_PROFIT")]
-            OptionsSettleProfit,
-            #[serde(rename = "INTERNAL_TRANSFER")]
-            InternalTransfer,
-            #[serde(rename = "AUTO_EXCHANGE")]
-            AutoExchange,
-            #[serde(rename = "DELIVERED_SETTELMENT")]
-            DeliveredSettelment,
-            #[serde(rename = "COIN_SWAP_DEPOSIT")]
-            CoinSwapDeposit,
-            #[serde(rename = "COIN_SWAP_WITHDRAW")]
-            CoinSwapWithdraw,
-            #[serde(rename = "POSITION_LIMIT_INCREASE_FEE")]
-            PositionLimitIncreaseFee,
-        }
         let text = <String as serde::Deserialize>::deserialize(deserializer)?;
-        let wire =
-            <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<
-                D::Error,
-            >::new(text))?;
-        Ok(match wire {
-            Wire::Transfer => Self::TRANSFER,
-            Wire::WelcomeBonus => Self::WelcomeBonus,
-            Wire::RealizedPnl => Self::RealizedPnl,
-            Wire::FundingFee => Self::FundingFee,
-            Wire::Commission => Self::COMMISSION,
-            Wire::InsuranceClear => Self::InsuranceClear,
-            Wire::ReferralKickback => Self::ReferralKickback,
-            Wire::CommissionRebate => Self::CommissionRebate,
-            Wire::ApiRebate => Self::ApiRebate,
-            Wire::ContestReward => Self::ContestReward,
-            Wire::CrossCollateralTransfer => Self::CrossCollateralTransfer,
-            Wire::OptionsPremiumFee => Self::OptionsPremiumFee,
-            Wire::OptionsSettleProfit => Self::OptionsSettleProfit,
-            Wire::InternalTransfer => Self::InternalTransfer,
-            Wire::AutoExchange => Self::AutoExchange,
-            Wire::DeliveredSettelment => Self::DeliveredSettelment,
-            Wire::CoinSwapDeposit => Self::CoinSwapDeposit,
-            Wire::CoinSwapWithdraw => Self::CoinSwapWithdraw,
-            Wire::PositionLimitIncreaseFee => Self::PositionLimitIncreaseFee,
-        })
+        BinanceIncomeTypeWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+            text,
+        ))
     }
 }
 #[derive(Debug, Clone, PartialEq, serde::Serialize)]
