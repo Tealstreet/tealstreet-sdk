@@ -10,7 +10,11 @@ use safe_cex_transport::{
     RestAdapter, RestAdapterVariant, RestFailure, RestFuture, RestRequest, RestResponse,
     TransportError, TransportRegistry,
     rate_limit::RateLimitClock,
-    retry::{ClassifiedRequest, network_error_on_read, reads_and_posted},
+    retry::reads_and_posted,
+    signature_rejection::{
+        IsSignatureRejection, SignatureRetry, resend_on_signature_rejection,
+        retry_network_reads_and_signature_rejection,
+    },
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions};
 use std::{rc::Rc, sync::Arc};
@@ -143,8 +147,45 @@ async fn create(
         retry_clock,
     })
 }
-// ts-bug: createAPI/createKucoinSpotAPI reuse the first timestamp on retry and
-// sign the already-transformed string, while its wire bytes remain unchanged.
+// ts: isKucoinSignatureRejection, shared with KuCoin spot.
+pub fn is_kucoin_signature_rejection(
+    data: &serde_json::Value,
+) -> Result<bool, safe_cex_num::JsCoercionError> {
+    let field = |key| data.as_object().and_then(|object| object.get(key));
+    if safe_cex_num::js_string(field("code"))? == "400005" {
+        return Ok(true);
+    }
+    let message = match field("msg").filter(|value| !value.is_null()) {
+        Some(value) => safe_cex_num::js_string(Some(value))?,
+        None => String::new(),
+    };
+    // A non-unicode /i regex never folds a non-ASCII unit onto an ASCII one.
+    Ok(message.to_ascii_lowercase().contains("invalid kc-api-sign"))
+}
+impl Api {
+    // axios-retry (networkErrorOnRead || signatureRejectedResponse) over one attempt.
+    async fn retrying(
+        &self,
+        request: RestRequest,
+        retry: &SignatureRetry,
+        predicate: &IsSignatureRejection,
+    ) -> Result<safe_cex_transport::RestExecution, RestFailure> {
+        let classified = reads_and_posted(vec![
+            "/api/v1/bullet-public".into(),
+            "/api/v1/bullet-private".into(),
+        ])
+        .classify(request);
+        retry_network_reads_and_signature_rejection(
+            classified,
+            3,
+            &self.attempt,
+            self.retry_clock.as_ref(),
+            retry,
+            predicate,
+        )
+        .await
+    }
+}
 // The future owns no venue latch or task: drop releases the shared attempt.
 impl RestAdapter for Api {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
@@ -169,19 +210,15 @@ impl RestAdapter for Api {
             request.timeout_ms = Some(20000);
         }
         Box::pin(async move {
-            match reads_and_posted(vec![
-                "/api/v1/bullet-public".into(),
-                "/api/v1/bullet-private".into(),
-            ])
-            .classify(request)
-            {
-                ClassifiedRequest::Read(read) => {
-                    network_error_on_read(read, 3)
-                        .execute_with_receipt(&self.attempt, self.retry_clock.as_ref())
-                        .await
-                }
-                ClassifiedRequest::Write(write) => write.execute_with_receipt(&self.attempt).await,
+            // One stamp per call stands in for config.safeCexSignatureRetry.
+            let retry = SignatureRetry::default();
+            let predicate: IsSignatureRejection = Rc::new(is_kucoin_signature_rejection);
+            let execution = self.retrying(request, &retry, &predicate).await?;
+            // Last interceptor; over the tunnel any status resolves.
+            if resend_on_signature_rejection(&execution, &retry, &predicate)? {
+                return self.retrying(execution.config, &retry, &predicate).await;
             }
+            Ok(execution)
         })
     }
 }
@@ -202,9 +239,18 @@ impl Attempt {
         {
             return Ok(());
         }
-        let timestamp = broker::get_kucoin_request_timestamp(Some(&request.headers))
-            .unwrap_or_else(|| js_number_string(self.clock.get_current_time_ms()));
+        // Only the device's signing pass keeps the server's timestamp, which the
+        // broker signature was made over; a replay must not reuse the previous one.
+        let incoming = if self.client.is_signing_capture(request) {
+            broker::get_kucoin_request_timestamp(Some(&request.headers))
+        } else {
+            None
+        };
+        let timestamp =
+            incoming.unwrap_or_else(|| js_number_string(self.clock.get_current_time_ms()));
         broker::add_kucoin_broker_headers(&mut request.headers, &self.options, &timestamp).await?;
+        // Set even without a broker config, so a hosted replay cannot hand the device the old one.
+        set_header(&mut request.headers, "KC-API-TIMESTAMP", timestamp.clone());
         if self.remote {
             return Ok(());
         }
@@ -239,7 +285,10 @@ impl Attempt {
             .map(|body| body.untransformed())
             .transpose()
             .map_err(|e| e.to_string())?;
-        let body = if body.is_some_and(|body| js_truthy(Some(body))) {
+        // A replayed config carries the body Axios already serialized: sign those bytes.
+        let body = if let Some(serde_json::Value::String(text)) = body {
+            text.clone()
+        } else if body.is_some_and(|body| js_truthy(Some(body))) {
             js_json_stringify(&JsJsonValue::from(body.unwrap().clone()))
                 .map_err(|e| e.to_string())?
                 .unwrap_or_default()

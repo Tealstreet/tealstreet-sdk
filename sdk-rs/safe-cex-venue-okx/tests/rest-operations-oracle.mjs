@@ -33,8 +33,11 @@ assert.ok(create);
 let checkResponse;
 const xhr={interceptors:{response:{use:fn=>checkResponse=fn},request:{use:()=>{}}}};
 const apiModule={exports:{}};
-const apiCode=ts.transpileModule(create.getText(apiAst),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
-vm.runInThisContext('(function(module,exports,BASE_URLS,RECV_WINDOW,safeCexAxiosCreate,retry,networkErrorOnRead){'+apiCode+'\n})')(apiModule,apiModule.exports,{okx:{livenet:'https://www.okx.com'}},20000,()=>xhr,()=>{},()=>{});
+const helpers=apiAst.statements.filter(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>['isOkxSignatureRejection','formatOkxApiErrorMessage'].includes(d.name.getText(apiAst))));
+assert.equal(helpers.length,2);
+const apiCode=ts.transpileModule(helpers.map(n=>n.getText(apiAst).replace(/^export\s+/,'')).join('\n')+'\n'+create.getText(apiAst),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;
+// No placement fixture is a signature rejection, so the resend declines every response.
+vm.runInThisContext('(function(module,exports,BASE_URLS,RECV_WINDOW,safeCexAxiosCreate,retry,networkErrorOnRead,signatureRejectedResponse,resendOnSignatureRejection){'+apiCode+'\n})')(apiModule,apiModule.exports,{okx:{livenet:'https://www.okx.com'}},20000,()=>xhr,()=>{},()=>{},()=>()=>false,()=>undefined);
 apiModule.exports.createAPI({publicDataOnly:true},{});
 assert.equal(typeof checkResponse,'function');
 const baseOrder={id:'store-order',status:'open',symbol:'BTCUSDT',type:'limit',side:'buy',price:1,amount:1,filled:0,remaining:1,reduceOnly:false,lastUpdate:123,info:{clOrdId:'client'}};

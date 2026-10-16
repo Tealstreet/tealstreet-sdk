@@ -104,8 +104,9 @@ explicit diagnostic/watchdog fixtures; it is not a full socket runtime oracle.
 defaults and before the shared transform. Remote echo adapter values are compared
 before byte projection, so an object cannot masquerade as its JSON string. The
 read classifier admits GET-like reads and the two bullet POST endpoints; order
-writes cannot enter retry. Retry retains the source first-timestamp and
-transformed-string preimage quirks, with a shared derived timeout budget.
+writes cannot enter retry. Each retry and the one signature-rejection resend
+re-sign with a fresh timestamp over the serialized string body; only a signing
+capture keeps the server's timestamp. Retries share a derived timeout budget.
 
 Factories own option snapshots. Source futures captures authentication/key
 defaults but reads live broker config; Spot also reads live key/privacy changes.

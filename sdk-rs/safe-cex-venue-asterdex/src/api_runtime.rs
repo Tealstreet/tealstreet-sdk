@@ -164,12 +164,15 @@ async fn signed_request<H: RuntimeHost>(
             h.get(&options, "apiKey")?,
         )?;
         let timestamp = clock(h.as_ref(), "getCurrentTimeMs", vec![])?;
+        // A hosted resend never recorded its unsigned params, so it still carries
+        // the previous attempt's signing fields.
         let data = or(h.as_ref(), h.get(&config, "__asterUnsignedParams")?, || {
-            or(h.as_ref(), h.get(&config, "data")?, || {
+            let params = or(h.as_ref(), h.get(&config, "data")?, || {
                 or(h.as_ref(), h.get(&config, "params")?, || {
                     Ok(h.object(vec![]))
                 })
-            })
+            })?;
+            h.import("withoutSigningFields", vec![params])
         })?;
         h.set(
             &config,
@@ -272,11 +275,52 @@ fn detail<H: RuntimeHost>(h: &H, data: &H::Value, field: &str) -> ResultValue<H:
         vec![h.get(data, field)?, opt(h, data.clone(), "code")?],
     )
 }
+// ts: resendV1SignatureRejection. V3 signs with a wallet key, where a rejection is
+// not drift a resend fixes; the request interceptor re-signs from __asterUnsignedParams.
+fn resend_v1_signature_rejection<H: RuntimeHost>(
+    h: &H,
+    api: &H::Value,
+    config: H::Value,
+    data: H::Value,
+) -> ResultValue<H::Value> {
+    if !h.truthy(&config) {
+        return Ok(h.undefined());
+    }
+    let url = h.get(&config, "url")?;
+    let v3 = if h.nullish(&url) {
+        h.undefined()
+    } else {
+        invoke!(h, url, "includes", vec![h.text("/fapi/v3/")])?
+    };
+    if h.truthy(&v3) || h.truthy(&h.import("hasRetriedSignature", vec![config.clone()])?) {
+        return Ok(h.undefined());
+    }
+    if !h.truthy(&h.import("isBinanceStyleSignatureRejection", vec![data])?) {
+        return Ok(h.undefined());
+    }
+    let next = copy(h, config)?;
+    h.define(
+        &next,
+        safe_cex_transport::signature_rejection::SIGNATURE_RETRY_CONFIG_KEY,
+        h.boolean(true),
+    )?;
+    invoke!(h, api.clone(), "request", vec![next])
+}
 async fn response_ok<H: RuntimeHost>(
     h: Rc<H>,
     exchange: H::Value,
+    api: H::Value,
     response: H::Value,
 ) -> ResultValue<H::Value> {
+    let resend = resend_v1_signature_rejection(
+        h.as_ref(),
+        &api,
+        h.get(&response, "config")?,
+        h.get(&response, "data")?,
+    )?;
+    if h.truthy(&resend) {
+        return Ok(resend);
+    }
     let data = h.get(&response, "data")?;
     if h.truthy(&opt(h.as_ref(), data.clone(), "code")?)
         && h.less(h.get(&h.get(&response, "data")?, "code")?, h.number(0.))?
@@ -325,6 +369,15 @@ async fn response_error<H: RuntimeHost>(
         )?;
         let status = fields[0].clone();
         let data = fields[1].clone();
+        let resend = resend_v1_signature_rejection(
+            h.as_ref(),
+            &api,
+            h.get(&error, "config")?,
+            data.clone(),
+        )?;
+        if h.truthy(&resend) {
+            return Ok(resend);
+        }
         if h.strict_equal(&opt(h.as_ref(), data.clone(), "code")?, &h.number(-1021.)) {
             let msg = opt(h.as_ref(), data.clone(), "msg")?;
             let includes = if h.nullish(&msg) {
@@ -488,11 +541,15 @@ pub fn create_api<H: RuntimeHost>(
     )?;
     let host = h.clone();
     let ex = exchange.clone();
+    let a = api.clone();
     let fulfilled = h.function(Rc::new(move |args| {
         let h = host.clone();
         let ex = ex.clone();
+        let api = a.clone();
         let response = args.first().cloned().unwrap_or_else(|| h.undefined());
-        let task = host.start(Box::pin(async move { response_ok(h, ex, response).await }));
+        let task = host.start(Box::pin(
+            async move { response_ok(h, ex, api, response).await },
+        ));
         Ok(host.promise(task))
     }));
     let host = h.clone();

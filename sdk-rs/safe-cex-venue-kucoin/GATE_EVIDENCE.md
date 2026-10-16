@@ -149,9 +149,8 @@ note corrected to describe UUID generation without claiming client-ID validation
 ## Retry reference boundary (factories remain pending)
 
 Real Axios and axios-retry execute14 fixtures with deterministic elapsed time.
-Both venues reuse the first timestamp and sign transformed string data on later
-attempts: original object JSON becomes quoted JSON text while wire bytes stay
-unchanged. Reads and bullet POSTs retry; order writes and response-bearing
+Both venues re-sign later attempts with a fresh timestamp over the serialized
+string body, so the signed preimage equals the unchanged wire bytes. Reads and bullet POSTs retry; order writes and response-bearing
 failures do not. The default remaining timeout shrinks:8000ms per attempt gives
 20000/12000/4000 and3 attempts;21000ms on the first gives one attempt.
 
@@ -659,7 +658,8 @@ longer projects every value through wire_bytes, which would hide that distinctio
 Both factories use shared execute_with_interceptor rather than pre-signing a
 request before ordinary execute. Local14 retry/signature/budget cases and48
 runtime cases cover body/header/public-prefix/form and remote behavior. The
-first-timestamp and transformed-string retry preimage quirks remain ts-bug marked.
+signature-rejection resend re-signs once; `signature_predicate_matches_actual_typescript`
+pins the predicate against live source.
 
 20 boundary cases distinguish the actual source directions of options aliasing:
 futures captures key/authentication defaults while Spot sees later key/privacy
