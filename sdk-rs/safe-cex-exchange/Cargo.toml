@@ -20,6 +20,7 @@ safe-cex-candle-cache = { path = "../safe-cex-candle-cache" }
 serde.workspace = true
 indexmap = { version = "=2.14.2", features = ["serde"] }
 serde_json.workspace = true
+num-bigint = "=0.4.6"
 base64.workspace = true
 regex = { workspace = true, optional = true }
 
