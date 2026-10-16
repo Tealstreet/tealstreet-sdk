@@ -113,6 +113,54 @@ pub(super) fn create_order(params: &Js) -> Result<CreateOrderParams, Thrown> {
 
 // ts: CreateGroupedOrdersParams
 pub(super) fn create_grouped_orders(params: &Js) -> Result<CreateGroupedOrdersParams, Thrown> {
+    let orders = params.get("orders")?;
+    let values = orders
+        .array_values()
+        .ok_or_else(|| mismatch("orders", "an array", &orders))?;
+    if values.is_empty() || values.len() > 3 {
+        return Err(Thrown::error(
+            "Error",
+            "Lighter grouped orders require 1-3 orders",
+        ));
+    }
+    let market = values[0].get("marketId")?;
+    let valid_market = market
+        .as_f64()
+        .is_some_and(|n| n.is_finite() && n.fract() == 0.0 && (0.0..=254.0).contains(&n));
+    if !valid_market {
+        return Err(Thrown::error(
+            "Error",
+            &format!(
+                "Grouped orders require a valid perps market id (0-254): {}",
+                market.to_display()
+            ),
+        ));
+    }
+    let mut ids: Vec<Js> = vec![];
+    for order in &values {
+        if !order.get("marketId")?.strict_equals(&market) {
+            return Err(Thrown::error(
+                "Error",
+                "Grouped orders must all use the same market id",
+            ));
+        }
+        let id = order.get("orderId")?.call_method("toString", vec![])?;
+        if ids.iter().any(|previous| previous.strict_equals(&id)) {
+            return Err(Thrown::error(
+                "Error",
+                &format!(
+                    "Grouped orders contain duplicate client order id {}",
+                    id.to_display()
+                ),
+            ));
+        }
+        ids.push(id);
+    }
+    // Source reads all order types before inspecting groupingType. The native
+    // builder performs the corresponding kind-specific validation after decode.
+    for order in &values {
+        order.get("orderType")?;
+    }
     let grouping = params.get("groupingType")?;
     let grouping_type = match grouping.as_f64() {
         Some(1.0) => LighterGroupedOrderType::OneTriggersTheOther,
@@ -128,7 +176,6 @@ pub(super) fn create_grouped_orders(params: &Js) -> Result<CreateGroupedOrdersPa
             ));
         }
     };
-    let orders = params.get("orders")?;
     let orders = orders
         .array_values()
         .ok_or_else(|| mismatch("orders", "an array", &orders))?
@@ -154,8 +201,29 @@ pub(super) fn cancel_order(params: &Js) -> Result<CancelOrderParams, Thrown> {
 
 // ts: UpdateLeverageParams
 pub(super) fn update_leverage(params: &Js) -> Result<UpdateLeverageParams, Thrown> {
-    let market_id = number(params, "marketId")?;
-    let leverage = number(params, "leverage")?;
+    let leverage = params.get("leverage")?;
+    let leverage = leverage
+        .as_f64()
+        .filter(|n| n.is_finite() && *n > 0.0)
+        .ok_or_else(|| {
+            Thrown::error(
+                "Error",
+                &format!("Invalid leverage value: {}", leverage.to_display()),
+            )
+        })?;
+    let market_id = params.get("marketId")?;
+    let market_id = market_id
+        .as_f64()
+        .filter(|n| n.is_finite() && n.fract() == 0.0 && (0.0..=254.0).contains(n))
+        .ok_or_else(|| {
+            Thrown::error(
+                "Error",
+                &format!(
+                    "marketId is out of valid range (0-254): {}",
+                    market_id.to_display()
+                ),
+            )
+        })?;
     let mode = params.get("marginMode")?;
     let margin_mode = mode.as_f64().and_then(MarginMode::new).ok_or_else(|| {
         Thrown::error(

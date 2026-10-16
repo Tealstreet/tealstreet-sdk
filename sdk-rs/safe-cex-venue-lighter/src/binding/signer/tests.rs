@@ -548,3 +548,44 @@ fn unsupported_provider_rejects_before_construction() {
         "unsupported provider"
     );
 }
+
+#[test]
+#[ignore = "requires Node and maintained TypeScript"]
+fn parameter_validation_precedence_matches_live_transaction_client() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/binding-signer-validation-oracle.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = cases.as_array().unwrap();
+    assert_eq!(cases.len(), 9, "independent source validation floor");
+    for case in cases {
+        let params = from_fixture(&case["params"]);
+        let result = if case["kind"] == "leverage" {
+            super::codec::update_leverage(&params).map(|_| ())
+        } else {
+            super::codec::create_grouped_orders(&params).map(|_| ())
+        };
+        let error = result.expect_err(case["label"].as_str().unwrap());
+        assert_eq!(
+            to_fixture(&error.value.get("name").unwrap()),
+            case["error"]["name"],
+            "{} error name",
+            case["label"]
+        );
+        assert_eq!(
+            error.message(),
+            case["error"]["message"].as_str().unwrap(),
+            "{} validation order",
+            case["label"]
+        );
+    }
+}
