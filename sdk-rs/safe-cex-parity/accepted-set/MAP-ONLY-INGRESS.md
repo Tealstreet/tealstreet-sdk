@@ -1,4 +1,4 @@
-# Object-only record ingress
+# Object-only records and string-only enums
 
 Use the existing `safe_cex_types::strict_decode::object` deserializer guard for
 TypeScript object records. Apply it at the concrete record's `Deserialize`
@@ -105,7 +105,76 @@ scratch workspace.
   [types guidance](../../safe-cex-types/CLAUDE.md) explain the object boundary and
   private companion policy.
 
-This recipe covers object records. String-literal enums need their own string
-admission guard and tagged-object rejection proof; that is a separate input
-shape. Proposal reports, private visibility and a passing neighboring owner do
-not replace the repaired owner's native evidence.
+## String-only literal enums
+
+A Serde-derived unit-variant enum also accepts an externally tagged object such
+as `{"long": null}`. A TypeScript string-literal union does not admit that object.
+For an enum representing such a union, use the existing
+`String::deserialize(d)?` admission guard, then pass the admitted string to a
+private Serde remote enum through `serde::de::value::StringDeserializer`.
+This is the maintained pattern in
+[shared OrderSide and the other string enums](../../safe-cex-types/src/lib.rs).
+It needs no new public helper, derive macro or gate permission.
+
+```rust
+#[derive(Debug, PartialEq)]
+pub enum Side {
+    Long,
+    Short,
+}
+
+#[derive(serde::Deserialize)]
+#[serde(remote = "Side")]
+enum SideWire {
+    #[serde(rename = "long")]
+    Long,
+    #[serde(rename = "short")]
+    Short,
+}
+
+impl<'de> serde::Deserialize<'de> for Side {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = <String as serde::Deserialize<'de>>::deserialize(d)?;
+        SideWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+    }
+}
+```
+
+Preserve all existing literal spellings, rename/alias rules and serialization
+behavior. Do not trim, change case or stringify a non-string input. Retain an
+existing serialization derive or delegation separately; the example adds only
+decoding. The remote enum carries the reviewed decoding spellings without
+implementing an independent `Deserialize` for `SideWire`. If a real private enum
+retains its own `Deserialize`, it remains an independently gated owner and needs
+its own string boundary and native evidence. An outer string guard cannot cover
+that helper. Do not apply this repair to a protocol that actually declares
+tagged objects or payload-carrying variants; review that schema separately.
+
+Required proof for each repaired enum:
+
+1. Derive the exact complete literal set from the maintained source. Decode
+   every admitted spelling and compare the actual native variant. Preserve
+   native-to-wire serialization where it already exists; a round trip alone
+   cannot prove variant identity. Existing Serde metadata oracles must still
+   inspect the complete remote variant schema, including any reviewed aliases.
+2. Reject a valid tagged map for **every** unit variant, including
+   `{"long": null}` for the example, through ordinary owned and borrowed JSON,
+   the qualified decoder and JSON text. Include arrays, null, numbers, booleans,
+   unknown strings and non-admitted case/whitespace/BOM spellings. A misspelled
+   tag or invalid payload can fail without the string guard and proves nothing
+   about this boundary.
+3. In an isolated compiling control, remove only the string-admission front
+   door: replace the two statements in `deserialize` with
+   `SideWire::deserialize(d)`. Require a previously refused valid tagged map to
+   become accepted and the named shape assertion to fail. Restore exact bytes
+   and require the native tests to pass. Compiler failures do not count.
+4. Classify the actual owner with `shape: "string"`, the independently reviewed
+   `literals`, exact compiler entrypoints and direct native variant observations.
+   Preserve every alternate decoder path and run fresh ordinary inventory and
+   scoped production probes. Remove any exact repaired standing-debt entry in
+   the same change; do not widen the classification to admit tagged maps or add
+   a private-helper exemption.
+
+Object records and string enums have different admission guards. Proposal
+reports, private visibility and a passing neighboring owner never replace the
+repaired owner's native evidence. Follow the same serial Cargo/probe rules above.

@@ -112,7 +112,10 @@ impl BybitExchange {
         store: Rc<dyn Store>,
         deps: BybitDependencies,
     ) -> Result<Rc<Self>, ExchangeError> {
-        if !matches!(name, ExchangeName::Bybit | ExchangeName::Bybitdemo) {
+        if !matches!(
+            name,
+            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Bybitspot
+        ) {
             return Err(ExchangeError::new(format!(
                 "BybitExchange cannot construct {}",
                 serde_json::to_value(&name)
@@ -138,13 +141,22 @@ impl BybitExchange {
                 },
             )
         });
+        let mut class_settings = settings();
+        if name == ExchangeName::Bybitspot {
+            class_settings.positions_supported = Some(false);
+            class_settings
+                .client_order_id_rule
+                .as_mut()
+                .expect("Bybit rule")
+                .label = "Bybit spot".into();
+        }
         let (receiver, core) = base_exchange::create(
             &shared.sockets,
             BaseExchangeParts {
                 name: name.clone(),
                 options: options.clone(),
                 store: store.clone(),
-                settings: settings(),
+                settings: class_settings,
                 external_public_data: deps.external_public_data.clone(),
             },
             from_typed(&name).map_err(err)?,
@@ -154,6 +166,10 @@ impl BybitExchange {
                 // bybitdemo.exchange.ts initializes this field after super().
                 if name == ExchangeName::Bybitdemo {
                     this.define("isDemo", Js::Bool(true))?;
+                }
+                // bybitspot.exchange.ts initializes its own isSpot field.
+                if name == ExchangeName::Bybitspot {
+                    this.define("isSpot", Js::Bool(true))?;
                 }
                 Ok(())
             },
@@ -179,6 +195,7 @@ impl BybitExchange {
         });
         let api_account_name = account_name.clone();
         let relay_enabled = deps.relay_enabled;
+        let public_base = core.clone();
         let venue = BybitExchange::new(
             core,
             runtime.clone(),
@@ -233,15 +250,16 @@ impl BybitExchange {
             {
                 let runtime = runtime.clone();
                 move |parent, category| {
-                    Rc::new(crate::ws_public::PublicProtocol {
+                    Rc::new(crate::ws_public::PublicProtocol::new(
                         parent,
-                        runtime: runtime.clone(),
-                        category: if category == "inverse" {
-                            "inverse"
-                        } else {
-                            "linear"
+                        runtime.clone(),
+                        match category {
+                            "inverse" => "inverse",
+                            "spot" => "spot",
+                            _ => "linear",
                         },
-                    })
+                        &public_base,
+                    ))
                 }
             },
             move |parent| {
@@ -356,7 +374,11 @@ impl Exchange for BybitExchange {
         &self.capabilities
     }
     fn class_name(&self) -> &'static str {
-        "BybitExchange"
+        if self.base.name == ExchangeName::Bybitspot {
+            "BybitSpotExchange"
+        } else {
+            "BybitExchange"
+        }
     }
     // ts: BybitExchange.dispose
     fn dispose(&self) -> Result<(), ExchangeError> {

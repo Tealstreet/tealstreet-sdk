@@ -148,7 +148,9 @@
       "sibling introductions cannot launder delayed debt but genuine new-owner merges pass"
     ],
     "accepted-reviewed-aliases.test.mjs": [
-      "reviewed generic aliases return only their spec-owned fixed instantiation"
+      "reviewed generic aliases return only their spec-owned fixed instantiation",
+      "reviewed function pointers retain exact signatures and every nested compiler role",
+      "reviewed function pointer source signature roots and caller guards are load bearing"
     ],
     "accepted-scanner.test.mjs": [
       "scanner receipts bind the SDK package and actual fresh executable",
@@ -166,6 +168,9 @@
     ],
     "accepted-constant-output-native.test.mjs": [
       "reviewed serializer constants execute actual production values and reject native drift"
+    ],
+    "accepted-function-pointer-native.test.mjs": [
+      "reviewed function pointers execute actual SDK alias identity and trait probes"
     ]
   },
   "mutations": [
@@ -301,6 +306,12 @@
     "constant serializer adapter pin",
     "constant serializer native witness pin",
     "constant serializer unit native value",
-    "constant serializer tuple native state"
+    "constant serializer tuple native state",
+    "function pointer source identity",
+    "function pointer expanded signature",
+    "function pointer nested root identity",
+    "function pointer caller redirection",
+    "function pointer retry native identity",
+    "function pointer factory native identity"
   ]
 }

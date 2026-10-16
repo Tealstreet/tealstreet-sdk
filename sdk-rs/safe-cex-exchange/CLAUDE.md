@@ -1103,6 +1103,13 @@ compares four form/empty/JSON-looking/scalar strings against the actual source
 remote adapter with installed Axios on both sides of the relay, including
 signer inputs and final transmitted text.
 
+Shared `Js::to_js_string` converts ordinary live objects with a string hint:
+`toString` precedes `valueOf`, each method is looked up when reached, and a
+primitive result ends conversion. Non-callable properties are skipped; failure
+to produce a primitive throws. The 31-case Node witness compares native UTF-16
+units and getter/callback order, including inherited methods and null prototypes.
+Stock intrinsic string forms remain the value model's default prototype methods.
+
 The single `js_runtime::base_exchange::create` factory takes a synchronous source
 field initializer as its sixth argument. It initializes the JS receiver, reads
 `isSpot` and `isDemo` using shared property access/truthiness, then publishes the

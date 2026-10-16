@@ -107,6 +107,12 @@ paths = [
   #    `keyed comparison, <phrase>` in a woo row note - English long enough to
   #    trip the entropy heuristic, rule 4 above in a file type it did not list.
   "sdk-rs/parity/manifest/",
+  # 7. A PUBLIC ADDRESS, not a key. The Hyperliquid realm socket unit test
+  #    passes `"key": "0x1479..."` - 0x plus 40 hex digits, i.e. a 20-byte EVM
+  #    account address (Hyperliquid's `key` option is the account address), the
+  #    same value the registry hyperliquid native-host tests use. Its `secret`
+  #    is the empty string. Exact file only.
+  "sdk-rs/safe-cex-venue-hyperliquid/src/realm/socket_tests\\.rs$",
 ]
 
 [[rules]]

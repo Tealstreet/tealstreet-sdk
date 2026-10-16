@@ -56,10 +56,16 @@ const socket = ast('exchanges/bybit/bybit.ws-private.ts');
 evaluate(`globalThis.Subject = class {${selected(socket,'BybitPrivateWebsocket',[
   'incrementalFills','onMessage','rowsThisConnectionTrades','handleOrderTopic','handlePositionTopic'
 ])}};`);
+const spotExchange = ast('exchanges/bybit/bybitspot.exchange.ts');
+evaluate(`globalThis.SpotParent = class {${selected(spotExchange,'BybitSpotExchange',['mapOrder'])}};`);
+const spotSocket = ast('exchanges/bybit/bybitspot.ws-private.ts');
+evaluate(`globalThis.SpotSubject = class {${selected(spotSocket,'BybitPrivateWebsocket',['incrementalFills','onMessage','handleOrderTopic'])}};`);
 const orders = rows => rows.map(({id,status,symbol,type,side,filled,remaining,amount}) => ({id,status,symbol,type,side,filled,remaining,amount}));
 const positions = rows => rows.map(({id,symbol,contracts,notional,unrealizedPnl,realizedPnl,leverage,marginSize,marginType,positionMode,option}) => ({id,symbol,contracts,notional,unrealizedPnl,realizedPnl,leverage,marginSize,marginType,positionMode,option}));
 const output = JSON.parse(fs.readFileSync(0,'utf8')).map(input => {
-  const parent = new context.Parent(); const owner = new context.Subject(); const store = new DefaultStore();
+  const parent = input.variant === "spot" ? new context.SpotParent() : new context.Parent();
+  const owner = input.variant === "spot" ? new context.SpotSubject() : new context.Subject();
+  const store = new DefaultStore();
   parent.options = input.options; parent.unifiedMarginStatus=6; parent.marginType=enums.MarginType.Cross; parent.store=store;
   store.update({markets:input.markets, balance:{used:0,free:1000,total:1000,upnl:0}});
   owner.parent=parent; owner.store=store; owner.isDisposed=false; owner.authRetries=0;
