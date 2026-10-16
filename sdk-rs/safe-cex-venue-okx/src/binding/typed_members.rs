@@ -12,18 +12,19 @@ use crate::{
 use safe_cex_exchange::{
     client_order_id::ClientOrderLookup,
     js_runtime::{
+        client::JsRestAdapter,
         promise::await_js,
         scope::bound_member,
-        value::{Js, Thrown, arg, from_json, from_typed, to_json, to_typed, utf16},
+        value::{Js, Thrown, arg, from_json, from_typed, to_js_json, to_json, to_typed},
     },
     runtime::ExchangeError,
 };
 use safe_cex_num::{JsJsonValue, TableHit};
-use safe_cex_transport::{RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse};
+use safe_cex_transport::RestFailure;
 use safe_cex_types::{Market, Order, OrderSide, OrderType, PositionMode};
 use serde_json::{Map, Value};
 use std::{
-    cell::{Cell, RefCell},
+    cell::Cell,
     collections::HashSet,
     rc::Rc,
 };
@@ -112,111 +113,6 @@ fn source_name(source: reference_price::PriceSource) -> &'static str {
     }
 }
 
-fn to_js_json(v: &Js) -> Result<JsJsonValue, Thrown> {
-    Ok(match v {
-        Js::Undefined | Js::Function(_) => JsJsonValue::Undefined,
-        Js::Null => JsJsonValue::Null,
-        Js::Bool(b) => JsJsonValue::Bool(*b),
-        Js::Number(n) => JsJsonValue::Number(*n),
-        Js::BigInt(n) => JsJsonValue::BigInt((**n).clone()),
-        Js::String(s) => JsJsonValue::String(String::from_utf16_lossy(s)),
-        Js::Array(_) => JsJsonValue::Array(
-            v.array_values().unwrap_or_default().iter().map(to_js_json).collect::<Result<_, _>>()?,
-        ),
-        _ => JsJsonValue::Object(
-            v.own_entries()?
-                .into_iter()
-                .map(|(k, v)| Ok((String::from_utf16_lossy(&k), to_js_json(&v)?)))
-                .collect::<Result<_, Thrown>>()?,
-        ),
-    })
-}
-
-/// The receiver's Axios client as the typed REST operations' adapter: the
-/// request runs the full JS pipeline (signing, createAPI's code check).
-struct XhrAdapter {
-    xhr: Js,
-    /// The original JS rejection, rethrown unchanged when the body propagates it.
-    rejection: RefCell<Option<Thrown>>,
-}
-
-fn rest_response(response: &Js) -> Result<RestResponse, Thrown> {
-    let status = response.get("status")?.to_number().unwrap_or(200.0);
-    Ok(RestResponse {
-        status: if status.is_finite() { status as u16 } else { 0 },
-        reason: None,
-        headers: Default::default(),
-        body: safe_cex_transport::RestResponseBody::Untransformed(to_json(&response.get("data")?)?),
-    })
-}
-
-impl XhrAdapter {
-    async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
-        let mut config = vec![];
-        if let Some(params) = &request.params {
-            config.push(("params", from_json(params)));
-        }
-        let config = Js::object(config);
-        let url = Js::str(&request.url);
-        let pending = if request.method == "post" {
-            let data = match &request.body {
-                Some(body) => {
-                    let bytes = body.wire_bytes().map_err(|e| Thrown::error("Error", &e.to_string()))?;
-                    let text = String::from_utf8_lossy(&bytes);
-                    from_json(&serde_json::from_str(&text).unwrap_or(Value::String(text.into_owned())))
-                }
-                None => Js::Undefined,
-            };
-            self.xhr.call_method("post", vec![url, data, config])?
-        } else {
-            self.xhr.call_method(&request.method, vec![url, config])?
-        };
-        rest_response(&await_js(pending).await?)
-    }
-}
-
-impl RestAdapter for XhrAdapter {
-    fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
-        Box::pin(async move {
-            match self.send(&request).await {
-                Ok(response) => Ok(response),
-                Err(thrown) => {
-                    let response = optional(&thrown.value, "response")
-                        .ok()
-                        .filter(|r| !r.is_nullish())
-                        .and_then(|r| rest_response(&r).ok());
-                    let code = optional(&thrown.value, "code").ok().filter(|c| c.is_string());
-                    let failure = RestFailure {
-                        code: code.map(|c| String::from_utf16_lossy(&c.to_js_string().unwrap_or_default())),
-                        message: thrown.message(),
-                        transport_error: None,
-                        response: response.map(Box::new),
-                        request: Box::new(request),
-                        context: None,
-                    };
-                    *self.rejection.borrow_mut() = Some(thrown);
-                    Err(failure)
-                }
-            }
-        })
-    }
-}
-
-/// A body's RestFailure: the adapter's own rejection rethrown as-is, else a host error.
-fn rest_thrown(adapter: &XhrAdapter, failure: RestFailure) -> Thrown {
-    if let Some(original) = adapter.rejection.borrow_mut().take() {
-        return original;
-    }
-    let name = failure
-        .context
-        .as_deref()
-        .and_then(|c| c.get("name"))
-        .and_then(Value::as_str)
-        .unwrap_or("Error")
-        .to_owned();
-    Thrown::error(&name, &failure.message)
-}
-
 fn placement(scope: &OkxScope, name: &'static str, algo: bool) {
     async_member(scope, name, move |s, a| {
         Box::pin(async move {
@@ -226,7 +122,7 @@ fn placement(scope: &OkxScope, name: &'static str, algo: bool) {
                 .iter()
                 .map(to_js_json)
                 .collect::<Result<_, _>>()?;
-            let adapter = XhrAdapter { xhr: s.this.get("xhr")?, rejection: RefCell::default() };
+            let adapter = JsRestAdapter::new(s.this.get("xhr")?);
             let emitter = capture(&s, "this.emitAndLogError")?;
             let emit = |message: &str| -> Result<(), ExchangeError> {
                 call(&emitter, vec![Js::str(message)]).map(|_| ()).map_err(ExchangeError::from)
@@ -249,7 +145,7 @@ fn find_order_by_client_order_id(scope: &OkxScope) {
             let orders: Vec<Order> = to_typed(&store.get("orders")?)?;
             let market = store.get("marketsBySymbol")?.get_key(&symbol.to_js_string()?)?;
             let market: Option<Market> = if market.is_nullish() { None } else { Some(to_typed(&market)?) };
-            let adapter = XhrAdapter { xhr: s.this.get("xhr")?, rejection: RefCell::default() };
+            let adapter = JsRestAdapter::new(s.this.get("xhr")?);
             let map_orders = |row: &Value, state: TableHit<&'static str>| -> Result<Vec<Order>, RestFailure> {
                 let failure = |name: &str, message: String| RestFailure {
                     code: None,
@@ -286,7 +182,7 @@ fn find_order_by_client_order_id(scope: &OkxScope) {
                 &map_orders,
             )
             .await
-            .map_err(|f| rest_thrown(&adapter, f))?;
+            .map_err(|f| adapter.thrown(f))?;
             Ok(match lookup {
                 ClientOrderLookup::Found(order) => {
                     Js::object(vec![("found", Js::Bool(true)), ("order", from_typed(&*order)?)])
@@ -762,5 +658,4 @@ pub(crate) fn install(scope: &OkxScope, variant: Variant) {
     prices(scope);
     orders(scope);
     sockets(scope);
-    let _ = utf16;
 }
