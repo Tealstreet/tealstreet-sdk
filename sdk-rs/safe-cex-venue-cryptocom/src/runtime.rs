@@ -383,14 +383,17 @@ fn request_body<V: Clone, E: Clone>(
     {
         (h.value.set)(&next, "method", (h.value.literal)("POST"))?;
         let result: Result<(), E> = (|| {
-            if (h.value.truthy)(&global(h, "isAuthenticatedEnvelope", || {
+            // A replay re-enters with the envelope it sent: re-sign its params.
+            let unsigned = if (h.value.truthy)(&global(h, "isAuthenticatedEnvelope", || {
                 Ok(vec![raw.clone(), method.clone(), get(h, options, "key")?])
             })?) {
-                (h.value.set)(&next, "data", raw)?;
-                return Ok(());
-            }
-            let params = if (h.value.truthy)(&global(h, "isRecord", || Ok(vec![raw.clone()]))?) {
+                get(h, &raw, "params")?
+            } else {
                 raw
+            };
+            let params = if (h.value.truthy)(&global(h, "isRecord", || Ok(vec![unsigned.clone()]))?)
+            {
+                unsigned
             } else {
                 (h.value.object)(vec![])
             };
@@ -402,7 +405,11 @@ fn request_body<V: Clone, E: Clone>(
                     get(h, options, "secret")?,
                 ])
             })?;
-            (h.value.set)(&next, "data", signed)?;
+            // Serialized here: axios-retry resends through an identity transformRequest.
+            let body = own(h, &(h.value.global)("JSON")?, "stringify", || {
+                Ok(vec![signed])
+            })?;
+            (h.value.set)(&next, "data", body)?;
             Ok(())
         })();
         if let Err(error) = result {
@@ -428,7 +435,29 @@ fn request_body<V: Clone, E: Clone>(
     }
     Ok(next)
 }
-fn response_body<V: Clone, E>(h: &RuntimeOps<V, E>, exchange: &V, response: V) -> Result<V, E> {
+fn response_body<V: Clone, E>(
+    h: &RuntimeOps<V, E>,
+    exchange: &V,
+    xhr: &V,
+    unwrapped: &V,
+    response: V,
+) -> Result<V, E> {
+    // A resend passes through here twice; the second pass must not re-read the result.
+    if (h.value.truthy)(&method(h, unwrapped.clone(), "has", || {
+        Ok(vec![response.clone()])
+    })?) {
+        return Ok(response);
+    }
+    let resend = global(h, "resendOnSignatureRejection", || {
+        Ok(vec![
+            xhr.clone(),
+            response.clone(),
+            (h.value.global)("isCryptocomSignatureRejection")?,
+        ])
+    })?;
+    if (h.value.truthy)(&resend) {
+        return Ok(resend);
+    }
     let data = get(h, &response, "data")?;
     if !(h.value.equal)(&get(h, &data, "code")?, &(h.value.number)(0.)) {
         let mut units: Vec<u16> = "Crypto.com API Error ".encode_utf16().collect();
@@ -454,6 +483,7 @@ fn response_body<V: Clone, E>(h: &RuntimeOps<V, E>, exchange: &V, response: V) -
     if !(h.value.equal)(&get(h, &data, "result")?, &(h.value.undefined)()) {
         (h.value.set)(&response, "data", get(h, &data, "result")?)?;
     }
+    method(h, unwrapped.clone(), "add", || Ok(vec![response.clone()]))?;
     Ok(response)
 }
 fn rejection_body<V: Clone, E>(h: &RuntimeOps<V, E>, exchange: &V, error: V) -> Result<V, E> {
@@ -526,17 +556,32 @@ pub fn create_api<V: Clone + 'static, E: Clone + 'static>(
                             let error = argument(&retry_h, &args, 0);
                             let network =
                                 global(&retry_h, "isNetworkError", || Ok(vec![error.clone()]))?;
-                            if !(retry_h.value.truthy)(&network) {
-                                return Ok(network);
+                            let read = if (retry_h.value.truthy)(&network) {
+                                let write = global(&retry_h, "isNonRetryablePrivateWrite", || {
+                                    Ok(vec![optional(
+                                        &retry_h,
+                                        get(&retry_h, &error, "config")?,
+                                        "url",
+                                    )?])
+                                })?;
+                                (retry_h.value.boolean)(!(retry_h.value.truthy)(&write))
+                            } else {
+                                network
+                            };
+                            if (retry_h.value.truthy)(&read) {
+                                return Ok(read);
                             }
-                            let write = global(&retry_h, "isNonRetryablePrivateWrite", || {
-                                Ok(vec![optional(
-                                    &retry_h,
-                                    get(&retry_h, &error, "config")?,
-                                    "url",
+                            // A signature rejection is a refusal, so resending a write is safe.
+                            let signature = global(&retry_h, "signatureRejectedResponse", || {
+                                Ok(vec![(retry_h.value.global)(
+                                    "isCryptocomSignatureRejection",
                                 )?])
                             })?;
-                            Ok((retry_h.value.boolean)(!(retry_h.value.truthy)(&write)))
+                            (retry_h.value.invoke)(
+                                signature,
+                                (retry_h.value.undefined)(),
+                                vec![error],
+                            )
                         }),
                     ),
                 ),
@@ -575,8 +620,10 @@ pub fn create_api<V: Clone + 'static, E: Clone + 'static>(
             )])
         },
     )?;
+    let unwrapped = (h.construct)((h.value.global)("WeakSet")?, vec![])?;
     let response_h = h.clone();
     let response_exchange = exchange.clone();
+    let response_xhr = xhr.clone();
     let rejection_h = h.clone();
     method(
         &h,
@@ -591,6 +638,8 @@ pub fn create_api<V: Clone + 'static, E: Clone + 'static>(
                         let result = response_body(
                             &response_h,
                             &response_exchange,
+                            &response_xhr,
+                            &unwrapped,
                             argument(&response_h, &args, 0),
                         );
                         Ok((response_h.promise)(Box::pin(async move { result })))
