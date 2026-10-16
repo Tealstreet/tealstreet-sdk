@@ -4053,3 +4053,12 @@ The extractor dry run reports zero updates, additions or orphaned symbols.
 The mandatory full `venue-oracle:bybit` command passes all 214 tests across 51
 test binaries (44 contain tests), with zero failures or ignored tests.
 It uses the installed compiler through SAFE_CEX_TYPESCRIPT_PATH.
+
+Current master 789b69c85e merges cleanly. The additive integration preserves all
+foreign inventory entries: master 1171 rows become 1174 with the same owned
+Bybit delta. All 49 primary/Spot/Inverse receiver tests pass again, including
+explicit execution of the two normally ignored source tests. The 18 native
+registry tests, seven cancellation and six override checks pass. Final host and
+wasm clippy pass with warnings denied. Parity passes at 7459 rows/17204 public
+Rust items; the extractor still reports zero changes and all 88 layer checks
+pass. No venue production body changed in this master integration.
