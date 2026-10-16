@@ -67,7 +67,7 @@ fn order() -> Order {
         .unwrap()
 }
 fn placed() -> PlaceOrderOpts {
-    serde_json::from_value(json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":1,"price":100,"timeInForce":"GoodTillCancel","clientOrderId":"tscaller-1"})).unwrap()
+    serde_json::from_value(json!({"symbol":"BTCUSDT","side":"buy","type":"limit","amount":1.2345,"price":100.127,"timeInForce":"GoodTillCancel","clientOrderId":"tscaller-1"})).unwrap()
 }
 fn done(h: &Harness) {
     h.exchange.dispose().unwrap();
@@ -171,8 +171,11 @@ fn bound_place_order() {
     let calls = h.http.calls(ORDER);
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].data["clientOrderId"], "tscaller-1");
-    assert_eq!(calls[0].data["quantity"], 1.0);
-    assert_eq!(calls[0].data["price"], 100.0);
+    assert_eq!(
+        calls[0].data["quantity"], 1.235,
+        "wire quantity uses amount step"
+    );
+    assert_eq!(calls[0].data["price"], 100.13, "wire price uses price step");
     assert_eq!(calls[0].headers["X-SOURCE-KEY"], "Tealstreet");
     assert!(
         calls[0].data["signature"]

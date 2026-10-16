@@ -1414,9 +1414,9 @@ schedule cancel and public trades; the tests require the exact Error and no I/O.
 - Native registry/constructor tests: 15 pass including BingX startup, a server-side
   HMAC check, placement/cancellation and existing Binance signature resend. Removing
   the BingX table entry compiles and fails construction; restoring it passes.
-- Global parity invention/status gate: 0 findings, 7460 rows /17057 Rust items.
+- Global parity invention/status gate: 0 findings after current master integration, 7459 rows /17061 Rust items.
   Read-only extractor: no BingX or registry drift; shared base/safeCexAxiosCreate
-  metadata plus an existing Apex orphan remain routed to their owners.
+  metadata remains routed to its owners (0 added/0 orphaned symbols).
 - registry:check passes. layers:check is 86/88: the two existing Lighter missing-
   classification assertions expect an old incoming edge; BingX exact membership
   and all actual graph validations pass. The overseer has the failure details.
@@ -1424,3 +1424,9 @@ schedule cancel and public trades; the tests require the exact Error and no I/O.
 Shared raw-response preservation and binary delivery are independent prerequisites
 #149 and #160. Existing per-row venue divergences remain; this evidence does not
 claim whole-venue equivalence. Hosted signing is visibly unavailable in this host.
+
+Placement uses fractional inputs amount1.2345/price100.127 against steps .001/.01;
+the actual maintained TypeScript adjust helper returns1.235/100.13. Separate
+binding-precision-controls.py mutations swap each production precision operand;
+both compile and fail their named wire quantity/price assertion, then restore.
+This strengthens the binding witness: integral inputs alone would mask a swap.

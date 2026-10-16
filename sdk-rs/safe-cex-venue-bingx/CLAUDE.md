@@ -177,3 +177,7 @@ Candle/book trait listeners dispatch to the existing public subscription receive
 The shared OrderBook callback carries a value snapshot; unlike the source live
 book object, an earlier native callback value retains its levels after cleanup.
 That owned-callback boundary is priced on the listenOrderBook manifest row.
+
+`scripts/binding-precision-controls.py` independently swaps the production amount
+and price precision operands. Fractional wire assertions must fail separately;
+integral placement inputs do not establish this protection.
