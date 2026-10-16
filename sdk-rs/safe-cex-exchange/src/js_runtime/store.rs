@@ -5,9 +5,19 @@ use super::{
     value::{Getter, Js, Thrown, from_typed, to_json, to_typed},
 };
 use crate::runtime::ExchangeError;
-use safe_cex_store::{Store, StoreUpdate};
+use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{Order, OrderStatus, Position};
 use std::rc::Rc;
+
+/// Store mutators take the entity (`updateTicker(ticker, ...)`); its `id` is the key.
+fn id_of(target: &Js) -> Result<String, Thrown> {
+    Ok(if target.is_object() {
+        target.get("id")?
+    } else {
+        target.clone()
+    }
+    .to_display())
+}
 
 fn mutation(e: safe_cex_store::StoreMutationError) -> Thrown {
     Thrown::from(ExchangeError::from(e))
@@ -60,6 +70,10 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
         "tickersById",
         Rc::new(|st| from_typed(&*st.tickers_by_id())),
     );
+    getter(
+        "fetchedLeverage",
+        Rc::new(|st| from_typed(&*st.fetched_leverage())),
+    );
 
     let method = |name: &str, f: Rc<dyn Fn(&dyn Store, Vec<Js>) -> Result<Js, Thrown>>| {
         let store = store.clone();
@@ -107,9 +121,20 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updatePosition",
         Rc::new(|st, a| {
-            let id = arg(&a, 0).to_display();
-            st.update_position(&id, &patch(&arg(&a, 1))?)
+            st.update_position(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
+            Ok(Js::Undefined)
+        }),
+    );
+    method(
+        "updatePositions",
+        Rc::new(|st, a| {
+            let mut updates = vec![];
+            for pair in arg(&a, 0).array_values().unwrap_or_default() {
+                let (position, changes) = (pair.get("0")?, pair.get("1")?);
+                updates.push((id_of(&position)?, ModelPatch::from(patch(&changes)?)));
+            }
+            st.update_positions(&updates).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
@@ -157,12 +182,7 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateOrder",
         Rc::new(|st, a| {
-            let id = if arg(&a, 0).is_object() {
-                arg(&a, 0).get("id")?
-            } else {
-                arg(&a, 0)
-            };
-            st.update_order(&id.to_display(), &patch(&arg(&a, 1))?)
+            st.update_order(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
@@ -171,20 +191,47 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
         "updateOrderStatus",
         Rc::new(|st, a| {
             let status: OrderStatus = to_typed(&arg(&a, 1))?;
-            st.update_order_status(&arg(&a, 0).to_display(), status)
+            st.update_order_status(&id_of(&arg(&a, 0))?, status)
                 .map_err(mutation)?;
+            Ok(Js::Undefined)
+        }),
+    );
+    method(
+        "updateOrdersStatus",
+        Rc::new(|st, a| {
+            let orders = arg(&a, 0).array_values().unwrap_or_default();
+            if orders.is_empty() || st.orders().is_empty() {
+                return Ok(Js::Undefined);
+            }
+            // ts: buildIdLookup keys on `items[i].id`, so every element is read as an object.
+            let mut keys = vec![];
+            for order in orders {
+                keys.push(String::from_utf16_lossy(&order.get("id")?.to_js_string()?));
+            }
+            let status: OrderStatus = to_typed(&arg(&a, 1))?;
+            let refs: Vec<&str> = keys.iter().map(String::as_str).collect();
+            st.update_orders_status(&refs, status).map_err(mutation)?;
+            Ok(Js::Undefined)
+        }),
+    );
+    method(
+        "setSetting",
+        Rc::new(|st, a| {
+            let key = arg(&a, 0).to_display();
+            if key != "isHedged" {
+                return Err(Thrown::type_error(&format!(
+                    "store options carry only isHedged (setting '{key}')"
+                )));
+            }
+            let value: bool = to_typed(&arg(&a, 1))?;
+            st.set_setting(&key, value).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
     method(
         "removeOrder",
         Rc::new(|st, a| {
-            let id = if arg(&a, 0).is_object() {
-                arg(&a, 0).get("id")?
-            } else {
-                arg(&a, 0)
-            };
-            st.remove_order(&id.to_display()).map_err(mutation)?;
+            st.remove_order(&id_of(&arg(&a, 0))?).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );
@@ -200,7 +247,7 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateTicker",
         Rc::new(|st, a| {
-            st.update_ticker(&arg(&a, 0).to_display(), &patch(&arg(&a, 1))?)
+            st.update_ticker(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
             Ok(Js::Undefined)
         }),
@@ -208,7 +255,7 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateMarket",
         Rc::new(|st, a| {
-            st.update_market(&arg(&a, 0).to_display(), &patch(&arg(&a, 1))?)
+            st.update_market(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
             Ok(Js::Undefined)
         }),

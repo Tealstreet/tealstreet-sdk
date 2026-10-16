@@ -6,30 +6,36 @@ pub struct IncrementalFill {
     pub value: Option<f64>,
 }
 
-// ts: cleanFloat — Number(n.toPrecision(12)). toPrecision rounds the exact decimal value
-// with ties going up in magnitude (Rust's `{:e}` breaks ties to even), and -0 prints as 0.
+/// ts: cleanFloat. Drops binary noise past the fifteen significant digits a double
+/// holds exactly: 83578.79999999999 -> 83578.8.
 pub fn clean_float(n: f64) -> f64 {
     if !n.is_finite() {
         return n;
     }
-    if n == 0.0 {
-        return 0.0;
+    let text = safe_cex_num::js_to_precision(n, 15.0).expect("15 is a valid precision");
+    text.parse().expect("toPrecision text parses")
+}
+// ts: decimalsOf
+fn decimals_of(n: f64) -> Option<usize> {
+    let text = safe_cex_num::js_number_string(n);
+    if text.contains('e') {
+        return None;
     }
-    let magnitude = n.abs();
-    // 800 fractional digits hold every f64's exact decimal expansion.
-    let exact = format!("{magnitude:.800e}");
-    let (mantissa, exponent) = exact.split_once('e').expect("exponent form");
-    let exponent: i32 = exponent.parse().expect("exponent");
-    let digits: String = mantissa.chars().filter(char::is_ascii_digit).collect();
-    let (head, tail) = digits.split_at(12);
-    let tie = tail.starts_with('5') && tail[1..].bytes().all(|b| b == b'0');
-    let rounded: f64 = if tie {
-        let up = head.parse::<u64>().expect("twelve digits") + 1;
-        format!("{up}e{}", exponent - 11).parse().expect("decimal")
-    } else {
-        format!("{magnitude:.11e}").parse().expect("decimal")
+    Some(
+        text.split_once('.')
+            .map_or(0, |(_, fraction)| fraction.len()),
+    )
+}
+/// ts: subtractDecimals. A small fill off a large running total keeps noise past
+/// fifteen digits, so round to the inputs' own decimal places.
+fn subtract_decimals(a: f64, b: f64) -> f64 {
+    let (Some(da), Some(db)) = (decimals_of(a), decimals_of(b)) else {
+        return clean_float(a - b);
     };
-    rounded.copysign(n)
+    let digits = da.max(db).min(20) as f64;
+    let text = safe_cex_num::js_to_fixed(a - b, digits).expect("0..=20 digits");
+    // Number(text): Rust's parser reads NaN, Infinity and exponent forms alike.
+    text.parse().expect("toFixed text parses")
 }
 
 pub fn create_incremental_fills(
@@ -42,7 +48,7 @@ pub fn create_incremental_fills(
             .find(|(id, _, _)| id == order_id)
             .map(|(_, qty, value)| (*qty, *value))
             .unwrap_or((0.0, 0.0));
-        let qty = clean_float(cumulative_qty - previous.0);
+        let qty = subtract_decimals(cumulative_qty, previous.0);
         if qty.partial_cmp(&0.0) != Some(std::cmp::Ordering::Greater) {
             return IncrementalFill {
                 qty: 0.0,
@@ -62,7 +68,7 @@ pub fn create_incremental_fills(
             seen.pop_front();
         }
         let value = cumulative_value
-            .map(|value| clean_float(value - previous.1))
+            .map(|value| subtract_decimals(value, previous.1))
             .filter(|value| *value > 0.0);
         IncrementalFill { qty, value }
     }
@@ -71,6 +77,23 @@ pub fn create_incremental_fills(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn fifteen_digit_ties_round_away_from_zero_as_to_precision_does() {
+        // Node: (123456789012344.5).toPrecision(15); ties-to-even would give ...344.
+        for (input, expected) in [
+            (123456789012345.5, 123456789012346.0_f64),
+            (-123456789012345.5, -123456789012346.0),
+            (123456789012344.5, 123456789012345.0),
+        ] {
+            assert_eq!(
+                clean_float(input).to_bits(),
+                expected.to_bits(),
+                "cleanFloat({input})"
+            );
+        }
+        assert_eq!(clean_float(100000.1 - 100000.0), 0.100000000005821);
+        assert_eq!(subtract_decimals(100000.1, 100000.0), 0.1);
+    }
     #[test]
     fn replays_older_frames_missing_values_and_restarts() {
         let mut fills = create_incremental_fills(500.0);
@@ -173,44 +196,6 @@ mod tests {
                 );
                 assert_eq!(actual.value, step["expected"]["value"].as_f64(), "{step}");
             }
-        }
-    }
-}
-
-#[cfg(test)]
-mod clean_float_tests {
-    use super::clean_float;
-    #[test]
-    fn clean_float_matches_to_precision_twelve() {
-        let cases: [(f64, f64); 9] = [
-            (4847.5704 / 0.058, 83578.8),
-            (0.1 + 0.2, 0.3),
-            (-0.1 - 0.2, -0.3),
-            (123456789012.5, 123456789013.0),
-            (-123456789012.5, -123456789013.0),
-            (1e21 / 3.0, 333333333333000000000.0),
-            (5e-324, 4.94065645841e-324),
-            (-0.0, 0.0),
-            (1.0, 1.0),
-        ];
-        for (input, expected) in cases {
-            let got = clean_float(input);
-            assert_eq!(got.to_bits(), expected.to_bits(), "clean_float({input:e})");
-        }
-        let mut fills = super::create_incremental_fills(500.0);
-        fills("a", 0.1, Some(0.1));
-        let fill = fills("a", 0.3, Some(0.3));
-        assert_eq!(
-            (fill.qty.to_bits(), fill.value.map(f64::to_bits)),
-            (0.2_f64.to_bits(), Some(0.2_f64.to_bits())),
-            "cumulative differences are cleaned (raw 0.19999999999999998)"
-        );
-        for value in [f64::NAN, f64::INFINITY, f64::NEG_INFINITY] {
-            assert_eq!(
-                clean_float(value).to_bits(),
-                value.to_bits(),
-                "nonfinite passthrough"
-            );
         }
     }
 }

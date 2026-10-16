@@ -1680,10 +1680,490 @@
     "file": "safe-cex-venue-bitget/src/subscriptions.rs"
   },
   {
+    "function": "public_only",
+    "body": "db5f2973936c8998",
+    "reference": "Exchange :: is_public_data_only",
+    "file": "safe-cex-venue-bitunix/src/adapter.rs"
+  },
+  {
+    "function": "dispose_venue",
+    "body": "a0ad36833d4edf57",
+    "reference": "crate :: exchange_lifecycle :: dispose",
+    "file": "safe-cex-venue-bitunix/src/adapter.rs"
+  },
+  {
+    "function": "dispose_venue",
+    "body": "a0ad36833d4edf57",
+    "call": "self . base . dispose ()",
+    "file": "safe-cex-venue-bitunix/src/adapter.rs"
+  },
+  {
+    "function": "dispose_venue",
+    "body": "a0ad36833d4edf57",
+    "call": "public . dispose ()",
+    "file": "safe-cex-venue-bitunix/src/adapter.rs"
+  },
+  {
+    "function": "dispose_venue",
+    "body": "a0ad36833d4edf57",
+    "call": "secondary . dispose ()",
+    "file": "safe-cex-venue-bitunix/src/adapter.rs"
+  },
+  {
+    "function": "dispose_venue",
+    "body": "a0ad36833d4edf57",
+    "call": "shard . dispose ()",
+    "file": "safe-cex-venue-bitunix/src/adapter.rs"
+  },
+  {
+    "function": "dispose_venue",
+    "body": "a0ad36833d4edf57",
+    "call": "futures . dispose ()",
+    "file": "safe-cex-venue-bitunix/src/adapter.rs"
+  },
+  {
+    "function": "dispose_venue",
+    "body": "a0ad36833d4edf57",
+    "call": "private . dispose ()",
+    "file": "safe-cex-venue-bitunix/src/adapter.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "55092b314058b60f",
+    "call": "v . start ()",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "55092b314058b60f",
+    "call": "v . fetch_historical_fills (o)",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "55092b314058b60f",
+    "call": "v . fetch_income_history (o)",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "55092b314058b60f",
+    "call": "v . fetch_income_history_range (s , e , k)",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "55092b314058b60f",
+    "call": "v . fetch_closed_pnl (o)",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "55092b314058b60f",
+    "call": "v . fetch_historical_orders (o)",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "start",
+    "body": "8ae839baddd89bb1",
+    "reference": "BitunixVenue :: start",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "validate_account",
+    "body": "80efa4bd900e6efe",
+    "reference": "BitunixVenue :: validate_account",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_markets",
+    "body": "d153938176aac272",
+    "reference": "BitunixVenue :: fetch_markets",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_tickers",
+    "body": "f7e15c28d4bbc054",
+    "reference": "BitunixVenue :: fetch_tickers",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_positions",
+    "body": "80ed3d83d5adbfc6",
+    "reference": "BitunixVenue :: fetch_positions",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_orders",
+    "body": "0779a22365aec547",
+    "reference": "BitunixVenue :: fetch_orders",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "update_order",
+    "body": "21efec3565e614be",
+    "reference": "BitunixVenue :: update_order",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "cancel_orders",
+    "body": "76192c15a21e8923",
+    "reference": "BitunixVenue :: cancel_orders",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "cancel_symbol_orders",
+    "body": "16f248ae21fc899a",
+    "reference": "BitunixVenue :: cancel_symbol_orders",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "set_leverage",
+    "body": "ddc6476f0972d8c4",
+    "reference": "BitunixVenue :: set_leverage",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "change_position_mode",
+    "body": "20156ada0727539a",
+    "reference": "BitunixVenue :: change_position_mode",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "change_margin_type",
+    "body": "2e7e03775199db15",
+    "reference": "BitunixVenue :: change_margin_type",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_ohlcv",
+    "body": "33374637b7c58957",
+    "reference": "BitunixVenue :: fetch_ohlcv",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_historical_fills",
+    "body": "7e69c7e5c91b2c0f",
+    "reference": "BitunixVenue :: fetch_historical_fills",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_income_history",
+    "body": "d3374894e05dfe8a",
+    "reference": "BitunixVenue :: fetch_income_history",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_income_history_range",
+    "body": "f1769fc8caa015c0",
+    "reference": "BitunixVenue :: fetch_income_history_range",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_closed_pnl",
+    "body": "41c8ccebedc7844a",
+    "reference": "BitunixVenue :: fetch_closed_pnl",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_historical_orders",
+    "body": "b88da50a963f027b",
+    "reference": "BitunixVenue :: fetch_historical_orders",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_historical_positions",
+    "body": "d9e222c41b6b57f3",
+    "reference": "BitunixVenue :: fetch_historical_positions",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "update_symbol_metadata",
+    "body": "30deccb40e5bd5b4",
+    "reference": "BitunixVenue :: update_symbol_metadata",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "0912243bd723da9c",
+    "reference": "BitunixVenue :: listen_ohlcv",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "73d90e874648f4f0",
+    "reference": "crate :: exchange_lifecycle :: listen_order_book",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "73d90e874648f4f0",
+    "call": "me . socket (\"futures\") . listen_order_book (s , cb)",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "c986b1f3d26a3188",
+    "reference": "crate :: session_control :: listen_ohlcv",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "c986b1f3d26a3188",
+    "call": "me . update_symbol_metadata (crate :: adapter :: utf8 (& symbol) ?)",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "c986b1f3d26a3188",
+    "call": "me . socket (\"futures\") . listen_ohlcv (o . symbol , interval , cb)",
+    "file": "safe-cex-venue-bitunix/src/adapter_exchange.rs"
+  },
+  {
+    "function": "fetch_income_history",
+    "body": "8281a41e007a6b70",
+    "reference": "crate :: history_reads :: fetch_income_history",
+    "file": "safe-cex-venue-bitunix/src/adapter_history.rs"
+  },
+  {
+    "function": "fetch_income_history_range",
+    "body": "920bc440288919f4",
+    "reference": "crate :: exchange_lifecycle :: fetch_income_history_range",
+    "file": "safe-cex-venue-bitunix/src/adapter_history.rs"
+  },
+  {
+    "function": "fetch_income_history_range",
+    "body": "920bc440288919f4",
+    "call": "me . fetch_income_history (Some (IncomeHistoryOptions { start_time : Some (range . start_time) , end_time : Some (range . end_time) , income_type : range . income_type , symbol : None , limit : None , }))",
+    "file": "safe-cex-venue-bitunix/src/adapter_history.rs"
+  },
+  {
+    "function": "fetch_closed_pnl",
+    "body": "7ac6bb5a709a36e3",
+    "reference": "crate :: history_reads :: fetch_closed_pnl",
+    "file": "safe-cex-venue-bitunix/src/adapter_history.rs"
+  },
+  {
+    "function": "fetch_historical_positions",
+    "body": "d65c687dce52a6c8",
+    "reference": "crate :: history_reads :: fetch_historical_positions",
+    "file": "safe-cex-venue-bitunix/src/adapter_history.rs"
+  },
+  {
+    "function": "fetch_historical_orders",
+    "body": "30cb0271423317f1",
+    "reference": "crate :: history_reads :: fetch_historical_orders",
+    "file": "safe-cex-venue-bitunix/src/adapter_history.rs"
+  },
+  {
+    "function": "fetch_positions",
+    "body": "7a011ed7aa885c9d",
+    "call": "self . venue . fetch_positions ()",
+    "file": "safe-cex-venue-bitunix/src/adapter_orders.rs"
+  },
+  {
+    "function": "hydrate",
+    "body": "3a0e59bfea8e258c",
+    "call": "fetch_p . fetch_positions ()",
+    "file": "safe-cex-venue-bitunix/src/adapter_orders.rs"
+  },
+  {
+    "function": "hydrate",
+    "body": "3a0e59bfea8e258c",
+    "call": "fetch_o . fetch_orders ()",
+    "file": "safe-cex-venue-bitunix/src/adapter_orders.rs"
+  },
+  {
+    "function": "cancel_orders",
+    "body": "b4a93b42d38be2e4",
+    "reference": "crate :: order_cancellation :: cancel_orders",
+    "file": "safe-cex-venue-bitunix/src/adapter_orders.rs"
+  },
+  {
+    "function": "cancel_symbol_orders",
+    "body": "51db826f74151118",
+    "reference": "crate :: rest_writes :: cancel_symbol_orders",
+    "file": "safe-cex-venue-bitunix/src/adapter_orders.rs"
+  },
+  {
+    "function": "cancel_symbol_orders",
+    "body": "51db826f74151118",
+    "call": "me . cancel_orders (selected)",
+    "file": "safe-cex-venue-bitunix/src/adapter_orders.rs"
+  },
+  {
+    "function": "update_order",
+    "body": "b3617a880ee6cef5",
+    "reference": "crate :: order_models :: update_order",
+    "file": "safe-cex-venue-bitunix/src/adapter_orders.rs"
+  },
+  {
+    "function": "fetch_markets",
+    "body": "0bed6f25e35cb926",
+    "reference": "crate :: rest_reads :: fetch_markets",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "fetch_tickers",
+    "body": "882d8c35abe91bf0",
+    "reference": "crate :: rest_reads :: fetch_tickers",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "fetch_positions",
+    "body": "3a84f4d53cdc4c68",
+    "reference": "crate :: position_reads :: fetch_positions",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "fetch_orders",
+    "body": "4a4745f489547969",
+    "reference": "crate :: position_reads :: fetch_orders",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "change_position_mode",
+    "body": "28ae2b3d6e0506f6",
+    "reference": "crate :: rest_writes :: change_position_mode",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "change_margin_type",
+    "body": "908840d72c844155",
+    "reference": "crate :: rest_writes :: change_margin_type",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "set_leverage",
+    "body": "e3028e0dc3de1554",
+    "reference": "crate :: rest_writes :: set_leverage :: < Fault , _ , _ >",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "validate_account",
+    "body": "123af3ab633940d0",
+    "reference": "crate :: history_rest :: validate_account",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "fetch_ohlcv",
+    "body": "409b0e956a7751eb",
+    "reference": "crate :: history_rest :: fetch_ohlcv",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "update_symbol_metadata",
+    "body": "d01f3058469c8105",
+    "reference": "crate :: history_rest :: update_symbol_metadata",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "fetch_historical_fills",
+    "body": "237523d368100a12",
+    "reference": "crate :: event_models :: fetch_historical_fills",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "start",
+    "body": "13cce81886983a7f",
+    "reference": "crate :: session_control :: start",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "fetch",
+    "body": "716f7d2cf2b4c391",
+    "call": "venue . fetch_markets ()",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "fetch",
+    "body": "716f7d2cf2b4c391",
+    "call": "venue . fetch_tickers ()",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "fetch",
+    "body": "716f7d2cf2b4c391",
+    "call": "venue . fetch_positions ()",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "fetch",
+    "body": "716f7d2cf2b4c391",
+    "call": "venue . fetch_orders ()",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
+    "function": "configure_public_websocket_shards",
+    "body": "5f9eee606ab12f68",
+    "call": "shard . dispose ()",
+    "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
+  },
+  {
     "function": "place_order",
     "body": "0e060dcc5a491d3f",
     "call": "host . fetch_positions ()",
     "file": "safe-cex-venue-bitunix/src/order_placement.rs"
+  },
+  {
+    "function": "fetch_and_set_private_snapshot",
+    "body": "fd9827e41d05bf04",
+    "reference": "Exchange :: fetch_and_set_private_snapshot",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "c48505d3ea6ef541",
+    "reference": "crate :: websocket_public :: dispose",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "c48505d3ea6ef541",
+    "call": "self . base . dispose ()",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "c48505d3ea6ef541",
+    "call": "self . base . dispose ()",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "7234221f6c482ada",
+    "reference": "crate :: ohlcv_subscription :: listen_ohlcv",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "79fe280a6b2626cb",
+    "reference": "crate :: orderbook_subscription :: listen_order_book",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
+  },
+  {
+    "function": "fallback",
+    "body": "a1e75ac905749f02",
+    "reference": "Exchange :: name",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
+  },
+  {
+    "function": "send_login",
+    "body": "a94847e2ca83f393",
+    "reference": "Exchange :: name",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
+  },
+  {
+    "function": "fetch_throttled",
+    "body": "851c093bb7c8be34",
+    "call": "venue . fetch_orders ()",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
+  },
+  {
+    "function": "fetch_throttled",
+    "body": "851c093bb7c8be34",
+    "call": "venue . fetch_positions ()",
+    "file": "safe-cex-venue-bitunix/src/sockets.rs"
   },
   {
     "function": "listen_candles",
@@ -1858,6 +2338,210 @@
     "body": "19744a6eb7f57fe2",
     "call": "owner . fetch_orders (None)",
     "file": "safe-cex-venue-blofin/src/exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "9f491263e0eee666",
+    "call": "v . start ()",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "9f491263e0eee666",
+    "call": "v . fetch_historical_fills (o)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "9f491263e0eee666",
+    "call": "v . fetch_income_history (o)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "9f491263e0eee666",
+    "call": "v . fetch_income_history_range (s , e , k)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "9f491263e0eee666",
+    "call": "v . fetch_closed_pnl (o)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "9f491263e0eee666",
+    "call": "v . fetch_historical_orders (o)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "cbcde168012ec9fd",
+    "call": "self . inner . dispose ()",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "start",
+    "body": "3565a3c45baf82d8",
+    "call": "self . inner . start ()",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "validate_account",
+    "body": "5a78be678fe9d574",
+    "call": "self . inner . validate_account ()",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_markets",
+    "body": "0e480e61443454eb",
+    "call": "self . inner . fetch_markets ()",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_tickers",
+    "body": "971d63ad83a1df8d",
+    "call": "self . inner . fetch_tickers ()",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_positions",
+    "body": "80b1b882f59aff7a",
+    "call": "self . inner . fetch_positions (symbols . as_deref ())",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_orders",
+    "body": "d70954299531a349",
+    "call": "self . inner . fetch_orders (symbols . as_deref ())",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_leverage_for_symbol",
+    "body": "e033b4f4463e890f",
+    "call": "self . inner . fetch_leverage_for_symbol (& symbol)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "set_leverage",
+    "body": "f415547fb5544c43",
+    "call": "self . inner . set_leverage (& symbol , leverage)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "change_position_mode",
+    "body": "cbbd72022356ef7b",
+    "call": "self . inner . change_position_mode (hedged)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "change_margin_type",
+    "body": "6abd504efaf87050",
+    "call": "self . inner . change_margin_type (isolated , symbol . as_deref ())",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "update_order",
+    "body": "091416624c4e732d",
+    "call": "self . inner . update_order (& options . order , & UtilityInput :: from_retained (update))",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "cancel_orders",
+    "body": "79a7642696e3601c",
+    "call": "self . inner . cancel_orders (& orders)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "cancel_symbol_orders",
+    "body": "00e4bb2149dbe481",
+    "call": "self . inner . cancel_symbol_orders (& symbol)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_ohlcv",
+    "body": "5b3a556e4f544654",
+    "call": "self . inner . fetch_ohlcv (& options)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_historical_fills",
+    "body": "d6f9aa1192a4400e",
+    "call": "self . inner . fetch_historical_fills (& options)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_income_history",
+    "body": "0bdd2bdf9e4d9c02",
+    "call": "self . inner . fetch_income_history (options . as_ref ())",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_income_history_range",
+    "body": "ca288b02ec77fda1",
+    "call": "self . inner . fetch_income_history_range (start , end , kind . as_deref ())",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_closed_pnl",
+    "body": "78c951b544912fc1",
+    "call": "self . inner . fetch_closed_pnl (& options)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_historical_orders",
+    "body": "d6dd29c8186684d7",
+    "call": "self . inner . fetch_historical_orders (options . as_ref ())",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "fetch_historical_positions",
+    "body": "c2161d0a3aed78b7",
+    "call": "self . inner . fetch_historical_positions (& HistoricalPositionsOptions { account : options . account , from : options . from , to : options . to , })",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "00ab2edc31cdee98",
+    "call": "self . inner . listen_ohlcv (options , Rc :: new (move | candle | { callback (candle . borrow () . clone ()) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "6cd0410abd7b4989",
+    "call": "self . inner . listen_order_book (symbol , Rc :: new (move | book | { callback (book . borrow () . clone ()) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-blofin/src/native_exchange.rs"
+  },
+  {
+    "function": "super_dispose",
+    "body": "dce54c207201f8d4",
+    "call": "base . get () . dispose ()",
+    "file": "safe-cex-venue-blofin/src/native_host.rs"
+  },
+  {
+    "function": "fetch_and_set_private_snapshot",
+    "body": "cbfdc60f9b5aaa87",
+    "call": "venue . fetch_and_set_private_snapshot (u32 :: try_from (retries) . unwrap_or (u32 :: MAX))",
+    "file": "safe-cex-venue-blofin/src/native_host.rs"
+  },
+  {
+    "function": "super_dispose",
+    "body": "87f36a4e7c2ca1fc",
+    "call": "self . socket . dispose ()",
+    "file": "safe-cex-venue-blofin/src/native_host.rs"
+  },
+  {
+    "function": "super_dispose",
+    "body": "87f36a4e7c2ca1fc",
+    "call": "self . socket . dispose ()",
+    "file": "safe-cex-venue-blofin/src/native_host.rs"
+  },
+  {
+    "function": "fetch_and_set_private_snapshot",
+    "body": "ecc62f4a8272a542",
+    "call": "self . parent . fetch_and_set_private_snapshot (1)",
+    "file": "safe-cex-venue-blofin/src/native_host.rs"
   },
   {
     "function": "on_message",
@@ -2886,6 +3570,108 @@
     "file": "safe-cex-venue-kraken/src/trading.rs"
   },
   {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "accounts :: get_account",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "accounts :: validate_account",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: start",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: fetch_positions",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: fetch_markets",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: fetch_tickers",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "reads :: fetch_orders",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: fetch_ohlcv",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: cancel_all_orders",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: cancel_orders",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: cancel_symbol_orders",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: update_order",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: set_leverage",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: change_margin_type",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: change_position_mode",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "socket_boundaries :: listen_ohlcv",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "socket_boundaries :: listen_order_book",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
     "function": "initialize",
     "body": "7826b5c08aaacc66",
     "reference": "public_streams :: listen_ohlcv",
@@ -2896,6 +3682,36 @@
     "body": "7826b5c08aaacc66",
     "reference": "public_streams :: listen_order_book",
     "file": "safe-cex-venue-kucoin/src/futures_public_class.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "5e3acdf0e57ac1fa",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "4f7f655b25a08443",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "4f7f655b25a08443",
+    "call": "venue . fetch_historical_fills (opts)",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "395945738d607326",
+    "call": "self . receiver . dispose ()",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "395945738d607326",
+    "call": "self . receiver . dispose ()",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
   },
   {
     "function": "native_member",
@@ -3174,6 +3990,30 @@
     "file": "safe-cex-venue-mexc/src/exchange.rs"
   },
   {
+    "function": "listen_ohlcv",
+    "body": "9aec87a5e902ae91",
+    "call": "provider . listen_ohlcv (options , callback)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "9aec87a5e902ae91",
+    "call": "socket . listen_ohlcv (options , callback)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "8691fd96244b0e80",
+    "call": "provider . listen_order_book (symbol , callback)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "8691fd96244b0e80",
+    "call": "socket . listen_order_book (symbol , callback)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
     "function": "fetch_ohlcv",
     "body": "df9cf4aa663f2f9b",
     "reference": "MexcExchange :: fetch_ohlcv",
@@ -3192,8 +4032,68 @@
     "file": "safe-cex-venue-mexc/src/exchange.rs"
   },
   {
+    "function": "set_leverage",
+    "body": "e4fafd285b786341",
+    "reference": "crate :: exchange_runtime :: set_leverage",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "change_position_mode",
+    "body": "a36a1d47fdf1f163",
+    "reference": "crate :: exchange_runtime :: change_position_mode",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "change_margin_type",
+    "body": "d54ad7f78d0e7771",
+    "reference": "crate :: exchange_runtime :: change_margin_type",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "update_order",
+    "body": "63cf59794ffd965b",
+    "reference": "crate :: runtime_assembly :: update_order",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "cancel_symbol_orders",
+    "body": "54753c4b5a2aa893",
+    "reference": "crate :: exchange_runtime :: cancel_symbol_orders",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "cancel_all_orders",
+    "body": "709853e3c4b5b5d5",
+    "reference": "crate :: exchange_runtime :: cancel_all_orders",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "e11aedadcba165b1",
+    "reference": "binding :: dispose",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "e11aedadcba165b1",
+    "call": "self . base . dispose ()",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "40676de1ca197af7",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "40676de1ca197af7",
+    "call": "venue . fetch_historical_fills (options)",
+    "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
     "function": "get_account",
-    "body": "ed79bb7f1263c63a",
+    "body": "324c1ddbacef3830",
     "call": "self . validate_account ()",
     "file": "safe-cex-venue-mexc/src/exchange.rs"
   },
@@ -3238,6 +4138,108 @@
     "body": "943b8c616d4fd0b0",
     "reference": "Exchange :: is_public_data_only",
     "file": "safe-cex-venue-mexc/src/exchange.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "Exchange :: is_public_data_only",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_markets ()",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_tickers ()",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_positions (symbols)",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_orders (symbols)",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . fetch_and_set_orders (symbols)",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "call": "v . cancel_orders (orders)",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "assembly :: update_order",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: set_leverage",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: change_position_mode",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: change_margin_type",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: cancel_symbol_orders",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "facade",
+    "body": "f40dd75fcdd55d78",
+    "reference": "account :: cancel_all_orders",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "base_dispose",
+    "body": "e12fd7ab31b46e84",
+    "call": "self . venue () ? . base . dispose ()",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "5c1ff012a60c1327",
+    "reference": "account :: dispose",
+    "file": "safe-cex-venue-mexc/src/exchange_binding.rs"
+  },
+  {
+    "function": "connect_and_subscribe",
+    "body": "50a100f2c4560c80",
+    "call": "parent . is_public_data_only ()",
+    "file": "safe-cex-venue-mexc/src/sockets.rs"
+  },
+  {
+    "function": "on_open",
+    "body": "1cb6710bc86a2370",
+    "call": "owner . fetch_and_set_private_snapshot (10)",
+    "file": "safe-cex-venue-mexc/src/sockets.rs"
   },
   {
     "function": "listen_ohlcv",

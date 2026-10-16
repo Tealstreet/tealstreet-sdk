@@ -73,6 +73,13 @@ So after the seed: **`sdk-rs` is authored here and Copybara imports it to the
 monorepo (`mirror-to-mono`).** Nothing may author `sdk-rs` in `tealstreet-next`
 again, including a well-meaning one-line clippy fix.
 
+Since 2026-10-16 the export enforces this: `tealstreet_sdk_mono_to_mirror`
+subtracts `SDK_MIRROR_AUTHORED_FILES` (`sdk-rs/**`, `infra/tradetunnel/**`)
+from both its origin and destination globs, so it neither reads nor writes
+those paths; the import still carries them. Two exports that ran ahead of the
+import (mirror `e1ca494a69`, `1177d3ae48`) overwrote this repo's newer `sdk-rs`
+with the monorepo's older copy before that.
+
 The monorepo still owns, and must keep owning:
 
 - `packages/safe-cex` and the rest of the TypeScript — this slice carries it

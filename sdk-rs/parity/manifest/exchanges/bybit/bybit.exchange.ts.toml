@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs", "safe-cex-venue-bybit/src/binding/exchange.rs", "safe-cex-venue-bybit/src/lib.rs" ]
 
 [[symbol]]
 ts = "BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS"
@@ -189,10 +189,10 @@ note = "Shared with identical inverse source selector, pinned by its actual-sour
 [[symbol]]
 ts = "BybitExchange"
 kind = "class"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/exchange.rs::BybitExchange"
+status = "divergent"
+note = "FINDING: the concrete linear/demo class binds the sixteen Exchange entrypoints over the maintained source bodies and actual clients, sockets and Store; tests/exchange_binding.rs covers their production composition. The shared typed-to-js_runtime bridge currently changes native nonfinite numbers through JSON: +Infinity leverage sends 1 instead of the source clamp to 100. Core owner codex-l89ogr owns that repair; this class mapping does not claim acceptance of the remaining pending non-trait members or standalone inverse/spot/HyroTrader constructors. Adapted Rust target: safe-cex-venue-bybit/src/exchange.rs::BybitExchange."
 
 [[symbol]]
 ts = "BybitExchange.get supportsTradeDerivedCandles"
@@ -389,10 +389,10 @@ note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary: the a
 [[symbol]]
 ts = "BybitExchange.constructor"
 kind = "constructor"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::create", "safe-cex-venue-bybit/src/binding/exchange.rs::BybitDependencies", "safe-cex-venue-bybit/src/lib.rs::BybitDependencies" ]
+status = "divergent"
+note = "CHOSEN: host-supplied runtime, wire, clocks and external-public-data factory are collected in BybitDependencies and its public re-export, consumed by BybitExchange::create to assemble the source constructor's clients, weak socket parents, receiver and method bindings. Rust host capabilities remain explicit because ambient browser globals would hide required runtime ownership. The constructor creates no task or dial; source-constructor and production exchange_binding witnesses cover initialization and startup ordering. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias applies to options retained by the shared BaseExchange. Renamed Rust constructor: safe-cex-venue-bybit/src/binding/exchange.rs::BybitExchange::create; companion constructor inputs: safe-cex-venue-bybit/src/binding/exchange.rs::BybitDependencies and safe-cex-venue-bybit/src/lib.rs::BybitDependencies."
 
 [[symbol]]
 ts = "BybitExchange.dispose"

@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/utils/incrementalFills.ts"
-rust_files = [ "safe-cex-store/src/incremental_fills.rs" ]
+rust_files = [ "safe-cex-store/src/incremental_fills.rs", "safe-cex-num/src/lib.rs" ]
 
 [[symbol]]
 ts = "IncrementalFill"
@@ -14,9 +14,25 @@ note = ""
 ts = "cleanFloat"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-store/src/incremental_fills.rs::clean_float"
+rs = [ "safe-cex-store/src/incremental_fills.rs::clean_float", "safe-cex-num/src/lib.rs::js_to_precision" ]
 status = "ported"
-note = "Ported for the bybit inverse fill price; the 15-digit form and decimalsOf/subtractDecimals arrive with PR #88 (claude-chn5rs), which supersedes this body."
+note = "The maintained fifteen-significant-digit implementation from #88 uses shared ECMAScript toPrecision rounding, including decimal ties and signed zero; nonfinite inputs return unchanged. Consumer and intrinsic targets: safe-cex-store/src/incremental_fills.rs::clean_float and safe-cex-num/src/lib.rs::js_to_precision. Store incremental-fill and numeric precision witnesses pin both native and live-source behavior."
+
+[[symbol]]
+ts = "decimalsOf"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-store/src/incremental_fills.rs::decimals_of"
+status = "ported"
+note = "Renamed Rust target: safe-cex-store/src/incremental_fills.rs::decimals_of. Uses ECMAScript number spelling; exponent notation returns absence so subtraction takes the precision fallback."
+
+[[symbol]]
+ts = "subtractDecimals"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-store/src/incremental_fills.rs::subtract_decimals"
+status = "ported"
+note = "Renamed Rust target: safe-cex-store/src/incremental_fills.rs::subtract_decimals. Uses the input decimal places, capped at twenty, and the shared toFixed operation, falling back to clean_float for exponent notation. The #88 incremental-fill regression covers the large-total/small-fill subtraction."
 
 [[symbol]]
 ts = "createIncrementalFills"

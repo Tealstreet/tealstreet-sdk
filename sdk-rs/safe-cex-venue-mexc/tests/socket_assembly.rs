@@ -226,6 +226,7 @@ fn venue(
                 Ok(())
             }),
         },
+        Rc::new(|_, _| panic!("no externalPublicData configured")),
     )
 }
 #[test]
