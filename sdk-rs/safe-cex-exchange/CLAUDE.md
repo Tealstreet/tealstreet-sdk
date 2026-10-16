@@ -954,3 +954,8 @@ Blob.text perform UTF-8 replacement only when the venue explicitly asks for text
 compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
 checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
+
+The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
+worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
+completion hook and reconstructed error properties. Arguments/results use the
+existing JSON worker boundary; it does not create a parallel worker protocol.
