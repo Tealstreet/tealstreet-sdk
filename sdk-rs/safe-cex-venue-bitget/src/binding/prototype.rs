@@ -8,7 +8,6 @@ use super::{
 };
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_types::{MarginType, PositionMode};
-use std::rc::Rc;
 
 fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
@@ -45,27 +44,6 @@ pub(crate) fn install(rt: &Rt) {
         }
     };
 
-    // ts: BaseExchange.initExternalPublicData
-    {
-        let rt = rt.clone();
-        def(
-            "initExternalPublicData",
-            Js::function("initExternalPublicData", move |_, _| {
-                let rt = rt.clone();
-                Ok(rt.clone().spawn(Box::pin(async move {
-                    let factory = rt.shared.extra.external_public_data.clone();
-                    let base = rt.base().clone();
-                    let used = base
-                        .init_external_public_data(move |config| match factory {
-                            Some(factory) => factory(config),
-                            None => missing_external_provider(),
-                        })
-                        .await?;
-                    Ok(Js::Bool(used))
-                })))
-            }),
-        );
-    }
     // ts: BitgetExchange#resolveSymbolPositioning
     {
         let rt = rt.clone();
@@ -199,8 +177,4 @@ pub(crate) fn install(rt: &Rt) {
             }),
         );
     }
-}
-
-fn missing_external_provider() -> Rc<dyn safe_cex_exchange::external::ExternalPublicData> {
-    unreachable!("BitgetExchange::new rejects externalPublicData without a provider")
 }

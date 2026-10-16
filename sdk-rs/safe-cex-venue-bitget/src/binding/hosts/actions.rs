@@ -1298,6 +1298,7 @@ fn selection_opts(opts: &Js, strict: bool) -> Result<(PlaceOrderOpts, Option<Js>
         stop_loss: None,
         take_profit: None,
         trigger_type: None,
+        implied_volatility: None,
         client_order_id: None,
         max_slippage_pct: None,
         close: None,

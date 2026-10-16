@@ -645,6 +645,7 @@ pub(crate) fn bind(
                 },
                 extra: None,
                 last_update: None,
+                option: None,
             };
             Ok(
                 crate::stream_positions::get_position_payload_update_time(&probe)

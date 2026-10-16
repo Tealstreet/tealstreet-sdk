@@ -33,7 +33,6 @@ pub(crate) fn settings() -> ExchangeSettings {
         tick_interval: None,
         positions_supported: Some(true),
         supports_public_only: true,
-        supports_executions_history: true,
         client_order_id_rule: Some(super::hosts::assembly::client_order_id_rule()),
     }
 }
@@ -69,11 +68,6 @@ impl BitgetExchange {
                 )));
             }
         };
-        if options.external_public_data.is_some() && deps.external_public_data.is_none() {
-            return Err(ExchangeError::new(
-                "BitgetExchange: externalPublicData is configured but no external public data provider was supplied",
-            ));
-        }
         let shared = Rc::new_cyclic(|weak: &std::rc::Weak<Shared>| {
             let globals = globals::build(weak.clone());
             super::hosts::register_all(&globals, weak.clone());
