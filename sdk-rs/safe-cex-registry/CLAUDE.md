@@ -158,3 +158,9 @@ ApexOmni's signed native host shares the account capability with HTTP and privat
 WS auth, retaining remote accountName while keeping the API secret in the browser.
 `native_host_apexomni` verifies both signed wire paths and pending-signature
 cancellation; the Omni seed remains necessary for source L2 contract signing.
+
+Bitget, Bitget USDC and Bitget Inverse native constructors supply the common
+gateway factory through their existing `external_public_data` dependency. The
+loopback `native_host_bitget_external_data` test covers all three names: gateway
+market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
+with no venue REST or private/public venue sockets in public-only mode.
