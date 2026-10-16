@@ -2511,6 +2511,23 @@
       "binance": "ETHUSDC"
     }
   ],
+  "txflow": [
+    {
+      "symbol": "BTC-USDC",
+      "base": "BTC",
+      "quote": "USDC",
+      "id": "BTC-USDC",
+      "_source": "docs-verified",
+      "binance": "BTCUSDC"
+    },
+    {
+      "symbol": "ETH-USDC",
+      "base": "ETH",
+      "quote": "USDC",
+      "id": "ETH-USDC",
+      "binance": "ETHUSDC"
+    }
+  ],
   "what": [
     {
       "symbol": "BTCUSDC",

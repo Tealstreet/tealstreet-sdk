@@ -63,6 +63,7 @@ const ALL_EXCHANGES: ExchangeName[] = [
   'mode',
   'salsadex',
   'tealstreet-dex',
+  'txflow',
   'what',
   'weex',
   'woo',
