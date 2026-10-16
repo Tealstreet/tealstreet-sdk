@@ -71,3 +71,20 @@ python3 sdk-rs/safe-cex-venue-grvt/scripts/accepted-record-controls.py
 ```
 
 No historical debt entry or production decoder is changed by this batch.
+
+Three SDK schema-helper contracts execute twenty-four independently authored
+cases against the native functions and actual vendored SDK. Metadata lookup
+returns exact full/lite declaration tokens. BigInt conversion retains decimal
+versus even-width hexadecimal formatting and non-BigInt identity, including the
+source's negative hexadecimal spelling. Bidirectional mapping observes native
+variants, ordered UTF-16 keys and strings, nested array lengths, Number bits,
+primitive identity and own undefined fields before serialization. Carrier tags
+construct these test values; they do not change the external input domain.
+
+All three complete APIs pass separately on native and wasm. Isolated production
+mutations of a metadata selector, hexadecimal padding and the unknown-key target
+each compile and fail the corresponding output expectations. Restoring the
+source exactly passes all three again. The existing fifty-three-case source
+oracle covers the consumed root and nested SDK maps. No shared decoder guard,
+borrowed lifetime rule or historical debt entry changes. Remaining compiler
+owners and the assembly's local macros retain their review obligations.
