@@ -3,7 +3,7 @@ use safe_cex_exchange::{
     js_runtime::{
         client::{self, JsHttpHost},
         promise::{JsFuture, Promise, await_js},
-        value::{Js, Thrown, arg, to_json},
+        value::{Js, Thrown, arg, to_json, utf16},
     },
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
@@ -358,6 +358,217 @@ fn json_stringify_prints_numbers_and_escapes_like_javascript() {
     assert_eq!(
         stringify(body),
         r#"{"qty":1,"px":0.1,"big":1e+21,"nan":null,"s":"a\"\n","list":[null,0]}"#
+    );
+}
+
+#[test]
+fn function_bind_retains_receiver_and_prepends_arguments_for_array_map() {
+    let receiver = Js::object(vec![("offset", Js::Number(10.0))]);
+    let expected_receiver = receiver.clone();
+    let mapper = Js::function("mapPosition", move |this, args| {
+        assert!(this.same_reference(&expected_receiver));
+        Ok(Js::Number(
+            this.get("offset")?.to_number()?
+                + arg(&args, 0).to_number()?
+                + arg(&args, 1).to_number()?,
+        ))
+    });
+    let bound = mapper
+        .call_method("bind", vec![receiver.clone(), Js::Number(100.0)])
+        .unwrap();
+    receiver.set("offset", Js::Number(20.0)).unwrap();
+    let mapped = Js::array(vec![Js::Number(1.0), Js::Number(2.0)])
+        .call_method("map", vec![bound.clone()])
+        .unwrap();
+    assert_eq!(to_json(&mapped).unwrap(), json!([121.0, 122.0]));
+    assert_eq!(bound.get("name").unwrap().to_display(), "bound mapPosition");
+    let rebound = bound
+        .call_method("bind", vec![Js::Null, Js::Number(7.0)])
+        .unwrap();
+    assert_eq!(
+        rebound
+            .call(Js::Undefined, vec![])
+            .unwrap()
+            .to_number()
+            .unwrap(),
+        127.0
+    );
+    assert!(!mapper.same_reference(&bound));
+}
+
+#[test]
+fn function_bind_uses_its_call_receiver_and_preserves_original_errors() {
+    let sentinel = Js::object(vec![("failure", Js::Bool(true))]);
+    let thrown = sentinel.clone();
+    let target = Js::function("throws", move |this, args| {
+        assert!(this.is_nullish());
+        assert!(arg(&args, 0).is_undefined());
+        Err(Thrown::new(thrown.clone()))
+    });
+    let bind = target.get("bind").unwrap();
+    let bound = bind.call(target.clone(), vec![]).unwrap();
+    assert!(
+        bound
+            .call(Js::Bool(true), vec![])
+            .unwrap_err()
+            .value
+            .same_reference(&sentinel)
+    );
+    assert!(bind.call(Js::Number(1.0), vec![]).is_err());
+    target.define("bind", Js::Number(42.0)).unwrap();
+    assert_eq!(target.get("bind").unwrap().to_number().unwrap(), 42.0);
+}
+
+#[test]
+fn json_stringify_callable_replacer_handles_bigint_and_root_replacement() {
+    let g = library();
+    let json = g.get("JSON").unwrap();
+    let big = Js::BigInt(Rc::new(123_u32.into()));
+    let replace = Js::function("replacer", |_, args| {
+        let value = arg(&args, 1);
+        if matches!(value, Js::BigInt(_)) {
+            Ok(Js::String(value.to_js_string()?))
+        } else if arg(&args, 0).strict_equals(&Js::str("omit")) {
+            Ok(Js::Undefined)
+        } else {
+            Ok(value)
+        }
+    });
+    let value = Js::object(vec![
+        ("amount", big.clone()),
+        ("omit", Js::Bool(true)),
+        ("list", Js::holey_array(vec![None, Some(big.clone())])),
+    ]);
+    assert!(json.call_method("stringify", vec![value.clone()]).is_err());
+    assert_eq!(
+        json.call_method("stringify", vec![value, replace.clone()])
+            .unwrap()
+            .to_display(),
+        r#"{"amount":"123","list":[null,"123"]}"#
+    );
+    assert_eq!(
+        json.call_method("stringify", vec![big, replace])
+            .unwrap()
+            .to_display(),
+        "\"123\""
+    );
+    let from_undefined = Js::function("replaceRoot", |holder, args| {
+        assert!(arg(&args, 0).strict_equals(&Js::str("")));
+        assert!(holder.has_own(""));
+        Ok(Js::Number(7.0))
+    });
+    assert_eq!(
+        json.call_method("stringify", vec![Js::Undefined, from_undefined])
+            .unwrap()
+            .to_display(),
+        "7"
+    );
+}
+
+#[test]
+fn json_stringify_replacer_observes_holders_live_siblings_and_to_json_keys() {
+    let g = library();
+    let visits = Rc::new(RefCell::new(Vec::new()));
+    let sink = visits.clone();
+    let nested = Js::object(vec![]);
+    nested
+        .define(
+            "toJSON",
+            Js::function("toJSON", |_, args| Ok(arg(&args, 0))),
+        )
+        .unwrap();
+    let input = Js::object(vec![
+        ("first", Js::Number(1.0)),
+        ("later", Js::Number(2.0)),
+        ("nested", nested),
+    ]);
+    let receiver = input.clone();
+    let replace = Js::function("replacer", move |holder, args| {
+        let key = arg(&args, 0).to_display();
+        sink.borrow_mut().push(key.clone());
+        if key == "first" {
+            assert!(holder.same_reference(&receiver));
+            holder.set("later", Js::Number(9.0))?;
+            holder.set("added", Js::Number(10.0))?;
+        }
+        Ok(arg(&args, 1))
+    });
+    let result = g
+        .get("JSON")
+        .unwrap()
+        .call_method("stringify", vec![input, replace])
+        .unwrap();
+    assert_eq!(
+        result.to_display(),
+        r#"{"first":1,"later":9,"nested":"nested"}"#
+    );
+    assert_eq!(*visits.borrow(), ["", "first", "later", "nested"]);
+}
+
+#[test]
+fn json_stringify_replacer_visits_holes_and_preserves_thrown_identity() {
+    let g = library();
+    let array = Js::holey_array(vec![None, Some(Js::Number(2.0))]);
+    let receiver = array.clone();
+    let replace = Js::function("replacer", move |holder, args| {
+        if arg(&args, 0).strict_equals(&Js::str("0")) {
+            assert!(holder.same_reference(&receiver));
+            assert!(arg(&args, 1).is_undefined());
+            holder.set("1", Js::Number(8.0))?;
+            return Ok(Js::Number(3.0));
+        }
+        Ok(arg(&args, 1))
+    });
+    assert_eq!(
+        g.get("JSON")
+            .unwrap()
+            .call_method("stringify", vec![array, replace])
+            .unwrap()
+            .to_display(),
+        "[3,8]"
+    );
+    let sentinel = Js::object(vec![]);
+    let thrown = sentinel.clone();
+    let replace = Js::function("throws", move |_, _| Err(Thrown::new(thrown.clone())));
+    assert!(
+        g.get("JSON")
+            .unwrap()
+            .call_method("stringify", vec![Js::Null, replace])
+            .unwrap_err()
+            .value
+            .same_reference(&sentinel)
+    );
+}
+
+#[test]
+fn json_stringify_replacer_can_remove_cycles_and_repeat_shared_objects() {
+    let g = library();
+    let cycle = Js::object(vec![]);
+    cycle.define("self", cycle.clone()).unwrap();
+    let json = g.get("JSON").unwrap();
+    let error = json
+        .call_method("stringify", vec![cycle.clone()])
+        .unwrap_err();
+    assert!(error.message().contains("circular structure"));
+    let replacer = Js::function("skipSelf", |_, args| {
+        if arg(&args, 0).strict_equals(&Js::str("self")) {
+            Ok(Js::Undefined)
+        } else {
+            Ok(arg(&args, 1))
+        }
+    });
+    assert_eq!(
+        json.call_method("stringify", vec![cycle.clone(), replacer])
+            .unwrap()
+            .to_display(),
+        "{}"
+    );
+    cycle.delete(&utf16("self"));
+    assert_eq!(
+        json.call_method("stringify", vec![Js::array(vec![cycle.clone(), cycle])])
+            .unwrap()
+            .to_display(),
+        "[{},{}]"
     );
 }
 
