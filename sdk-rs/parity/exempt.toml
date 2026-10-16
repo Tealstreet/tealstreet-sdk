@@ -1253,10 +1253,6 @@ rs = "safe-cex-exchange/src/websocket.rs::WsRuntime"
 reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
 
 [[exempt]]
-rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::monotonic_ms"
-reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
-
-[[exempt]]
 rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::transport"
 reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
 
@@ -7220,3 +7216,439 @@ reason = "Rust-only boxed future/result carrier for host asynchronous loader ope
 [[exempt]]
 rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeLoopFn"
 reason = "Rust-only owned callback carrier for the host loop scheduler's anonymous asynchronous function argument; no standalone TypeScript declaration. Loop behavior remains in its mapped operations. Accepted-set alias identity and raw-construction probes remain mandatory. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmLoader"
+reason = "Shared module-context owner for the module-level wasmReady/wasmInitPromise state of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi; its behaviour is in the mapped WasmLoader::init_wasm/is_wasm_ready/get_crypto_api members. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmLoader::new"
+reason = "Constructor of the shared module-context owner (fresh module-level wasmReady=false, wasmInitPromise=null) for browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmLoader::init_marker"
+reason = "Observation accessor for the module-private wasmInitPromise identity, used by the loader tests to pin in-flight reuse and reset-on-failure for browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No TypeScript symbol; adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::BrowserLoader"
+reason = "Explicit module context for browser-loader.ts: holds the shared WasmLoader so that file's mapped initWasm/isWasmReady/getCryptoApi rows have a receiver for their module-level state. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::BrowserLoader::new"
+reason = "Module-context constructor for browser-loader.ts (one module instance, fresh module-level state) serving its mapped initWasm/isWasmReady/getCryptoApi rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::NodeLoader"
+reason = "Explicit module context for node-loader.ts: holds the shared WasmLoader so that file's mapped initWasm/isWasmReady/getCryptoApi rows have a receiver for their module-level state. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::NodeLoader::new"
+reason = "Module-context constructor for node-loader.ts (one module instance, fresh module-level state) serving its mapped initWasm/isWasmReady/getCryptoApi rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::AutoLoader"
+reason = "Explicit module context for loader.ts: holds the shared WasmLoader so that file's mapped initWasm/isWasmReady/getCryptoApi rows have a receiver for their module-level state. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::AutoLoader::new"
+reason = "Module-context constructor for loader.ts (one module instance, fresh module-level state) serving its mapped initWasm/isWasmReady/getCryptoApi rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::PoseidonIndex"
+reason = "Explicit module context for index.ts holding its module-level runtime/initPromise state for the mapped index.ts initWasm/isWasmReady/getCryptoApi rows. No TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::PoseidonIndex::new"
+reason = "Module-context constructor for index.ts (fresh module-level runtime/initPromise) serving the mapped index.ts initWasm/isWasmReady/getCryptoApi rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::PoseidonIndex::init_marker"
+reason = "Observation accessor for index.ts module-private initPromise identity, used by tests to pin in-flight reuse and the detection-throw restore order of the mapped index.ts initWasm row. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::InitTask"
+reason = "Shared settled-once promise carrier representing wasmInitPromise / initPromise for browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi and index.ts initWasm/isWasmReady/getCryptoApi; replaces a JS Promise object and adds no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::LoaderError"
+reason = "JS Error value carrier (name/message) for the errors thrown by browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi and index.ts initWasm/isWasmReady/getCryptoApi; no TypeScript declaration of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::LoaderError::new"
+reason = "new Error(message) construction primitive for the loader error carrier used by browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi and index.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::LoaderError::js_string"
+reason = "String(error) coercion primitive used by the `Failed to initialize WASM: ${error}` template in browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi and index.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::LoaderKind"
+reason = "Selector for the browser/node/auto acquisition branch of the shared WasmLoader::init_wasm body and for index.ts dynamic import of ./browser-loader or ./node-loader; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::Receiver"
+reason = "Call-receiver selector (globalThis versus unbound) for the host global-function call capability used by the mapped PoseidonCrypto methods; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::GlobalFunction"
+reason = "Host capability for calling a WASM-installed global function (poseidon2Hash, schnorrSign, ...) declared in types.ts ; used by the mapped PoseidonCrypto methods. No independent algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::GlobalFunction::call"
+reason = "Required member of the global-function call capability (actual JS Call with receiver and original throws) used by the mapped PoseidonCrypto methods. No independent algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::GlobalBinding"
+reason = "Host value shape for a global lookup (undefined, null, non-callable or callable) read by the mapped PoseidonCrypto methods; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::FetchResponse"
+reason = "Host value shape for the browser fetch Response fields (ok/status/statusText/body handle) read by the mapped browser-loader.ts initWasm row; no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost"
+reason = "Host capability trait binding dynamic imports, fs/path, fetch, Go/WebAssembly instantiate/run, setTimeout and globals for the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::array_buffer"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::fetch"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::fetch_defined"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::global"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::import_fs"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::import_path"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::import_wasm_exec"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::instantiate"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::module_directory"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::new_go"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::node_version_truthy"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::origin"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::path_join"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::read_file_sync"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::run"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::sleep"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::WasmHost::spawn_init"
+reason = "Explicit imported platform capability (dynamic import, fs/path, fetch/arrayBuffer, Go/WebAssembly instantiate/run, setTimeout, global read or task spawn) used by the shared WasmLoader::init_wasm body of browser-loader.ts, node-loader.ts and loader.ts initWasm/isWasmReady/getCryptoApi. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::IndexHost"
+reason = "Host capability trait binding window/Worker/self definedness, instanceof, dynamic loader import and task spawn for the mapped index.ts isBrowserLikeRuntime and initWasm rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::IndexHost::import_loader"
+reason = "Explicit imported platform capability (typeof/instanceof global probe, dynamic import or task spawn) used by the mapped index.ts isBrowserLikeRuntime and initWasm rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::IndexHost::self_defined"
+reason = "Explicit imported platform capability (typeof/instanceof global probe, dynamic import or task spawn) used by the mapped index.ts isBrowserLikeRuntime and initWasm rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::IndexHost::self_instanceof_worker"
+reason = "Explicit imported platform capability (typeof/instanceof global probe, dynamic import or task spawn) used by the mapped index.ts isBrowserLikeRuntime and initWasm rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::IndexHost::spawn_init"
+reason = "Explicit imported platform capability (typeof/instanceof global probe, dynamic import or task spawn) used by the mapped index.ts isBrowserLikeRuntime and initWasm rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::IndexHost::window_defined"
+reason = "Explicit imported platform capability (typeof/instanceof global probe, dynamic import or task spawn) used by the mapped index.ts isBrowserLikeRuntime and initWasm rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::IndexHost::worker_constructor"
+reason = "Explicit imported platform capability (typeof/instanceof global probe, dynamic import or task spawn) used by the mapped index.ts isBrowserLikeRuntime and initWasm rows. No independent loader algorithm."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/ethereum.rs::get_address"
+reason = "Dependency primitive outside the extracted TypeScript roots: ethers getAddress (EIP-55 checksum normalisation and validation), called by the mapped asterdex builder/builder-approval, grvt builder and shared EIP-712 address-normalisation rows. No repository TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/ethereum.rs::encode_string_address_address_uint256"
+reason = "Dependency primitive outside the extracted TypeScript roots: ethers AbiCoder.encode for the (string,address,address,uint256) tuple used by the asterdex generateV3Signature pipeline, which now reaches it through its RuntimeHost. No repository TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/ethereum.rs::keccak256"
+reason = "Dependency primitive outside the extracted TypeScript roots: ethers keccak256, used by the asterdex generateV3Signature hash pipeline through its RuntimeHost. No repository TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/ethereum.rs::ethereum_message_hash"
+reason = "Dependency primitive outside the extracted TypeScript roots: ethers hashMessage (EIP-191 prefix plus keccak256), used by the asterdex generateV3Signature hash pipeline through its RuntimeHost. No repository TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/ethereum.rs::sign_digest"
+reason = "Dependency primitive outside the extracted TypeScript roots: ethers SigningKey.sign over a 32-byte digest with r/s/v serialisation, used by the asterdex generateV3Signature pipeline through its RuntimeHost. No repository TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/starknet.rs::hash_typed_data"
+reason = "Dependency primitive outside the extracted TypeScript roots: starknet.js typedData.getMessageHash for an account address, called by the mapped paradex typed-data signing rows (typed_data_signing.rs). No repository TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/starknet.rs::sign"
+reason = "Dependency primitive outside the extracted TypeScript roots: starknet.js ec.starkCurve.sign returning (r, s), called by the mapped paradex typed-data signing rows (typed_data_signing.rs). No repository TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeValue"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the JS value read from an ordinary-object property (undefined, null, string, number, boolean or builtin referent). Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeValue::truthy"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: ToBoolean over a prototype-read value. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeValue::is_nullish"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the nullish (undefined/null) test over a prototype-read value. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeScalar"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the primitive value a builtin referent property may be assigned. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinIdentity"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the identity tag of an Object.prototype / Function.prototype builtin referent. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::FunctionMethod"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: selector for the builtin Function.prototype methods reachable as inherited members. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::FunctionMethod::name"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the builtin function name property of an inherited Function.prototype method. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::FunctionMethod::length"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the builtin function length property of an inherited Function.prototype method. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: a shared mutable builtin referent (inherited object or function) within one realm, preserving identity across reads. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::get"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: [[Get]] on a builtin referent. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::set"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: [[Set]] of a primitive own property on a builtin referent. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::is_callable"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: IsCallable on a builtin referent. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::js_string"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: ToString of a builtin referent (function source text or [object Object]). Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::member"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the identity of the builtin a referent denotes. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::realm"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the realm a builtin referent belongs to. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::BuiltinReference::own_fields"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the own enumerable primitive fields written onto a builtin referent. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealm"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: one runtime realm owning the shared builtin referents. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealm::current"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the realm bound to the current thread. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealm::bind"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: scoped binding of a realm as the current realm. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealm::reference"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: lookup of the shared referent for an inherited member. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealm::inherited"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: inherited-property read through the realm prototypes. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealm::enumerable_keys"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: for-in enumerable keys contributed by realm prototypes. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealm::get"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: [[Get]] through the realm for an ordinary object. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealm::set"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: [[Set]] through the realm for an ordinary object. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealm::future"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: carries the realm binding across an await. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealmBinding"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the scope guard restoring the previous current realm. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/prototype_realm.rs::PrototypeRealmFuture"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol: the future wrapper that keeps a realm bound while polled. Used by the mapped cryptocom types lookup, binance class and hyperliquid signing rows that read through unmodified-prototype referents. CHOSEN contract uses unmodified Object.prototype; shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary."
+
+[[exempt]]
+rs = "safe-cex-num/src/numeric_ingress.rs::js_capture_output"
+reason = "Shared ECMAScript runtime glue with no TypeScript source symbol. Captures serialized native output values as a retained JSON tree before serde_json would project non-finite numbers to null, so the binance class and cryptocom wire-record rows keep NaN/Infinity observable (sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect)."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/order_operations.rs::order_options"
+reason = "Rust construction plumbing for the PlaceOrderOpts object literal {symbol, side, type, amount} that the mapped BaseExchange derive-algo-orders and nuke paths and the crossTradePlaceOrder row build inline; every optional field stays absent. No independent order algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeError::js_error_string"
+reason = "Error.prototype.toString primitive (name: message, with empty-name/empty-message forms) for the standard JavaScript Error boundary, used at the String(error) sites of the mapped BaseExchange, BaseWebSocket and venue rows. No independent algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/runtime.rs::ExchangeRuntime::report_raw_exception"
+reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. This member preserves a non-string thrown value at the reporting boundary. Trait declarations add no routing, retry or venue behavior."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeExchange::name"
+reason = "Required member of the CrossTradeExchange capability (mapped on the CrossTradeManager getExchange row) exposing the live exchange name, store, placeOrder, chaser start/terminate or warning call used by the mapped CrossTradeManager and crossTradePlaceOrder rows. No independent cross-trade algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeExchange::store"
+reason = "Required member of the CrossTradeExchange capability (mapped on the CrossTradeManager getExchange row) exposing the live exchange name, store, placeOrder, chaser start/terminate or warning call used by the mapped CrossTradeManager and crossTradePlaceOrder rows. No independent cross-trade algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeExchange::place_order"
+reason = "Required member of the CrossTradeExchange capability (mapped on the CrossTradeManager getExchange row) exposing the live exchange name, store, placeOrder, chaser start/terminate or warning call used by the mapped CrossTradeManager and crossTradePlaceOrder rows. No independent cross-trade algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeExchange::chaser_terminate"
+reason = "Required member of the CrossTradeExchange capability (mapped on the CrossTradeManager getExchange row) exposing the live exchange name, store, placeOrder, chaser start/terminate or warning call used by the mapped CrossTradeManager and crossTradePlaceOrder rows. No independent cross-trade algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeExchange::chaser_start"
+reason = "Required member of the CrossTradeExchange capability (mapped on the CrossTradeManager getExchange row) exposing the live exchange name, store, placeOrder, chaser start/terminate or warning call used by the mapped CrossTradeManager and crossTradePlaceOrder rows. No independent cross-trade algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeExchange::warning"
+reason = "Required member of the CrossTradeExchange capability (mapped on the CrossTradeManager getExchange row) exposing the live exchange name, store, placeOrder, chaser start/terminate or warning call used by the mapped CrossTradeManager and crossTradePlaceOrder rows. No independent cross-trade algorithm."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeRuntime::now_ms"
+reason = "Host boundary contract adapting external runtime facilities (clock, console debug/error, loop scheduler) for the mapped CrossTradeManager rows; see sdk-rs/parity/MANIFEST-SPEC.md#cross-trade-native-capabilities. Trait declarations add no cross-trade behavior."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeRuntime::debug"
+reason = "Host boundary contract adapting external runtime facilities (clock, console debug/error, loop scheduler) for the mapped CrossTradeManager rows; see sdk-rs/parity/MANIFEST-SPEC.md#cross-trade-native-capabilities. Trait declarations add no cross-trade behavior."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeRuntime::error"
+reason = "Host boundary contract adapting external runtime facilities (clock, console debug/error, loop scheduler) for the mapped CrossTradeManager rows; see sdk-rs/parity/MANIFEST-SPEC.md#cross-trade-native-capabilities. Trait declarations add no cross-trade behavior."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeRuntime::schedule_loop"
+reason = "Host boundary contract adapting external runtime facilities (clock, console debug/error, loop scheduler) for the mapped CrossTradeManager rows; see sdk-rs/parity/MANIFEST-SPEC.md#cross-trade-native-capabilities. Trait declarations add no cross-trade behavior."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeLoop::is_disposed"
+reason = "Observation accessor for the disposal flag of the loop handle mapped on the CrossTradeManager rows, used by tests and the loop scheduler to stop re-arming. Adds no behaviour."
+
+[[exempt]]
+rs = "safe-cex-exchange/src/cross_trade/manager.rs::CrossTradeManager::failure_entry"
+reason = "Map.get read of the per account:symbol failure entry consulted by the mapped CrossTradeManager isMuted and recordFailure rows; exposed for their tests. No independent cross-trade algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet.rs::TealstreetTransportHost::big_int_adapter"
+reason = "Explicit imported capability (canonical Axios adapter, BigInt adapter, regional adapter factory, accessToken getProxyToken, Node/Bun runtime probe or REST proxy header marker) of the TealstreetTransportHost mapped on the tealstreetTransport row, used by its mapped rest/restAdapter/privateProxy members. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet.rs::TealstreetTransportHost::default_adapter"
+reason = "Explicit imported capability (canonical Axios adapter, BigInt adapter, regional adapter factory, accessToken getProxyToken, Node/Bun runtime probe or REST proxy header marker) of the TealstreetTransportHost mapped on the tealstreetTransport row, used by its mapped rest/restAdapter/privateProxy members. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet.rs::TealstreetTransportHost::get_proxy_token"
+reason = "Explicit imported capability (canonical Axios adapter, BigInt adapter, regional adapter factory, accessToken getProxyToken, Node/Bun runtime probe or REST proxy header marker) of the TealstreetTransportHost mapped on the tealstreetTransport row, used by its mapped rest/restAdapter/privateProxy members. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet.rs::TealstreetTransportHost::is_node_or_bun_runtime"
+reason = "Explicit imported capability (canonical Axios adapter, BigInt adapter, regional adapter factory, accessToken getProxyToken, Node/Bun runtime probe or REST proxy header marker) of the TealstreetTransportHost mapped on the tealstreetTransport row, used by its mapped rest/restAdapter/privateProxy members. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet.rs::TealstreetTransportHost::mark_rest_proxy_header"
+reason = "Explicit imported capability (canonical Axios adapter, BigInt adapter, regional adapter factory, accessToken getProxyToken, Node/Bun runtime probe or REST proxy header marker) of the TealstreetTransportHost mapped on the tealstreetTransport row, used by its mapped rest/restAdapter/privateProxy members. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet.rs::TealstreetTransportHost::regional_adapter"
+reason = "Explicit imported capability (canonical Axios adapter, BigInt adapter, regional adapter factory, accessToken getProxyToken, Node/Bun runtime probe or REST proxy header marker) of the TealstreetTransportHost mapped on the tealstreetTransport row, used by its mapped rest/restAdapter/privateProxy members. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet_time_source.rs::TealstreetTimeHost::origin"
+reason = "Explicit imported capability (location origin, configured time origin, Date.now, time-endpoint request or dayjs.utc parse) of the TealstreetTimeHost mapped on the tealstreetTimeSource row, used by its mapped getBaseUrl/getTealstreetTimeEndpoint/tealstreetTimeSource bodies. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet_time_source.rs::TealstreetTimeHost::configured_time_origin"
+reason = "Explicit imported capability (location origin, configured time origin, Date.now, time-endpoint request or dayjs.utc parse) of the TealstreetTimeHost mapped on the tealstreetTimeSource row, used by its mapped getBaseUrl/getTealstreetTimeEndpoint/tealstreetTimeSource bodies. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet_time_source.rs::TealstreetTimeHost::now_ms"
+reason = "Explicit imported capability (location origin, configured time origin, Date.now, time-endpoint request or dayjs.utc parse) of the TealstreetTimeHost mapped on the tealstreetTimeSource row, used by its mapped getBaseUrl/getTealstreetTimeEndpoint/tealstreetTimeSource bodies. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet_time_source.rs::TealstreetTimeHost::get_time"
+reason = "Explicit imported capability (location origin, configured time origin, Date.now, time-endpoint request or dayjs.utc parse) of the TealstreetTimeHost mapped on the tealstreetTimeSource row, used by its mapped getBaseUrl/getTealstreetTimeEndpoint/tealstreetTimeSource bodies. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/tealstreet_time_source.rs::TealstreetTimeHost::parse_utc_time"
+reason = "Explicit imported capability (location origin, configured time origin, Date.now, time-endpoint request or dayjs.utc parse) of the TealstreetTimeHost mapped on the tealstreetTimeSource row, used by its mapped getBaseUrl/getTealstreetTimeEndpoint/tealstreetTimeSource bodies. No independent transport algorithm."
+
+[[exempt]]
+rs = "safe-cex-transport/src/query.rs::QueryKeyOrder"
+reason = "Host-side external Axios/qs configuration carrier (key-order selector of QueryProfile: preserve insertion order or JS root-object order). It belongs to the shared request ABI like QueryProfile; consumer rows own their selected profile. No TypeScript symbol of its own."

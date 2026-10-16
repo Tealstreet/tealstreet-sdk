@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-exchange/src/fill_event_units.rs" ]
 ts = "fillEventUnits"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/fill_event_units.rs::fill_event_units"
+rs = [ "safe-cex-exchange/src/fill_event_units.rs::fill_event_units", "safe-cex-exchange/src/fill_event_units.rs::FillEventUnit" ]
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#shared-handler-and-ledger-choice. Fixed table values and builtin prototype identity/arity are covered by the22-key native/source witness. Symbolic inherited values exclude executable/custom prototype behavior. The fixed source table yields undefined for D800; no retained-unit or mutated-table witness is claimed, and its old FORCED subclaim is withdrawn. Targets: safe_cex_exchange::fill_event_units::fill_event_units"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#shared-handler-and-ledger-choice. Fixed table values and builtin prototype identity/arity are covered by the22-key native/source witness. Symbolic inherited values exclude executable/custom prototype behavior. The fixed source table yields undefined for D800; no retained-unit or mutated-table witness is claimed, and its old FORCED subclaim is withdrawn. Targets: safe_cex_exchange::fill_event_units::fill_event_units Split member `safe-cex-exchange/src/fill_event_units.rs::FillEventUnit`; the closed 'native' | 'base' result union this function returns."
 
 [[symbol]]
 ts = "FILL_EVENT_UNIT_VENUES"

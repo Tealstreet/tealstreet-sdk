@@ -790,9 +790,9 @@ note = ""
 ts = "BaseExchange.recoverAfterOffline"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::recover_after_offline"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::recover_after_offline", "safe-cex-exchange/src/exchange.rs::Exchange::recover_after_offline" ]
 status = "ported"
-note = "Snapshots the real get_all_sockets result, invokes every supplied context-bound socket recovery before aggregating booleans, treats None as the source nullish true, and stops immediately on a recovery error. The explicit native dispatcher represents the source virtual call and carries each venue policy; no always-success callback is supplied by this method. Native Rc socket identities, three ordered callbacks even after false, two-call error prefix and empty snapshot truth are asserted before executing the actual source property body. Existing getAllSockets representation boundaries remain mapped in its own row."
+note = "Snapshots the real get_all_sockets result, invokes every supplied context-bound socket recovery before aggregating booleans, treats None as the source nullish true, and stops immediately on a recovery error. The explicit native dispatcher represents the source virtual call and carries each venue policy; no always-success callback is supplied by this method. Native Rc socket identities, three ordered callbacks even after false, two-call error prefix and empty snapshot truth are asserted before executing the actual source property body. Existing getAllSockets representation boundaries remain mapped in its own row. Split member `safe-cex-exchange/src/exchange.rs::Exchange::recover_after_offline`; the Exchange trait dispatch member through which hosts and subclasses invoke this field, matching the other BaseExchange trait-member splits."
 
 [[symbol]]
 ts = "BaseExchange.noteHttpResponse"
