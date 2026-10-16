@@ -483,3 +483,13 @@ primary local-write adapter computes remaining from the original filled amount;
 its record-options initializer shares the identical Spot implementation. Bare
 parseFloat lookup captures the raw callable before evaluating its argument, then
 invokes it without a global receiver. Concrete class binding remains pending.
+
+
+primary_startup is the BybitExchange.start body over SnapshotHost. It retains
+cached public-only mode, the margin probe's then(ok, fail) attached at creation,
+the eager cache launch, the optional inverse public socket connect and
+post-market parser ordering. Its detached cache rejection reports the original
+value instead of the source's empty continuation (CHOSEN, divergent row).
+tests/primary_startup.rs compares 22 scenarios with the executed source member;
+that report is the only native-only effect it removes before comparison.
+Concrete binding to the Exchange trait is pending, as for every SnapshotHost body.
