@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitrue`, `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`),
 Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
@@ -23,6 +23,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 
 - **Initial members:**
   - `lighter` and `lighter-robinhood`, built with the existing `LighterNativeExchange::new`; the name selects deployment URLs and quote currency. The host retains the runtime transport and local signer entropy.
+  - `grvt`, built with `GrvtExchange::new` over shared js_runtime; its host supplies fresh HTTP and the common external-public-data factory. Active SDK signing requires a local wallet; the native hosted-signer host refuses this venue visibly.
   - `asterdex`, built with `native_exchange::AsterDEXExchange::new` on the shared
     js_runtime. Its HTTP factory receives each lane's options, including secondary
     credentials and proxy override. The native host routes signed requests through

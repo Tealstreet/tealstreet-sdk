@@ -24,6 +24,7 @@ use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
+use safe_cex_venue_grvt::binding::exchange::{GrvtDependencies, GrvtExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_lighter::binding::exchange::{LighterDependencies, LighterNativeExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
@@ -149,6 +150,7 @@ pub trait RustVenueHost {
     fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
     /// Bitget, Bitget USDC and Bitget inverse share one input set.
     fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
+    fn grvt(&self) -> Result<GrvtDependencies, ExchangeError>;
     fn hyperliquid(
         &self,
         options: &ExchangeOptions,
@@ -184,6 +186,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitrue, bitrue_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Grvt, grvt_constructor),
     (ExchangeName::Bybit, bybit_constructor),
     (ExchangeName::Bybitdemo, bybit_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
@@ -203,6 +206,12 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Polymarket, polymarket_constructor),
     (ExchangeName::Woo, woo_constructor),
 ];
+
+pub fn grvt_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(GrvtExchange::new(name, options, store, host.grvt()?)?)
+    })
+}
 
 pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |_, options, store| {
