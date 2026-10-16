@@ -11,6 +11,14 @@ status = "divergent"
 note = "CHOSEN prepared acyclic JsJsonValue input preserves undefined, BigInt and nonfinite numeric values but excludes Date/Buffer/custom prototypes and lone UTF-16 surrogates (shared string restriction: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary); a richer host value representation could preserve those, but this implementation retains the shared prepared-value boundary rather than extending it to host objects. Live qs oracle pins indexed arrays, null/undefined, key order and escaped/raw bytes."
 
 [[symbol]]
+ts = "isKucoinSignatureRejection"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "createAPI"
 kind = "const-fn"
 layer = "adapted"

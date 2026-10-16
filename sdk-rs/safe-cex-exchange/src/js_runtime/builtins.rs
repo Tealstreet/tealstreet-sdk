@@ -361,6 +361,18 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
             }
             Ok(acc)
         }),
+        "flat" => method(name, move |a| {
+            let depth = arg(&a, 0);
+            let depth = if depth.is_undefined() {
+                1.0
+            } else {
+                let n = depth.to_number()?;
+                if n.is_nan() { 0.0 } else { n.trunc() }
+            };
+            let mut out = vec![];
+            flatten_into(&items(&this), depth, &mut out);
+            Ok(Js::array(out))
+        }),
         "flatMap" => method(name, move |a| {
             let f = arg(&a, 0);
             let mut out = vec![];
@@ -421,6 +433,16 @@ fn array_member(this: Js, name: &str) -> Option<Js> {
         }),
         _ => return None,
     })
+}
+
+/// FlattenIntoArray: holes are skipped, arrays nest while `depth` stays positive.
+fn flatten_into(source: &[Option<Js>], depth: f64, out: &mut Vec<Js>) {
+    for value in source.iter().flatten() {
+        match value.array_items() {
+            Some(inner) if depth > 0.0 => flatten_into(&inner, depth - 1.0, out),
+            _ => out.push(value.clone()),
+        }
+    }
 }
 
 fn map_entries(this: &Js) -> Rc<RefCell<Vec<(Js, Js)>>> {

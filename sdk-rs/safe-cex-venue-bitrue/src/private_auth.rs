@@ -44,6 +44,8 @@ pub trait PrivateHost: ReadHost {
         name: Self::Value,
         parser: &str,
     ) -> Result<(), Self::Error>;
+    /// ts: incrementalFills cleanFloat over a Number.
+    fn clean_float(&self, value: Self::Value) -> Result<Self::Value, Self::Error>;
     /// Binds source `isRetryable`: networkErrorOnRead(LISTEN_KEY) || signatureRejectedResponse.
     fn retry_condition(&self) -> Result<Self::Value, Self::Error>;
     /// Binds source `isBitrueSignatureRejection`, i.e. [`is_bitrue_signature_rejection`].
@@ -402,7 +404,7 @@ pub fn order_update<H: PrivateHost>(
         let fill = if h.less(h.number(0.0), amount.clone())? && h.less_equal(raw, amount.clone())? {
             executed
         } else {
-            h.arithmetic(Op::Mul, executed, multiplier)?
+            h.clean_float(h.arithmetic(Op::Mul, executed, multiplier)?)?
         };
         if h.less(h.number(0.0), fill.clone())? {
             let p = method(h, get(h, &r, "emitter")?, "emit")?;

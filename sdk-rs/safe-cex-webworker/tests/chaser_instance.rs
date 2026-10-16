@@ -74,7 +74,7 @@ fn chaser_instance_matches_live_source_transitions_prototype_keys_and_disposal()
         String::from_utf8_lossy(&output.stderr)
     );
     let scenarios: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(scenarios.len(), 624);
+    assert_eq!(scenarios.len(), 648);
     for (index, s) in scenarios.iter().enumerate() {
         let runtime = Rc::new(Runtime::default());
         let store = Rc::new(DefaultStore::new());
