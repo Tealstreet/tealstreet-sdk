@@ -9,7 +9,10 @@ use safe_cex_types::{
     object_map::JsObjectMap,
 };
 use std::{any::Any, cell::Cell, rc::Rc};
-pub use types::*;
+pub use types::{
+    CrossTradWeightMode, CrossTradeConfig, CrossTradeCopier, CrossTradeExecution,
+    default_cross_trade_config, default_cross_trade_copier,
+};
 
 #[derive(Debug, Clone, Default, serde::Deserialize)]
 #[serde(rename_all = "camelCase")]
