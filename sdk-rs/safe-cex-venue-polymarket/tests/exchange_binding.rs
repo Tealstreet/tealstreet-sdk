@@ -530,3 +530,87 @@ fn concrete_private_read_failure_rethrows_and_preserves_snapshot() {
         "status error is not retried as network failure"
     );
 }
+
+#[test]
+fn concrete_supplied_credentials_funder_and_all_signer_types_reach_requests() {
+    let funder = "0x1111111111111111111111111111111111111111";
+    for signer_type in 0..4 {
+        let mut opts = wallet_options();
+        opts.polymarket = Some(ExchangeOptionsPolymarket {
+            api_key: Some("supplied-key".into()),
+            api_secret: Some("c3VwcGxpZWQtc2VjcmV0".into()),
+            api_passphrase: Some("supplied-passphrase".into()),
+            signer_type: Some(signer_type as f64),
+            funder_address: Some(funder.into()),
+        });
+        let h = harness(ExchangeName::Polymarket, opts, |http| {
+            private_routes(http);
+            markets(http);
+            http.ok("POST", "/midpoints", json!({"123":"0.62","456":"0.38"}));
+            http.ok("GET", "/positions", json!([]));
+            http.ok(
+                "POST",
+                "/order",
+                json!({"success":true,"orderID":"supplied-order"}),
+            );
+        });
+        assert_eq!(
+            h.drive(h.venue().validate_account()).unwrap().error,
+            "".into()
+        );
+        assert!(
+            h.http.calls("/auth/derive-api-key").is_empty(),
+            "provided credentials skip derivation"
+        );
+        let balance = &h.http.calls("/balance-allowance")[0];
+        assert_eq!(balance.headers["POLY_API_KEY"], "supplied-key");
+        assert_eq!(balance.headers["POLY_PASSPHRASE"], "supplied-passphrase");
+        assert_eq!(balance.params["signature_type"], json!(signer_type as f64));
+        assert!(h.drive(h.venue().fetch_positions(None)).unwrap().is_empty());
+        assert_eq!(h.http.calls("/positions")[0].params["user"], funder);
+        let markets = h.drive(h.venue().fetch_markets()).unwrap();
+        let tickers = h.drive(h.venue().fetch_tickers()).unwrap();
+        h.store
+            .update_full(
+                StoreUpdate {
+                    markets: Some(markets),
+                    tickers: Some(tickers),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+        assert_eq!(place(&h, json!({"symbol":"event-Yes","type":"limit","side":"buy","amount":10.259,"price":0.573})).unwrap(), ["supplied-order"]);
+        let request = &h.http.calls("/order")[0];
+        let bytes = wire(request);
+        let payload: serde_json::Value = serde_json::from_slice(&bytes).unwrap();
+        assert_eq!(payload["owner"], "supplied-key");
+        assert_eq!(payload["order"]["signatureType"], signer_type);
+        assert_eq!(payload["order"]["maker"], funder);
+        assert_eq!(
+            payload["order"]["signer"],
+            if signer_type == 3 {
+                funder
+            } else {
+                "0x1a642f0E3c3aF545E7AcBD38b07251B3990914F1"
+            }
+        );
+        let preimage = format!(
+            "{}POST/order{}",
+            request.headers["POLY_TIMESTAMP"].as_str().unwrap(),
+            String::from_utf8(bytes).unwrap()
+        );
+        let expected = safe_cex_crypto::hmac_sha256(
+            b"supplied-secret",
+            preimage.as_bytes(),
+            safe_cex_crypto::Encoding::Base64,
+        )
+        .replace('+', "-")
+        .replace('/', "_");
+        assert_eq!(
+            request.headers["POLY_SIGNATURE"], expected,
+            "supplied secret signs exact native payload"
+        );
+        h.venue().dispose().unwrap();
+    }
+}
