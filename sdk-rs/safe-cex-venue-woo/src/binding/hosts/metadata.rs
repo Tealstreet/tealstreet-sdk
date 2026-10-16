@@ -4,7 +4,7 @@ use crate::{
     binding::{
         promise::Promise,
         rt::{Rt, Shared},
-        value::{Js, ObjectData, Thrown, arg, from_typed, to_typed},
+        value::{Js, Thrown, arg, from_typed, to_typed},
     },
     legacy_metadata::{self as meta, Field, Fields, Host, JsString, Rows, State, Task},
 };
@@ -16,30 +16,9 @@ use std::{
     task::Poll,
 };
 
-type States = Vec<(Weak<ObjectData>, Rc<State<Thrown>>)>;
-
-thread_local! {
-    /// The metadata cache/in-flight/backoff maps of each live receiver.
-    static STATES: RefCell<States> = const { RefCell::new(Vec::new()) };
-}
-
-fn receiver_state(this: &Js) -> Rc<State<Thrown>> {
-    let Js::Object(object) = this else {
-        unreachable!("WOOXExchange receivers are objects")
-    };
-    STATES.with(|states| {
-        let mut states = states.borrow_mut();
-        states.retain(|(owner, _)| owner.strong_count() > 0);
-        if let Some((_, state)) = states
-            .iter()
-            .find(|(owner, _)| std::ptr::eq(owner.as_ptr(), Rc::as_ptr(object)))
-        {
-            return state.clone();
-        }
-        let state = Rc::new(State::default());
-        states.push((Rc::downgrade(object), state.clone()));
-        state
-    })
+/// The metadata cache/in-flight/backoff maps; one receiver per exchange scope.
+fn receiver_state(rt: &Rt) -> Rc<State<Thrown>> {
+    rt.shared.extra.metadata.get_or_init(Rc::default).clone()
 }
 
 /// `this._accountPositionMode` is the source of truth other members read.
@@ -132,7 +111,7 @@ impl Frame {
         Rc::new(RefCell::new(Self { rt: rt.clone() }))
     }
     fn sync(&self) -> Result<(), Thrown> {
-        write_mode(&self.rt, &receiver_state(&self.rt.this))
+        write_mode(&self.rt, &receiver_state(&self.rt))
     }
     fn xhr(&self, method: &str, args: Vec<Js>) -> Result<Js, Thrown> {
         let client = self.rt.this.get("xhr")?;
@@ -146,7 +125,7 @@ impl Host for Frame {
     type Value = Js;
     type Positions = Js;
     fn state(&self) -> Rc<State<Thrown>> {
-        let state = receiver_state(&self.rt.this);
+        let state = receiver_state(&self.rt);
         state.mode.set(read_mode(&self.rt.this));
         state
     }
@@ -234,7 +213,11 @@ impl Host for Frame {
     }
     fn sleep(&mut self, delay: u64) -> Result<Task<(), Thrown>, Thrown> {
         let sleep = self.rt.global("sleep")?;
-        let done = awaited(invoke(&sleep, Js::Undefined, vec![Js::Number(delay as f64)])?);
+        let done = awaited(invoke(
+            &sleep,
+            Js::Undefined,
+            vec![Js::Number(delay as f64)],
+        )?);
         Ok(Box::pin(async move { done.await.map(|_| ()) }))
     }
     fn fetch_positions(&mut self) -> Result<Task<Js, Thrown>, Thrown> {
@@ -243,7 +226,12 @@ impl Host for Frame {
     fn update_positions(&mut self, positions: Js) -> Result<(), Thrown> {
         let store = self.rt.this.get("store")?;
         let update = store.get("update")?;
-        invoke(&update, store, vec![Js::object(vec![("positions", positions)])]).map(|_| ())
+        invoke(
+            &update,
+            store,
+            vec![Js::object(vec![("positions", positions)])],
+        )
+        .map(|_| ())
     }
     fn account_info(&mut self) -> Result<Task<Js, Thrown>, Thrown> {
         Ok(awaited(call_member(&self.rt, "fetchAccountInfo", vec![])?))
@@ -277,7 +265,7 @@ fn publish_mode(rt: &Rt, task: Task<Js, Thrown>) -> Js {
         rt,
         Ok(Box::pin(async move {
             let result = task.await;
-            write_mode(&owner, &receiver_state(&owner.this))?;
+            write_mode(&owner, &receiver_state(&owner))?;
             result
         })),
     )
@@ -296,21 +284,30 @@ fn fetch_account_info(rt: &Rt, _: Vec<Js>) -> Result<Js, Thrown> {
 
 fn get_position_mode(rt: &Rt, _: Vec<Js>) -> Result<Js, Thrown> {
     let mode = meta::get_position_mode(Frame::shared(rt));
-    Ok(publish_mode(rt, Box::pin(async move { Ok(mode_js(mode.await?)) })))
+    Ok(publish_mode(
+        rt,
+        Box::pin(async move { Ok(mode_js(mode.await?)) }),
+    ))
 }
 
 fn create_position_metadata_cache_key(_: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
     let symbol = text(&arg(&args, 0))?;
     let mode: PositionMode = to_typed(&arg(&args, 1))?;
-    Ok(Js::utf16(&meta::create_position_metadata_cache_key(&symbol, mode)))
+    Ok(Js::utf16(&meta::create_position_metadata_cache_key(
+        &symbol, mode,
+    )))
 }
 
 fn build_position_metadata_from_leverage(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
     let symbol = text(&arg(&args, 0))?;
     let mode: PositionMode = to_typed(&arg(&args, 1))?;
     let frame = Frame::shared(rt);
-    let rows =
-        meta::build_position_metadata_from_leverage(&mut *frame.borrow_mut(), symbol, mode, arg(&args, 2))?;
+    let rows = meta::build_position_metadata_from_leverage(
+        &mut *frame.borrow_mut(),
+        symbol,
+        mode,
+        arg(&args, 2),
+    )?;
     rows_js(&rows)
 }
 
@@ -338,7 +335,10 @@ fn confirm_position_mode_and_refresh_positions(rt: &Rt, args: Vec<Js>) -> Result
         Err(e) => return Ok(spawn(rt, Err(e))),
     };
     let done = meta::confirm_position_mode_and_refresh_positions(Frame::shared(rt), expected);
-    Ok(publish_mode(rt, Box::pin(async move { done.await.map(|()| Js::Undefined) })))
+    Ok(publish_mode(
+        rt,
+        Box::pin(async move { done.await.map(|()| Js::Undefined) }),
+    ))
 }
 
 fn set_leverage(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
@@ -353,7 +353,10 @@ fn set_leverage(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
 
 fn change_position_mode(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
     let done = meta::change_position_mode(Frame::shared(rt), arg(&args, 0).truthy());
-    Ok(spawn(rt, Ok(Box::pin(async move { done.await.map(|()| Js::Undefined) }))))
+    Ok(spawn(
+        rt,
+        Ok(Box::pin(async move { done.await.map(|()| Js::Undefined) })),
+    ))
 }
 
 fn after_method_called_in_worker(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {

@@ -1,6 +1,7 @@
 //! WOO members bound in binding/hosts/members.rs, driven through the production
 //! WooExchange: transaction-history fills and their symbol/side normalisation.
 #[path = "support/binding_harness.rs"]
+#[allow(dead_code)] // Shared support: each test crate uses a subset.
 mod binding_harness;
 use binding_harness::{harness, options};
 use safe_cex_types::{ExchangeName, ExchangeOptions, ExecutionsOptions};
@@ -28,12 +29,18 @@ fn fetch_historical_fills_reads_transaction_history_for_the_venue_symbol() {
         );
     });
     let fills = h
-        .drive(h.venue().fetch_historical_fills(executions(Some("BTCUSDT"))))
+        .drive(
+            h.venue()
+                .fetch_historical_fills(executions(Some("BTCUSDT"))),
+        )
         .unwrap();
     let calls = h.http.calls("/v3/trade/transactionHistory");
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].method, "GET");
-    assert_eq!(calls[0].params, json!({"limit": "500", "symbol": "PERP_BTC_USDT"}));
+    assert_eq!(
+        calls[0].params,
+        json!({"limit": "500", "symbol": "PERP_BTC_USDT"})
+    );
     let fills = serde_json::to_value(fills).unwrap();
     assert_eq!(fills.as_array().unwrap().len(), 2);
     // ts: sorted newest first (b.timestamp - a.timestamp).
@@ -67,7 +74,10 @@ fn hedge_side_strings_carry_side_and_position_side() {
     let fills = serde_json::to_value(fills).unwrap();
     assert_eq!(fills[0]["side"], "sell");
     assert_eq!(fills[0]["positionSide"], "short");
-    assert_eq!(h.http.calls("/v3/trade/transactionHistory")[0].params, json!({"limit": "500"}));
+    assert_eq!(
+        h.http.calls("/v3/trade/transactionHistory")[0].params,
+        json!({"limit": "500"})
+    );
 }
 
 #[test]

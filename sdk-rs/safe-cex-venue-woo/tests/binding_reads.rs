@@ -1,6 +1,7 @@
 //! Account/market/ticker reads and the leverage/position-mode writes of the
 //! production WooExchange, driven end to end over a scripted transport.
 #[path = "support/binding_harness.rs"]
+#[allow(dead_code)] // Shared support: each test crate uses a subset.
 mod binding_harness;
 use binding_harness::{Harness, harness, options};
 use safe_cex_store::Store;
@@ -64,7 +65,10 @@ fn get_account_maps_application_and_absent_referrer() {
         http.ok("GET", ACCOUNT, account("ONE_WAY"));
     });
     let result = h.drive(h.venue().get_account()).unwrap();
-    assert_eq!(json_of(&result), json!({"userId": "app-1", "affiliateId": null}));
+    assert_eq!(
+        json_of(&result),
+        json!({"userId": "app-1", "affiliateId": null})
+    );
     let calls = h.http.calls(ACCOUNT);
     assert_eq!(calls.len(), 1);
     assert_eq!(calls[0].method, "GET");
@@ -73,7 +77,11 @@ fn get_account_maps_application_and_absent_referrer() {
 #[test]
 fn get_account_rejects_an_invalid_account_envelope() {
     let h = harness(ExchangeName::Woo, options(), |http| {
-        http.ok("GET", ACCOUNT, json!({"applicationId": "app-1", "positionMode": "SIDEWAYS"}));
+        http.ok(
+            "GET",
+            ACCOUNT,
+            json!({"applicationId": "app-1", "positionMode": "SIDEWAYS"}),
+        );
     });
     let error = h.drive(h.venue().get_account()).unwrap_err();
     assert_eq!(
@@ -85,7 +93,12 @@ fn get_account_rejects_an_invalid_account_envelope() {
 #[test]
 fn get_account_rejects_with_the_failed_envelope_message() {
     let h = harness(ExchangeName::Woo, options(), |http| {
-        http.route("GET", ACCOUNT, 200.0, json!({"success": false, "msg": "  key revoked  "}));
+        http.route(
+            "GET",
+            ACCOUNT,
+            200.0,
+            json!({"success": false, "msg": "  key revoked  "}),
+        );
     });
     let error = h.drive(h.venue().get_account()).unwrap_err();
     assert_eq!(error.message, "  key revoked  ");
@@ -101,7 +114,11 @@ fn validate_account_checks_the_key_then_reads_the_balance() {
         json_of(&result),
         json!({"error": "", "balance": {"free": 10.24, "total": 20.0, "used": 5.26, "upnl": 0.0}})
     );
-    assert_eq!(h.http.calls(ACCOUNT).len(), 2, "key check, then fetchBalance");
+    assert_eq!(
+        h.http.calls(ACCOUNT).len(),
+        2,
+        "key check, then fetchBalance"
+    );
 }
 
 #[test]
@@ -121,7 +138,14 @@ fn validate_account_reads_the_secondary_key_when_configured() {
         .iter()
         .map(|r| r.headers["x-api-key"].clone())
         .collect();
-    assert_eq!(keys, vec![json!("fixture-key"), json!("second-key"), json!("second-key")]);
+    assert_eq!(
+        keys,
+        vec![
+            json!("fixture-key"),
+            json!("second-key"),
+            json!("second-key")
+        ]
+    );
 }
 
 #[test]
@@ -137,9 +161,15 @@ fn validate_account_reports_the_rejection_message() {
     let seen = errors(&h);
     let result = h.drive(h.venue().validate_account()).unwrap();
     assert_eq!(json_of(&result), json!({"error": "the api key is wrong"}));
-    assert_eq!(h.http.calls(ACCOUNT).len(), 1, "no balance read after a failed key check");
+    assert_eq!(
+        h.http.calls(ACCOUNT).len(),
+        1,
+        "no balance read after a failed key check"
+    );
     assert!(
-        seen.borrow().iter().any(|e| e.contains("the api key is wrong")),
+        seen.borrow()
+            .iter()
+            .any(|e| e.contains("the api key is wrong")),
         "emitAndLogError carries the response message: {:?}",
         seen.borrow()
     );
@@ -197,20 +227,32 @@ fn fetch_markets_maps_perpetual_rows_only() {
         btc["limits"],
         json!({"amount": {"min": 0.0001, "max": 100.0}, "leverage": {"min": 1.0, "max": 50.0}})
     );
-    assert_eq!(markets[1]["limits"]["leverage"]["max"], 100.0, "base_imr defaults to 0.01");
+    assert_eq!(
+        markets[1]["limits"]["leverage"]["max"], 100.0,
+        "base_imr defaults to 0.01"
+    );
     assert_eq!(h.http.calls(MARKETS)[0].method, "GET");
 }
 
 #[test]
 fn fetch_markets_failure_returns_the_stored_markets() {
     let h = harness(ExchangeName::Woo, options(), |http| {
-        http.route("GET", MARKETS, 500.0, json!({"success": false, "message": "down"}));
+        http.route(
+            "GET",
+            MARKETS,
+            500.0,
+            json!({"success": false, "message": "down"}),
+        );
     });
     seed_markets(&h);
     let seen = errors(&h);
     let markets = h.drive(h.venue().fetch_markets()).unwrap();
     assert_eq!(json_of(&markets)[0]["symbol"], "BTCUSDT");
-    assert!(seen.borrow().iter().any(|e| e.contains("down")), "{:?}", seen.borrow());
+    assert!(
+        seen.borrow().iter().any(|e| e.contains("down")),
+        "{:?}",
+        seen.borrow()
+    );
 }
 
 #[test]
@@ -231,7 +273,11 @@ fn fetch_tickers_parses_rows_with_a_known_market() {
     });
     seed_markets(&h);
     let tickers = json_of(&h.drive(h.venue().fetch_tickers()).unwrap());
-    assert_eq!(tickers.as_array().unwrap().len(), 1, "unknown markets are skipped");
+    assert_eq!(
+        tickers.as_array().unwrap().len(),
+        1,
+        "unknown markets are skipped"
+    );
     let t = &tickers[0];
     assert_eq!(t["id"], "BTC/USDT:USDT");
     assert_eq!(t["symbol"], "BTCUSDT");
@@ -251,12 +297,21 @@ fn fetch_tickers_parses_rows_with_a_known_market() {
 #[test]
 fn fetch_tickers_failure_returns_the_stored_tickers() {
     let h = harness(ExchangeName::Woo, options(), |http| {
-        http.route("GET", TICKERS, 500.0, json!({"success": false, "message": "no tickers"}));
+        http.route(
+            "GET",
+            TICKERS,
+            500.0,
+            json!({"success": false, "message": "no tickers"}),
+        );
     });
     let seen = errors(&h);
     let tickers = h.drive(h.venue().fetch_tickers()).unwrap();
     assert!(tickers.is_empty());
-    assert!(seen.borrow().iter().any(|e| e.contains("no tickers")), "{:?}", seen.borrow());
+    assert!(
+        seen.borrow().iter().any(|e| e.contains("no tickers")),
+        "{:?}",
+        seen.borrow()
+    );
 }
 
 #[test]
@@ -279,7 +334,12 @@ fn set_leverage_posts_cross_both_sides() {
 #[test]
 fn set_leverage_failure_is_reported_and_rethrown() {
     let h = harness(ExchangeName::Woo, options(), |http| {
-        http.route("POST", LEVERAGE, 400.0, json!({"success": false, "message": "leverage too high"}));
+        http.route(
+            "POST",
+            LEVERAGE,
+            400.0,
+            json!({"success": false, "message": "leverage too high"}),
+        );
     });
     let seen = errors(&h);
     let error = h
@@ -287,7 +347,9 @@ fn set_leverage_failure_is_reported_and_rethrown() {
         .unwrap_err();
     assert!(!error.message.is_empty());
     assert!(
-        seen.borrow().iter().any(|e| e.contains("leverage too high")),
+        seen.borrow()
+            .iter()
+            .any(|e| e.contains("leverage too high")),
         "{:?}",
         seen.borrow()
     );
@@ -307,11 +369,19 @@ fn set_leverage_refreshes_cached_metadata_without_a_new_read() {
         http.ok("POST", LEVERAGE, json!({}));
     });
     let read = |h: &Harness| {
-        json_of(&h.drive(h.venue().fetch_positions(Some(vec!["BTCUSDT".into()]))).unwrap())
+        json_of(
+            &h.drive(h.venue().fetch_positions(Some(vec!["BTCUSDT".into()])))
+                .unwrap(),
+        )
     };
     let first = read(&h);
     assert_eq!(first[0]["leverage"], 5.0, "{first}");
-    let get = h.http.calls(LEVERAGE).iter().filter(|r| r.method == "GET").count();
+    let get = h
+        .http
+        .calls(LEVERAGE)
+        .iter()
+        .filter(|r| r.method == "GET")
+        .count();
     assert_eq!(get, 1);
     assert_eq!(
         h.http.calls(LEVERAGE)[0].params,
@@ -321,7 +391,12 @@ fn set_leverage_refreshes_cached_metadata_without_a_new_read() {
         .unwrap();
     let second = read(&h);
     assert_eq!(second[0]["leverage"], 9.0, "{second}");
-    let get = h.http.calls(LEVERAGE).iter().filter(|r| r.method == "GET").count();
+    let get = h
+        .http
+        .calls(LEVERAGE)
+        .iter()
+        .filter(|r| r.method == "GET")
+        .count();
     assert_eq!(get, 1, "the cached metadata answered");
 }
 
@@ -336,8 +411,14 @@ fn change_position_mode_posts_then_confirms_by_readback() {
     let posts = h.http.calls(MODE);
     assert_eq!(posts.len(), 1);
     assert_eq!(posts[0].data, json!("position_mode=HEDGE_MODE"));
-    assert!(!h.http.calls(ACCOUNT).is_empty(), "the readback reads account info");
-    assert!(!h.http.calls(POSITIONS).is_empty(), "positions are refreshed after readback");
+    assert!(
+        !h.http.calls(ACCOUNT).is_empty(),
+        "the readback reads account info"
+    );
+    assert!(
+        !h.http.calls(POSITIONS).is_empty(),
+        "positions are refreshed after readback"
+    );
 }
 
 #[test]
@@ -354,10 +435,18 @@ fn change_position_mode_already_set_is_a_no_op_after_readback() {
         no_positions(http);
     });
     let seen = errors(&h);
-    h.drive(h.venue().change_position_mode(false, None)).unwrap();
+    h.drive(h.venue().change_position_mode(false, None))
+        .unwrap();
     assert_eq!(h.http.calls(MODE)[0].data, json!("position_mode=ONE_WAY"));
-    assert!(!h.http.calls(ACCOUNT).is_empty(), "already-set still confirms by readback");
-    assert!(seen.borrow().is_empty(), "no error emitted: {:?}", seen.borrow());
+    assert!(
+        !h.http.calls(ACCOUNT).is_empty(),
+        "already-set still confirms by readback"
+    );
+    assert!(
+        seen.borrow().is_empty(),
+        "no error emitted: {:?}",
+        seen.borrow()
+    );
 }
 
 #[test]
@@ -376,8 +465,15 @@ fn change_position_mode_refuses_with_pending_orders() {
         .drive(h.venue().change_position_mode(true, None))
         .unwrap_err();
     assert!(!error.message.is_empty());
-    assert!(h.http.calls(ACCOUNT).is_empty(), "no readback after a refusal");
-    assert!(seen.borrow().iter().any(|e| e.contains(message)), "{:?}", seen.borrow());
+    assert!(
+        h.http.calls(ACCOUNT).is_empty(),
+        "no readback after a refusal"
+    );
+    assert!(
+        seen.borrow().iter().any(|e| e.contains(message)),
+        "{:?}",
+        seen.borrow()
+    );
 }
 
 #[test]

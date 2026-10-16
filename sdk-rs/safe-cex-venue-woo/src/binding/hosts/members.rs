@@ -20,7 +20,11 @@ fn coercion(e: safe_cex_num::JsCoercionError) -> Thrown {
 }
 
 fn optional_json(v: &Js) -> Result<Option<Value>, Thrown> {
-    Ok(if v.is_undefined() { None } else { Some(to_json(v)?) })
+    Ok(if v.is_undefined() {
+        None
+    } else {
+        Some(to_json(v)?)
+    })
 }
 
 fn object(v: &Js) -> Result<Map<String, Value>, Thrown> {
@@ -55,7 +59,11 @@ fn text_option(v: &Js) -> Result<Option<String>, Thrown> {
 }
 
 fn number_option(v: &Js) -> Result<Option<f64>, Thrown> {
-    Ok(if v.is_undefined() { None } else { Some(v.to_number()?) })
+    Ok(if v.is_undefined() {
+        None
+    } else {
+        Some(v.to_number()?)
+    })
 }
 
 /// `{ symbol?, fromMilliseconds?, toMilliseconds?, limit }` as the legacy query.
@@ -79,15 +87,23 @@ fn parsed_transaction(row: transaction::ParsedWooTransaction) -> Result<Js, Thro
         ("side", from_typed(&row.side)?),
         ("price", Js::Number(row.price)),
         ("qty", Js::Number(row.qty)),
-        ("timestampMilliseconds", Js::Number(row.timestamp_milliseconds)),
+        (
+            "timestampMilliseconds",
+            Js::Number(row.timestamp_milliseconds),
+        ),
         ("timestampSeconds", Js::Number(row.timestamp_seconds)),
-        ("orderId", row.order_id.map_or(Js::Undefined, |s| Js::str(&s))),
+        (
+            "orderId",
+            row.order_id.map_or(Js::Undefined, |s| Js::str(&s)),
+        ),
         ("fillId", row.fill_id.map_or(Js::Undefined, |s| Js::str(&s))),
         ("maker", row.maker.map_or(Js::Undefined, Js::Bool)),
         ("commission", number_or_undefined(row.commission)),
         (
             "commissionAsset",
-            row.commission_asset.as_ref().map_or(Js::Undefined, from_json),
+            row.commission_asset
+                .as_ref()
+                .map_or(Js::Undefined, from_json),
         ),
         ("realizedPnl", number_or_undefined(row.realized_pnl)),
         ("positionSide", from_typed(&row.position_side)?),
@@ -261,9 +277,10 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
                 })?;
                 let adapter = JsRestAdapter::new(rt.this.get("xhr")?);
                 let venue = venue(&rt)?;
-                let fills = historical_fills::fetch_historical_fills(venue.as_ref(), &adapter, &opts)
-                    .await
-                    .map_err(Thrown::from)?;
+                let fills =
+                    historical_fills::fetch_historical_fills(venue.as_ref(), &adapter, &opts)
+                        .await
+                        .map_err(Thrown::from)?;
                 from_typed(&fills)
             })
         }),

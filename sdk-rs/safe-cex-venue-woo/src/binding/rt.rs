@@ -20,10 +20,11 @@ pub(crate) struct WooExtra {
     pub options: safe_cex_types::ExchangeOptions,
     pub external_public_data: Option<ExternalPublicDataFactory>,
     pub classes: RefCell<Vec<Rc<ClassRecord>>>,
+    pub metadata: std::cell::OnceCell<Rc<crate::legacy_metadata::State<Thrown>>>,
 }
 
 impl WooExtra {
-    pub fn class(&self, class: &Js) -> Option<Rc<ClassRecord>> {
+    pub(crate) fn class(&self, class: &Js) -> Option<Rc<ClassRecord>> {
         self.classes
             .borrow()
             .iter()

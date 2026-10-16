@@ -1,5 +1,4 @@
 //! Concrete JS-value runtime binding the ported WOO bodies to the Exchange trait.
-#![allow(dead_code)] // WIP: removed once every host is bound.
 pub(crate) mod classes;
 pub mod exchange;
 pub(crate) mod globals;

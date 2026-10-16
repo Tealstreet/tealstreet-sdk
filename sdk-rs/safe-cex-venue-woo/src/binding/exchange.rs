@@ -72,6 +72,7 @@ impl WooExchange {
                     options: options.clone(),
                     external_public_data: deps.external_public_data.clone(),
                     classes: Default::default(),
+                    metadata: Default::default(),
                 },
             )
         });
@@ -83,10 +84,9 @@ impl WooExchange {
         let weak = Rc::downgrade(&shared);
         super::hosts::socket_control::define_socket_classes(&rt, weak.clone(), runtime.clone())
             .map_err(err)?;
-        let class = crate::exchange_class::define_exchange_class(super::ops::exchange_class(
-            weak, runtime,
-        ))
-        .map_err(err)?;
+        let class =
+            crate::exchange_class::define_exchange_class(super::ops::exchange_class(weak, runtime))
+                .map_err(err)?;
         let _ = shared.globals.define("WOOXExchange", class.clone());
         let receiver = class
             .call(
@@ -254,7 +254,11 @@ impl Exchange for WooExchange {
         self.invoke_unit("changePositionMode", a)
     }
     // ts: base.ts:836 — WOOXExchange inherits changeMarginType, which rejects.
-    fn change_margin_type(&self, _isolated: bool, _symbol: Option<String>) -> ExchangeFuture<'_, ()> {
+    fn change_margin_type(
+        &self,
+        _isolated: bool,
+        _symbol: Option<String>,
+    ) -> ExchangeFuture<'_, ()> {
         not_implemented()
     }
     fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {

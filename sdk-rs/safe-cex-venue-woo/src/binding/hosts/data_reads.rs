@@ -37,7 +37,10 @@ impl Callee {
     }
     pub(crate) fn invoke(&self, args: Vec<Js>) -> Result<Js, Thrown> {
         if !self.f.is_callable() {
-            return Err(Thrown::type_error(&format!("{} is not a function", self.path)));
+            return Err(Thrown::type_error(&format!(
+                "{} is not a function",
+                self.path
+            )));
         }
         self.f.call(self.this.clone(), args)
     }
@@ -56,7 +59,13 @@ pub(crate) fn member(
         let shared = weak
             .upgrade()
             .ok_or_else(|| Thrown::error("Error", "exchange runtime disposed"))?;
-        body(Rt { shared, this: this.clone() }, args)
+        body(
+            Rt {
+                shared,
+                this: this.clone(),
+            },
+            args,
+        )
     })
 }
 
@@ -74,7 +83,11 @@ pub(crate) fn error_path(e: &Thrown, path: &[&str]) -> Result<Js, Thrown> {
 
 pub(crate) fn length(v: &Js) -> Result<usize, Thrown> {
     let n = v.get("length")?.to_number()?;
-    Ok(if n.is_finite() && n > 0.0 { n as usize } else { 0 })
+    Ok(if n.is_finite() && n > 0.0 {
+        n as usize
+    } else {
+        0
+    })
 }
 
 /// A for...of iterator: arrays iterate live, re-reading length each step.
@@ -135,7 +148,11 @@ pub(crate) fn schedule(
     callback: Rc<dyn Fn() -> Result<Task<Js, Thrown>, Thrown>>,
 ) -> Js {
     let runtime = rt.shared.runtime.clone();
-    let ms = if delay.is_finite() && delay > 0.0 { delay as u64 } else { 0 };
+    let ms = if delay.is_finite() && delay > 0.0 {
+        delay as u64
+    } else {
+        0
+    };
     let handle = Js::object_with_class("Timeout", vec![]);
     let weak: Weak<Shared> = Rc::downgrade(&rt.shared);
     let own = handle.clone();
@@ -171,7 +188,10 @@ pub(crate) fn schedule(
             }
             if !repeat {
                 if let Some(shared) = weak.upgrade() {
-                    shared.timers.borrow_mut().retain(|(h, _)| !h.same_reference(&own));
+                    shared
+                        .timers
+                        .borrow_mut()
+                        .retain(|(h, _)| !h.same_reference(&own));
                 }
                 return;
             }
@@ -253,20 +273,12 @@ impl body::Host for Frame {
             Binding::PositionMode => Prepared::Call(self.own("getPositionMode")?),
             Binding::OpenPositions => Prepared::Call(self.own("fetchOpenPositions")?),
             Binding::Metadata => Prepared::Call(self.own("fetchPositionMetadata")?),
-            Binding::MetadataSymbol => {
-                Prepared::Call(self.own("fetchPositionMetadataForSymbol")?)
-            }
+            Binding::MetadataSymbol => Prepared::Call(self.own("fetchPositionMetadataForSymbol")?),
             Binding::ParseFunding => Prepared::Call(self.own("parseFiniteFundingNumber")?),
             Binding::Normalize => Prepared::Call(Callee::global(&self.rt, "normalizeSymbol")?),
             Binding::Reverse => Prepared::Call(Callee::global(&self.rt, "reverseSymbol")?),
-            Binding::CandleStart => {
-                Prepared::Call(Callee::global(&self.rt, "getCandleStartTime")?)
-            }
-            Binding::Now => Prepared::Call(Callee::of(
-                self.rt.global("Date")?,
-                "now",
-                "Date.now",
-            )?),
+            Binding::CandleStart => Prepared::Call(Callee::global(&self.rt, "getCandleStartTime")?),
+            Binding::Now => Prepared::Call(Callee::of(self.rt.global("Date")?, "now", "Date.now")?),
             Binding::ListenCandle | Binding::ListenBook => {
                 let name = if binding == Binding::ListenCandle {
                     "listenOHLCV"
@@ -529,7 +541,10 @@ pub(crate) fn register(g: &Js, _weak: Weak<Shared>) {
         "getCandleStartTime",
         Js::function("getCandleStartTime", |_, a| {
             let timeframe = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
-            Ok(Js::Number(candle_start_time(&timeframe, arg(&a, 1).to_number()?)))
+            Ok(Js::Number(candle_start_time(
+                &timeframe,
+                arg(&a, 1).to_number()?,
+            )))
         }),
     );
 }

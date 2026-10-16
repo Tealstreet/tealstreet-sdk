@@ -77,7 +77,13 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
         .unwrap_or(constants::RECV_WINDOW as f64);
     let base_url = constants::BASE_URL
         .iter()
-        .find(|(k, _)| *k == if typed.testnet == Some(true) { "testnet" } else { "livenet" })
+        .find(|(k, _)| {
+            *k == if typed.testnet == Some(true) {
+                "testnet"
+            } else {
+                "livenet"
+            }
+        })
         .map(|(_, v)| *v)
         .unwrap_or_default();
     let xhr = client::create(
@@ -109,7 +115,11 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
         "__configureRetry",
         vec![Js::object(vec![
             ("retries", Js::Number(3.0)),
-            ("retryCondition", rt.global("networkErrorOnRead")?.call(Js::Undefined, vec![])?),
+            (
+                "retryCondition",
+                rt.global("networkErrorOnRead")?
+                    .call(Js::Undefined, vec![])?,
+            ),
         ])],
     )?;
     // The signer capability is not serializable; it lives on the typed options.
@@ -245,13 +255,18 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     );
     def("ORDER_TYPE", enum_table(constants::ORDER_TYPE));
     def("ORDER_SIDE", enum_table(constants::ORDER_SIDE));
-    def("ORDER_TRIGGER_TYPE", enum_table(constants::ORDER_TRIGGER_TYPE));
+    def(
+        "ORDER_TRIGGER_TYPE",
+        enum_table(constants::ORDER_TRIGGER_TYPE),
+    );
 
     // woo.utils.ts
     def(
         "normalizeSymbol",
         Js::function("normalizeSymbol", |_, a| {
-            Ok(Js::str(&crate::utils::normalize_symbol(&text(&arg(&a, 0))?)))
+            Ok(Js::str(&crate::utils::normalize_symbol(&text(&arg(
+                &a, 0,
+            ))?)))
         }),
     );
     def(
@@ -271,7 +286,9 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     let w = weak.clone();
     def(
         "createAPI",
-        Js::function("createAPI", move |_, a| create_api(&scope_of(&w)?, arg(&a, 0))),
+        Js::function("createAPI", move |_, a| {
+            create_api(&scope_of(&w)?, arg(&a, 0))
+        }),
     );
     let w = weak.clone();
     def(
@@ -283,7 +300,9 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
     let w = weak.clone();
     def(
         "getTransport",
-        Js::function("getTransport", move |_, _| Ok(get_transport(&scope_of(&w)?))),
+        Js::function("getTransport", move |_, _| {
+            Ok(get_transport(&scope_of(&w)?))
+        }),
     );
     def(
         "rateLimit",

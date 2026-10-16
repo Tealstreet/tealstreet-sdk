@@ -44,7 +44,12 @@ impl Frame {
         Ok(())
     }
     fn global(&self, path: &str, member: &str, args: Vec<Js>) -> Result<Js, Thrown> {
-        Callee::of(self.rt()?.global(path)?, member, &format!("{path}.{member}"))?.invoke(args)
+        Callee::of(
+            self.rt()?.global(path)?,
+            member,
+            &format!("{path}.{member}"),
+        )?
+        .invoke(args)
     }
 }
 
@@ -108,9 +113,7 @@ impl body::Host for Frame {
     }
     // ts: jsonParse — JSON.parse inside try/catch, null on any failure.
     fn parse(&mut self, data: Js) -> Result<Js, Thrown> {
-        Ok(self
-            .global("JSON", "parse", vec![data])
-            .unwrap_or(Js::Null))
+        Ok(self.global("JSON", "parse", vec![data]).unwrap_or(Js::Null))
     }
     fn create_socket(&mut self, call: Callee, url: JsString) -> Result<Js, Thrown> {
         call.invoke(vec![Js::utf16(&url)])
@@ -162,7 +165,9 @@ impl body::Host for Frame {
     }
     fn object_values(&mut self, v: Js) -> Result<Vec<Js>, Thrown> {
         if v.is_nullish() {
-            return Err(Thrown::type_error("Cannot convert undefined or null to object"));
+            return Err(Thrown::type_error(
+                "Cannot convert undefined or null to object",
+            ));
         }
         Ok(v.own_entries()?.into_iter().map(|(_, v)| v).collect())
     }
@@ -213,7 +218,8 @@ impl body::Host for Frame {
         Ok(Box::pin(await_js(signer.invoke(vec![request])?)))
     }
     fn hmac_sha256_hex(&mut self, secret: Js, to_sign: JsString) -> Result<JsString, Thrown> {
-        let hmac = Callee::global(self.rt()?, "createHmac")?.invoke(vec![Js::str("sha256"), secret])?;
+        let hmac =
+            Callee::global(self.rt()?, "createHmac")?.invoke(vec![Js::str("sha256"), secret])?;
         let hmac = Callee::of(hmac, "update", "hmac.update")?.invoke(vec![Js::utf16(&to_sign)])?;
         text(&Callee::of(hmac, "digest", "hmac.digest")?.invoke(vec![Js::str("hex")])?)
     }
@@ -262,18 +268,24 @@ fn base_fields(receiver: &Js) -> Result<(), Thrown> {
     )
 }
 
-pub(crate) fn define_socket_classes(rt: &Rt, weak: Weak<Shared>, runtime: Runtime) -> Result<(), Thrown> {
+pub(crate) fn define_socket_classes(
+    rt: &Rt,
+    weak: Weak<Shared>,
+    runtime: Runtime,
+) -> Result<(), Thrown> {
     let store = rt.shared.store.clone();
     let frames = weak.clone();
     let common = Rc::new(SocketClassOps {
         stream: ops::stream(weak.clone(), runtime.clone()),
-        derive: Rc::new(|name: &str, superclass: Js, _arity, initialize: Initialize| {
-            let fields: Initialize = Rc::new(move |receiver: Js| {
-                base_fields(&receiver)?;
-                initialize(receiver)
-            });
-            classes::derive_socket(name, superclass, fields)
-        }),
+        derive: Rc::new(
+            |name: &str, superclass: Js, _arity, initialize: Initialize| {
+                let fields: Initialize = Rc::new(move |receiver: Js| {
+                    base_fields(&receiver)?;
+                    initialize(receiver)
+                });
+                classes::derive_socket(name, superclass, fields)
+            },
+        ),
         frame: Rc::new(move |receiver: &Js| Frame::over(&frames, receiver)),
         store: Rc::new(move |_: &Js| store.clone()),
         json: Rc::new(|v: &Js| to_json(v).map(Rc::new)),
@@ -330,7 +342,11 @@ fn update_order_book_by_price(a: Vec<Js>) -> Result<Js, Thrown> {
     Ok(Js::Number(match found {
         None if !upsert || zero => -1.0,
         None => {
-            let level = Js::object(vec![("price", price), ("amount", amount), ("total", Js::Number(0.0))]);
+            let level = Js::object(vec![
+                ("price", price),
+                ("amount", amount),
+                ("total", Js::Number(0.0)),
+            ]);
             cells.borrow_mut().insert(left as usize, Some(level));
             left as f64
         }
@@ -348,7 +364,9 @@ fn update_order_book_by_price(a: Vec<Js>) -> Result<Js, Thrown> {
 pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     let _ = g.define(
         "updateOrderBookByPrice",
-        Js::function("updateOrderBookByPrice", |_, a| update_order_book_by_price(a)),
+        Js::function("updateOrderBookByPrice", |_, a| {
+            update_order_book_by_price(a)
+        }),
     );
     if let Ok(console) = g.get("console") {
         let _ = console.define(

@@ -96,7 +96,11 @@ pub(crate) fn emit_with(
 /// `array.length` read as ToLength.
 pub(crate) fn length(value: &Js) -> Result<usize, Thrown> {
     let n = value.get("length")?.to_number()?;
-    Ok(if n.is_nan() || n <= 0.0 { 0 } else { n.floor() as usize })
+    Ok(if n.is_nan() || n <= 0.0 {
+        0
+    } else {
+        n.floor() as usize
+    })
 }
 
 /// The iteration protocol for `...value` over the values this source spreads.
@@ -163,10 +167,10 @@ impl Host for Frame {
         Ok(settle(self.rt.call_path(name, vec![])?))
     }
     fn recursive_orders(&mut self, endpoint: &str) -> Result<Task<Js, Thrown>, Thrown> {
-        Ok(settle(
-            self.rt
-                .call_path("fetchOrdersRecursively", vec![Js::str(endpoint)])?,
-        ))
+        Ok(settle(self.rt.call_path(
+            "fetchOrdersRecursively",
+            vec![Js::str(endpoint)],
+        )?))
     }
     fn delete(
         &mut self,

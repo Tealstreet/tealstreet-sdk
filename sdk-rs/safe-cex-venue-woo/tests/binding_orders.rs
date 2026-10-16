@@ -1,6 +1,7 @@
 //! WOO order members (legacy_order_control / legacy_order_writes) driven through
 //! the production WooExchange and the Exchange trait over a scripted transport.
 #[path = "support/binding_harness.rs"]
+#[allow(dead_code)] // Shared support: each test crate uses a subset.
 mod binding_harness;
 use binding_harness::{Harness, Http, harness, options};
 use safe_cex_store::{Store, StoreUpdate};
@@ -44,7 +45,11 @@ fn one_way(http: &Http) {
 }
 
 fn hedged(http: &Http) {
-    http.ok("GET", "/v3/accountinfo", json!({"positionMode": "HEDGE_MODE"}));
+    http.ok(
+        "GET",
+        "/v3/accountinfo",
+        json!({"positionMode": "HEDGE_MODE"}),
+    );
 }
 
 fn place(h: &Harness, opts: Value) -> Result<Vec<String>, String> {
@@ -80,7 +85,11 @@ fn long_position(contracts: f64) -> Value {
 }
 
 fn log(h: &Harness) -> String {
-    format!("{:#?}\nreports: {:?}", h.http.requests.borrow(), h.runtime.reports.borrow())
+    format!(
+        "{:#?}\nreports: {:?}",
+        h.http.requests.borrow(),
+        h.runtime.reports.borrow()
+    )
 }
 
 fn algo_ok(http: &Http, ids: &[u64]) {
@@ -91,7 +100,12 @@ fn algo_ok(http: &Http, ids: &[u64]) {
 
 fn place_ok(http: &Http, ids: &[u64]) {
     for id in ids {
-        http.route("POST", "/v1/order", 200.0, json!({"success": true, "order_id": id}));
+        http.route(
+            "POST",
+            "/v1/order",
+            200.0,
+            json!({"success": true, "order_id": id}),
+        );
     }
 }
 
@@ -120,7 +134,9 @@ fn place_limit_order_posts_one_lot() {
     assert_eq!(ids, Ok(vec!["123".to_string()]), "{}", log(&h));
     assert_eq!(
         bodies(&h, "POST", "/v1/order"),
-        vec![json!(format!("{BROKER}&order_price=99.5&order_quantity=1.5&order_type=LIMIT&reduce_only=false&side=BUY&symbol=PERP_BTC_USDT"))]
+        vec![json!(format!(
+            "{BROKER}&order_price=99.5&order_quantity=1.5&order_type=LIMIT&reduce_only=false&side=BUY&symbol=PERP_BTC_USDT"
+        ))]
     );
 }
 
@@ -132,12 +148,17 @@ fn place_market_order_prices_an_ioc_from_the_touch() {
         place_ok(http, &[7]);
     });
     seed(&h, vec![], vec![]);
-    let ids = place(&h, json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":1}));
+    let ids = place(
+        &h,
+        json!({"symbol":"BTCUSDT","type":"market","side":"buy","amount":1}),
+    );
     assert_eq!(ids, Ok(vec!["7".to_string()]), "{}", log(&h));
     // fair 100 * 1.009 misses the 101.5 ask, which is inside the 3% WOO cap.
     assert_eq!(
         bodies(&h, "POST", "/v1/order"),
-        vec![json!(format!("{BROKER}&order_price=101.5&order_quantity=1&order_type=IOC&side=BUY&symbol=PERP_BTC_USDT"))]
+        vec![json!(format!(
+            "{BROKER}&order_price=101.5&order_quantity=1&order_type=IOC&side=BUY&symbol=PERP_BTC_USDT"
+        ))]
     );
 }
 
@@ -156,7 +177,9 @@ fn place_market_order_falls_back_to_fair_slippage() {
     assert_eq!(ids, Ok(vec!["8".to_string()]), "{}", log(&h));
     assert_eq!(
         bodies(&h, "POST", "/v1/order"),
-        vec![json!(format!("{BROKER}&order_price=99.5&order_quantity=1&order_type=IOC&side=SELL&symbol=PERP_BTC_USDT"))]
+        vec![json!(format!(
+            "{BROKER}&order_price=99.5&order_quantity=1&order_type=IOC&side=SELL&symbol=PERP_BTC_USDT"
+        ))]
     );
 }
 
@@ -210,7 +233,9 @@ fn post_only_resting_order_is_sent_as_post_only() {
     assert_eq!(ids, Ok(vec!["9".to_string()]), "{}", log(&h));
     assert_eq!(
         bodies(&h, "POST", "/v1/order"),
-        vec![json!(format!("{BROKER}&order_price=99.5&order_quantity=1&order_type=POST_ONLY&side=BUY&symbol=PERP_BTC_USDT"))]
+        vec![json!(format!(
+            "{BROKER}&order_price=99.5&order_quantity=1&order_type=POST_ONLY&side=BUY&symbol=PERP_BTC_USDT"
+        ))]
     );
 }
 
@@ -228,7 +253,9 @@ fn caller_client_order_id_is_sent_verbatim() {
     assert_eq!(ids, Ok(vec!["10".to_string()]), "{}", log(&h));
     assert_eq!(
         bodies(&h, "POST", "/v1/order"),
-        vec![json!(format!("{BROKER}&client_order_id=9007199254740991&order_price=101&order_quantity=1&order_type=LIMIT&side=SELL&symbol=PERP_BTC_USDT"))]
+        vec![json!(format!(
+            "{BROKER}&client_order_id=9007199254740991&order_price=101&order_quantity=1&order_type=LIMIT&side=SELL&symbol=PERP_BTC_USDT"
+        ))]
     );
 }
 
@@ -257,9 +284,21 @@ fn large_order_is_split_into_max_size_lots_plus_remainder() {
         place_ok(http, &[1, 2, 3, 4]);
     });
     seed(&h, vec![], vec![]);
-    let ids = place(&h, json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":25,"price":99}));
-    assert_eq!(ids, Ok(vec!["1".into(), "2".into(), "3".into(), "4".into()]), "{}", log(&h));
-    let lot = |q: &str| json!(format!("{BROKER}&order_price=99&order_quantity={q}&order_type=LIMIT&side=BUY&symbol=PERP_BTC_USDT"));
+    let ids = place(
+        &h,
+        json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":25,"price":99}),
+    );
+    assert_eq!(
+        ids,
+        Ok(vec!["1".into(), "2".into(), "3".into(), "4".into()]),
+        "{}",
+        log(&h)
+    );
+    let lot = |q: &str| {
+        json!(format!(
+            "{BROKER}&order_price=99&order_quantity={q}&order_type=LIMIT&side=BUY&symbol=PERP_BTC_USDT"
+        ))
+    };
     // ts: lots = ceil(25 / 10) = 3, rest = 25 % 10 = 5, lotSize = adjust(20 / 3) = 6.667.
     assert_eq!(
         bodies(&h, "POST", "/v1/order"),
@@ -296,7 +335,9 @@ fn hedged_limit_order_carries_position_side() {
     assert_eq!(ids, Ok(vec!["11".to_string()]), "{}", log(&h));
     assert_eq!(
         bodies(&h, "POST", "/v1/order"),
-        vec![json!(format!("{BROKER}&order_price=99&order_quantity=1&order_type=LIMIT&position_side=SHORT&reduce_only=true&side=BUY&symbol=PERP_BTC_USDT"))]
+        vec![json!(format!(
+            "{BROKER}&order_price=99&order_quantity=1&order_type=LIMIT&position_side=SHORT&reduce_only=true&side=BUY&symbol=PERP_BTC_USDT"
+        ))]
     );
 }
 
@@ -305,19 +346,30 @@ fn limit_order_with_tp_sl_places_a_positional_sibling() {
     let h = harness(ExchangeName::Woo, options(), |http| {
         one_way(http);
         place_ok(http, &[123]);
-        http.ok("POST", "/v3/algo/order", json!({"rows": [{"orderId": 7}, {"orderId": 8}]}));
+        http.ok(
+            "POST",
+            "/v3/algo/order",
+            json!({"rows": [{"orderId": 7}, {"orderId": 8}]}),
+        );
     });
     seed(&h, vec![], vec![]);
     let ids = place(
         &h,
         json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":99,"stopLoss":90,"takeProfit":110,"tpTriggerType":"last_price"}),
     );
-    assert_eq!(ids, Ok(vec!["123".into(), "7".into(), "8".into()]), "{}", log(&h));
+    assert_eq!(
+        ids,
+        Ok(vec!["123".into(), "7".into(), "8".into()]),
+        "{}",
+        log(&h)
+    );
     assert_eq!(
         bodies(&h, "POST", "/v3/algo/order"),
-        vec![json!({"reduceOnly":true,"symbol":"PERP_BTC_USDT","algoType":"POSITIONAL_TP_SL","childOrders":[
+        vec![
+            json!({"reduceOnly":true,"symbol":"PERP_BTC_USDT","algoType":"POSITIONAL_TP_SL","childOrders":[
             {"reduceOnly":true,"algoType":"STOP_LOSS","type":"CLOSE_POSITION","triggerPriceType":"MARK_PRICE","side":"SELL","triggerPrice":"90"},
-            {"reduceOnly":true,"algoType":"TAKE_PROFIT","type":"CLOSE_POSITION","triggerPriceType":"MARKET_PRICE","side":"SELL","triggerPrice":"110"}],"brokerId":BROKER_ID})]
+            {"reduceOnly":true,"algoType":"TAKE_PROFIT","type":"CLOSE_POSITION","triggerPriceType":"MARKET_PRICE","side":"SELL","triggerPrice":"110"}],"brokerId":BROKER_ID})
+        ]
     );
 }
 
@@ -337,9 +389,11 @@ fn stop_market_with_amount_posts_a_stop_algo() {
     assert_eq!(ids, Ok(vec!["31".to_string()]), "{}", log(&h));
     assert_eq!(
         bodies(&h, "POST", "/v3/algo/order"),
-        vec![json!({"symbol":"PERP_BTC_USDT","type":"MARKET","algoType":"STOP","side":"SELL",
+        vec![
+            json!({"symbol":"PERP_BTC_USDT","type":"MARKET","algoType":"STOP","side":"SELL",
             "triggerPrice":95.0,"triggerPriceType":"MARKET_PRICE","reduceOnly":true,"positionSide":"LONG","quantity":1.0,
-            "brokerId":BROKER_ID})]
+            "brokerId":BROKER_ID})
+        ]
     );
 }
 
@@ -354,7 +408,12 @@ fn stop_market_lots_are_split_and_flattened() {
         &h,
         json!({"symbol":"BTCUSDT","type":"take_profit_market","side":"sell","amount":12,"price":110}),
     );
-    assert_eq!(ids, Ok(vec!["41".into(), "42".into(), "43".into()]), "{}", log(&h));
+    assert_eq!(
+        ids,
+        Ok(vec!["41".into(), "42".into(), "43".into()]),
+        "{}",
+        log(&h)
+    );
     let quantities: Vec<Value> = bodies(&h, "POST", "/v3/algo/order")
         .iter()
         .map(|b| b["quantity"].clone())
@@ -377,8 +436,10 @@ fn take_profit_without_amount_is_positional() {
     assert_eq!(ids, Ok(vec!["51".to_string()]), "{}", log(&h));
     assert_eq!(
         bodies(&h, "POST", "/v3/algo/order"),
-        vec![json!({"reduceOnly":true,"symbol":"PERP_BTC_USDT","algoType":"POSITIONAL_TP_SL","childOrders":[
-            {"reduceOnly":true,"algoType":"TAKE_PROFIT","type":"CLOSE_POSITION","triggerPriceType":"MARK_PRICE","side":"SELL","triggerPrice":"110"}],"brokerId":BROKER_ID})]
+        vec![
+            json!({"reduceOnly":true,"symbol":"PERP_BTC_USDT","algoType":"POSITIONAL_TP_SL","childOrders":[
+            {"reduceOnly":true,"algoType":"TAKE_PROFIT","type":"CLOSE_POSITION","triggerPriceType":"MARK_PRICE","side":"SELL","triggerPrice":"110"}],"brokerId":BROKER_ID})
+        ]
     );
 }
 
@@ -408,7 +469,10 @@ fn positional_take_profit_absorbs_and_cancels_an_open_stop_sibling() {
             .iter()
             .map(|c| (c["algoType"].clone(), c["triggerPrice"].clone()))
             .collect::<Vec<_>>(),
-        vec![(json!("STOP_LOSS"), json!("90")), (json!("TAKE_PROFIT"), json!("110"))]
+        vec![
+            (json!("STOP_LOSS"), json!("90")),
+            (json!("TAKE_PROFIT"), json!("110"))
+        ]
     );
 }
 
@@ -442,7 +506,10 @@ fn already_canceled_sibling_is_marked_canceled_and_placement_continues() {
 fn algo_order_without_price_is_reported_and_places_nothing() {
     let h = harness(ExchangeName::Woo, options(), one_way);
     seed(&h, vec![], vec![]);
-    let ids = place(&h, json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":1}));
+    let ids = place(
+        &h,
+        json!({"symbol":"BTCUSDT","type":"stop_market","side":"sell","amount":1}),
+    );
     assert_eq!(ids, Ok(vec![]), "{}", log(&h));
     assert!(h.http.requests.borrow().is_empty());
 }
@@ -461,8 +528,10 @@ fn trailing_stop_posts_callback_distance_and_position_size() {
     assert_eq!(ids, Ok(vec!["61".to_string()]), "{}", log(&h));
     assert_eq!(
         bodies(&h, "POST", "/v3/algo/order"),
-        vec![json!({"symbol":"PERP_BTC_USDT","type":"MARKET","algoType":"TRAILING_STOP","callbackValue":"5",
-            "side":"SELL","reduceOnly":true,"quantity":"2","triggerPriceType":"MARK_PRICE","brokerId":BROKER_ID})]
+        vec![
+            json!({"symbol":"PERP_BTC_USDT","type":"MARKET","algoType":"TRAILING_STOP","callbackValue":"5",
+            "side":"SELL","reduceOnly":true,"quantity":"2","triggerPriceType":"MARK_PRICE","brokerId":BROKER_ID})
+        ]
     );
 }
 
@@ -474,7 +543,10 @@ fn trailing_stop_without_a_position_is_refused() {
         &h,
         json!({"symbol":"BTCUSDT","type":"trailing_stop_market","side":"sell","amount":2,"price":95}),
     );
-    assert_eq!(result, Err("Position BTCUSDT and side long not found".to_string()));
+    assert_eq!(
+        result,
+        Err("Position BTCUSDT and side long not found".to_string())
+    );
     assert!(bodies(&h, "POST", "/v3/algo/order").is_empty());
 }
 
@@ -524,10 +596,19 @@ fn update_limit_order_amount_only() {
 #[test]
 fn update_limit_order_failure_is_rethrown() {
     let h = harness(ExchangeName::Woo, options(), |http| {
-        http.route("PUT", "/v3/order/557", 400.0, json!({"success": false, "message": "bad edit"}));
+        http.route(
+            "PUT",
+            "/v3/order/557",
+            400.0,
+            json!({"success": false, "message": "bad edit"}),
+        );
     });
     seed(&h, vec![], vec![]);
-    let result = update(&h, order("557", None, "limit", "buy", 99.0, 1.0), json!({"price": 98}));
+    let result = update(
+        &h,
+        order("557", None, "limit", "buy", 99.0, 1.0),
+        json!({"price": 98}),
+    );
     assert!(result.is_err(), "{result:?}");
 }
 
@@ -543,7 +624,10 @@ fn update_algo_order_with_amount_moves_trigger_price() {
         json!({"price": 96}),
     );
     assert_eq!(ids, Ok(vec!["901".to_string()]), "{}", log(&h));
-    assert_eq!(bodies(&h, "PUT", "/v3/algo/order/900"), vec![json!({"triggerPrice":"96"})]);
+    assert_eq!(
+        bodies(&h, "PUT", "/v3/algo/order/900"),
+        vec![json!({"triggerPrice":"96"})]
+    );
 }
 
 #[test]
@@ -574,7 +658,14 @@ fn update_trailing_stop_cancels_and_replaces() {
     seed(&h, vec![], vec![long_position(2.0)]);
     let ids = update(
         &h,
-        order("701", Some("700"), "trailing_stop_market", "sell", 95.0, 2.0),
+        order(
+            "701",
+            Some("700"),
+            "trailing_stop_market",
+            "sell",
+            95.0,
+            2.0,
+        ),
         json!({"price": 97}),
     );
     assert_eq!(ids, Ok(vec!["71".to_string()]), "{}", log(&h));
@@ -593,7 +684,10 @@ fn update_trailing_stop_cancels_and_replaces() {
             ("POST".into(), "/v3/algo/order".into())
         ]
     );
-    assert_eq!(bodies(&h, "POST", "/v3/algo/order")[0]["callbackValue"], json!("3"));
+    assert_eq!(
+        bodies(&h, "POST", "/v3/algo/order")[0]["callbackValue"],
+        json!("3")
+    );
 }
 
 // ---- cancelOrders ----
@@ -608,7 +702,14 @@ fn cancel_orders_cancels_limits_and_each_algo_parent_once() {
     let orders: Vec<Order> = vec![
         typed(order("123", None, "limit", "buy", 99.0, 1.0)),
         typed(order("901", Some("900"), "stop_market", "sell", 90.0, 0.0)),
-        typed(order("902", Some("900"), "take_profit_market", "sell", 110.0, 0.0)),
+        typed(order(
+            "902",
+            Some("900"),
+            "take_profit_market",
+            "sell",
+            110.0,
+            0.0,
+        )),
     ];
     h.drive(h.venue().cancel_orders(orders)).expect("cancel");
     let urls: Vec<(String, String)> = h
@@ -634,7 +735,12 @@ fn cancel_orders_cancels_limits_and_each_algo_parent_once() {
 #[test]
 fn cancel_orders_failure_is_rethrown() {
     let h = harness(ExchangeName::Woo, options(), |http| {
-        http.route("DELETE", "/v1/order", 400.0, json!({"success": false, "message": "unknown order"}));
+        http.route(
+            "DELETE",
+            "/v1/order",
+            400.0,
+            json!({"success": false, "message": "unknown order"}),
+        );
     });
     seed(&h, vec![], vec![]);
     let orders: Vec<Order> = vec![typed(order("123", None, "limit", "buy", 99.0, 1.0))];
@@ -690,14 +796,25 @@ fn fetch_orders_concatenates_limit_then_algo_rows() {
         log(&h)
     );
     // v1 signing sorts the query; v3 keeps qs insertion order.
-    assert_eq!(queries(&h, LIMIT_PAGE), vec![Some("page=1&status=INCOMPLETE".into())]);
-    assert_eq!(queries(&h, ALGO_PAGE), vec![Some("status=INCOMPLETE&page=1".into())]);
+    assert_eq!(
+        queries(&h, LIMIT_PAGE),
+        vec![Some("page=1&status=INCOMPLETE".into())]
+    );
+    assert_eq!(
+        queries(&h, ALGO_PAGE),
+        vec![Some("status=INCOMPLETE&page=1".into())]
+    );
 }
 
 #[test]
 fn fetch_orders_read_failure_yields_the_other_side() {
     let h = harness(ExchangeName::Woo, options(), |http| {
-        http.route("GET", LIMIT_PAGE, 500.0, json!({"success": false, "message": "boom"}));
+        http.route(
+            "GET",
+            LIMIT_PAGE,
+            500.0,
+            json!({"success": false, "message": "boom"}),
+        );
         http.route("GET", ALGO_PAGE, 200.0, json!({"success": true, "data": {"rows": [], "meta": {"total": 0, "records_per_page": 100}}}));
     });
     seed(&h, vec![], vec![]);
@@ -714,7 +831,9 @@ fn history_row(id: u64, created: &str) -> Value {
 }
 
 fn history_query(page: u32) -> Option<String> {
-    Some(format!("end_t=2&page={page}&realized_pnl=true&size=100&start_t=1&symbol=PERP_BTC_USDT"))
+    Some(format!(
+        "end_t=2&page={page}&realized_pnl=true&size=100&start_t=1&symbol=PERP_BTC_USDT"
+    ))
 }
 
 #[test]
@@ -737,7 +856,9 @@ fn fetch_historical_orders_pages_sorts_and_limits() {
     });
     seed(&h, vec![], vec![]);
     let opts = typed(json!({"symbol": "BTCUSDT", "from": 1, "to": 2, "limit": 2}));
-    let orders = h.drive(h.venue().fetch_historical_orders(Some(opts))).expect("history");
+    let orders = h
+        .drive(h.venue().fetch_historical_orders(Some(opts)))
+        .expect("history");
     let ids: Vec<(String, f64, String)> = orders
         .iter()
         .map(|o| (o.id.clone(), o.created_time, o.symbol.clone()))
@@ -752,7 +873,10 @@ fn fetch_historical_orders_pages_sorts_and_limits() {
         log(&h)
     );
     assert_eq!(orders[0].realized_pnl, Some(0.0));
-    assert_eq!(queries(&h, "/v1/orders"), vec![history_query(1), history_query(2)]);
+    assert_eq!(
+        queries(&h, "/v1/orders"),
+        vec![history_query(1), history_query(2)]
+    );
 }
 
 #[test]
@@ -760,7 +884,9 @@ fn fetch_historical_orders_unknown_symbol_reads_nothing() {
     let h = harness(ExchangeName::Woo, options(), |_| {});
     seed(&h, vec![], vec![]);
     let opts = typed(json!({"symbol": "ETHUSDT"}));
-    let orders = h.drive(h.venue().fetch_historical_orders(Some(opts))).expect("history");
+    let orders = h
+        .drive(h.venue().fetch_historical_orders(Some(opts)))
+        .expect("history");
     assert!(orders.is_empty());
     assert!(h.http.requests.borrow().is_empty());
 }
@@ -855,6 +981,14 @@ fn cancel_symbol_orders_deletes_by_venue_symbol_and_reports_failure() {
     let calls = h.http.calls("/v1/orders");
     assert_eq!(calls.len(), 1);
     // ts: signV1 sends a mutation's params as the sorted form body.
-    assert_eq!(bodies(&h, "DELETE", "/v1/orders"), vec![json!("symbol=PERP_BTC_USDT")]);
-    assert!(errors.borrow().iter().any(|e| e.contains("symbol has no orders")));
+    assert_eq!(
+        bodies(&h, "DELETE", "/v1/orders"),
+        vec![json!("symbol=PERP_BTC_USDT")]
+    );
+    assert!(
+        errors
+            .borrow()
+            .iter()
+            .any(|e| e.contains("symbol has no orders"))
+    );
 }

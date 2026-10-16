@@ -1,6 +1,7 @@
 //! Socket classes, stream/data reads and fill-driven position recovery of the
 //! production WooExchange, driven end to end over a scripted transport.
 #[path = "support/binding_harness.rs"]
+#[allow(dead_code)] // Shared support: each test crate uses a subset.
 mod binding_harness;
 use binding_harness::{Harness, Socket, harness, options};
 use safe_cex_exchange::websocket::WsEvent;
@@ -113,8 +114,12 @@ fn listen(h: &Harness, event: &str) -> Rc<RefCell<Vec<Value>>> {
     h.venue().base().on(
         event,
         Rc::new(move |_, data| {
-            sink.borrow_mut()
-                .push(data.as_array().and_then(|a| a.first()).cloned().unwrap_or(data.clone()));
+            sink.borrow_mut().push(
+                data.as_array()
+                    .and_then(|a| a.first())
+                    .cloned()
+                    .unwrap_or(data.clone()),
+            );
             Ok(())
         }),
     );
@@ -145,7 +150,11 @@ fn start_connects_the_public_socket_and_its_frames_update_the_store() {
             ]}),
         );
     });
-    assert_eq!(h.runtime.sockets.borrow().len(), 1, "public data only dials no private socket");
+    assert_eq!(
+        h.runtime.sockets.borrow().len(),
+        1,
+        "public data only dials no private socket"
+    );
     let public = socket(&h, PUBLIC_URL);
     assert_eq!(
         sent(&public),
@@ -164,14 +173,29 @@ fn start_connects_the_public_socket_and_its_frames_update_the_store() {
             {"symbol": "SPOT_BTC_USDT", "close": 1, "amount": 1, "volume": 1},
         ]}),
     );
-    push(&h, &public, json!({"topic": "bbos", "data": [{"symbol": "PERP_BTC_USDT", "bid": 105.4, "ask": 105.6}]}));
-    push(&h, &public, json!({"topic": "markprices", "data": [{"symbol": "PERP_BTC_USDT", "price": 105.45}]}));
+    push(
+        &h,
+        &public,
+        json!({"topic": "bbos", "data": [{"symbol": "PERP_BTC_USDT", "bid": 105.4, "ask": 105.6}]}),
+    );
+    push(
+        &h,
+        &public,
+        json!({"topic": "markprices", "data": [{"symbol": "PERP_BTC_USDT", "price": 105.45}]}),
+    );
     let t = ticker(&h);
     assert_eq!(
-        (t["last"].clone(), t["quoteVolume"].clone(), t["volume"].clone()),
+        (
+            t["last"].clone(),
+            t["quoteVolume"].clone(),
+            t["volume"].clone()
+        ),
         (json!(105.5), json!(5000.0), json!(50.0))
     );
-    assert_eq!((t["bid"].clone(), t["ask"].clone()), (json!(105.4), json!(105.6)));
+    assert_eq!(
+        (t["bid"].clone(), t["ask"].clone()),
+        (json!(105.4), json!(105.6))
+    );
     assert_eq!(t["mark"], json!(105.45));
     push(&h, &public, json!({"event": "ping"}));
     assert_eq!(sent(&public).last().unwrap(), &json!({"event": "pong"}));
@@ -181,11 +205,18 @@ fn start_connects_the_public_socket_and_its_frames_update_the_store() {
     h.runtime.advance(60_000.0);
     assert_eq!(h.http.calls(FUNDING).len(), 1);
     let t = ticker(&h);
-    assert_eq!((t["fundingRate"].clone(), t["fundingTime"].clone()), (json!(0.0005), json!(1700000060000.0)));
+    assert_eq!(
+        (t["fundingRate"].clone(), t["fundingTime"].clone()),
+        (json!(0.0005), json!(1700000060000.0))
+    );
     h.venue().dispose().unwrap();
     h.runtime.advance(60_000.0);
     h.runtime.advance(60_000.0);
-    assert_eq!(h.http.calls(FUNDING).len(), 1, "dispose clears the funding interval");
+    assert_eq!(
+        h.http.calls(FUNDING).len(),
+        1,
+        "dispose clears the funding interval"
+    );
 }
 
 #[test]
@@ -220,9 +251,22 @@ fn private_auth_failure_is_reported_and_leaves_it_unsubscribed() {
     let h = started(json!({}), |http| private_routes(http, "ONE_WAY"));
     let errors = listen(&h, "error");
     let private = socket(&h, PRIVATE_URL);
-    push(&h, &private, json!({"event": "auth", "success": false, "message": "signature mismatch"}));
-    assert_eq!(sent(&private).len(), 1, "no subscription after a failed auth");
-    let text = errors.borrow().iter().map(Value::to_string).collect::<Vec<_>>().join("|");
+    push(
+        &h,
+        &private,
+        json!({"event": "auth", "success": false, "message": "signature mismatch"}),
+    );
+    assert_eq!(
+        sent(&private).len(),
+        1,
+        "no subscription after a failed auth"
+    );
+    let text = errors
+        .borrow()
+        .iter()
+        .map(Value::to_string)
+        .collect::<Vec<_>>()
+        .join("|");
     assert!(text.contains("signature mismatch"), "{text}");
     assert!(!text.contains("Remote WS signing unavailable"), "{text}");
 }
@@ -256,9 +300,16 @@ fn execution_reports_update_store_orders_and_emit_fills() {
         "quantity": 2, "price": 100, "reduceOnly": false, "executedQuantity": 0, "executedPrice": 0});
     let mut new = limit.clone();
     new["status"] = json!("NEW");
-    push(&h, &private, json!({"topic": "executionreport", "data": new}));
+    push(
+        &h,
+        &private,
+        json!({"topic": "executionreport", "data": new}),
+    );
     let stored = order(&h, "11").expect("NEW report adds the order");
-    assert_eq!((stored["status"].clone(), stored["side"].clone()), (json!("open"), json!("buy")));
+    assert_eq!(
+        (stored["status"].clone(), stored["side"].clone()),
+        (json!("open"), json!("buy"))
+    );
     assert!(fills.borrow().is_empty());
 
     let mut filled = limit.clone();
@@ -266,7 +317,11 @@ fn execution_reports_update_store_orders_and_emit_fills() {
     filled["executedQuantity"] = json!(2);
     filled["executedPrice"] = json!(100.5);
     filled["executedTimestamp"] = json!(1700000001234.0);
-    push(&h, &private, json!({"topic": "executionreport", "data": filled}));
+    push(
+        &h,
+        &private,
+        json!({"topic": "executionreport", "data": filled}),
+    );
     assert_eq!(
         fills.borrow()[0],
         json!({"id": "11", "orderId": "11", "side": "buy", "symbol": "BTCUSDT",
@@ -278,15 +333,26 @@ fn execution_reports_update_store_orders_and_emit_fills() {
         "triggerPriceType": "MARK_PRICE", "reduceOnly": true, "totalExecutedQuantity": 0});
     let mut new = algo.clone();
     new["algoStatus"] = json!("NEW");
-    push(&h, &private, json!({"topic": "algoexecutionreportv2", "data": [new]}));
+    push(
+        &h,
+        &private,
+        json!({"topic": "algoexecutionreportv2", "data": [new]}),
+    );
     let stored = order(&h, "77").expect("NEW algo report adds the order");
-    assert_eq!((stored["type"].clone(), stored["price"].clone()), (json!("stop_market"), json!(90.0)));
+    assert_eq!(
+        (stored["type"].clone(), stored["price"].clone()),
+        (json!("stop_market"), json!(90.0))
+    );
 
     let mut filled = algo.clone();
     filled["algoStatus"] = json!("FILLED");
     filled["averageExecutedPrice"] = json!(89.5);
     filled["totalExecutedQuantity"] = json!(1);
-    push(&h, &private, json!({"topic": "algoexecutionreportv2", "data": filled}));
+    push(
+        &h,
+        &private,
+        json!({"topic": "algoexecutionreportv2", "data": filled}),
+    );
     assert_eq!(
         fills.borrow()[1],
         json!({"id": "77", "orderId": "77", "side": "sell", "symbol": "BTCUSDT",
@@ -308,41 +374,87 @@ fn a_fill_refreshes_the_symbol_position_and_dispose_clears_the_retry() {
     let before = h.http.calls(POSITIONS).len();
     let fill = json!({"symbol": "PERP_BTC_USDT", "orderId": 12, "side": "BUY", "type": "LIMIT",
         "quantity": 0.5, "price": 100, "reduceOnly": false, "status": "FILLED", "executedQuantity": 0.5, "executedPrice": 100});
-    push(&h, &private, json!({"topic": "executionreport", "data": fill}));
+    push(
+        &h,
+        &private,
+        json!({"topic": "executionreport", "data": fill}),
+    );
     // The zero-delay refresh reads the symbol's positions; the empty read leaves only
     // the zero-size metadata row, mismatching the optimistic signature.
     assert_eq!(h.http.calls(POSITIONS).len(), before + 1);
     assert_eq!(h.http.calls(LEVERAGE)[0].params["symbol"], "PERP_BTC_USDT");
-    let btc = position_rows(&h).into_iter().find(|p| p["symbol"] == "BTCUSDT").unwrap();
-    assert_eq!((btc["contracts"].clone(), btc["leverage"].clone()), (json!(0.0), json!(10.0)));
+    let btc = position_rows(&h)
+        .into_iter()
+        .find(|p| p["symbol"] == "BTCUSDT")
+        .unwrap();
+    assert_eq!(
+        (btc["contracts"].clone(), btc["leverage"].clone()),
+        (json!(0.0), json!(10.0))
+    );
     h.runtime.advance(100.0);
-    assert_eq!(h.http.calls(POSITIONS).len(), before + 1, "the retry waits 150ms");
+    assert_eq!(
+        h.http.calls(POSITIONS).len(),
+        before + 1,
+        "the retry waits 150ms"
+    );
     h.runtime.advance(50.0);
-    assert_eq!(h.http.calls(POSITIONS).len(), before + 2, "signature mismatch retries");
+    assert_eq!(
+        h.http.calls(POSITIONS).len(),
+        before + 2,
+        "signature mismatch retries"
+    );
     h.venue().dispose().unwrap();
-    assert!(h.venue().base().is_disposed(), "dispose reaches the BaseExchange core");
+    assert!(
+        h.venue().base().is_disposed(),
+        "dispose reaches the BaseExchange core"
+    );
     h.runtime.advance(300.0);
     h.runtime.advance(600.0);
-    assert_eq!(h.http.calls(POSITIONS).len(), before + 2, "dispose cleared the retry timer");
+    assert_eq!(
+        h.http.calls(POSITIONS).len(),
+        before + 2,
+        "dispose cleared the retry timer"
+    );
 }
 
 #[test]
 fn a_fill_matching_the_refreshed_position_stops_retrying() {
     let (h, private) = authed("ONE_WAY", |_| {});
-    h.http.routes.borrow_mut().retain(|(_, p, _)| p != POSITIONS);
-    h.http.ok("GET", POSITIONS, json!({"positions": [
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, p, _)| p != POSITIONS);
+    h.http.ok(
+        "GET",
+        POSITIONS,
+        json!({"positions": [
         {"symbol": "PERP_BTC_USDT", "holding": 0.5, "averageOpenPrice": 100,
-         "leverage": 10, "estLiqPrice": 50, "marginMode": "CROSS"}]}));
+         "leverage": 10, "estLiqPrice": 50, "marginMode": "CROSS"}]}),
+    );
     let before = h.http.calls(POSITIONS).len();
     let fill = json!({"symbol": "PERP_BTC_USDT", "orderId": 13, "side": "BUY", "type": "LIMIT",
         "quantity": 0.5, "price": 100, "reduceOnly": false, "status": "FILLED", "executedQuantity": 0.5, "executedPrice": 100});
-    push(&h, &private, json!({"topic": "executionreport", "data": fill}));
+    push(
+        &h,
+        &private,
+        json!({"topic": "executionreport", "data": fill}),
+    );
     h.runtime.advance(1.0);
     h.runtime.advance(150.0);
     h.runtime.advance(300.0);
-    assert_eq!(h.http.calls(POSITIONS).len(), before + 1, "matching signature: no retry");
-    let btc = position_rows(&h).into_iter().find(|p| p["symbol"] == "BTCUSDT").unwrap();
-    assert_eq!((btc["entryPrice"].clone(), btc["leverage"].clone()), (json!(100.0), json!(10.0)));
+    assert_eq!(
+        h.http.calls(POSITIONS).len(),
+        before + 1,
+        "matching signature: no retry"
+    );
+    let btc = position_rows(&h)
+        .into_iter()
+        .find(|p| p["symbol"] == "BTCUSDT")
+        .unwrap();
+    assert_eq!(
+        (btc["entryPrice"].clone(), btc["leverage"].clone()),
+        (json!(100.0), json!(10.0))
+    );
 }
 
 #[test]
@@ -351,20 +463,36 @@ fn fetch_positions_appends_zero_size_rows_from_metadata() {
         private_routes(http, "HEDGE_MODE");
         http.ok("GET", LEVERAGE, json!({"details": [{"leverage": "20"}]}));
     });
-    h.http.routes.borrow_mut().retain(|(_, p, _)| p != POSITIONS);
-    h.http.ok("GET", POSITIONS, json!({"positions": [
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, p, _)| p != POSITIONS);
+    h.http.ok(
+        "GET",
+        POSITIONS,
+        json!({"positions": [
         {"symbol": "PERP_BTC_USDT", "holding": 0.25, "averageOpenPrice": 100,
-         "leverage": 20, "estLiqPrice": 60, "marginMode": "CROSS"}]}));
+         "leverage": 20, "estLiqPrice": 60, "marginMode": "CROSS"}]}),
+    );
     let leverage_reads = h.http.calls(LEVERAGE).len();
     let positions = json_of(
-        &h.drive(h.venue().fetch_positions(Some(vec!["BTCUSDT".into(), "ETHUSDT".into()])))
-            .unwrap(),
+        &h.drive(
+            h.venue()
+                .fetch_positions(Some(vec!["BTCUSDT".into(), "ETHUSDT".into()])),
+        )
+        .unwrap(),
     );
     let rows: Vec<(Value, Value, Value)> = positions
         .as_array()
         .unwrap()
         .iter()
-        .map(|p| (p["id"].clone(), p["contracts"].clone(), p["leverage"].clone()))
+        .map(|p| {
+            (
+                p["id"].clone(),
+                p["contracts"].clone(),
+                p["leverage"].clone(),
+            )
+        })
         .collect();
     assert_eq!(
         rows,
@@ -376,13 +504,24 @@ fn fetch_positions_appends_zero_size_rows_from_metadata() {
         ]
     );
     let fake = &positions[1];
-    for k in ["entryPrice", "notional", "unrealizedPnl", "liquidationPrice"] {
+    for k in [
+        "entryPrice",
+        "notional",
+        "unrealizedPnl",
+        "liquidationPrice",
+    ] {
         assert_eq!(fake[k], json!(0.0), "{k}");
     }
-    assert_eq!((fake["marginType"].clone(), fake["positionMode"].clone()), (json!("cross"), json!("hedged")));
+    assert_eq!(
+        (fake["marginType"].clone(), fake["positionMode"].clone()),
+        (json!("cross"), json!("hedged"))
+    );
     let reads = h.http.calls(LEVERAGE)[leverage_reads..].to_vec();
     let symbols: Vec<Value> = reads.iter().map(|r| r.params["symbol"].clone()).collect();
-    assert_eq!(symbols, vec![json!("PERP_BTC_USDT"), json!("PERP_ETH_USDT")]);
+    assert_eq!(
+        symbols,
+        vec![json!("PERP_BTC_USDT"), json!("PERP_ETH_USDT")]
+    );
     assert_eq!(reads[0].params["position_mode"], "ONE_WAY");
     assert_eq!(reads[0].params["margin_mode"], "CROSS");
 }
@@ -393,14 +532,30 @@ fn fetch_positions_without_symbols_targets_open_positions_and_open_orders() {
         private_routes(http, "ONE_WAY");
         http.ok("GET", LEVERAGE, json!({"details": [{"leverage": "5"}]}));
     });
-    h.http.routes.borrow_mut().retain(|(_, p, _)| p != POSITIONS);
-    h.http.ok("GET", POSITIONS, json!({"positions": [
+    h.http
+        .routes
+        .borrow_mut()
+        .retain(|(_, p, _)| p != POSITIONS);
+    h.http.ok(
+        "GET",
+        POSITIONS,
+        json!({"positions": [
         {"symbol": "PERP_BTC_USDT", "holding": -1, "averageOpenPrice": 100,
-         "leverage": 5, "estLiqPrice": 150, "marginMode": "CROSS"}]}));
+         "leverage": 5, "estLiqPrice": 150, "marginMode": "CROSS"}]}),
+    );
     let leverage_reads = h.http.calls(LEVERAGE).len();
     let positions = json_of(&h.drive(h.venue().fetch_positions(None)).unwrap());
-    let ids: Vec<Value> = positions.as_array().unwrap().iter().map(|p| p["id"].clone()).collect();
-    assert_eq!(ids, vec![json!("BTCUSDT")], "one-way open position needs no metadata row");
+    let ids: Vec<Value> = positions
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(|p| p["id"].clone())
+        .collect();
+    assert_eq!(
+        ids,
+        vec![json!("BTCUSDT")],
+        "one-way open position needs no metadata row"
+    );
     assert_eq!(h.http.calls(LEVERAGE).len(), leverage_reads);
 }
 
@@ -408,12 +563,18 @@ fn fetch_positions_without_symbols_targets_open_positions_and_open_orders() {
 fn post_only_placement_reads_the_touch_price_from_the_order_book() {
     let h = started(json!({}), |http| {
         private_routes(http, "ONE_WAY");
-        http.route("GET", ORDERBOOK, 200.0, json!({"success": true,
-            "asks": [{"price": "100.2"}, {"price": 100.3}], "bids": [{"price": 99.9}]}));
+        http.route(
+            "GET",
+            ORDERBOOK,
+            200.0,
+            json!({"success": true,
+            "asks": [{"price": "100.2"}, {"price": 100.3}], "bids": [{"price": 99.9}]}),
+        );
     });
-    let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({"symbol": "BTCUSDT", "type": "limit", "side": "buy",
+    let opts: safe_cex_types::PlaceOrderOpts =
+        serde_json::from_value(json!({"symbol": "BTCUSDT", "type": "limit", "side": "buy",
         "amount": 1, "price": 100.5, "timeInForce": "PostOnly"}))
-    .unwrap();
+        .unwrap();
     let result = h.drive(Box::pin(h.venue().base().place_order(h.venue(), opts)));
     assert_eq!(
         result.map_err(|e| e.message),
@@ -439,7 +600,11 @@ fn fetch_ohlcv_routes_recent_reads_to_kline_and_history_to_the_proxy_client() {
     )
     .unwrap();
     let candles = json_of(&h.drive(h.venue().fetch_ohlcv(recent)).unwrap());
-    assert_eq!(candles[0]["timestamp"], json!(1699999880.0), "rows are reversed");
+    assert_eq!(
+        candles[0]["timestamp"],
+        json!(1699999880.0),
+        "rows are reversed"
+    );
     assert_eq!(candles[1]["close"], json!(2.5));
     assert_eq!(
         h.http.calls(KLINE)[0].params,
@@ -461,12 +626,27 @@ fn fetch_ohlcv_routes_recent_reads_to_kline_and_history_to_the_proxy_client() {
 fn listen_order_book_joins_the_snapshot_with_buffered_deltas() {
     let h = started(json!({"publicDataOnly": true}), |http| {
         public_routes(http);
-        http.route("GET", ORDERBOOK, 500.0, json!({"success": false, "message": "busy"}));
-        http.route("GET", ORDERBOOK, 500.0, json!({"success": false, "message": "busy"}));
+        http.route(
+            "GET",
+            ORDERBOOK,
+            500.0,
+            json!({"success": false, "message": "busy"}),
+        );
+        http.route(
+            "GET",
+            ORDERBOOK,
+            500.0,
+            json!({"success": false, "message": "busy"}),
+        );
         // The v1 orderbook response carries the book at the top level.
-        http.route("GET", ORDERBOOK, 200.0, json!({"success": true, "timestamp": 1000,
+        http.route(
+            "GET",
+            ORDERBOOK,
+            200.0,
+            json!({"success": true, "timestamp": 1000,
             "bids": [{"price": 100, "quantity": 1}, {"price": 99, "quantity": 2}],
-            "asks": [{"price": 101, "quantity": 1}]}));
+            "asks": [{"price": 101, "quantity": 1}]}),
+        );
     });
     let books: Rc<RefCell<Vec<Value>>> = Rc::default();
     let sink = books.clone();
@@ -474,34 +654,72 @@ fn listen_order_book_joins_the_snapshot_with_buffered_deltas() {
     let topic = "PERP_BTC_USDT@orderbookupdate";
     let cleanup = h
         .venue()
-        .listen_order_book("BTCUSDT".into(), Rc::new(move |b| sink.borrow_mut().push(json_of(&b))))
+        .listen_order_book(
+            "BTCUSDT".into(),
+            Rc::new(move |b| sink.borrow_mut().push(json_of(&b))),
+        )
         .unwrap();
     h.runtime.pump();
     assert!(sent(&public).contains(&json!({"event": "subscribe", "topic": topic})));
-    assert_eq!(h.http.calls(ORDERBOOK).len(), 1, "snapshot is requested immediately");
-    assert!(books.borrow().is_empty(), "a failed snapshot publishes nothing");
+    assert_eq!(
+        h.http.calls(ORDERBOOK).len(),
+        1,
+        "snapshot is requested immediately"
+    );
+    assert!(
+        books.borrow().is_empty(),
+        "a failed snapshot publishes nothing"
+    );
     // Older than the snapshot: buffered, then dropped at the join.
-    push(&h, &public, json!({"topic": topic, "ts": 500, "data": {"bids": [[97, 9]], "asks": []}}));
+    push(
+        &h,
+        &public,
+        json!({"topic": topic, "ts": 500, "data": {"bids": [[97, 9]], "asks": []}}),
+    );
     assert!(books.borrow().is_empty());
-    push(&h, &public, json!({"topic": topic, "ts": 2000,
-        "data": {"bids": [[100, 0], [98, 5]], "asks": [[101.5, 3]]}}));
+    push(
+        &h,
+        &public,
+        json!({"topic": topic, "ts": 2000,
+        "data": {"bids": [[100, 0], [98, 5]], "asks": [[101.5, 3]]}}),
+    );
     // ts: rateLimit(4 per 1000ms) holds the third read until the window frees.
     h.runtime.advance(1000.0);
     assert_eq!(h.http.calls(ORDERBOOK).len(), 3);
-    assert_eq!(books.borrow().len(), 1, "the snapshot joins the buffered deltas once");
+    assert_eq!(
+        books.borrow().len(),
+        1,
+        "the snapshot joins the buffered deltas once"
+    );
     let book = books.borrow()[0].clone();
-    assert_eq!(book["bids"], json!([
-        {"price": 99.0, "amount": 2.0, "total": 2.0},
-        {"price": 98.0, "amount": 5.0, "total": 7.0},
-    ]));
-    assert_eq!(book["asks"], json!([
-        {"price": 101.0, "amount": 1.0, "total": 1.0},
-        {"price": 101.5, "amount": 3.0, "total": 4.0},
-    ]));
-    push(&h, &public, json!({"topic": topic, "ts": 3000, "data": {"bids": [[99, 1]], "asks": []}}));
-    assert_eq!(books.borrow().last().unwrap()["bids"][0], json!({"price": 99.0, "amount": 1.0, "total": 1.0}));
+    assert_eq!(
+        book["bids"],
+        json!([
+            {"price": 99.0, "amount": 2.0, "total": 2.0},
+            {"price": 98.0, "amount": 5.0, "total": 7.0},
+        ])
+    );
+    assert_eq!(
+        book["asks"],
+        json!([
+            {"price": 101.0, "amount": 1.0, "total": 1.0},
+            {"price": 101.5, "amount": 3.0, "total": 4.0},
+        ])
+    );
+    push(
+        &h,
+        &public,
+        json!({"topic": topic, "ts": 3000, "data": {"bids": [[99, 1]], "asks": []}}),
+    );
+    assert_eq!(
+        books.borrow().last().unwrap()["bids"][0],
+        json!({"price": 99.0, "amount": 1.0, "total": 1.0})
+    );
     cleanup().unwrap();
-    assert_eq!(sent(&public).last().unwrap(), &json!({"event": "unsubscribe", "topic": topic}));
+    assert_eq!(
+        sent(&public).last().unwrap(),
+        &json!({"event": "unsubscribe", "topic": topic})
+    );
 }
 
 #[test]
@@ -514,13 +732,18 @@ fn listen_ohlcv_streams_kline_candles_and_ignores_older_ones() {
     let options = serde_json::from_value(json!({"symbol": "BTCUSDT", "interval": "1m"})).unwrap();
     let cleanup = h
         .venue()
-        .listen_ohlcv(options, Rc::new(move |c| sink.borrow_mut().push(json_of(&c))))
+        .listen_ohlcv(
+            options,
+            Rc::new(move |c| sink.borrow_mut().push(json_of(&c))),
+        )
         .unwrap();
     h.runtime.pump();
     let subscriptions = sent(&public);
     assert!(subscriptions.contains(&json!({"event": "subscribe", "topic": topic})));
     // ts: publicDataOnly skips the secondary @trades topic.
-    assert!(!subscriptions.contains(&json!({"event": "subscribe", "topic": "PERP_BTC_USDT@trades"})));
+    assert!(
+        !subscriptions.contains(&json!({"event": "subscribe", "topic": "PERP_BTC_USDT@trades"}))
+    );
     let kline = |start: f64, close: f64| {
         json!({"topic": topic, "ts": start, "data": {"startTime": start, "open": 1.0, "high": 3.0,
             "low": 0.5, "close": close, "volume": 7.0}})

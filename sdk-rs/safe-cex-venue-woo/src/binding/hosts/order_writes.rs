@@ -151,7 +151,10 @@ fn map_historical(rt: &Rt, a: Vec<Js>) -> Result<Js, Thrown> {
 }
 
 /// Stable merge sort with a fallible JS comparator (NaN compares as +0).
-fn merge_sort(items: Vec<Js>, cmp: &dyn Fn(&Js, &Js) -> Result<f64, Thrown>) -> Result<Vec<Js>, Thrown> {
+fn merge_sort(
+    items: Vec<Js>,
+    cmp: &dyn Fn(&Js, &Js) -> Result<f64, Thrown>,
+) -> Result<Vec<Js>, Thrown> {
     if items.len() <= 1 {
         return Ok(items);
     }
@@ -183,7 +186,9 @@ impl Frame {
     fn inverse(&self, table: &str) -> Result<Callee, Thrown> {
         let table = self.rt.global(table)?;
         Ok(Callee::Table(
-            self.rt.global("inverseObj")?.call(Js::Undefined, vec![table])?,
+            self.rt
+                .global("inverseObj")?
+                .call(Js::Undefined, vec![table])?,
         ))
     }
 }
@@ -215,18 +220,16 @@ impl Host for Frame {
             Binding::UpdateAlgo => self.this("updateAlgoOrder", "this.updateAlgoOrder"),
             Binding::PlaceAlgo => self.this("placeAlgoOrder", "this.placeAlgoOrder"),
             Binding::Stop => self.this("placeStopMarket", "this.placeStopMarket"),
-            Binding::Positional => self.this(
-                "placePositionalAlgoOrder",
-                "this.placePositionalAlgoOrder",
-            ),
+            Binding::Positional => {
+                self.this("placePositionalAlgoOrder", "this.placePositionalAlgoOrder")
+            }
             Binding::PositionSide => {
                 self.this("getPositionSideForOrder", "this.getPositionSideForOrder")
             }
             Binding::PositionMode => self.this("getPositionMode", "this.getPositionMode"),
-            Binding::Touch => self.this(
-                "fetchMarketIocTouchPrice",
-                "this.fetchMarketIocTouchPrice",
-            ),
+            Binding::Touch => {
+                self.this("fetchMarketIocTouchPrice", "this.fetchMarketIocTouchPrice")
+            }
             Binding::AssertClientId => self.this(
                 "assertSingleNativeClientOrderId",
                 "this.assertSingleNativeClientOrderId",
@@ -345,7 +348,9 @@ impl Host for Frame {
         Ok(out)
     }
     fn omit_undefined(&mut self, v: Js) -> Result<Js, Thrown> {
-        self.rt.global("omitUndefined")?.call(Js::Undefined, vec![v])
+        self.rt
+            .global("omitUndefined")?
+            .call(Js::Undefined, vec![v])
     }
     fn length(&mut self, v: &Js) -> Result<usize, Thrown> {
         length(v)
@@ -464,11 +469,7 @@ impl Host for Frame {
 
 type Frames = Rc<RefCell<Frame>>;
 
-fn async_member(
-    rt: &Rt,
-    name: &str,
-    run: impl Fn(Frames, Js) -> Task<Js, Thrown> + 'static,
-) -> Js {
+fn async_member(rt: &Rt, name: &str, run: impl Fn(Frames, Js) -> Task<Js, Thrown> + 'static) -> Js {
     let rt = rt.clone();
     Js::function(name, move |_, args| {
         let frame = Rc::new(RefCell::new(Frame { rt: rt.clone() }));

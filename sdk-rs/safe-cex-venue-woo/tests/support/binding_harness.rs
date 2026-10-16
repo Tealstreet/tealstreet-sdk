@@ -1,5 +1,4 @@
 //! Scripted transport and runtime for driving the production WooExchange.
-#![allow(dead_code)] // WIP: every helper is exercised once all members are bound.
 use safe_cex_exchange::js_runtime::{
     client::JsHttpHost,
     promise::JsFuture,

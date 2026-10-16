@@ -1,7 +1,9 @@
 //! WOOXExchange members ported in `crate::legacy_fill_recovery`, over js_runtime
 //! values. The same Frame serves the private socket's execution-report members,
 //! whose receiver is the socket (`this.parent` is the exchange).
-use super::data_reads::{Callee, Iter, clear_timer, error_path, iterate, length, member, next, schedule};
+use super::data_reads::{
+    Callee, Iter, clear_timer, error_path, iterate, length, member, next, schedule,
+};
 use crate::{
     binding::{
         promise::await_js,
@@ -216,7 +218,9 @@ impl body::Host for Frame {
                 clear_timer(self.rt()?, &arg(&args, 0));
                 Ok(Js::Undefined)
             }
-            Prepared::SetTimeout => Err(Thrown::type_error("setTimeout is scheduled through timeout")),
+            Prepared::SetTimeout => Err(Thrown::type_error(
+                "setTimeout is scheduled through timeout",
+            )),
         }
     }
     fn call(&mut self, c: Prepared, args: Vec<Js>) -> Result<Task<Js, Thrown>, Thrown> {
@@ -325,7 +329,12 @@ impl body::Host for Frame {
     fn prepare_map_set(&mut self, m: Map) -> Result<(Js, &'static str), Thrown> {
         self.collection(m)
     }
-    fn map_set_prepared(&mut self, (target, key): (Js, &'static str), k: Js, v: Js) -> Result<(), Thrown> {
+    fn map_set_prepared(
+        &mut self,
+        (target, key): (Js, &'static str),
+        k: Js,
+        v: Js,
+    ) -> Result<(), Thrown> {
         collection_set(&target, key, k, v)
     }
     fn map_get(&mut self, m: Map, k: &Js) -> Result<Js, Thrown> {
@@ -407,9 +416,11 @@ pub(crate) fn bind(rt: &Rt, name: &str) -> Option<Result<Js, Thrown>> {
         }),
         "refreshPositionForSymbolFromFill" => member(rt, name, |rt, a| {
             let task: Task<Js, Thrown> = match arg(&a, 1).to_number() {
-                Ok(attempt) => {
-                    body::refresh_position_for_symbol_from_fill(host(rt.clone()), arg(&a, 0), attempt)
-                }
+                Ok(attempt) => body::refresh_position_for_symbol_from_fill(
+                    host(rt.clone()),
+                    arg(&a, 0),
+                    attempt,
+                ),
                 Err(e) => Box::pin(std::future::ready(Err(e))),
             };
             Ok(rt.spawn(task))

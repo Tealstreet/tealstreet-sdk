@@ -1,5 +1,6 @@
 //! The production WooExchange driven end to end over a scripted transport.
 #[path = "support/binding_harness.rs"]
+#[allow(dead_code)] // Shared support: each test crate uses a subset.
 mod binding_harness;
 use binding_harness::{harness, options};
 use safe_cex_types::ExchangeName;

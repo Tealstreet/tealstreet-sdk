@@ -158,7 +158,10 @@ pub(crate) fn stream(weak: Weak<Shared>, runtime: Runtime) -> Rc<StreamOps<Js, T
     })
 }
 
-pub(crate) fn construction(weak: Weak<Shared>, runtime: Runtime) -> Rc<ConstructionOps<Js, Thrown>> {
+pub(crate) fn construction(
+    weak: Weak<Shared>,
+    runtime: Runtime,
+) -> Rc<ConstructionOps<Js, Thrown>> {
     let supers = weak.clone();
     Rc::new(ConstructionOps {
         value: lifecycle(weak, runtime),
@@ -178,7 +181,10 @@ pub(crate) fn construction(weak: Weak<Shared>, runtime: Runtime) -> Rc<Construct
     })
 }
 
-pub(crate) fn exchange_class(weak: Weak<Shared>, runtime: Runtime) -> Rc<ExchangeClassOps<Js, Thrown>> {
+pub(crate) fn exchange_class(
+    weak: Weak<Shared>,
+    runtime: Runtime,
+) -> Rc<ExchangeClassOps<Js, Thrown>> {
     let derives = weak.clone();
     let members = weak.clone();
     let prototypes = weak.clone();

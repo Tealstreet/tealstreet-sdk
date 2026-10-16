@@ -38,7 +38,9 @@ pub(super) fn invoke(f: &Js, this: Js, args: Vec<Js>) -> Result<Js, Thrown> {
 pub(super) fn call_member(rt: &Rt, name: &str, args: Vec<Js>) -> Result<Js, Thrown> {
     let f = rt.this.get(name)?;
     if !f.is_callable() {
-        return Err(Thrown::type_error(&format!("this.{name} is not a function")));
+        return Err(Thrown::type_error(&format!(
+            "this.{name} is not a function"
+        )));
     }
     f.call(rt.this.clone(), args)
 }
