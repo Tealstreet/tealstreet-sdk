@@ -62,5 +62,5 @@ The scope is the selected native/default enum owners under the canonical
 [string boundary](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary) and
 [divergence taxonomy](../parity/MANIFEST-SPEC.md#divergence-taxonomy). It excludes
 parent records, local decoders, other owners, aliases and feature/WASM coverage.
-After the prior thirty-eight owner contracts (including pending decision #360),
+After the prior thirty-eight owner contracts (including merged decision #360),
 this batch leaves 135 original Aster owners. Queue ddi2il-32 remains open.
