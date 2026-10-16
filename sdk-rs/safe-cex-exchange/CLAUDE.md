@@ -990,6 +990,16 @@ rather than calling a URL serializer. `http_factory` tests compare actual source
 Axios behavior and observe proxy-auth/sign/query/send ordering through the native
 terminal bridge. Existing source bindings continue to own telemetry callbacks.
 
+Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
+JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
+`dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
+cases cover successful cleanup and each throwing socket, shared-cell visibility,
+retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
+The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
+worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
+completion hook and reconstructed error properties. Arguments/results use the
+existing JSON worker boundary; it does not create a parallel worker protocol.
+
 Configured js_runtime retries retain `config["axios-retry"]` through the effective
 failed-config replay. The source condition sees the current retryCount; retryDelay
 sees its incremented value. The shared runtime owns the delay, and request start
