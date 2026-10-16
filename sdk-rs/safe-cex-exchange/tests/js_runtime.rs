@@ -3544,3 +3544,6 @@ fn hosted_signing_accepts_source_string_data_before_wire_encoding() {
         );
     }
 }
+
+#[path = "support/js_string_coercion.rs"]
+mod string_coercion;

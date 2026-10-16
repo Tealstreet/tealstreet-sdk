@@ -1090,3 +1090,10 @@ existing byte representation. `hosted_signing_accepts_source_string_data_before_
 compares four form/empty/JSON-looking/scalar strings against the actual source
 remote adapter with installed Axios on both sides of the relay, including
 signer inputs and final transmitted text.
+
+Shared `Js::to_js_string` converts ordinary live objects with a string hint:
+`toString` precedes `valueOf`, each method is looked up when reached, and a
+primitive result ends conversion. Non-callable properties are skipped; failure
+to produce a primitive throws. The 31-case Node witness compares native UTF-16
+units and getter/callback order, including inherited methods and null prototypes.
+Stock intrinsic string forms remain the value model's default prototype methods.
