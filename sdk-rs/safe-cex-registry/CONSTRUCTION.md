@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `backpack`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for `asterdex`, `backpack`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`),
 the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
@@ -21,6 +21,11 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 `ExchangeName -> fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor`.
 
 - **Initial members:**
+  - `asterdex`, built with `native_exchange::AsterDEXExchange::new` on the shared
+    js_runtime. Its HTTP factory receives each lane's options, including secondary
+    credentials and proxy override. The native host routes signed requests through
+    the shared transport stack and supplies the external-data gateway factory.
+    `tests/native_host_asterdex.rs` verifies a signed account read server-side.
   - `backpack`, built with `BackpackExchange::new`.
   - `binance`, built with `BinanceExchange::new`.
   - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around

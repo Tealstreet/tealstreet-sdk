@@ -232,6 +232,14 @@ jobs:
         run: |
           node sdk-rs/safe-cex-crypto/scripts/zklink-native.cjs --prepare "$RUNNER_TEMP/zklink-native-oracle"
           echo "SAFE_CEX_ZKLINK_NATIVE_ORACLE=$RUNNER_TEMP/zklink-native-oracle" >> "$GITHUB_ENV"
+      # `cargo test` spawns Node differential tests that require the slice's own
+      # packages (lodash, ethers, dayjs...), so the workspace must be installed.
+      - name: Install workspace dependencies for differential tests
+        if: matrix.check == 'test'
+        working-directory: .
+        run: |
+          test "$(corepack yarn --version)" = "$(node -p "require('./package.json').packageManager.split('@')[1]")"
+          corepack yarn install --frozen-lockfile --ignore-scripts --non-interactive --network-timeout 600000
       - name: Audit cancellable future classifications
         if: matrix.check == 'test'
         run: |
