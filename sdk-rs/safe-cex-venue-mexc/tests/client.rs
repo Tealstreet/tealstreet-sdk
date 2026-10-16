@@ -1153,3 +1153,234 @@ fn mexc_rich_exhausted_retry_retains_native_query_and_original_failure() {
         );
     }
 }
+
+struct ScriptedWire {
+    runtime: Rc<Runtime>,
+    steps: Vec<(u16, &'static str)>,
+    capture: RefCell<Vec<RestRequest>>,
+}
+impl RestAdapter for ScriptedWire {
+    fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+        Box::pin(async move {
+            self.runtime.attempt.set(self.runtime.attempt.get() + 1);
+            self.capture.borrow_mut().push(request.clone());
+            let (status, body) = *self
+                .steps
+                .get(self.runtime.attempt.get() as usize - 1)
+                .expect("native unscripted extra attempt");
+            let response = RestResponse {
+                status,
+                reason: Some(status.to_string()),
+                headers: Default::default(),
+                body: safe_cex_transport::RestResponseBody::Encoded(body.as_bytes().to_vec()),
+            };
+            if (200..300).contains(&status) {
+                return Ok(response);
+            }
+            Err(RestFailure {
+                code: Some("ERR_BAD_REQUEST".into()),
+                message: format!("Request failed with status code {status}"),
+                transport_error: None,
+                response: Some(Box::new(response)),
+                request: Box::new(request),
+                context: None,
+            })
+        })
+    }
+}
+#[test]
+#[expect(clippy::arc_with_non_send_sync)]
+fn mexc_signature_rejection_resends_once_with_a_fresh_signature() {
+    use safe_cex_venue_mexc::api::{is_mexc_signature_rejection, sign_mexc_request};
+    const REJECTION: &str =
+        r#"{"success":false,"code":602,"message":"Signature verification failed!"}"#;
+    const OK: &str = r#"{"code":0,"data":[]}"#;
+    let scenarios: [(&str, &str, Vec<(u16, &'static str)>); 8] = [
+        ("get-envelope", "get", vec![(200, REJECTION), (200, OK)]),
+        ("post-envelope", "post", vec![(200, REJECTION), (200, OK)]),
+        (
+            "post-envelope-twice",
+            "post",
+            vec![(200, REJECTION), (200, REJECTION)],
+        ),
+        ("post-http", "post", vec![(401, REJECTION), (200, OK)]),
+        (
+            "get-http-twice",
+            "get",
+            vec![(401, REJECTION), (401, REJECTION)],
+        ),
+        (
+            "get-http-then-envelope",
+            "get",
+            vec![(401, REJECTION), (200, REJECTION)],
+        ),
+        (
+            "msg-only",
+            "get",
+            vec![
+                (
+                    200,
+                    r#"{"success":false,"code":10,"msg":"signature VERIFICATION failed"}"#,
+                ),
+                (200, OK),
+            ],
+        ),
+        (
+            "not-signature",
+            "post",
+            vec![
+                (
+                    200,
+                    r#"{"success":false,"code":401,"message":"No authority"}"#,
+                ),
+                (200, OK),
+            ],
+        ),
+    ];
+    let expected_native: [(usize, Value); 8] = [
+        (2, json!({"ok":0})),
+        (2, json!({"ok":0})),
+        (
+            2,
+            json!({"error":"Signature verification failed!","status":200}),
+        ),
+        (2, json!({"ok":0})),
+        (
+            2,
+            json!({"error":"Request failed with status code 401","status":401}),
+        ),
+        (
+            2,
+            json!({"error":"Signature verification failed!","status":200}),
+        ),
+        (2, json!({"ok":0})),
+        (1, json!({"error":"No authority","status":200})),
+    ];
+    let mut native = Vec::new();
+    for ((label, method, steps), (attempts, result)) in scenarios.into_iter().zip(expected_native) {
+        let runtime = Rc::new(Runtime::default());
+        let wire = Arc::new(ScriptedWire {
+            runtime: runtime.clone(),
+            steps,
+            capture: RefCell::default(),
+        });
+        let api = create_api(
+            HttpClientOptions {
+                response_transform: None,
+                params_serializer: None,
+                exchange: ExchangeName::Mexc,
+                options: serde_json::from_value(
+                    json!({"key":"fixture-key","secret":"fixture-secret"}),
+                )
+                .unwrap(),
+                request: RestRequest::default(),
+                provider: None,
+                signer: None,
+                account_name: None,
+                adapter: wire.clone(),
+                host: Rc::new(Host::default()),
+                runtime: runtime.clone(),
+                store: None,
+                stats: Some(Arc::default()),
+                logs: Some(Arc::default()),
+                every: vec![],
+                periodic: vec![],
+                next_id: Arc::new(|| "id".into()),
+                signing_now: Arc::new(|| 0),
+            },
+            &TransportRegistry::default(),
+            runtime.clone(),
+        )
+        .unwrap();
+        let request = if method == "get" {
+            RestRequest {
+                method: "get".into(),
+                url: "/private".into(),
+                params: Some(json!({"symbol":"BTC_USDT"})),
+                ..Default::default()
+            }
+        } else {
+            RestRequest {
+                method: "post".into(),
+                url: "/private".into(),
+                body: Some(RestBody::Untransformed(
+                    json!({"symbol":"BTC_USDT","vol":1}),
+                )),
+                ..Default::default()
+            }
+        };
+        let actual = match futures::executor::block_on(api.execute(request)) {
+            Ok(response) => json!({"ok": response.body.json_value().unwrap()["code"]}),
+            Err(error) => json!({
+                "error": error.message,
+                "status": error.response.as_ref().map(|response| response.status),
+            }),
+        };
+        assert_eq!(
+            actual, result,
+            "MEXC signature resend native result {label}"
+        );
+        let captures = wire.capture.borrow();
+        assert_eq!(
+            captures.len(),
+            attempts,
+            "MEXC signature resend native attempt count {label}"
+        );
+        let mut wires = Vec::new();
+        for (index, request) in captures.iter().enumerate() {
+            let header = |name: &str| request.headers.get(name).cloned().unwrap();
+            let time = header("Request-Time");
+            assert_eq!(
+                time,
+                (1791800000123_u64 + index as u64).to_string(),
+                "MEXC signature resend native fresh signing time {label}/{index}"
+            );
+            let data = request
+                .body
+                .as_ref()
+                .map(|body| String::from_utf8(body.wire_bytes().unwrap()).unwrap());
+            let param = data.clone().unwrap_or_else(|| "symbol=BTC_USDT".into());
+            assert_eq!(
+                header("Signature"),
+                sign_mexc_request("fixture-secret", "fixture-key", &time, &param).unwrap(),
+                "MEXC signature resend native fresh signature {label}/{index}"
+            );
+            wires.push(json!({"time":time,"signature":header("Signature"),"data":data}));
+        }
+        native.push(json!({"label":label,"attempts":attempts,"wire":wires,"result":actual}));
+    }
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/signature_resend_oracle.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let inputs = source["predicateInputs"].as_array().unwrap();
+    assert_eq!(inputs.len(), 18, "MEXC signature predicate source floor");
+    for (index, input) in inputs.iter().enumerate() {
+        assert_eq!(
+            Value::Bool(is_mexc_signature_rejection(input).unwrap()),
+            source["predicate"][index],
+            "MEXC signature predicate source equality {input}"
+        );
+    }
+    assert_eq!(
+        source["scenarios"].as_array().unwrap().len(),
+        8,
+        "MEXC signature resend source scenario floor"
+    );
+    for (index, native) in native.iter().enumerate() {
+        assert_eq!(
+            native, &source["scenarios"][index],
+            "MEXC signature resend source equality {}",
+            native["label"]
+        );
+    }
+}

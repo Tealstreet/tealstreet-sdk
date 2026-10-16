@@ -197,20 +197,11 @@ fn private_handlers_commit_before_original_subscriber_failure_and_abort_later_ef
                 [0],
                 "private native original subscriber id"
             );
-            let mutation = error
-                .source()
-                .unwrap()
-                .downcast_ref::<safe_cex_store::StoreMutationError>()
-                .expect("private native whole Store origin");
-            let cause = mutation
-                .source()
-                .unwrap()
-                .source()
-                .unwrap()
+            let cause = error
                 .source()
                 .unwrap()
                 .downcast_ref::<HandlerOrigin>()
-                .unwrap();
+                .expect("private native source is the original subscriber cause");
             assert_eq!(cause.0, 313, "private native opaque cause code");
             assert!(
                 std::ptr::eq(cause, origin.as_ref()),

@@ -7009,10 +7009,6 @@ rs = "safe-cex-exchange/src/runtime.rs::ExchangeErrorOrigin::error"
 reason = "Read-only native std::error::Error origin accessor used by the shared Error::source implementation; no TypeScript method or venue policy."
 
 [[exempt]]
-rs = "safe-cex-venue-mexc/src/ws_private.rs::MexcPrivateHandlers::new_with_fallible_hooks"
-reason = "Native callback construction adapter for existing mapped private frame handlers. It admits fallible seen/shield hooks while retaining the existing infallible constructor ABI; it adds no venue decision or TypeScript algorithm."
-
-[[exempt]]
 rs = "safe-cex-num/src/get_key.rs::array_lookup"
 reason = "Native exact dense-array property primitive, exposed from the existing shared getKey implementation for extractRows without getKey alias rewriting; no new venue policy."
 

@@ -216,7 +216,7 @@ fn mexc_public_handler_arrays_match_source_reentrant_routes() {
                         protocol.remove_handler(&socket, KEY, &b)?;
                         cleanup_clocks.set(cleanup_clocks.get() + runtime.clocks.get() - before);
                     } else {
-                        protocol.add_handler(&socket, KEY, c.clone());
+                        protocol.add_handler(&socket, KEY, c.clone())?;
                     }
                     if name == "recursive" {
                         route(&protocol, &socket, &calls)?;
@@ -229,17 +229,17 @@ fn mexc_public_handler_arrays_match_source_reentrant_routes() {
             })
         };
         if name != "missing" {
-            protocol.add_handler(&socket, KEY, a.clone());
+            protocol.add_handler(&socket, KEY, a.clone()).unwrap();
         }
         if matches!(
             name,
             "add" | "remove" | "recursive" | "throw" | "duplicates"
         ) {
-            protocol.add_handler(&socket, KEY, b.clone());
+            protocol.add_handler(&socket, KEY, b.clone()).unwrap();
         }
         if name == "duplicates" {
-            protocol.add_handler(&socket, KEY, b.clone());
-            protocol.add_handler(&socket, KEY, c);
+            protocol.add_handler(&socket, KEY, b.clone()).unwrap();
+            protocol.add_handler(&socket, KEY, c).unwrap();
         }
         let old = socket.message_handlers.borrow().get(KEY).cloned();
         // A pre-existing stats entry makes omitted cleanup observable.
@@ -329,8 +329,7 @@ fn mexc_public_handler_arrays_match_source_reentrant_routes() {
         "MEXC independent native callback-call floor"
     );
     assert_eq!(total_routes, 10, "MEXC independent native route-call floor");
-    // Materialize the residual inherited-property mismatch, rather than
-    // treating a successful own-key callback corpus as registry completeness.
+    // Stock inherited non-array entries throw before changing the own registry.
     for removing in [false, true] {
         let protocol = Rc::new(MexcPublicProtocol::new(Rc::new(|v| v)));
         let socket = BaseWebSocket::new(
@@ -342,19 +341,22 @@ fn mexc_public_handler_arrays_match_source_reentrant_routes() {
             protocol.clone(),
         );
         let handler: MessageHandler = Rc::new(|_| Ok(()));
-        if removing {
+        let error = if removing {
             protocol
                 .remove_handler(&socket, "constructor", &handler)
-                .expect("native handler removal succeeds");
+                .unwrap_err()
         } else {
-            protocol.add_handler(&socket, "constructor", handler);
-        }
+            protocol
+                .add_handler(&socket, "constructor", handler)
+                .unwrap_err()
+        };
         assert_eq!(
-            socket.message_handlers.borrow()["constructor"]
-                .borrow()
-                .len(),
-            if removing { 0 } else { 1 },
-            "FINDING native accepts inherited constructor key"
+            error.name, "TypeError",
+            "MEXC inherited registry key throws before write"
+        );
+        assert!(
+            !socket.message_handlers.borrow().contains_key("constructor"),
+            "MEXC failed inherited operation leaves registry unchanged"
         );
     }
     let output = std::process::Command::new("node")
@@ -379,7 +381,7 @@ fn mexc_public_handler_arrays_match_source_reentrant_routes() {
     assert_eq!(source["routes"], 10, "SOURCE route-call floor");
     assert_eq!(
         source["inheritedConstructorErrors"], 2,
-        "SOURCE retained inherited-key finding floor"
+        "SOURCE inherited-key rejection floor"
     );
     assert_eq!(
         json!(native),
