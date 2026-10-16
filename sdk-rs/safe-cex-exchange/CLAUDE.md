@@ -618,6 +618,13 @@ before the signer, then normalize again after signer output. The first spelling
 survives while the last value wins. Plain-object serialize_headers deliberately
 retains its entries, including case variants.
 
+The JS client gives source request interceptors an AxiosHeaders facade with
+inherited `set(name, value, rewrite?)`, `set(record, rewrite?)`, `get(name)` and
+`has(name)` methods. Header casing, value normalization, fluent receiver identity
+and own-key order are checked against installed Axios; methods never become wire
+entries. Parser/matcher overloads of get/has fail visibly until bound. This does
+not widen the transport's string-valued header ABI to Axios's false sentinel.
+
 After signing, the shared request transform generates application/json for
 object/array data when Content-Type is absent, and dispatch supplies
 application/x-www-form-urlencoded for POST/PUT/PATCH when still absent. Explicit
