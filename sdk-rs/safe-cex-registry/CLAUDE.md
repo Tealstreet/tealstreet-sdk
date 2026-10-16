@@ -207,3 +207,9 @@ headers; remoteSigner DXtrade login refuses visibly. The native date realm is
 explicitly UTC for offset-less legacy timestamps, while embedding hosts supply
 their own local_to_utc policy. native_host_breakoutprop.rs proves actual native
 HTTP login/startup/reads/placement/cancellation with no websocket dial.
+
+Orderly-family per-options HTTP hosts share the hosted signer and account name,
+with the selected family name bound before requests. Preserve the source local
+signing requirement on private HTTP even with hosted signing. Private WS stays
+local-only; empty-secret recovery follows the existing approved onOpen contract.
+`native_host_orderly_hosted` covers all six names with valid/empty local secrets.
