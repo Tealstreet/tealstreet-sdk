@@ -6,6 +6,10 @@ use crate::{
     transaction_signing::{HostThrownValue, SigningResult},
 };
 use num_bigint::BigInt;
+use safe_cex_exchange::js_runtime::{
+    ops,
+    value::{Js, Thrown},
+};
 use std::rc::Rc;
 // ts: AccountInfo
 #[derive(Debug, Clone, PartialEq)]
@@ -190,25 +194,102 @@ pub(crate) fn primitive_to_number(value: &AccountValue) -> SigningResult<f64> {
         }
     })
 }
-/// `value + right` for a Number literal `right`: string operands concatenate,
-/// BigInt cannot mix, objects throw as in primitive_to_number.
-pub(crate) fn primitive_add_number(
-    value: &AccountValue,
-    right: f64,
-) -> SigningResult<AccountValue> {
+/// A primitive as a js_runtime value. These sites hold no host ToPrimitive
+/// (valueOf/toString), so object-like operands throw a TypeError instead.
+fn primitive_js(value: &AccountValue, symbol_target: &str) -> SigningResult<Js> {
     Ok(match value {
-        AccountValue::String(left) => {
-            let mut text = left.clone();
-            text.extend(safe_cex_num::js_number_string(right).encode_utf16());
-            AccountValue::String(text)
+        AccountValue::Undefined => Js::Undefined,
+        AccountValue::Null => Js::Null,
+        AccountValue::Boolean(v) => Js::Bool(*v),
+        AccountValue::Number(v) => Js::Number(*v),
+        AccountValue::BigInt(v) => Js::BigInt(Rc::new(v.clone())),
+        AccountValue::String(v) => Js::utf16(v),
+        AccountValue::Symbol(_) => {
+            return Err(type_error(&format!(
+                "Cannot convert a Symbol value to a {symbol_target}"
+            )));
         }
-        AccountValue::BigInt(_) => {
-            return Err(type_error(
-                "Cannot mix BigInt and other types, use explicit conversions",
-            ));
+        AccountValue::Function(_) | AccountValue::Object(_) | AccountValue::HtmlDda => {
+            return Err(type_error("Cannot convert object to primitive value"));
         }
-        other => AccountValue::Number(primitive_to_number(other)? + right),
     })
+}
+fn primitive_account(value: Js) -> SigningResult<AccountValue> {
+    Ok(match value {
+        Js::Undefined => AccountValue::Undefined,
+        Js::Null => AccountValue::Null,
+        Js::Bool(v) => AccountValue::Boolean(v),
+        Js::Number(v) => AccountValue::Number(v),
+        Js::BigInt(v) => AccountValue::BigInt((*v).clone()),
+        Js::String(v) => AccountValue::String(v.to_vec()),
+        _ => return Err(type_error("Cannot convert object to primitive value")),
+    })
+}
+fn thrown_error(thrown: Thrown) -> crate::transaction_signing::TransactionSigningError {
+    let name = thrown.value.get("name").map(|n| n.to_display()).unwrap_or_default();
+    TransactionBuildError {
+        name: match name.as_str() {
+            "TypeError" => "TypeError",
+            "RangeError" => "RangeError",
+            _ => "Error",
+        },
+        message: thrown.message().encode_utf16().collect(),
+    }
+    .into()
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JsBinary {
+    Add,
+    Subtract,
+    Divide,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum JsRelation {
+    Less,
+    Greater,
+    LessEqual,
+    GreaterEqual,
+}
+/// `left <op> right` for `+ - /` via `js_runtime::ops`, on primitive operands.
+pub(crate) fn primitive_binary(
+    op: JsBinary,
+    left: &AccountValue,
+    right: &AccountValue,
+) -> SigningResult<AccountValue> {
+    let concatenates = op == JsBinary::Add
+        && (matches!(left, AccountValue::String(_)) || matches!(right, AccountValue::String(_)));
+    let target = if concatenates { "string" } else { "number" };
+    let (left, right) = (primitive_js(left, target)?, primitive_js(right, target)?);
+    let result = match op {
+        JsBinary::Add => ops::add(&left, &right),
+        JsBinary::Subtract => ops::subtract(&left, &right),
+        JsBinary::Divide => ops::divide(&left, &right),
+    };
+    primitive_account(result.map_err(thrown_error)?)
+}
+/// `left <op> right` for `< > <= >=` via `js_runtime::ops`, on primitive operands.
+pub(crate) fn primitive_relation(
+    op: JsRelation,
+    left: &AccountValue,
+    right: &AccountValue,
+) -> SigningResult<bool> {
+    let (left, right) = (primitive_js(left, "number")?, primitive_js(right, "number")?);
+    match op {
+        JsRelation::Less => ops::less_than(&left, &right),
+        JsRelation::Greater => ops::greater_than(&left, &right),
+        JsRelation::LessEqual => ops::less_equal(&left, &right),
+        JsRelation::GreaterEqual => ops::greater_equal(&left, &right),
+    }
+    .map_err(thrown_error)
+}
+/// `x++` / `++x` value: ToNumeric, then add one of the same numeric type.
+pub(crate) fn primitive_increment(value: &AccountValue) -> SigningResult<AccountValue> {
+    let numeric = ops::to_numeric(&primitive_js(value, "number")?).map_err(thrown_error)?;
+    let one = match numeric {
+        Js::BigInt(_) => Js::BigInt(Rc::new(BigInt::from(1))),
+        _ => Js::Number(1.0),
+    };
+    primitive_account(ops::add(&numeric, &one).map_err(thrown_error)?)
 }
 /// Abstract ToString over primitives; object operands throw as in primitive_to_number.
 pub(crate) fn primitive_to_string(value: &AccountValue) -> SigningResult<Vec<u16>> {

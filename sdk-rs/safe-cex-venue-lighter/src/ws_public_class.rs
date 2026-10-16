@@ -8,7 +8,10 @@
 //! LogSeverity string values, as in the neighbouring public-socket bodies.
 use crate::{
     public_ingress::{self, IngressOps},
-    sdk_account_api::{AccountValue, primitive_add_number, primitive_to_number},
+    sdk_account_api::{
+        AccountValue, JsBinary, JsRelation, primitive_binary, primitive_increment,
+        primitive_relation, primitive_to_number,
+    },
     transaction_promise::{NativePromise, PromiseResolver, TransactionRuntime},
     transaction_signing::{SigningResult, TransactionSigningError},
     ws_public,
@@ -108,6 +111,9 @@ fn text(s: &str) -> AccountValue {
 }
 fn num(value: &AccountValue) -> SigningResult<f64> {
     primitive_to_number(value)
+}
+fn number(n: f64) -> AccountValue {
+    AccountValue::Number(n)
 }
 fn is_number(value: &AccountValue, n: f64) -> bool {
     matches!(value, AccountValue::Number(v) if *v == n)
@@ -371,9 +377,9 @@ fn done() -> SigningResult<Step> {
 // ts: LighterPublicWebsocket.onClose
 pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningResult<()> {
     let hr = h.as_ref();
-    let number = hr.binding("Number")?;
+    let number_ctor = hr.binding("Number")?;
     let code = optional(hr, event, "code")?;
-    let code_value = hr.invoke(&number, &AccountValue::Undefined, &[code])?;
+    let code_value = hr.invoke(&number_ctor, &AccountValue::Undefined, &[code])?;
     let finite = binding_method(hr, "Number", "isFinite", || Ok(vec![code_value.clone()]))?;
     let close_code = if finite.truthy() {
         code_value
@@ -392,16 +398,22 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         text("")
     };
     let now = virtual_now(hr)?;
-    let time_since_connect = if num(&own(hr, "connectStartedAt")?)? > 0.0 {
-        let started = own(hr, "connectStartedAt")?;
-        num(&now)? - num(&started)?
-    } else {
-        f64::INFINITY
-    };
+    let time_since_connect =
+        if primitive_relation(JsRelation::Greater, &own(hr, "connectStartedAt")?, &number(0.0))? {
+            let started = own(hr, "connectStartedAt")?;
+            primitive_binary(JsBinary::Subtract, &now, &started)?
+        } else {
+            number(f64::INFINITY)
+        };
     let failed_before_open = !own(hr, "openedSinceLastConnect")?.truthy();
     let closed_before_first_message = own(hr, "openedSinceLastConnect")?.truthy()
         && !own(hr, "hasReceivedMessageSinceConnect")?.truthy();
-    let early_close = closed_before_first_message && time_since_connect <= EARLY_CLOSE_WINDOW_MS;
+    let early_close = closed_before_first_message
+        && primitive_relation(
+            JsRelation::LessEqual,
+            &time_since_connect,
+            &number(EARLY_CLOSE_WINDOW_MS),
+        )?;
     let classification = global_call(hr, "classifyLighterPublicClose", || {
         Ok(vec![close_code.clone(), close_reason.clone()])
     })?;
@@ -412,16 +424,16 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         || get(hr, &classification, "isRateLimited")?.truthy()
         || get(hr, &classification, "isPolicyRestricted")?.truthy();
     if should_count {
-        let failed = primitive_add_number(&own(hr, "failedConnections")?, 1.0)?;
+        let failed = primitive_binary(JsBinary::Add, &own(hr, "failedConnections")?, &number(1.0))?;
         set_own(hr, "failedConnections", failed)?;
     } else if is_number(&close_code, 1000.0) {
         set_own(hr, "failedConnections", AccountValue::Number(0.0))?;
     } else {
         let value = binding_method(hr, "Math", "max", || {
-            let failed = num(&own(hr, "failedConnections")?)?;
+            let failed = own(hr, "failedConnections")?;
             Ok(vec![
-                AccountValue::Number(0.0),
-                AccountValue::Number(failed - 1.0),
+                number(0.0),
+                primitive_binary(JsBinary::Subtract, &failed, &number(1.0))?,
             ])
         })?;
         set_own(hr, "failedConnections", value)?;
@@ -430,7 +442,11 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         && !own(hr, "connectedViaProxyRoute")?.truthy()
         && !own(hr, "useReadonlyDirectRoute")?.truthy()
         && should_count
-        && num(&own(hr, "failedConnections")?)? >= DIRECT_ROUTE_FAILURES_BEFORE_READONLY
+        && primitive_relation(
+            JsRelation::GreaterEqual,
+            &own(hr, "failedConnections")?,
+            &number(DIRECT_ROUTE_FAILURES_BEFORE_READONLY),
+        )?
     {
         set_own(hr, "useReadonlyDirectRoute", AccountValue::Boolean(true))?;
         log(hr, "warning", || {
@@ -452,14 +468,22 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         if own(hr, "connectedViaProxyRoute")?.truthy() {
             set_own(hr, "directRouteFailureCount", AccountValue::Number(0.0))?;
             if should_count {
-                let count = primitive_add_number(&own(hr, "proxyRouteFailureCount")?, 1.0)?;
+                let count = primitive_binary(
+                    JsBinary::Add,
+                    &own(hr, "proxyRouteFailureCount")?,
+                    &number(1.0),
+                )?;
                 set_own(hr, "proxyRouteFailureCount", count)?;
                 let paused_until = own(hr, "directFallbackProbePausedUntil")?;
-                let can_probe = num(&now)? >= num(&paused_until)?;
+                let can_probe =
+                    primitive_relation(JsRelation::GreaterEqual, &now, &paused_until)?;
                 if !own(hr, "useDirectFallbackRoute")?.truthy()
                     && can_probe
-                    && num(&own(hr, "proxyRouteFailureCount")?)?
-                        >= PROXY_ROUTE_FAILURES_BEFORE_DIRECT_FALLBACK
+                    && primitive_relation(
+                        JsRelation::GreaterEqual,
+                        &own(hr, "proxyRouteFailureCount")?,
+                        &number(PROXY_ROUTE_FAILURES_BEFORE_DIRECT_FALLBACK),
+                    )?
                 {
                     set_own(hr, "useDirectFallbackRoute", AccountValue::Boolean(true))?;
                     log(hr, "warning", || {
@@ -478,13 +502,21 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
                 set_own(hr, "useDirectFallbackRoute", AccountValue::Boolean(false))?;
             }
         } else if should_count {
-            let count = primitive_add_number(&own(hr, "directRouteFailureCount")?, 1.0)?;
+            let count = primitive_binary(
+                JsBinary::Add,
+                &own(hr, "directRouteFailureCount")?,
+                &number(1.0),
+            )?;
             set_own(hr, "directRouteFailureCount", count)?;
             set_own(hr, "useDirectFallbackRoute", AccountValue::Boolean(false))?;
             set_own(
                 hr,
                 "directFallbackProbePausedUntil",
-                primitive_add_number(&now, PROXY_DIRECT_FALLBACK_FAILURE_COOLDOWN_MS)?,
+                primitive_binary(
+                    JsBinary::Add,
+                    &now,
+                    &number(PROXY_DIRECT_FALLBACK_FAILURE_COOLDOWN_MS),
+                )?,
             )?;
             log(hr, "warning", || {
                 let count = own(hr, "directRouteFailureCount")?;
@@ -586,9 +618,9 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         hr.invoke(&remove, &ws, &[text(event_name), handler])?;
     }
     set_own(hr, "ws", AccountValue::Undefined)?;
-    let count = num(&own(hr, "onCloseCount")?)?;
-    set_own(hr, "onCloseCount", AccountValue::Number(count + 1.0))?;
-    if num(&own(hr, "onCloseCount")?)? > 100.0 {
+    let count = primitive_increment(&own(hr, "onCloseCount")?)?;
+    set_own(hr, "onCloseCount", count)?;
+    if primitive_relation(JsRelation::Greater, &own(hr, "onCloseCount")?, &number(100.0))? {
         log(hr, "error", || {
             Ok(text(
                 "[Lighter] Public WS onClose count > 100, stopping reconnection",
@@ -707,9 +739,10 @@ pub fn fetch_and_emit_order_book_from_rest(
             let status = status_code(hr, &error)?;
             if is_number(&status, 403.0) {
                 let record = own(hr, "orderBookRestFallbackCooldownUntilByTopic")?;
-                let until = primitive_add_number(
+                let until = primitive_binary(
+                    JsBinary::Add,
                     &virtual_now(hr)?,
-                    ORDER_BOOK_REST_FALLBACK_403_COOLDOWN_MS,
+                    &number(ORDER_BOOK_REST_FALLBACK_403_COOLDOWN_MS),
                 )?;
                 hr.set(&record, &catch_topic, until)?;
                 log(hr, "warning", || {
@@ -804,8 +837,11 @@ fn ticker_fallback_body(h: Rc<dyn PublicSocketHost>) -> SigningResult<Step> {
         let error = hr.error_value(error);
         let status = status_code(hr, &error)?;
         if is_number(&status, 403.0) {
-            let until =
-                primitive_add_number(&virtual_now(hr)?, TICKER_REST_FALLBACK_403_COOLDOWN_MS)?;
+            let until = primitive_binary(
+                JsBinary::Add,
+                &virtual_now(hr)?,
+                &number(TICKER_REST_FALLBACK_403_COOLDOWN_MS),
+            )?;
             set_own(hr, "tickerRestFallbackCooldownUntil", until)?;
             log(hr, "warning", || {
                 Ok(text(
@@ -882,8 +918,13 @@ pub fn attempt_order_book_recovery(
     }
     let now = virtual_now(h)?;
     let last = h.get(&own(h, "lastOrderBookRecoveryAtByTopic")?, topic)?;
-    let last = if last.truthy() { num(&last)? } else { 0.0 };
-    if num(&now)? - last < ORDER_BOOK_RECOVERY_COOLDOWN_MS {
+    let last = if last.truthy() { last } else { number(0.0) };
+    let elapsed = primitive_binary(JsBinary::Subtract, &now, &last)?;
+    if primitive_relation(
+        JsRelation::Less,
+        &elapsed,
+        &number(ORDER_BOOK_RECOVERY_COOLDOWN_MS),
+    )? {
         own_call(
             h,
             "armOrderBookStaleTimeout",
@@ -899,10 +940,11 @@ pub fn attempt_order_book_recovery(
     } else {
         AccountValue::Number(0.0)
     };
-    let attempt = primitive_add_number(&attempts, 1.0)?;
+    let attempt = primitive_binary(JsBinary::Add, &attempts, &number(1.0))?;
     let record = own(h, "orderBookRecoveryAttempts")?;
     h.set(&record, topic, attempt.clone())?;
-    let should_reconnect = !own(h, "isConnected")?.truthy() || num(&attempt)? >= 2.0;
+    let should_reconnect = !own(h, "isConnected")?.truthy()
+        || primitive_relation(JsRelation::GreaterEqual, &attempt, &number(2.0))?;
     let message = |prefix: &str| -> SigningResult<AccountValue> {
         template(
             h,
@@ -1018,12 +1060,11 @@ fn seconds(
     raw: impl FnOnce() -> SigningResult<AccountValue>,
 ) -> SigningResult<AccountValue> {
     let raw = global_call(h, "Number", || Ok(vec![raw()?]))?;
-    let n = num(&raw)?;
-    Ok(AccountValue::Number(if n > 10_000_000_000.0 {
-        n / 1000.0
+    if primitive_relation(JsRelation::Greater, &raw, &number(10_000_000_000.0))? {
+        primitive_binary(JsBinary::Divide, &raw, &number(1000.0))
     } else {
-        n
-    }))
+        Ok(raw)
+    }
 }
 fn parse_float(
     h: &dyn PublicSocketHost,

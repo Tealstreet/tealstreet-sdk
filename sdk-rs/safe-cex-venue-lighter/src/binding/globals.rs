@@ -15,7 +15,7 @@ use crate::{
     },
     utils::{
         get_lighter_amount_decimals, get_lighter_order_minimums, get_lighter_price_decimals,
-        parse_lighter_api_key_index, parse_lighter_positive_integer_string,
+        is_lighter_l1_address, parse_lighter_api_key_index, parse_lighter_positive_integer_string,
         resolve_lighter_cancel_targets, to_lighter_api_key_index_string, to_lighter_scaled_int,
     },
 };
@@ -157,6 +157,12 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
             Ok(parse_lighter_positive_integer_string(value.as_ref())
                 .map_err(coercion)?
                 .map_or(Js::Undefined, |s| Js::str(&s)))
+        }),
+        helper("isLighterL1Address", |a| {
+            let value = optional_json(&arg(&a, 0))?;
+            is_lighter_l1_address(value.as_ref())
+                .map(Js::Bool)
+                .map_err(coercion)
         }),
         helper("getLighterAmountDecimals", |a| {
             let market: Market = to_typed(&arg(&a, 0))?;
