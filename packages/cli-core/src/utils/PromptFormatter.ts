@@ -1,9 +1,9 @@
 import type { ExchangeLike } from '../types';
-import type { Position, Order } from '@tealstreet/safe-cex/src/types';
+import type { Market, Position, Order } from '@tealstreet/safe-cex/src/types';
 import { OrderStatus, PositionSide } from '@tealstreet/safe-cex/src/types';
 import { ConnectionMonitor } from './ConnectionMonitor';
-import { getSizeCurrency } from '@tealstreet/safe-cex/src/utils/sizing';
-import { formatPriceCompact, formatSizeCompact } from '@tealstreet/utils/src/formatting';
+import { formatBaseSize } from './formatBaseSize';
+import { formatPriceCompact } from '@tealstreet/utils/src/formatting';
 import chalk from 'chalk';
 
 /**
@@ -137,7 +137,7 @@ export interface PromptInfo {
   price?: number;
   /** Position side ('Long' or 'Short', null for none) */
   positionSide?: 'Long' | 'Short' | null;
-  /** Position size in contracts */
+  /** Position size in base units */
   positionSize?: number;
   /** Connection status indicator */
   connectionIndicator?: string;
@@ -210,8 +210,7 @@ export function formatPrompt(options: PromptOptions): PromptInfo {
 
   // Build token values
   const pricePrecision = market?.precision?.price;
-  const amountPrecision = market?.precision?.amount;
-  const currency = getSizeCurrency(market as any);
+  const currency = market?.base;
 
   // When the selected account isn't connected yet, the `{conn}` slot carries
   // an explicit status word and the account name is tinted. Only applies when
@@ -227,7 +226,7 @@ export function formatPrompt(options: PromptOptions): PromptInfo {
     side: position ? (position.side === PositionSide.Long ? chalk.green('Long:') : chalk.red('Short:')) : '',
     size: position
       ? (position.side === PositionSide.Long ? chalk.green : chalk.red)(
-          `${formatSizeCompact(Math.abs(position.contracts), amountPrecision)}${currency ? ' ' + currency : ''}`,
+          `${formatBaseSize(position.contracts, market)}${currency ? ' ' + currency : ''}`,
         )
       : '',
     entry: position ? formatPriceCompact(position.entryPrice, pricePrecision) : '',
@@ -405,10 +404,7 @@ function escapeRegex(str: string): string {
 /**
  * Get market info for a symbol
  */
-function getMarket(
-  exchange: ExchangeLike | null,
-  symbol: string,
-): { precision?: { price?: number; amount?: number } } | null {
+function getMarket(exchange: ExchangeLike | null, symbol: string): Market | null {
   if (!exchange) return null;
   const markets = exchange.store?.markets;
   if (!markets) return null;
