@@ -239,6 +239,8 @@ pub enum WooV3TriggerPriceType {
     LastPrice,
 }
 
+// Remote variants must retain the public enum names.
+#[allow(clippy::enum_variant_names)]
 #[derive(Deserialize)]
 #[serde(remote = "WooV3TriggerPriceType")]
 enum AcceptedWooV3TriggerPriceTypeWire {
