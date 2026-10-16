@@ -266,7 +266,7 @@ name throws a ReferenceError rather than resolving to a stand-in.
 clean startup. Run `python3 sdk-rs/safe-cex-venue-hyperliquid/scripts/binding-controls.py`
 from the repository root for reproducible dispatch controls: each of the 16
 trait overrides is corrupted independently, must compile and fail its named
-E2E test, and is restored byte-for-byte. The restored suite must pass all 13
+E2E test, and is restored byte-for-byte. The restored suite must pass all 14
 tests. These controls establish dispatch coverage; they do not establish full
 JavaScript semantics or live exchange parity. Logs stay outside the repository.
 
@@ -291,3 +291,9 @@ waiters subscribe to that same signer. HTTP relay signing is supplied separately
 by the host's composed adapter, which must honor the API's skip-signing tag on info
 requests. Every caller must pass the signer bundle explicitly; local callers use
 `ExchangeSigners::default()`.
+
+
+Date construction and Date.now apply the shared TimeClip operation to injected
+wall-clock values. A fractional host clock must still produce an integer nonce;
+`tests/binding.rs` checks local signing with a fractional input. NativeRuntime also
+supplies integer epoch milliseconds, while monotonic clocks retain their precision.

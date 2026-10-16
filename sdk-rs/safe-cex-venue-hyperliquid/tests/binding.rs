@@ -505,3 +505,16 @@ fn update_order_cancels_then_places_under_a_fresh_cloid() {
     assert_eq!(wire["p"], json!("59000"));
     assert!(wire["c"].as_str().is_some_and(|c| c.len() == 34));
 }
+
+#[test]
+fn fractional_host_clock_still_produces_integer_date_now_signing_nonces() {
+    let f = fixture(vec![(
+        "exchange:scheduleCancel",
+        json!({"status":"ok","response":{"type":"scheduleCancel","data":{"status":"success"}}}),
+    )]);
+    f.host.now.set(0.75);
+    f.host.block_on(f.exchange.schedule_cancel(None)).unwrap();
+    let body = last_body(&f, "exchange:scheduleCancel");
+    assert_eq!(body["nonce"].as_f64(), Some(1_700_000_000_000.0));
+    assert!(body["signature"]["r"].is_string());
+}

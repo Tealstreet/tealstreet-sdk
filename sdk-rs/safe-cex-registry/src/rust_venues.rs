@@ -78,6 +78,10 @@ pub trait RustVenueHost {
     fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
     /// Bitget, Bitget USDC and Bitget inverse share one input set.
     fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
+    fn hyperliquid(
+        &self,
+        options: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -101,6 +105,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
     (ExchangeName::Okx, okx_constructor),
@@ -108,6 +113,15 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
 ];
+
+pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |_, options, store| {
+        let deps = host.hyperliquid(&options)?;
+        let exchange =
+            safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
+        Ok(exchange)
+    })
+}
 
 pub fn backpack_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
