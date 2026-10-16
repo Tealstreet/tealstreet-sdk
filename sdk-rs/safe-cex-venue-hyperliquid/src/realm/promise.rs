@@ -121,7 +121,10 @@ pub(crate) fn settle(cell: &Rc<RefCell<PromiseCell>>, result: Result<Value, Thro
 impl Realm {
     /// The ExchangeError view of a thrown value: an Error's message (and its
     /// `name` when not plain Error), otherwise String(value).
-    pub(crate) fn exchange_error(&mut self, thrown: &Value) -> safe_cex_exchange::runtime::ExchangeError {
+    pub(crate) fn exchange_error(
+        &mut self,
+        thrown: &Value,
+    ) -> safe_cex_exchange::runtime::ExchangeError {
         let message = if thrown
             .object()
             .is_some_and(|o| matches!(o.borrow().kind, Kind::Error))

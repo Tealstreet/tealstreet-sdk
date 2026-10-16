@@ -5,7 +5,11 @@ impl Realm {
     /// `const [a, b, ...] = value` over `slots`; a `false` slot is an elision.
     /// After the last slot the iterator is closed unless already exhausted; a
     /// throwing `return` propagates (normal completion).
-    pub(crate) fn array_pattern(&mut self, value: &Value, slots: &[bool]) -> Result<Vec<Value>, Thrown> {
+    pub(crate) fn array_pattern(
+        &mut self,
+        value: &Value,
+        slots: &[bool],
+    ) -> Result<Vec<Value>, Thrown> {
         let iterator = self.get_iterator(value)?;
         let mut out = vec![];
         let mut done = false;
@@ -26,7 +30,11 @@ impl Realm {
         }
         Ok(out)
     }
-    pub(crate) fn array_slots(&mut self, value: &Value, count: usize) -> Result<Vec<Value>, Thrown> {
+    pub(crate) fn array_slots(
+        &mut self,
+        value: &Value,
+        count: usize,
+    ) -> Result<Vec<Value>, Thrown> {
         self.array_pattern(value, &vec![true; count])
     }
     /// `const [head, ...rest] = value`.
@@ -40,7 +48,11 @@ impl Realm {
         Ok((head, self.new_array(rest)))
     }
     /// `const { k1, k2 } = value`, with the source destructuring TypeError.
-    pub(crate) fn object_pattern(&mut self, value: &Value, keys: &[&str]) -> Result<Vec<Value>, Thrown> {
+    pub(crate) fn object_pattern(
+        &mut self,
+        value: &Value,
+        keys: &[&str],
+    ) -> Result<Vec<Value>, Thrown> {
         if value.is_nullish() {
             let first = keys.first().copied().unwrap_or("");
             let shown = if matches!(value, Value::Null) {
@@ -60,7 +72,11 @@ impl Realm {
         keys.iter().map(|k| self.get_str(value, k)).collect()
     }
     /// Object spread / CopyDataProperties: own enumerable string then symbol keys.
-    pub(crate) fn copy_data_properties(&mut self, target: &Value, source: &Value) -> Result<(), Thrown> {
+    pub(crate) fn copy_data_properties(
+        &mut self,
+        target: &Value,
+        source: &Value,
+    ) -> Result<(), Thrown> {
         if source.is_nullish() {
             return Ok(());
         }
@@ -95,12 +111,20 @@ impl Realm {
         Ok(self.new_array(items))
     }
     /// `f(...value)` appends the iterable's items to an argument list.
-    pub(crate) fn spread_args(&mut self, args: &mut Vec<Value>, value: &Value) -> Result<(), Thrown> {
+    pub(crate) fn spread_args(
+        &mut self,
+        args: &mut Vec<Value>,
+        value: &Value,
+    ) -> Result<(), Thrown> {
         args.extend(self.collect_iterable(value)?);
         Ok(())
     }
     /// `[...array, last]`.
-    pub(crate) fn spread_append(&mut self, iterable: &Value, last: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn spread_append(
+        &mut self,
+        iterable: &Value,
+        last: &Value,
+    ) -> Result<Value, Thrown> {
         let mut items = self.collect_iterable(iterable)?;
         items.push(last.clone());
         Ok(self.new_array(items))

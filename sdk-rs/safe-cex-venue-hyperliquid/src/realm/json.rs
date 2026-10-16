@@ -191,7 +191,10 @@ impl Realm {
         serde_json::from_str(&String::from_utf16_lossy(&units))
             .map_err(|e| self.error(&format!("unserializable value: {e}")))
     }
-    pub(crate) fn to_typed<T: serde::de::DeserializeOwned>(&mut self, value: &Value) -> Result<T, Thrown> {
+    pub(crate) fn to_typed<T: serde::de::DeserializeOwned>(
+        &mut self,
+        value: &Value,
+    ) -> Result<T, Thrown> {
         let json = self.to_serde(value)?;
         serde_json::from_value(json).map_err(|e| self.type_error(&format!("typed boundary: {e}")))
     }
@@ -208,7 +211,10 @@ impl Realm {
 impl Realm {
     /// The signing view of a value: own enumerable data in key order, with
     /// `undefined` members retained (msgpack encodes them as nil; JSON drops them).
-    pub(crate) fn to_js_json(&mut self, value: &Value) -> Result<safe_cex_num::JsJsonValue, Thrown> {
+    pub(crate) fn to_js_json(
+        &mut self,
+        value: &Value,
+    ) -> Result<safe_cex_num::JsJsonValue, Thrown> {
         use safe_cex_num::JsJsonValue as J;
         Ok(match value {
             Value::Undefined => J::Undefined,

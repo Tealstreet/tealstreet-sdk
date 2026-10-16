@@ -263,7 +263,12 @@ JS BaseExchange, BaseWebSocket (over the core socket), store and REST clients to
 their Rust owners; imports bind by name to the existing ports, and an unbound
 name throws a ReferenceError rather than resolving to a stand-in.
 `tests/binding.rs` drives all 16 methods over a scripted host and asserts a
-clean startup; each bound method has a recorded prove-fail mutation.
+clean startup. Run `python3 sdk-rs/safe-cex-venue-hyperliquid/scripts/binding-controls.py`
+from the repository root for reproducible dispatch controls: each of the 16
+trait overrides is corrupted independently, must compile and fail its named
+E2E test, and is restored byte-for-byte. The restored suite must pass all 11
+tests. These controls establish dispatch coverage; they do not establish full
+JavaScript semantics or live exchange parity. Logs stay outside the repository.
 
 Declared realm choices: promise reactions run as runtime tasks, not a V8
 microtask queue; store reads are snapshots (writes go through Store methods);

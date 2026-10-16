@@ -169,7 +169,11 @@ impl Realm {
             .borrow_mut()
             .put(PropKey::str(name), value, false);
     }
-    pub(crate) fn singleton(&self, name: &'static str, init: impl FnOnce(&Realm) -> Value) -> Value {
+    pub(crate) fn singleton(
+        &self,
+        name: &'static str,
+        init: impl FnOnce(&Realm) -> Value,
+    ) -> Value {
         if let Some(v) = self.state.singletons.borrow().get(name) {
             return v.clone();
         }

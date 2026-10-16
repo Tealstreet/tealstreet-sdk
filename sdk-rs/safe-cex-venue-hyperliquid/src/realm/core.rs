@@ -197,7 +197,12 @@ impl Realm {
         Ok(Value::Undefined)
     }
     /// Strict-mode `o[key] = value`.
-    pub(crate) fn set(&mut self, target: &Value, key: &PropKey, value: Value) -> Result<(), Thrown> {
+    pub(crate) fn set(
+        &mut self,
+        target: &Value,
+        key: &PropKey,
+        value: Value,
+    ) -> Result<(), Thrown> {
         let o = match target {
             Value::Object(o) => o.clone(),
             Value::Undefined | Value::Null => {
@@ -296,11 +301,21 @@ impl Realm {
         }
         self.define(target, key.clone(), value)
     }
-    pub(crate) fn set_str(&mut self, target: &Value, key: &str, value: Value) -> Result<(), Thrown> {
+    pub(crate) fn set_str(
+        &mut self,
+        target: &Value,
+        key: &str,
+        value: Value,
+    ) -> Result<(), Thrown> {
         self.set(target, &PropKey::str(key), value)
     }
     /// CreateDataPropertyOrThrow.
-    pub(crate) fn define(&mut self, target: &Value, key: PropKey, value: Value) -> Result<(), Thrown> {
+    pub(crate) fn define(
+        &mut self,
+        target: &Value,
+        key: PropKey,
+        value: Value,
+    ) -> Result<(), Thrown> {
         let Some(o) = target.object() else {
             return Err(self.type_error("CreateDataProperty called on non-object"));
         };
@@ -340,7 +355,12 @@ impl Realm {
         });
         Ok(())
     }
-    pub(crate) fn define_str(&mut self, target: &Value, key: &str, value: Value) -> Result<(), Thrown> {
+    pub(crate) fn define_str(
+        &mut self,
+        target: &Value,
+        key: &str,
+        value: Value,
+    ) -> Result<(), Thrown> {
         self.define(target, PropKey::str(key), value)
     }
     /// A non-enumerable own method/field (class prototype member).
@@ -496,7 +516,12 @@ impl Realm {
     }
 
     // ---- calls ----
-    pub(crate) fn call(&mut self, f: &Value, this: &Value, args: &[Value]) -> Result<Value, Thrown> {
+    pub(crate) fn call(
+        &mut self,
+        f: &Value,
+        this: &Value,
+        args: &[Value],
+    ) -> Result<Value, Thrown> {
         match f.function().and_then(|f| f.call.clone()) {
             Some(body) => body(self, this, args),
             None => {

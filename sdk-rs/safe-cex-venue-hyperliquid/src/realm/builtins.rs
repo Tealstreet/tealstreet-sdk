@@ -588,7 +588,10 @@ fn install_array(realm: &mut Realm) {
         let mut items = array_items(r, this)?;
         // Stable insertion sort; comparator and ToString errors propagate.
         let mut sorted: Vec<Value> = Vec::with_capacity(items.len());
-        let undefined_count = items.iter().filter(|v| matches!(v, Value::Undefined)).count();
+        let undefined_count = items
+            .iter()
+            .filter(|v| matches!(v, Value::Undefined))
+            .count();
         items.retain(|v| !matches!(v, Value::Undefined));
         for v in items {
             let mut pos = sorted.len();
