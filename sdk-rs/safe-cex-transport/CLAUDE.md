@@ -182,4 +182,6 @@ reviewed in [ACCEPTED_SHAPES.md](ACCEPTED_SHAPES.md). The shared standalone fram
 use owner-specific `deserialize_map` visitors and private remote schemas; SDK
 records use the existing object guard. Keep generic borrowed request payloads,
 all original field/presence rules and the independently inventoried visitor
-contracts. The twelve compiling disconnect controls restore exact source bytes.
+contracts. The fourteen compiling disconnect controls restore exact source bytes.
+The bounded follow-up API reviews are recorded in
+[ACCEPTED_API_REVIEWS.md](ACCEPTED_API_REVIEWS.md).

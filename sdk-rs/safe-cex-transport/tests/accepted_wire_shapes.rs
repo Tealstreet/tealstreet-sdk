@@ -184,3 +184,58 @@ fn routing_options_require_an_object_and_preserve_native_fields() {
     let row: RoutingOptions = serde_json::from_str(r#"{"tealstreetWsRoute":true}"#).unwrap();
     assert!(!row.tealstreet_proxy && row.tealstreet_ws_route);
 }
+
+#[test]
+fn resolution_transport_requires_object_and_preserves_optional_flags() {
+    use safe_cex_transport::transport_resolution::ResolvedTransport;
+    record::<ResolvedTransport>(
+        json!({"tealstreetProxy":true,"tealstreetTunnel":false,"proxyRegion":"JA"}),
+        json!([true, false, "JA"]),
+        |row| {
+            assert_eq!(row.tealstreet_proxy, Some(true));
+            assert_eq!(row.tealstreet_tunnel, Some(false));
+            assert_eq!(row.proxy_region.as_deref(), Some("JA"));
+        },
+    );
+    for raw in [
+        "{}",
+        r#"{"tealstreetProxy":null,"tealstreetTunnel":null,"proxyRegion":null}"#,
+    ] {
+        let row: ResolvedTransport = serde_json::from_str(raw).unwrap();
+        assert!(row.tealstreet_proxy.is_none());
+        assert!(row.tealstreet_tunnel.is_none());
+        assert!(row.proxy_region.is_none());
+    }
+}
+
+#[test]
+fn resolution_metadata_requires_object_and_preserves_native_region_order() {
+    use safe_cex_transport::transport_resolution::TransportMetadata;
+    record::<TransportMetadata>(
+        json!({"requiresCors":true,"enforceWsTunnel":false,"supportsTunnel":true,"privateProxyRegions":{"SG":["binance"],"JA":["okx"]}}),
+        json!([true, false, true, {"SG":["binance"],"JA":["okx"]}]),
+        |row| {
+            assert!(row.requires_cors);
+            assert_eq!(row.enforce_ws_tunnel, Some(false));
+            assert_eq!(row.supports_tunnel, Some(true));
+            assert_eq!(
+                row.private_proxy_regions.keys().collect::<Vec<_>>(),
+                vec!["SG", "JA"]
+            );
+            assert_eq!(
+                row.private_proxy_regions.get("SG").unwrap(),
+                &vec!["binance".to_owned()]
+            );
+            assert_eq!(
+                row.private_proxy_regions.get("JA").unwrap(),
+                &vec!["okx".to_owned()]
+            );
+        },
+    );
+    let row: TransportMetadata =
+        serde_json::from_str(r#"{"requiresCors":false,"privateProxyRegions":{}}"#).unwrap();
+    assert!(!row.requires_cors);
+    assert!(row.enforce_ws_tunnel.is_none() && row.supports_tunnel.is_none());
+    assert!(row.private_proxy_regions.is_empty());
+    assert!(serde_json::from_str::<TransportMetadata>("{}").is_err());
+}
