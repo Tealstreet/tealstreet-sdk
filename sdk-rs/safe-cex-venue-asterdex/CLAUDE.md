@@ -16,6 +16,9 @@ Keep implementation-specific costs and evidence in the owning rows and gate reco
 `tests/live_types.rs` checks accepted/refused shapes and native numeric bits;
 `NUMERIC_INGRESS_GATE_EXITS.md` records its bounded-depth acceptance cost.
 Tables and auth/version helpers retain their separate live-source oracles.
+`FLATTEN_NUMERIC_REVIEW.md` describes direct raw-number witnesses for the six
+public flattened records and copied lexical diagnostics for their six private
+decoders. Those diagnostics do not classify or exempt local owners.
 
 `exchange_helpers.rs` owns pure mappers and decisions. Numeric metadata uses the
 shared retained owner; `NATIVE_METADATA_GATE_EXITS.md` records its measured
