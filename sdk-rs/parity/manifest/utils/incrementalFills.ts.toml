@@ -21,18 +21,18 @@ note = "Renamed to safe-cex-store/src/incremental_fills.rs::clean_float. Split m
 [[symbol]]
 ts = "decimalsOf"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-store/src/incremental_fills.rs::decimals_of"
-status = "ported"
-note = "Renamed Rust target: safe-cex-store/src/incremental_fills.rs::decimals_of. Uses ECMAScript number spelling; exponent notation returns absence so subtraction takes the precision fallback."
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "subtractDecimals"
 kind = "const-fn"
-layer = "adapted"
-rs = "safe-cex-store/src/incremental_fills.rs::subtract_decimals"
-status = "ported"
-note = "Renamed Rust target: safe-cex-store/src/incremental_fills.rs::subtract_decimals. Uses the input decimal places, capped at twenty, and the shared toFixed operation, falling back to clean_float for exponent notation. The #88 incremental-fill regression covers the large-total/small-fill subtraction."
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "createIncrementalFills"
