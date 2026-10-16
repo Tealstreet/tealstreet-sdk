@@ -108,6 +108,8 @@ pub struct ExchangeOptionsPatch {
     pub polymarket: Option<Option<ExchangeOptionsPolymarket>>,
     pub testnet: Option<Option<bool>>,
     pub enable_spot_markets: Option<Option<bool>>,
+    pub enable_option_markets: Option<Option<bool>>,
+    pub enable_inverse_markets: Option<Option<bool>>,
     pub bybit_site_id: Option<Option<ExchangeOptionsBybitSiteId>>,
     pub public_data_only: Option<Option<bool>>,
     pub private_only: Option<Option<bool>>,
@@ -188,6 +190,12 @@ pub(crate) fn apply_patch(patch: &ExchangeOptionsPatch, options: &mut ExchangeOp
     }
     if let Some(value) = &patch.enable_spot_markets {
         options.enable_spot_markets = *value;
+    }
+    if let Some(value) = &patch.enable_option_markets {
+        options.enable_option_markets = *value;
+    }
+    if let Some(value) = &patch.enable_inverse_markets {
+        options.enable_inverse_markets = *value;
     }
     if let Some(value) = &patch.bybit_site_id {
         options.bybit_site_id = value.clone();
