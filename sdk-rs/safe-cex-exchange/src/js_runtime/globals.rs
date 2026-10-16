@@ -558,6 +558,54 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     def("Map", Js::constructor("Map", |_, _| Ok(Js::new_map())));
     def(
+        "WsDirectFallback",
+        Js::constructor("WsDirectFallback", |_, a| {
+            let max = arg(&a, 0);
+            let max = if max.is_undefined() {
+                2.0
+            } else {
+                max.to_number()?
+            };
+            let state = Rc::new(std::cell::RefCell::new(
+                safe_cex_transport::fallback::WsDirectFallback::new(max.max(0.0) as usize),
+            ));
+            let (resolve, message, silence) = (state.clone(), state.clone(), state);
+            Ok(Js::object_with_class(
+                "WsDirectFallback",
+                vec![
+                    (
+                        "resolveUrl",
+                        Js::function("resolveUrl", move |_, a| {
+                            let primary = String::from_utf16_lossy(&arg(&a, 0).to_js_string()?);
+                            let fallbacks: Vec<Option<String>> = a
+                                .iter()
+                                .skip(1)
+                                .map(|v| v.as_str().map(|s| String::from_utf16_lossy(s)))
+                                .collect();
+                            let refs: Vec<Option<&str>> =
+                                fallbacks.iter().map(|f| f.as_deref()).collect();
+                            Ok(Js::str(resolve.borrow_mut().resolve_url(&primary, &refs)))
+                        }),
+                    ),
+                    (
+                        "onMessage",
+                        Js::function("onMessage", move |_, _| {
+                            message.borrow_mut().on_message();
+                            Ok(Js::Undefined)
+                        }),
+                    ),
+                    (
+                        "disregardSilence",
+                        Js::function("disregardSilence", move |_, _| {
+                            silence.borrow_mut().disregard_silence();
+                            Ok(Js::Undefined)
+                        }),
+                    ),
+                ],
+            ))
+        }),
+    );
+    def(
         "Set",
         Js::constructor("Set", |_, a| {
             let set = Js::new_set();

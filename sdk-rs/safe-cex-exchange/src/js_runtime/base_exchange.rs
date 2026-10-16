@@ -99,17 +99,64 @@ pub fn create(
     }
     {
         let base = base.clone();
+        // Listener ids by JS function identity, so `off(event, fn)` finds its row.
+        let registered: Rc<std::cell::RefCell<Vec<(String, Js, String)>>> = Rc::default();
+        let (on_base, off_base) = (base.clone(), base.clone());
+        let (on_rows, off_rows) = (registered.clone(), registered);
         def(
             "emitter",
-            Js::object(vec![(
-                "emit",
-                Js::function("emit", move |_, a| {
-                    let event = text(&arg(&a, 0))?;
-                    let payload = to_json(&Js::array(a.into_iter().skip(1).collect()))?;
-                    base.emit(&event, payload)?;
-                    Ok(Js::Bool(true))
-                }),
-            )]),
+            Js::object(vec![
+                (
+                    "emit",
+                    Js::function("emit", move |_, a| {
+                        let event = text(&arg(&a, 0))?;
+                        let payload = to_json(&Js::array(a.into_iter().skip(1).collect()))?;
+                        base.emit(&event, payload)?;
+                        Ok(Js::Bool(true))
+                    }),
+                ),
+                (
+                    "on",
+                    Js::function("on", move |this, a| {
+                        let event = text(&arg(&a, 0))?;
+                        let listener = arg(&a, 1);
+                        let callee = listener.clone();
+                        let id = on_base.on(
+                            &event,
+                            Rc::new(move |_, data| {
+                                let args = match super::value::from_json(data) {
+                                    Js::Array(items) => items
+                                        .borrow()
+                                        .iter()
+                                        .map(|v| v.clone().unwrap_or(Js::Undefined))
+                                        .collect(),
+                                    other => vec![other],
+                                };
+                                callee.call(Js::Undefined, args)?;
+                                Ok(())
+                            }),
+                        );
+                        on_rows.borrow_mut().push((event, listener, id));
+                        Ok(this)
+                    }),
+                ),
+                (
+                    "off",
+                    Js::function("off", move |this, a| {
+                        let event = text(&arg(&a, 0))?;
+                        let listener = arg(&a, 1);
+                        let mut rows = off_rows.borrow_mut();
+                        if let Some(at) = rows
+                            .iter()
+                            .position(|(e, f, _)| *e == event && f.same_reference(&listener))
+                        {
+                            let (_, _, id) = rows.remove(at);
+                            off_base.off(&event, Some(&id));
+                        }
+                        Ok(this)
+                    }),
+                ),
+            ]),
         );
     }
     {
