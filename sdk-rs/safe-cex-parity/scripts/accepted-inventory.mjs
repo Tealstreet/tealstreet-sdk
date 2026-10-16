@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { defaultTraitInventory } from './accepted-defaults.mjs';
 
 // The pinned compiler, rather than derive syntax, owns the implementation inventory.
-export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, readSource } = {}) {
+export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, receiverTraits = {}, readSource } = {}) {
   assert.ok(!(onlyOwners && onlyDefaultTraits), 'accepted-set: regression scopes cannot be combined');
   assert.equal(doc.format_version, 61, 'accepted-set: review changed rustdoc JSON format');
   const index = doc.index;
@@ -96,7 +97,8 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
     }
     return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, expanded(child, seen, bindings)]));
   }
-  const rawInput = value => /"primitive":"str"|"primitive":"u8"|serde_json::(?:value::)?(?:Value|Map)|alloc::string::String/.test(JSON.stringify(normalize(expanded(value))));
+  // PatchSource admits the raw serde_json Map, so its dyn entrypoints are raw input.
+  const rawInput = value => /"primitive":"str"|"primitive":"u8"|serde_json::(?:value::)?(?:Value|Map)|alloc::string::String|safe_cex_store::model_patch::PatchSource/.test(JSON.stringify(normalize(expanded(value))));
   const apiSources = new Map();
   const decoderBounds = fn => /serde(?:_core)?::de::(?:DeserializeOwned|Deserializer|Deserialize)/.test(JSON.stringify(normalize(fn.generics)));
   const decodedOutput = value => {
@@ -194,6 +196,32 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
       scope: { onlyOwners },
     };
   }
+  // Receivers with no inventoried owner (smart-pointer forwarding, external
+  // types) and never-instantiated defaults are reviewed against pinned source.
+  function typeName(type) {
+    if (!type || typeof type !== 'object') return String(type);
+    if (type.generic) return type.generic;
+    if (type.primitive) return type.primitive;
+    if (type.borrowed_ref) return `&${type.borrowed_ref.is_mutable ? 'mut ' : ''}${typeName(type.borrowed_ref.type)}`;
+    if (type.tuple) return `(${type.tuple.map(typeName).join(', ')})`;
+    if (type.slice) return `[${typeName(type.slice)}]`;
+    if (type.resolved_path) {
+      const name = doc.paths[String(type.resolved_path.id)]?.path.join('::') ?? paths.get(String(type.resolved_path.id))?.join('::') ?? type.resolved_path.path;
+      const args = (type.resolved_path.args?.angle_bracketed?.args ?? []).map(arg => arg.type ? typeName(arg.type) : arg.lifetime ?? JSON.stringify(normalize(arg)));
+      return args.length ? `${name}<${args.join(', ')}>` : name;
+    }
+    return JSON.stringify(normalize(type));
+  }
+  function reviewedReceiver(key, span, contract) {
+    const label = `${key}: accepted-set assertion: reviewed receiver classification`;
+    assert.deepEqual(Object.keys(contract).sort(), ['category', 'file', 'reason', 'sourceSha256'], `${label}: unsupported fields`);
+    assert.ok(['non-decoder', 'delegated'].includes(contract.category), `${label}: unknown category`);
+    assert.ok(contract.reason?.trim(), `${label}: specific reason required`);
+    assert.equal(span?.filename, contract.file, `${label}: reviewed source identity changed`);
+    assert.equal(typeof readSource, 'function', `${label}: production source reader required`);
+    assert.equal(createHash('sha256').update(readSource(span.filename)).digest('hex'), contract.sourceSha256, `${label}: reviewed source changed`);
+  }
+  const unreviewed = [];
   for (const item of Object.values(index)) {
     const impl = item.inner.impl;
     if (impl && !impl.is_negative && !impl.is_synthetic && !coveredImpls.has(String(item.id)) && get(impl.trait?.id)?.crate_id === 0) {
@@ -203,18 +231,25 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
       for (const method of [...supplied, ...defaults]) {
         if (reviewedDefaults.methodIds.has(String(method.id))) continue;
         const fn = method?.inner.function;
-        if (fn && (rawInput(fn.sig.inputs) || decodedOutput(fn.sig.output) || decoderBounds(fn)))
-          assert.fail(`${traitPath(impl)}::${method.name}: accepted-set assertion: decoder trait on unsupported receiver needs explicit production coverage`);
+        if (fn && (rawInput(fn.sig.inputs) || decodedOutput(fn.sig.output) || decoderBounds(fn))) {
+          const key = `${traitPath(impl)}::${method.name} for ${typeName(impl.for)}`;
+          if (!receiverTraits[key]) unreviewed.push(`${key}: accepted-set assertion: decoder trait on unsupported receiver needs explicit production coverage`);
+          else reviewedReceiver(key, item.span, receiverTraits[key]);
+        }
       }
     }
     if (item.crate_id === 0 && item.inner.trait && !coveredTraits.has(String(item.id))) {
       for (const id of item.inner.trait.items) {
         const method = get(id); const fn = method?.inner.function;
-        if (fn?.has_body && !coveredDefaults.has(String(id)) && (rawInput(fn.sig.inputs) || decodedOutput(fn.sig.output) || decoderBounds(fn)))
-          assert.fail(`${paths.get(String(item.id))?.join('::')}::${method.name}: accepted-set assertion: uninstantiated default decoder requires production coverage`);
+        if (fn?.has_body && !coveredDefaults.has(String(id)) && (rawInput(fn.sig.inputs) || decodedOutput(fn.sig.output) || decoderBounds(fn))) {
+          const key = `${paths.get(String(item.id))?.join('::')}::${method.name}`;
+          if (!receiverTraits[key]) unreviewed.push(`${key}: accepted-set assertion: uninstantiated default decoder requires production coverage`);
+          else reviewedReceiver(key, method.span, receiverTraits[key]);
+        }
       }
     }
   }
+  assert.equal(unreviewed.length, 0, unreviewed.join('\n'));
   const externalTypeAliases = [];
   const publicAliases = [];
   function collectExternalTypePaths(value, output) {

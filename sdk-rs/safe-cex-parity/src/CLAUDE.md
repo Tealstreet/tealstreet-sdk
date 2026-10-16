@@ -68,7 +68,8 @@ constructors, free-function decoder candidates and custom trait methods, even
 without Deserialize. Raw-input functions remain candidates when they return unit
 and mutate an output argument. Generic bounds and local aliases participate in
 discovery. Unsupported trait receivers and uninstantiated decoder defaults fail
-closed. Owner-local compiler trait probes cover
+closed unless `../accepted-set/receiver-traits.json` reviews them against a
+whole-source pin (`non-decoder` or `delegated` only). `PatchSource` counts as raw input. Owner-local compiler trait probes cover
 block-local declarations rustdoc omits. Nested functions and local Visitor/Seed
 helpers require explicit whole-source fingerprints; decoder helpers also name
 an inventoried production decoder whose probes execute. Deserialize decoder helpers additionally require direct input/output witnesses

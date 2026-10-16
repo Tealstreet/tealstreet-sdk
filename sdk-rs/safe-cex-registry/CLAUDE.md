@@ -81,3 +81,5 @@ uninhabited) and fails visibly until a host-registered source exists.
 installs the remote signing adapter on every client and signs Spot ws-auth
 through it; backpack refuses that host visibly until its signing is wired.
 `tests/native_host_remote_signer.rs` verifies the signer's HMAC server-side.
+`tests/native_host_tunnel.rs` runs `tealstreetTunnel` REST over a local tradetunnel
+(rpc.auth with the proxy token, rpc.http frames) with no direct venue request.

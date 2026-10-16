@@ -617,7 +617,7 @@
       "source_dependencies": [
         {
           "file": "src/order_operations.rs",
-          "sha256": "ae41195fe0e674c34039ddfc998aa285113322219ecd000b017b3d028025bc7c"
+          "sha256": "469b88b28c9a75d7f9ad8f4d30f25062b7a7e2f35054ef3794778d1e850e1806"
         }
       ],
       "guards": [
@@ -642,7 +642,7 @@
       "source_dependencies": [
         {
           "file": "src/order_operations.rs",
-          "sha256": "ae41195fe0e674c34039ddfc998aa285113322219ecd000b017b3d028025bc7c"
+          "sha256": "469b88b28c9a75d7f9ad8f4d30f25062b7a7e2f35054ef3794778d1e850e1806"
         }
       ],
       "guards": [
@@ -881,7 +881,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "e737d9ae8b4c4f8c2a6ef81c5c8a4b48e6d78fd35ae944de0fd7eae2aae3f3d2"
+          "sha256": "f74dba4cce58600bf2df0fd455c4580a301decd76ab5ceb0fd226164cead4823"
         }
       ],
       "guards": [
@@ -1586,6 +1586,105 @@
       "reason": "Verified std thread_local! initializes a synchronous RefCell<HashSet>; the supplied closure is called synchronously and no future is constructed."
     },
     {
+      "owner": "src/native.rs::NativeHttpHost as HttpHost::execute",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "49a90af05d9be9b5c6aea9070d1f3fda12ae06c0c5ce1daae9207cdf87f3f839",
+      "classification": "no-owned-latch",
+      "reason": "Drives the supplied adapter exactly once and returns its receipt future; the request is local and no registration, latch or task is created, so a drop drops the adapter future."
+    },
+    {
+      "owner": "src/native.rs::NativeRuntime as ExchangeRuntime::console",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "9090298274c9c6b6d9e7a27d73b9d7e060ff0da5f570e3307c089f476d8b8c9d",
+      "classification": "immediate",
+      "reason": "std eprintln! writes synchronously to stderr; no future is constructed."
+    },
+    {
+      "owner": "src/native.rs::NativeRuntime as ExchangeRuntime::execute_worker_request",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block"
+      ],
+      "producer_sha256": "106d256fc3cf33f3fcaee4ab5bcb2e68297c63128e327b5aa9acaa67eece5c55",
+      "classification": "immediate",
+      "reason": "Returns a ready error (the native host runs no worker) with no shared state or registration."
+    },
+    {
+      "owner": "src/native.rs::NativeRuntime as ExchangeRuntime::report_exception",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "7d274a02247b9bcc6cf02b8e8b8db4dd210c94a78ab502b857a6b711c0fef230",
+      "classification": "immediate",
+      "reason": "std eprintln! writes synchronously to stderr; no future is constructed."
+    },
+    {
+      "owner": "src/native.rs::NativeRuntime as ExchangeRuntime::report_raw_exception",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "82ef89a20c2c25a93013f3ece2abdb053a280506e380056d8eb76e4177d6a0c0",
+      "classification": "immediate",
+      "reason": "std eprintln! writes synchronously to stderr; no future is constructed."
+    },
+    {
+      "owner": "src/native.rs::NativeRuntime as ExchangeRuntime::sleep",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block",
+        "await",
+        "await"
+      ],
+      "producer_sha256": "9283518c72cd313a39deced8b33fda20b4cdd4267e26dcabf6e97bbccaef52f0",
+      "classification": "no-owned-latch",
+      "reason": "tokio yield_now/sleep register only their own timer entry, released when the future drops; no shared state spans the await."
+    },
+    {
+      "owner": "src/native.rs::NativeRuntime as ExchangeRuntime::spawn_local",
+      "boundaries": [
+        "future-signature"
+      ],
+      "producer_sha256": "1421e305a0819311499fc2ab22af1a716f69fa40f11066f90e5fde57969ec0c8",
+      "classification": "no-owned-latch",
+      "reason": "Hands the future to tokio spawn_local and returns LocalTask, whose cancel aborts it. The detached lifetime belongs to the core task registries that call cancel; the wrapper holds no state."
+    },
+    {
+      "owner": "src/native.rs::NativeRuntime as WsRuntime::dial",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "bf669ae5b4b3f13e8c2acf00edff9e0cf3cf62a91ea3fb3c37b73b14ee7af24b",
+      "classification": "no-owned-latch",
+      "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task."
+    },
+    {
+      "owner": "src/native.rs::NativeWsSocket as WsSocket::next_event",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block",
+        "async-block",
+        "await",
+        "await",
+        "await"
+      ],
+      "producer_sha256": "2e164f4f5dcb5c3d0ac44751a1eb718285c42ed2030d01f1023e8f9222d4e509",
+      "classification": "no-owned-latch",
+      "reason": "Awaits tokio Mutex::lock then mpsc recv, both cancel-safe: a dropped event future loses no frame and releases its lock wait. The ended branch returns an unregistered pending future."
+    },
+    {
       "owner": "src/owned_tasks.rs::Driver as Future::poll",
       "boundaries": [
         "future-poll"
@@ -1642,7 +1741,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "e737d9ae8b4c4f8c2a6ef81c5c8a4b48e6d78fd35ae944de0fd7eae2aae3f3d2"
+          "sha256": "f74dba4cce58600bf2df0fd455c4580a301decd76ab5ceb0fd226164cead4823"
         }
       ],
       "guards": [
@@ -2028,7 +2127,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
+          "sha256": "8fa96bbe703268636f8c14b0e401391f3f1e7e756beb5361e6b9d6a43678c661"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2073,7 +2172,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
+          "sha256": "8fa96bbe703268636f8c14b0e401391f3f1e7e756beb5361e6b9d6a43678c661"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2177,7 +2276,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
+          "sha256": "8fa96bbe703268636f8c14b0e401391f3f1e7e756beb5361e6b9d6a43678c661"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2221,7 +2320,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
+          "sha256": "8fa96bbe703268636f8c14b0e401391f3f1e7e756beb5361e6b9d6a43678c661"
         }
       ],
       "guards": [
