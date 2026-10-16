@@ -790,7 +790,6 @@ fn dispose_stops_the_rest_fallback_interval() {
 /// js_runtime `Scope::clear_timeout` drops the task without `cancel()`, so on
 /// a host where drop does not cancel, a cleared timeout still fires.
 #[test]
-#[ignore = "js_runtime scope.rs: clearTimeout does not cancel the task"]
 fn dispose_clears_the_ticker_watchdog_timeout() {
     let f = fixture();
     f.open();
