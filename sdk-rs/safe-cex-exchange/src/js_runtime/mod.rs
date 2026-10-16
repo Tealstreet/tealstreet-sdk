@@ -5,6 +5,7 @@ pub mod base_exchange;
 pub mod builtins;
 pub mod client;
 pub mod globals;
+pub mod ops;
 pub mod promise;
 pub mod scope;
 pub mod sockets;

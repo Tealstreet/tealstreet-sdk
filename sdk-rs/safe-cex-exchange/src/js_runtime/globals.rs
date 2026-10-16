@@ -3,9 +3,95 @@
 use super::{
     promise,
     scope::{ScopeShared, scope_of},
-    value::{Js, Thrown, arg, error_object, from_json, to_json},
+    value::{Js, Thrown, arg, error_object, from_json},
 };
 use std::rc::{Rc, Weak};
+
+fn json_quote(text: &[u16], out: &mut Vec<u16>) {
+    out.push(b'"' as u16);
+    for (i, &c) in text.iter().enumerate() {
+        let lone = match c {
+            0xD800..=0xDBFF => !matches!(text.get(i + 1), Some(0xDC00..=0xDFFF)),
+            0xDC00..=0xDFFF => i == 0 || !matches!(text[i - 1], 0xD800..=0xDBFF),
+            _ => false,
+        };
+        let escaped = match c {
+            0x22 => "\\\"".to_owned(),
+            0x5C => "\\\\".to_owned(),
+            0x08 => "\\b".to_owned(),
+            0x0C => "\\f".to_owned(),
+            0x0A => "\\n".to_owned(),
+            0x0D => "\\r".to_owned(),
+            0x09 => "\\t".to_owned(),
+            c if c < 0x20 || lone => format!("\\u{c:04x}"),
+            c => {
+                out.push(c);
+                continue;
+            }
+        };
+        out.extend(escaped.encode_utf16());
+    }
+    out.push(b'"' as u16);
+}
+
+/// JSON.stringify(value) without replacer/indent; `None` is the undefined result.
+fn json_stringify(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
+    let mut value = value.clone();
+    if value.is_object() || value.is_array() {
+        let to_json_member = value.get("toJSON")?;
+        if to_json_member.is_callable() {
+            value = to_json_member.call(value.clone(), vec![Js::str("")])?;
+        }
+    }
+    let lit = |t: &str| Ok(Some(t.encode_utf16().collect()));
+    match &value {
+        Js::Undefined | Js::Function(_) => Ok(None),
+        Js::Null => lit("null"),
+        Js::Bool(b) => lit(if *b { "true" } else { "false" }),
+        Js::Number(n) if n.is_finite() => lit(&safe_cex_num::js_number_string(*n)),
+        Js::Number(_) => lit("null"),
+        Js::BigInt(_) => Err(Thrown::type_error("Do not know how to serialize a BigInt")),
+        Js::String(s) => {
+            let mut out = vec![];
+            json_quote(s, &mut out);
+            Ok(Some(out))
+        }
+        Js::Array(items) => {
+            let items: Vec<Option<Js>> = items.borrow().clone();
+            let mut out = vec![b'[' as u16];
+            for (i, item) in items.iter().enumerate() {
+                if i > 0 {
+                    out.push(b',' as u16);
+                }
+                match item.as_ref().map(json_stringify).transpose()?.flatten() {
+                    Some(text) => out.extend(text),
+                    None => out.extend("null".encode_utf16()),
+                }
+            }
+            out.push(b']' as u16);
+            Ok(Some(out))
+        }
+        Js::Object(_) => {
+            let mut out = vec![b'{' as u16];
+            let mut first = true;
+            for (key, member) in value.own_entries()? {
+                let Some(text) = json_stringify(&member)? else {
+                    continue;
+                };
+                if !first {
+                    out.push(b',' as u16);
+                }
+                first = false;
+                json_quote(&key, &mut out);
+                out.push(b':' as u16);
+                out.extend(text);
+            }
+            out.push(b'}' as u16);
+            Ok(Some(out))
+        }
+        Js::Promise(_) | Js::Map(_) | Js::Set(_) => lit("{}"),
+    }
+}
 
 /// application/x-www-form-urlencoded byte serializer (URLSearchParams).
 fn form_encode(text: &str) -> String {
@@ -317,9 +403,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                     if v.is_undefined() || v.is_callable() {
                         return Ok(Js::Undefined);
                     }
-                    Ok(Js::str(
-                        &serde_json::to_string(&to_json(&v)?).unwrap_or_default(),
-                    ))
+                    Ok(json_stringify(&v)?.map_or(Js::Undefined, |t| Js::utf16(&t)))
                 }),
             ),
             (

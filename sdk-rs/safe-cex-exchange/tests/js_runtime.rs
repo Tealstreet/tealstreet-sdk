@@ -239,3 +239,80 @@ fn bigint_and_url_search_params_follow_ecmascript() {
         "a+b=x+y%26z&k=%7E*"
     );
 }
+
+#[test]
+fn operators_follow_ecmascript_and_refuse_bigint_mixing() {
+    use safe_cex_exchange::js_runtime::ops;
+    let big = |n: i64| Js::BigInt(Rc::new(n.into()));
+    assert_eq!(
+        ops::add(&Js::str("a"), &Js::Number(1.0))
+            .unwrap()
+            .to_display(),
+        "a1"
+    );
+    assert_eq!(
+        ops::add(&Js::Number(1.0), &Js::Bool(true))
+            .unwrap()
+            .to_display(),
+        "2"
+    );
+    assert!(ops::add(&big(2), &big(3)).unwrap().strict_equals(&big(5)));
+    assert_eq!(ops::add(&big(2), &Js::str("x")).unwrap().to_display(), "2x");
+    assert_eq!(
+        ops::multiply(&big(2), &Js::Number(3.0))
+            .unwrap_err()
+            .message(),
+        "Cannot mix BigInt and other types, use explicit conversions"
+    );
+    assert!(
+        ops::subtract(&Js::str("5"), &Js::Number(2.0))
+            .unwrap()
+            .strict_equals(&Js::Number(3.0))
+    );
+    assert!(ops::less_than(&Js::str("10"), &Js::str("9")).unwrap());
+    assert!(!ops::less_than(&Js::str("10"), &Js::Number(9.0)).unwrap());
+    assert!(ops::less_than(&big(1), &Js::Number(1.5)).unwrap());
+    assert!(!ops::less_equal(&Js::Number(f64::NAN), &Js::Number(1.0)).unwrap());
+    assert!(ops::greater_equal(&big(2), &Js::str("2")).unwrap());
+}
+
+#[test]
+fn set_refuses_writes_it_cannot_store_instead_of_dropping_them() {
+    let array = Js::array(vec![]);
+    array.set("0", Js::Number(1.0)).unwrap();
+    assert!(array.set("extra", Js::Number(1.0)).is_err());
+    assert_eq!(
+        Js::str("abc")
+            .set("x", Js::Number(1.0))
+            .unwrap_err()
+            .message(),
+        "Cannot create property 'x' on string 'abc'"
+    );
+}
+
+#[test]
+fn json_stringify_prints_numbers_and_escapes_like_javascript() {
+    let globals = Js::object(vec![]);
+    safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&globals, std::rc::Weak::new());
+    let stringify = |v: Js| {
+        globals
+            .get("JSON")
+            .unwrap()
+            .call_method("stringify", vec![v])
+            .unwrap()
+            .to_display()
+    };
+    let body = Js::object(vec![
+        ("qty", Js::Number(1.0)),
+        ("px", Js::Number(0.1)),
+        ("big", Js::Number(1e21)),
+        ("nan", Js::Number(f64::NAN)),
+        ("skip", Js::Undefined),
+        ("s", Js::str("a\"\n")),
+        ("list", Js::array(vec![Js::Undefined, Js::Number(-0.0)])),
+    ]);
+    assert_eq!(
+        stringify(body),
+        r#"{"qty":1,"px":0.1,"big":1e+21,"nan":null,"s":"a\"\n","list":[null,0]}"#
+    );
+}
