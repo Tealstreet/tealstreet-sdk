@@ -95,6 +95,13 @@ outcome rather than that preparation failed. Doing the fetch in the venue and
 then calling `start_websocket` reopens exactly the disposal and stale-generation
 races this operation exists to own.
 
+JS-backed sockets dispatch typed disposal through the live receiver's `dispose`
+member. The facade guards both that dispatch and the base prototype's
+`super.dispose()` path against reentry. A source throw is reported through the
+runtime; the infallible protocol hook still permits core transport cleanup.
+The Weex source-member witness covers timer/listener cleanup, superclass order,
+direct and typed calls, repeated disposal and guard reset after errors.
+
 Socket options use `None` for omitted SDK tuning and `Some(options)` for explicit
 RWS options, including an empty object. Make absence a distinct representable
 state rather than a default value. Header presence does not select tuning.
@@ -1045,3 +1052,16 @@ without superclass disposal or force-close metadata/task changes, and releases
 state borrows before invoking host close callbacks. Native and managed-relay
 state-retention witnesses cover this primitive; Backpack's bound disposal tests
 compare the source-specific cleanup and order independently.
+
+The shared utility import table also installs Lodash `throttle`. Its scheduler
+uses the existing Scope clock and cancellable timers, preserving leading and
+trailing options, the latest receiver/arguments, maxWait, cached returns and
+callback errors. The returned function exposes cancel and flush. Polymarket
+consumes this shared factory directly; it has no venue-local scheduler.
+`tests/js_throttle.rs` compares 294 installed-Lodash traces in one Node capture,
+including sustained bursts, stalled timers and clock rollback, then checks
+native error identity separately. Host timer precision remains Scope's existing
+millisecond profile. The sequential `tests/js_throttle_controls.py` faults each
+of leading, trailing and maxWait; all three must compile and fail the source
+comparison, then pass after exact restoration. A fourth fault removes the shared
+import and must fail Polymarket construction, then restore all 15 concrete tests.

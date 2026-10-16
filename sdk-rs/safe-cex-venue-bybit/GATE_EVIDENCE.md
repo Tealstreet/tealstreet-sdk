@@ -3703,3 +3703,49 @@ and uncompiled; it is not an accepted oracle or part of the delivery commit.
 No startup mutation ran, and its row remains pending with zero new row credit.
 Final checkpoint formatting and workspace build must be measured against the
 checkpoint SHA separately from the accepted three-row local-order delivery.
+
+## Production private event delivery (ddi2il-27)
+
+The private socket previously used WsProtocol's unimplemented message default.
+`PrivateProtocol::on_message` now delegates to a shared retained receiver consumer
+in `ws_private/messages.rs`; the constructor owns auth retry state and one fresh
+canonical `create_incremental_fills(500)` tracker. The same consumer calls the
+variant's actual mappers and preserves the dedicated Spot/Inverse branch rules.
+Primary and Demo are the currently constructible receivers; the remaining
+variant constructors and Hyro session wrapper remain separately mapped work.
+
+Six tests in `tests/private_event_delivery.rs`, run with `--include-ignored`, pass:
+
+- real socket-pump order delivery, parent/virtual rows, duplicate and advancing
+  cumulative fills with independent numeric assertions, terminal publication;
+- positions, balance upnl, default category rejection, zero-contract updates,
+  pong statistics, disposal, and source-ignored execution/wallet frames;
+- opted-in inverse order units and false replacement partials;
+- bounded auth retry starts (four, matching the source <= 3 guard);
+- actual placement -> omitted REST snapshot -> private order sighting -> next
+  snapshot, proving the sighting releases recently-placed snapshot grace;
+- 24 actual-source compositions: four option/inverse switch combinations times
+  six ordered frame scenes. The oracle extracts the maintained private members,
+  actual exchange mappers/selectors, canonical fill helpers and DefaultStore.
+  Native Store and fill snapshots are independently compared after every frame;
+  each side asserts a fixed 24-case total. Host I/O is the scripted boundary.
+
+`python3 sdk-rs/safe-cex-venue-bybit/scripts/private-delivery-controls.py` compiles
+six mutations: live message dispatch disabled, category gate bypassed, fresh fill
+cache on every frame, missing markOrderSeen, discarded position publication,
+and auth retry boundary changed. Every mutation fails its named runtime test;
+no compiler failure counts as detection. Source bytes are restored and all six
+tests pass afterward. The runner stores logs only under `/tmp`.
+
+The production E2Es cover primary/Demo, including opted-in inverse/option rows.
+No complete dedicated Spot/Inverse/Hyro constructor or session-gate claim is
+inferred from this handler. Binary frames remain a declared SocketFrame input
+boundary; text frames use shared JSON.parse and catch only parse failures.
+
+Override call-site review: exactly 13 existing references in receiver::install
+keep their original targets. Their enclosing fingerprint changes from
+711c716ab03d25ff to 8adb93f50b6745a7 solely because tradesCategoryOf is registered.
+Deleting just that three-line registration reproduces the previous receiver
+file byte-identically. The selector dynamically calls the already-bound
+category/option/inverse members; it does not capture a BaseExchange method.
+No delegation classification or bypass exemption is added.

@@ -1,5 +1,8 @@
 # Polymarket source mirrors
 
+The shared js_runtime utility table supplies the source Lodash throttle import;
+this venue does not maintain a separate timer algorithm.
+
 The concrete `binding::exchange::PolymarketExchange` assembles the existing source
 body ports over shared `js_runtime` values, clients, sockets and store. Its native
 ethers/V2 builder boundary is compared against the actual maintained TypeScript
