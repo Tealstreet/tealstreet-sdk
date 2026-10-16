@@ -46,6 +46,7 @@ pub struct HyperliquidDependencies {
     pub external_public_data: Option<ExternalPublicDataFactory>,
 }
 
+#[derive(Clone)]
 pub(crate) struct Binding {
     pub realm: Realm,
     pub instance: Value,
@@ -72,7 +73,7 @@ impl RateLimitClock for RuntimeClock {
 /// Error('Not implemented'))` (base.ts getAccount L734, fetchMarkets L754,
 /// fetchTickers L759, fetchSymbolMaxLeverage L799, changePositionMode L832,
 /// fetchPublicTrades L1138). No request, no emit.
-fn base_exchange_rejection<'a, T: 'a>() -> ExchangeFuture<'a, T> {
+pub(crate) fn base_exchange_rejection<'a, T: 'a>() -> ExchangeFuture<'a, T> {
     Box::pin(async { Err(ExchangeError::new("Not implemented")) })
 }
 
@@ -187,22 +188,35 @@ impl HyperliquidExchange {
         Ok(venue)
     }
 
-    fn bound(&self) -> Result<(Realm, Value), ExchangeError> {
-        self.binding
-            .borrow()
-            .as_ref()
-            .map(|b| (b.realm.clone(), b.instance.clone()))
-            .ok_or_else(|| {
-                ExchangeError::new("Hyperliquid exchange was built without its runtime binding")
-            })
+    fn bound(&self) -> Result<Binding, ExchangeError> {
+        self.binding.borrow().clone().ok_or_else(|| {
+            ExchangeError::new("Hyperliquid exchange was built without its runtime binding")
+        })
     }
+    async fn typed<T: serde::de::DeserializeOwned>(
+        &self,
+        name: &str,
+        args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
+    ) -> Result<T, ExchangeError> {
+        self.bound()?.typed(name, args).await
+    }
+    async fn unit(
+        &self,
+        name: &str,
+        args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
+    ) -> Result<(), ExchangeError> {
+        self.bound()?.unit(name, args).await
+    }
+}
+
+impl Binding {
     /// Invoke the instance's ported method and await its (possibly async) result.
-    async fn invoke(
+    pub(crate) async fn invoke(
         &self,
         name: &str,
         args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
     ) -> Result<(Realm, Value), ExchangeError> {
-        let (mut realm, instance) = self.bound()?;
+        let (mut realm, instance) = (self.realm.clone(), self.instance.clone());
         let args = args(&mut realm).map_err(|e| realm.exchange_error(&e))?;
         let result = realm
             .call_method(&instance, name, &args)
@@ -213,7 +227,7 @@ impl HyperliquidExchange {
             .map_err(|e| realm.exchange_error(&e))?;
         Ok((realm, value))
     }
-    async fn typed<T: serde::de::DeserializeOwned>(
+    pub(crate) async fn typed<T: serde::de::DeserializeOwned>(
         &self,
         name: &str,
         args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
@@ -221,7 +235,7 @@ impl HyperliquidExchange {
         let (mut realm, value) = self.invoke(name, args).await?;
         realm.to_typed(&value).map_err(|e| realm.exchange_error(&e))
     }
-    async fn unit(
+    pub(crate) async fn unit(
         &self,
         name: &str,
         args: impl FnOnce(&mut Realm) -> Result<Vec<Value>, Value>,
@@ -230,7 +244,7 @@ impl HyperliquidExchange {
     }
 }
 
-fn opt<T: serde::Serialize>(r: &mut Realm, v: &Option<T>) -> Result<Value, Value> {
+pub(crate) fn opt<T: serde::Serialize>(r: &mut Realm, v: &Option<T>) -> Result<Value, Value> {
     match v {
         Some(v) => r.from_typed(v),
         None => Ok(Value::Undefined),
@@ -261,7 +275,10 @@ impl Exchange for HyperliquidExchange {
     }
     fn dispose(&self) -> Result<(), ExchangeError> {
         match self.bound() {
-            Ok((mut realm, instance)) => realm
+            Ok(Binding {
+                mut realm,
+                instance,
+            }) => realm
                 .call_method(&instance, "dispose", &[])
                 .map(|_| ())
                 .map_err(|e| realm.exchange_error(&e)),
@@ -270,6 +287,22 @@ impl Exchange for HyperliquidExchange {
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("start", |_| Ok(vec![])))
+    }
+    fn fetch_historical_positions(
+        &self,
+        options: safe_cex_exchange::journal::HistoricalPositionOptions,
+    ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
+        Box::pin(self.typed("fetchHistoricalPositions", move |realm| {
+            let opts = realm.new_object();
+            realm.define_str(&opts, "account", Value::str(&options.account))?;
+            if let Some(from) = options.from {
+                realm.define_str(&opts, "from", Value::Number(from))?;
+            }
+            if let Some(to) = options.to {
+                realm.define_str(&opts, "to", Value::Number(to))?;
+            }
+            Ok(vec![opts])
+        }))
     }
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
         Box::pin(async move {

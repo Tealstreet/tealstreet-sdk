@@ -3,6 +3,7 @@ use safe_cex_types::HistoricalOrder;
 use safe_cex_venue_binance::order_history::{
     BinanceHistoricalOrderError, map_binance_historical_order_typed,
 };
+use safe_cex_venue_binance::private_event_value::EventOps;
 use serde_json::{Value, json};
 fn number(n: f64) -> Value {
     json!({"number":if n == 0.0 && n.is_sign_negative() { "-0".into() } else { js_number_string(n) }})
@@ -101,7 +102,7 @@ fn typed_projection_native_policy() {
     .unwrap()
     .unwrap();
     assert!(
-        matches!(&native, EventValue::Object(record) if record.borrow().fields.len() == 13),
+        matches!(&native, EventValue::Object(record) if record.props.borrow().len() == 13),
         "native canonical history retains thirteen independently authored own fields"
     );
     for field in ["price", "averagePrice", "positionSide", "updatedTime"] {
@@ -164,7 +165,7 @@ fn typed_projection_native_policy() {
     .unwrap()
     .unwrap();
     assert!(
-        matches!(native_null.get("positionSide").unwrap(), EventValue::Null),
+        matches!(native_null.read("positionSide").unwrap(), EventValue::Null),
         "native canonical history retains present null"
     );
     assert!(
@@ -212,7 +213,7 @@ fn typed_projection_native_policy() {
     .unwrap()
     .unwrap();
     assert!(
-        matches!(result.get("type").unwrap(), EventValue::Number(1000.0)),
+        matches!(result.read("type").unwrap(), EventValue::Number(1000.0)),
         "native canonical history keeps inherited numeric 1000 rather than MARKET"
     );
     assert!(

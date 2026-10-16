@@ -148,7 +148,7 @@ fn eager_prefix_shared_native_settlement_and_all_waiters() {
             value.same(&original),
             "native shared original object result identity"
         );
-        assert!(matches!(value.get("value").unwrap(),EventValue::Number(v)if v==4.2));
+        assert!(matches!(value.read("value").unwrap(),EventValue::Number(v)if v==4.2));
     }
     assert_eq!(
         runtime.tasks.borrow().len(),

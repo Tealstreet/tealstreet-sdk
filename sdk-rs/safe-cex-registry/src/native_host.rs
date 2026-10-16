@@ -219,6 +219,7 @@ impl RustVenueHost for NativeVenueHost {
     #[allow(clippy::arc_with_non_send_sync)]
     fn hyperliquid(
         &self,
+        name: safe_cex_types::ExchangeName,
         options: &safe_cex_types::ExchangeOptions,
     ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError> {
         let base_url = if options.testnet.unwrap_or(false) {
@@ -229,7 +230,7 @@ impl RustVenueHost for NativeVenueHost {
         let client = native_client(
             &self.runtime,
             &self.adapter,
-            safe_cex_types::ExchangeName::Hyperliquid,
+            name,
             options,
             safe_cex_transport::RestRequest {
                 base_url: Some(base_url.into()),
@@ -361,13 +362,13 @@ impl RustVenueHost for NativeVenueHost {
     fn hosted_signer(&self) -> Option<HostedSigner> {
         self.remote.clone()
     }
-    fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
+    fn apexomni(&self) -> Result<safe_cex_venue_apexomni::ApexDependencies, ExchangeError> {
         if self.remote.is_some() {
             return Err(ExchangeError::new(
-                "remoteSigner is not wired for bingx on the native host",
+                "remoteSigner is not wired for apexomni on the native host",
             ));
         }
-        Ok(safe_cex_venue_bingx::BingxDependencies {
+        Ok(safe_cex_venue_apexomni::ApexDependencies {
             runtime: self.runtime.clone(),
             http: safe_cex_exchange::js_runtime::client::rest_http_host(
                 self.runtime.clone(),
@@ -377,19 +378,27 @@ impl RustVenueHost for NativeVenueHost {
         })
     }
 
+    fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
+        Ok(safe_cex_venue_bingx::BingxDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
+
     fn grvt(
         &self,
     ) -> Result<safe_cex_venue_grvt::binding::exchange::GrvtDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for grvt on the native host",
-            ));
-        }
         Ok(safe_cex_venue_grvt::binding::exchange::GrvtDependencies {
             runtime: self.runtime.clone(),
-            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                 self.runtime.clone(),
                 (self.adapter)()?,
+                self.remote.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
@@ -422,16 +431,12 @@ impl RustVenueHost for NativeVenueHost {
     }
 
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for kraken on the native host",
-            ));
-        }
         Ok(safe_cex_venue_kraken::KrakenDependencies {
             runtime: self.runtime.clone(),
-            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                 self.runtime.clone(),
                 (self.adapter)()?,
+                self.remote.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
             journal: None,

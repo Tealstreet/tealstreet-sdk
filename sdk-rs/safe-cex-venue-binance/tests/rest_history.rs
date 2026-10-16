@@ -52,18 +52,15 @@ fn wire(v: &EventValue) -> Value {
                 json!(v)
             }
         }
-        EventValue::String(v) => json!(v),
-        EventValue::Array(v) => v.borrow().iter().map(wire).collect(),
-        EventValue::Object(v) => v
-            .borrow()
-            .fields
+        EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
+        EventValue::Array(v) => array_values(v).iter().map(wire).collect(),
+        EventValue::Object(_) => v
+            .spread()
             .iter()
             .map(|(k, v)| (k.clone(), wire(v)))
             .collect(),
-        EventValue::Enum(v) => v.wire(),
-        EventValue::Inherited(_) => panic!("projection stopped before inherited function fixtures"),
-        EventValue::Builtin(_) => panic!(
-            "authored REST-history fixture excludes builtin outputs; native referents are asserted in history_native"
+        _ => panic!(
+            "authored REST-history fixture excludes non-data outputs; native referents are asserted in history_native"
         ),
     }
 }
@@ -75,11 +72,10 @@ fn input_json(v: &EventValue) -> Value {
         EventValue::Null => Value::Null,
         EventValue::Bool(v) => json!(v),
         EventValue::Number(v) => json!(v),
-        EventValue::String(v) => json!(v),
-        EventValue::Array(v) => v.borrow().iter().map(input_json).collect(),
-        EventValue::Object(v) => v
-            .borrow()
-            .fields
+        EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
+        EventValue::Array(v) => array_values(v).iter().map(input_json).collect(),
+        EventValue::Object(_) => v
+            .spread()
             .iter()
             .filter(|(_, v)| !matches!(v, EventValue::Undefined))
             .map(|(k, v)| (k.clone(), input_json(v)))
@@ -126,7 +122,7 @@ fn text(v: &EventValue, want: &str, l: &str) {
     let EventValue::String(s) = v else {
         panic!("{l}: expected native String, {v:?}")
     };
-    assert_eq!(s, want, "{l}")
+    assert_eq!(s.as_ref(), want.encode_utf16().collect::<Vec<_>>(), "{l}")
 }
 fn boolean(v: &EventValue, want: bool, l: &str) {
     let EventValue::Bool(s) = v else {
@@ -138,20 +134,30 @@ fn own(v: &EventValue, k: &str) -> bool {
     let EventValue::Object(o) = v else {
         panic!("native object")
     };
-    o.borrow().fields.contains_key(k)
+    o.props
+        .borrow()
+        .contains_key(safe_cex_exchange::js_runtime::value::utf16(k).as_ref())
 }
 fn rows(v: &EventValue, n: usize, l: &str) -> Vec<EventValue> {
     let EventValue::Array(a) = v else {
         panic!("{l}: native array")
     };
     assert_eq!(a.borrow().len(), n, "{l}: native row count");
-    a.borrow().clone()
+    array_values(a)
 }
 fn native_enum(v: &EventValue, want: PrivateEnum, l: &str) {
-    let EventValue::Enum(e) = v else {
-        panic!("{l}: native enum, got{v:?}")
+    let EventValue::String(units) = v else {
+        panic!("{l}: native categorical string, got{v:?}")
     };
-    assert_eq!(*e, want, "{l}")
+    assert_eq!(
+        units.as_ref(),
+        want.wire()
+            .as_str()
+            .unwrap()
+            .encode_utf16()
+            .collect::<Vec<_>>(),
+        "{l}"
+    );
 }
 fn optional_number(v: Option<f64>) -> EventValue {
     v.map(number).unwrap_or(EventValue::Undefined)
@@ -177,13 +183,13 @@ fn typed_order(raw: EventValue) -> Result<EventValue, Failure> {
         return Ok(EventValue::Null);
     };
     let pos = match o.position_side {
-        Some(ExecutionPositionSide::Both(_)) => EventValue::Enum(PrivateEnum::Execution(
+        Some(ExecutionPositionSide::Both(_)) => EventValue::enum_value(PrivateEnum::Execution(
             &ExecutionPositionSide::Both(safe_cex_types::BothPositionSide::Both),
         )),
-        Some(ExecutionPositionSide::Side(PositionSide::Long)) => EventValue::Enum(
+        Some(ExecutionPositionSide::Side(PositionSide::Long)) => EventValue::enum_value(
             PrivateEnum::Execution(&ExecutionPositionSide::Side(PositionSide::Long)),
         ),
-        Some(ExecutionPositionSide::Side(PositionSide::Short)) => EventValue::Enum(
+        Some(ExecutionPositionSide::Side(PositionSide::Short)) => EventValue::enum_value(
             PrivateEnum::Execution(&ExecutionPositionSide::Side(PositionSide::Short)),
         ),
         None => EventValue::Undefined,
@@ -191,9 +197,12 @@ fn typed_order(raw: EventValue) -> Result<EventValue, Failure> {
     Ok(record([
         ("id", string(o.id)),
         ("symbol", string(o.symbol)),
-        ("side", EventValue::Enum(PrivateEnum::Side(o.side))),
-        ("type", EventValue::Enum(PrivateEnum::Type(o.r#type))),
-        ("status", EventValue::Enum(PrivateEnum::Status(o.status))),
+        ("side", EventValue::enum_value(PrivateEnum::Side(o.side))),
+        ("type", EventValue::enum_value(PrivateEnum::Type(o.r#type))),
+        (
+            "status",
+            EventValue::enum_value(PrivateEnum::Status(o.status)),
+        ),
         ("price", optional_number(o.price)),
         ("averagePrice", optional_number(o.average_price)),
         ("amount", number(o.amount)),
@@ -357,8 +366,8 @@ impl HistoryBindings for Bind {
                 panic!()
             };
             let row = decoded(fixture()["income"][0].clone());
-            row.define("tranId", string("appended"));
-            a.borrow_mut().push(row);
+            row.write("tranId", string("appended"));
+            EventValue::Array(a.clone()).push(row).unwrap();
         }
         drop(s);
         income_category(raw)
@@ -385,7 +394,7 @@ impl HistoryBindings for Bind {
                 s.page_input
                     .as_ref()
                     .unwrap()
-                    .define("startTime", number(2.0));
+                    .write("startTime", number(2.0));
             }
             drop(s);
             let state = state.clone();
@@ -484,24 +493,26 @@ fn options(family: &str, name: &str) -> EventValue {
     };
     if name == "missing-symbol" {
         let EventValue::Object(x) = &o else { panic!() };
-        x.borrow_mut().fields.remove("symbol");
+        x.props
+            .borrow_mut()
+            .shift_remove(safe_cex_exchange::js_runtime::value::utf16("symbol").as_ref());
     }
     match name {
         "null-opts" => o = EventValue::Null,
         "undefined-opts" => o = EventValue::Undefined,
-        "limit-null" => o.define("limit", EventValue::Null),
-        "limit-zero" => o.define("limit", number(0.0)),
-        "limit-string" => o.define("limit", string("2.5")),
+        "limit-null" => o.write("limit", EventValue::Null),
+        "limit-zero" => o.write("limit", number(0.0)),
+        "limit-string" => o.write("limit", string("2.5")),
         "zero-fields" => {
             o = decoded(json!({"symbol":"","incomeType":"","startTime":0,"endTime":0,"limit":0}))
         }
         "split-range" => {
-            o.define("from", number(1.0));
-            o.define("to", number(604800003.0));
+            o.write("from", number(1.0));
+            o.write("to", number(604800003.0));
         }
         "string-range" => {
-            o.define("from", string("1"));
-            o.define("to", number(1000.0));
+            o.write("from", string("1"));
+            o.write("to", number(1000.0));
         }
         _ => {}
     }
@@ -516,9 +527,9 @@ fn state(family: &str, name: &str) -> Shared {
     } else {
         let row = decoded(f["entry"].clone());
         if family == "public_trades" {
-            row.define("isBuyerMaker", EventValue::Bool(true))
+            row.write("isBuyerMaker", EventValue::Bool(true))
         }
-        EventValue::Array(Rc::new(RefCell::new(vec![row])))
+        EventValue::array(vec![row])
     };
     match name {
         "non-array" => payload = decoded(json!({"code":-1000,"msg":"non array"})),
@@ -527,7 +538,7 @@ fn state(family: &str, name: &str) -> Shared {
             let EventValue::Array(a) = &payload else {
                 panic!()
             };
-            a.borrow()[0].define(
+            a.borrow()[0].as_ref().unwrap().write(
                 "id",
                 if name == "null-id" {
                     EventValue::Null
@@ -631,7 +642,7 @@ fn reader(family: &str) {
                     income_range(number(0.0), number(1000.0), EventValue::Undefined, &mut b).await
                 }
                 "public_trades" => {
-                    public_trades(string("BTCUSDT"), opts.get("limit")?, &mut b).await
+                    public_trades(string("BTCUSDT"), opts.read("limit")?, &mut b).await
                 }
                 _ => panic!(),
             }
@@ -759,30 +770,30 @@ fn reader(family: &str) {
                 let l = format!("{label} row{j}");
                 match family {
                     "fills" => {
-                        text(&row.get("id").unwrap(), "9007199254740993", &l);
-                        text(&row.get("orderId").unwrap(), "123", &l);
+                        text(&row.read("id").unwrap(), "9007199254740993", &l);
+                        text(&row.read("orderId").unwrap(), "123", &l);
                         num(
-                            &row.get("timestamp").unwrap(),
+                            &row.read("timestamp").unwrap(),
                             1700000000.0,
                             &format!("{l}: native timestamp"),
                         );
-                        num(&row.get("price").unwrap(), 12.3, &l);
-                        num(&row.get("qty").unwrap(), 3.6, &l);
-                        num(&row.get("commission").unwrap(), 0.07, &l);
-                        num(&row.get("realizedPnl").unwrap(), -0.25, &l);
+                        num(&row.read("price").unwrap(), 12.3, &l);
+                        num(&row.read("qty").unwrap(), 3.6, &l);
+                        num(&row.read("commission").unwrap(), 0.07, &l);
+                        num(&row.read("realizedPnl").unwrap(), -0.25, &l);
                         native_enum(
-                            &row.get("side").unwrap(),
+                            &row.read("side").unwrap(),
                             PrivateEnum::Side(OrderSide::Sell),
                             &l,
                         );
                         native_enum(
-                            &row.get("positionSide").unwrap(),
+                            &row.read("positionSide").unwrap(),
                             PrivateEnum::Execution(&ExecutionPositionSide::Side(
                                 PositionSide::Long,
                             )),
                             &l,
                         );
-                        boolean(&row.get("maker").unwrap(), true, &l);
+                        boolean(&row.read("maker").unwrap(), true, &l);
                         assert!(
                             own(row, "id") && own(row, "maker"),
                             "{l}: native retained fields"
@@ -790,32 +801,32 @@ fn reader(family: &str) {
                     }
                     "orders" => {
                         text(
-                            &row.get("id").unwrap(),
+                            &row.read("id").unwrap(),
                             if j == 0 { "200" } else { "100" },
                             &format!("{l}: native ID"),
                         );
                         num(
-                            &row.get("createdTime").unwrap(),
+                            &row.read("createdTime").unwrap(),
                             if j == 0 { 2000.0 } else { 1000.0 },
                             &l,
                         );
                         num(
-                            &row.get("price").unwrap(),
+                            &row.read("price").unwrap(),
                             if j == 0 { 12.4 } else { 12.3 },
                             &l,
                         );
                         num(
-                            &row.get("amount").unwrap(),
+                            &row.read("amount").unwrap(),
                             if j == 0 { 4.2 } else { 3.6 },
                             &l,
                         );
                         num(
-                            &row.get("filled").unwrap(),
+                            &row.read("filled").unwrap(),
                             if j == 0 { 0.3 } else { 0.2 },
                             &l,
                         );
                         native_enum(
-                            &row.get("side").unwrap(),
+                            &row.read("side").unwrap(),
                             PrivateEnum::Side(if j == 0 {
                                 OrderSide::Sell
                             } else {
@@ -824,7 +835,7 @@ fn reader(family: &str) {
                             &l,
                         );
                         native_enum(
-                            &row.get("type").unwrap(),
+                            &row.read("type").unwrap(),
                             PrivateEnum::Type(if j == 0 {
                                 OrderType::StopLoss
                             } else {
@@ -833,7 +844,7 @@ fn reader(family: &str) {
                             &l,
                         );
                         native_enum(
-                            &row.get("status").unwrap(),
+                            &row.read("status").unwrap(),
                             PrivateEnum::Status(if j == 0 {
                                 OrderStatus::Open
                             } else {
@@ -842,30 +853,30 @@ fn reader(family: &str) {
                             &l,
                         );
                         assert!(
-                            matches!(row.get("updatedTime").unwrap(), EventValue::Undefined)
+                            matches!(row.read("updatedTime").unwrap(), EventValue::Undefined)
                                 && own(row, "updatedTime"),
                             "{l}: native own undefined"
                         );
                     }
                     "page" | "income" => {
                         num(
-                            &row.get("income").unwrap(),
+                            &row.read("income").unwrap(),
                             if j == 0 { 1.25 } else { -0.25 },
                             &format!("{l}: native income"),
                         );
                         if j == 0 {
-                            num(&row.get("timestamp").unwrap(), 1000.0, &l);
-                            text(&row.get("tranId").unwrap(), "txn-A", &l);
+                            num(&row.read("timestamp").unwrap(), 1000.0, &l);
+                            text(&row.read("tranId").unwrap(), "txn-A", &l);
                         } else {
-                            text(&row.get("timestamp").unwrap(), "2000", &l);
-                            num(&row.get("tranId").unwrap(), 2.0, &l);
+                            text(&row.read("timestamp").unwrap(), "2000", &l);
+                            num(&row.read("tranId").unwrap(), 2.0, &l);
                             assert!(
-                                matches!(row.get("tradeId").unwrap(), EventValue::Null),
+                                matches!(row.read("tradeId").unwrap(), EventValue::Null),
                                 "{l}: native explicit null tradeId"
                             );
                         }
                         native_enum(
-                            &row.get("category").unwrap(),
+                            &row.read("category").unwrap(),
                             PrivateEnum::Income(if j == 0 {
                                 &IncomeCategory::Funding
                             } else {
@@ -875,17 +886,17 @@ fn reader(family: &str) {
                         );
                     }
                     "public_trades" => {
-                        text(&row.get("id").unwrap(), "9007199254740993", &l);
-                        num(&row.get("price").unwrap(), 12.3, &l);
-                        num(&row.get("qty").unwrap(), 3.6, &l);
-                        num(&row.get("quoteQty").unwrap(), 44.28, &l);
+                        text(&row.read("id").unwrap(), "9007199254740993", &l);
+                        num(&row.read("price").unwrap(), 12.3, &l);
+                        num(&row.read("qty").unwrap(), 3.6, &l);
+                        num(&row.read("quoteQty").unwrap(), 44.28, &l);
                         num(
-                            &row.get("timestamp").unwrap(),
+                            &row.read("timestamp").unwrap(),
                             1700000000123.0,
                             &format!("{l}: native timestamp"),
                         );
                         native_enum(
-                            &row.get("side").unwrap(),
+                            &row.read("side").unwrap(),
                             PrivateEnum::Side(OrderSide::Sell),
                             &format!("{l}: native side"),
                         );
@@ -895,7 +906,7 @@ fn reader(family: &str) {
                             result.as_ref().unwrap().same(&state.range_records),
                             "{l}: native original pager records"
                         );
-                        num(&row.get("sentinel").unwrap(), 12.3, &l);
+                        num(&row.read("sentinel").unwrap(), 12.3, &l);
                     }
                     _ => panic!(),
                 }
@@ -936,7 +947,7 @@ fn reader(family: &str) {
                 3.6
             };
             num(
-                &receipt.params.get("limit").unwrap(),
+                &receipt.params.read("limit").unwrap(),
                 limit,
                 &format!("{l}: native limit"),
             );
@@ -958,12 +969,12 @@ fn reader(family: &str) {
                     .position(|r| std::ptr::eq(r, receipt))
                     .unwrap();
                 num(
-                    &receipt.params.get("startTime").unwrap(),
+                    &receipt.params.read("startTime").unwrap(),
                     if index == 0 { 1.0 } else { 604800002.0 },
                     &l,
                 );
                 num(
-                    &receipt.params.get("endTime").unwrap(),
+                    &receipt.params.read("endTime").unwrap(),
                     if index == 0 { 604800001.0 } else { 604800003.0 },
                     &l,
                 );
@@ -1058,14 +1069,14 @@ fn reader(family: &str) {
             );
             if let Some(args) = &state.page_args {
                 num(
-                    &args.get("startTime").unwrap(),
+                    &args.read("startTime").unwrap(),
                     1.0,
                     &format!("{label}: native captured page start"),
                 );
-                num(&args.get("endTime").unwrap(), 999.0, &label);
-                num(&args.get("limit").unwrap(), 7.0, &label);
+                num(&args.read("endTime").unwrap(), 999.0, &label);
+                num(&args.read("limit").unwrap(), 7.0, &label);
                 assert!(
-                    matches!(args.get("incomeType").unwrap(), EventValue::Undefined)
+                    matches!(args.read("incomeType").unwrap(), EventValue::Undefined)
                         && own(args, "incomeType"),
                     "{label}: native explicit undefined income type"
                 );
@@ -1128,11 +1139,11 @@ fn mapper() {
         let label = format!("native mapper case{i} {name}");
         let entry = decoded(f["entry"].clone());
         match name {
-            "numeric-prefix" => entry.define("price", string("12.3tail")),
+            "numeric-prefix" => entry.write("price", string("12.3tail")),
             "nullable-ids" => {
-                entry.define("id", EventValue::Null);
-                entry.define("orderId", EventValue::Null);
-                entry.define("quoteQty", EventValue::Null);
+                entry.write("id", EventValue::Null);
+                entry.write("orderId", EventValue::Null);
+                entry.write("quoteQty", EventValue::Null);
             }
             "missing" => {
                 let EventValue::Object(o) = &entry else {
@@ -1148,12 +1159,14 @@ fn mapper() {
                     "positionSide",
                     "side",
                 ] {
-                    o.borrow_mut().fields.remove(key);
+                    o.props
+                        .borrow_mut()
+                        .shift_remove(safe_cex_exchange::js_runtime::value::utf16(key).as_ref());
                 }
             }
             "unknown-labels" => {
-                entry.define("positionSide", string("MANUAL"));
-                entry.define("side", string("CUSTOM"));
+                entry.write("positionSide", string("MANUAL"));
+                entry.write("side", string("CUSTOM"));
             }
             _ => {}
         }
@@ -1171,8 +1184,8 @@ fn mapper() {
                     return Err(err.clone());
                 }
                 if name == "locale-mutates" {
-                    entry.define("commission", string("0.2"));
-                    entry.define("time", number(2000.0));
+                    entry.write("commission", string("0.2"));
+                    entry.write("time", number(2000.0));
                 }
                 assert!(value.is_ascii(), "locale adapter floor is ASCII labels");
                 Ok(value.to_ascii_lowercase())
@@ -1206,12 +1219,12 @@ fn mapper() {
             let v = result.as_ref().unwrap();
             let EventValue::Object(o) = v else { panic!() };
             assert_eq!(
-                o.borrow().fields.len(),
+                o.props.borrow().len(),
                 14,
                 "{label}: native own field count"
             );
             num(
-                &v.get("price").unwrap(),
+                &v.read("price").unwrap(),
                 if name == "numeric-prefix" {
                     f64::NAN
                 } else {
@@ -1219,7 +1232,7 @@ fn mapper() {
                 },
                 &format!("{label}: native price"),
             );
-            num(&v.get("qty").unwrap(), 3.6, &label);
+            num(&v.read("qty").unwrap(), 3.6, &label);
             for key in ["id", "orderId", "quoteQty"] {
                 if matches!(name, "nullable-ids" | "missing") {
                     assert!(
@@ -1241,12 +1254,12 @@ fn mapper() {
                 }
             }
             num(
-                &v.get("realizedPnl").unwrap(),
+                &v.read("realizedPnl").unwrap(),
                 if name == "missing" { f64::NAN } else { -0.25 },
                 &label,
             );
             num(
-                &v.get("commission").unwrap(),
+                &v.read("commission").unwrap(),
                 if name == "missing" {
                     f64::NAN
                 } else if name == "locale-mutates" {
@@ -1257,7 +1270,7 @@ fn mapper() {
                 &label,
             );
             num(
-                &v.get("time").unwrap(),
+                &v.read("time").unwrap(),
                 if name == "missing" {
                     f64::NAN
                 } else if name == "locale-mutates" {
@@ -1267,14 +1280,14 @@ fn mapper() {
                 },
                 &label,
             );
-            boolean(&v.get("buyer").unwrap(), false, &label);
-            boolean(&v.get("maker").unwrap(), true, &label);
+            boolean(&v.read("buyer").unwrap(), false, &label);
+            boolean(&v.read("maker").unwrap(), true, &label);
             if name == "unknown-labels" {
-                text(&v.get("positionSide").unwrap(), "manual", &label);
-                text(&v.get("side").unwrap(), "custom", &label)
+                text(&v.read("positionSide").unwrap(), "manual", &label);
+                text(&v.read("side").unwrap(), "custom", &label)
             } else {
                 native_enum(
-                    &v.get("positionSide").unwrap(),
+                    &v.read("positionSide").unwrap(),
                     PrivateEnum::Execution(if name == "missing" {
                         &ExecutionPositionSide::Both(safe_cex_types::BothPositionSide::Both)
                     } else {
@@ -1283,10 +1296,10 @@ fn mapper() {
                     &label,
                 );
                 if name == "missing" {
-                    text(&v.get("side").unwrap(), "", &label)
+                    text(&v.read("side").unwrap(), "", &label)
                 } else {
                     native_enum(
-                        &v.get("side").unwrap(),
+                        &v.read("side").unwrap(),
                         PrivateEnum::Side(OrderSide::Sell),
                         &label,
                     )
@@ -1449,7 +1462,7 @@ fn seed() {
         let label = format!("native seed case{i} {name}");
         let opts =
             decoded(json!({"symbol":"BTCUSDT","interval":"1m","limit":5,"nested":{"value":3.6}}));
-        let nested = opts.get("nested").unwrap();
+        let nested = opts.read("nested").unwrap();
         let candles = if name == "empty" {
             decoded(json!([]))
         } else if name == "null-candles" {
@@ -1477,7 +1490,7 @@ fn seed() {
             let mut s = state.borrow_mut();
             s.trace.push(json!(["callback"]));
             let last = if let EventValue::Array(a) = &s.candles {
-                a.borrow().last().cloned()
+                a.borrow().last().cloned().flatten()
             } else {
                 None
             };
@@ -1595,23 +1608,23 @@ fn seed() {
             "{label}: native original options argument"
         );
         num(
-            &opts.get("limit").unwrap(),
+            &opts.read("limit").unwrap(),
             5.0,
             &format!("{label}: native original options limit"),
         );
         if let Some(params) = &state.params {
             assert!(!params.same(&opts), "{label}: native shallow seed options");
             assert!(
-                params.get("nested").unwrap().same(&nested),
+                params.read("nested").unwrap().same(&nested),
                 "{label}: native nested options referent"
             );
             num(
-                &params.get("limit").unwrap(),
+                &params.read("limit").unwrap(),
                 1.0,
                 &format!("{label}: native seed limit"),
             );
-            text(&params.get("symbol").unwrap(), "BTCUSDT", &label);
-            text(&params.get("interval").unwrap(), "1m", &label);
+            text(&params.read("symbol").unwrap(), "BTCUSDT", &label);
+            text(&params.read("interval").unwrap(), "1m", &label);
         }
         assert_eq!(
             state.params.is_some(),
@@ -1660,7 +1673,7 @@ fn seed() {
                 "{label}: native debug message"
             );
         }
-        actual.push(json!({"name":name,"trace":state.trace,"notices":state.notices.iter().map(Notice::wire).collect::<Vec<_>>(),"callbackRefs":state.callback_refs,"callbacks":state.callbacks.iter().map(wire).collect::<Vec<_>>(),"cleanups":state.cleanups,"params":state.params.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"paramsRefs":state.params.as_ref().map(|p|json!({"root":p.same(&opts),"nested":p.get("nested").unwrap().same(&nested)})),"cleanup":cleanup.is_ok(),"jobs":jobs,"jobFailures":job_errors.iter().map(|e|error_wire(e,&err)).collect::<Vec<_>>(),"failure":primary.as_ref().map(|e|error_wire(e,&err))}));
+        actual.push(json!({"name":name,"trace":state.trace,"notices":state.notices.iter().map(Notice::wire).collect::<Vec<_>>(),"callbackRefs":state.callback_refs,"callbacks":state.callbacks.iter().map(wire).collect::<Vec<_>>(),"cleanups":state.cleanups,"params":state.params.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"paramsRefs":state.params.as_ref().map(|p|json!({"root":p.same(&opts),"nested":p.read("nested").unwrap().same(&nested)})),"cleanup":cleanup.is_ok(),"jobs":jobs,"jobFailures":job_errors.iter().map(|e|error_wire(e,&err)).collect::<Vec<_>>(),"failure":primary.as_ref().map(|e|error_wire(e,&err))}));
     }
     compare("seed", actual, 15);
 }

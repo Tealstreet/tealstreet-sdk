@@ -5,7 +5,6 @@ mod host;
 mod members;
 mod signing;
 mod socket;
-mod throttle;
 use safe_cex_exchange::js_runtime::{
     scope::{Scope, ScopeShared},
     value::{Js, Thrown},

@@ -295,7 +295,12 @@ impl ApexHost for Host {
             .clone()
             .ok_or_else(|| ExchangeError::new("fixture runtime missing"))
     }
-    fn create_api(&self, _: &ExchangeOptions, rate: Option<u8>) -> Result<(), ExchangeError> {
+    fn create_api(
+        &self,
+        _: &ExchangeOptions,
+        _: Rc<BaseExchange>,
+        rate: Option<u8>,
+    ) -> Result<(), ExchangeError> {
         self.record("api:create", vec![]);
         if let Some(rate) = rate {
             self.record("rateLimit", vec![n(rate.into())]);

@@ -432,8 +432,8 @@ fn public_classes_share_native_payload_callbacks_reentrancy_and_failure() {
     let nesting = nested.clone();
     let callback: Parser = Rc::new(move |events| {
         if !nesting.get() {
-            *captured.borrow_mut() = Some(events.get("0")?);
-            events.get("0")?.define("native", number(f64::INFINITY));
+            *captured.borrow_mut() = Some(events.read("0")?);
+            events.read("0")?.write("native", number(f64::INFINITY));
             nesting.set(true);
             owner_copy.on_message(r#"{"e":"nested","s":"BTC"}"#)?;
         }
@@ -444,13 +444,13 @@ fn public_classes_share_native_payload_callbacks_reentrancy_and_failure() {
     let counted = calls.clone();
     let original = event.clone();
     let exact: Parser = Rc::new(move |events| {
-        let first = events.get("0")?;
+        let first = events.read("0")?;
         assert!(
             first.same(original.borrow().as_ref().unwrap()),
             "native exact retains original parsed object"
         );
         assert!(
-            matches!(first.get("native")?,EventValue::Number(v)if v==f64::INFINITY),
+            matches!(first.read("native")?,EventValue::Number(v)if v==f64::INFINITY),
             "native exact sees nonfinite mutation without JSON projection"
         );
         counted.set(counted.get() + 1);
@@ -793,7 +793,7 @@ fn saved_core_bridge_decodes_numeric_lexeme_without_frame() {
         "saved".into(),
         vec![Rc::new(|events| {
             assert!(
-                matches!(events.get("0")?.get("native")?,EventValue::Number(v)if v==f64::INFINITY),
+                matches!(events.read("0")?.read("native")?,EventValue::Number(v)if v==f64::INFINITY),
                 "native saved core bridge preserves overflow Number"
             );
             Ok(())

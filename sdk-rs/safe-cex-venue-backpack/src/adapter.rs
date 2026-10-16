@@ -170,10 +170,7 @@ impl BackpackExchange {
         crate::account_reads::get_position_mode()
     }
     pub fn dispose(&self) -> Result<(), ExchangeError> {
-        for task in self.tasks.borrow_mut().drain(..) {
-            task.cancel();
-        }
-        self.base.dispose()?;
+        self.base.set_disposed_flag(true);
         self.public_websocket
             .get()
             .expect("constructed public socket")
