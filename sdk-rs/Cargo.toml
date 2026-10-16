@@ -252,3 +252,8 @@ large_enum_variant = "allow"
 # to catch. Production code still should not hold an `Rc<Box<T>>`; that is now
 # on review rather than on the compiler.
 redundant_allocation = "allow"
+
+# Full debuginfo for ~45 crates' test binaries exhausts the CI runner's disk
+# (`No space left on device` building woo tests). Line tables keep backtraces.
+[profile.dev]
+debug = "line-tables-only"
