@@ -51,9 +51,28 @@ fn futures_native_book_callback_and_cleanup() {
         let book = books.borrow()[0].clone();
         assert_eq!(book.bids[0].price.to_bits(), price.to_bits());
         assert_eq!(book.bids[0].amount.to_bits(), amount.to_bits());
+        let update = |sequence: i64, quantity: f64| {
+            safe_cex_transport::socket::SocketFrame::Text(
+                json!({"type":"message","topic":format!("/contractMarket/level2:{api}"),"data":{"sequence":sequence,"change":format!("{price},buy,{quantity}")}}).to_string(),
+            )
+        };
+        socket.on_message(&update(2, amount + 2.0)).unwrap();
+        assert_eq!(
+            books.borrow().len(),
+            2,
+            "valid native update emits before cleanup"
+        );
+        assert_eq!(
+            books.borrow()[1].bids[0].amount.to_bits(),
+            (amount + 2.0).to_bits()
+        );
         cleanup().unwrap();
-        socket.on_message(&safe_cex_transport::socket::SocketFrame::Text(json!({"type":"message","topic":format!("/contractMarket/level2:{api}"),"data":{"sequence":2}}).to_string())).unwrap();
-        assert_eq!(books.borrow().len(), 1, "cleanup removes actual callback");
+        socket.on_message(&update(3, amount + 3.0)).unwrap();
+        assert_eq!(
+            books.borrow().len(),
+            2,
+            "futures cleanup suppresses valid emitted update"
+        );
         assert_eq!(transport.sockets.borrow().len(), 1);
         venue.dispose().unwrap();
     }

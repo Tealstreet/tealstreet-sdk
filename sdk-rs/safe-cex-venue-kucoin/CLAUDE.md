@@ -79,6 +79,11 @@ borrowed, qualified and text decoding. Run the six compiled guard-removal contro
 serially with `node safe-cex-venue-kucoin/tests/accepted-native-controls.mjs` from
 `sdk-rs`; the runner restores production bytes and reruns all seven tests.
 
+`accepted_exchange_members` exercises connected native book callbacks and cleanup.
+The futures case proves a valid change emits before cleanup, then suppresses the
+next valid change. Run `node safe-cex-venue-kucoin/tests/accepted-book-cleanup-control.mjs`
+alone for the compiled handler-removal failure and exact restoration proof.
+
 Account-mode Serialize emits native fields directly, without an intermediate
 `json!` Value that would erase infinities before the ingress output guard.
 The wire serializer still gives JavaScript's null for non-finite JSON values;

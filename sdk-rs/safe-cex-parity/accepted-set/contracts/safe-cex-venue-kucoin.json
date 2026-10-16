@@ -1193,11 +1193,11 @@
     "call": "{serde_json::json!($type(Some($value)))}",
     "cases": [
       {
-        "input": "  broker-a\u00a0",
+        "input": "  broker-a ",
         "output": "broker-a"
       },
       {
-        "input": "\ufeff\t broker-b \n",
+        "input": "﻿\t broker-b \n",
         "output": "broker-b"
       },
       {
@@ -9566,7 +9566,7 @@
         "output": false
       },
       {
-        "input": "\u00e9",
+        "input": "é",
         "output": false
       }
     ],
@@ -19193,7 +19193,7 @@
       },
       {
         "input": {
-          "value": "\ud83d\ude00"
+          "value": "😀"
         },
         "output": {
           "kind": "string",
@@ -21200,7 +21200,7 @@
         }
       },
       {
-        "input": "\ud83d\ude00",
+        "input": "😀",
         "output": {
           "kind": "string",
           "units": [
@@ -21414,7 +21414,7 @@
       },
       {
         "input": {
-          "symbol": "\ud83d\ude00"
+          "symbol": "😀"
         },
         "output": [
           110,
@@ -40864,7 +40864,7 @@
   },
   "safe_cex_venue_kucoin::kucoin_exchange::KucoinExchange": {
     "shape": "observed",
-    "evidence": "Reviewed full concrete KuCoin binding and all10 selected compiler APIs. Constructor remains typed; all9 selected raw trait methods retain actual native adapters. Ordinary methods inspect native models, real HTTP/state effects and connected socket callbacks/cleanup. Six genuine constant/error entrypoints preserve honest equal outputs and require exact separately reviewed shared policy; no dropped API, raw-to-typed relabeling, replacement venue body or output padding. All12 ordinary trait adapters have executed natively (24 genuine inputs); the6 constant/refusal adapters executed separately (12 inputs). Formal complete-owner native/Wasm receipts remain pending exact shared policy support.",
+    "evidence": "Reviewed the complete concrete binding and all ten selected compiler APIs: one typed constructor and nine observed raw trait methods. Seven ordinary observed methods and two source-inherited errors retain genuine native inputs and outputs. The book listener proves a valid change emits before cleanup, then the next valid change is suppressed; disconnecting production handler removal causes the named native callback assertion to fail and exact restoration passes. Exact individually reviewed finite policies pin every constant API, Rust/TypeScript source, both executable fixtures, adapter and cases. The complete owner executes within the ordinary native and target-specific Wasm package gates; all 194 package receipts pass (106 runtime results and 88 classifications). No API omission, raw-to-typed relabeling, replacement venue method or echoed fixture output.",
     "entrypoints": [
       {
         "api": {
@@ -41886,7 +41886,7 @@
           }
         },
         "input": "observed",
-        "reason": "Exact source-inherited constant error; preserve all real symbol/limit inputs and actual native Error/state/zero-HTTP observations pending finite shared-policy review.",
+        "reason": "Exact source-inherited constant error; preserve all real symbol/limit inputs and actual native Error/state/zero-HTTP observations under the exact reviewed finite policy.",
         "constantOutput": true,
         "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::futures(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); let limit=$value[\"limit\"].as_f64(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_public_trades(receiver,symbol,limit).await.map(|_|()) })) }",
         "cases": [
@@ -42036,8 +42036,8 @@
           }
         },
         "input": "observed",
-        "reason": "Execute the literal concrete listener on a genuinely connected shared BaseWebSocket using scripted dial/event I/O only. Observe actual native callback field bits for two raw books; execute cleanup then deliver a real source socket message and prove no second callback. No venue method/getter replacement.",
-        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;use std::{cell::RefCell,rc::Rc};let (h,parts,deps,transport)=fx::io::connected_parts(safe_cex_types::ExchangeName::Kucoin);let venue=$type::new(parts,deps).unwrap();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));let price=$value[\"price\"].as_f64().unwrap();let amount=$value[\"amount\"].as_f64().unwrap();h.wire.script(\"POST\",\"/api/v1/bullet-public\",serde_json::json!({\"code\":\"200000\",\"data\":{\"token\":\"native-token\",\"instanceServers\":[{\"endpoint\":\"wss://native.invalid\",\"pingInterval\":18000}]}}));h.wire.script(\"GET\",\"/api/v1/level2/snapshot\",serde_json::json!({\"code\":\"200000\",\"data\":{\"bids\":[[price,amount]],\"asks\":[[price+1.0,amount+1.0]],\"sequence\":1}}));let socket=venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).unwrap();socket.connect_and_subscribe(false).unwrap();h.runtime.pump();h.runtime.pump();assert!(socket.is_connected());let received=Rc::new(RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));let callbacks=received.clone();let cleanup=<$type as Exchange>::listen_order_book(venue.as_ref(),symbol.into(),Rc::new(move |book|callbacks.borrow_mut().push(book))).unwrap();let frame=safe_cex_transport::socket::SocketFrame::Text(serde_json::json!({\"type\":\"message\",\"topic\":format!(\"/contractMarket/level2:{api}\"),\"data\":{\"bids\":[[price,amount]],\"asks\":[[price+1.0,amount+1.0]],\"sequence\":2}}).to_string());h.runtime.pump();h.runtime.pump();let count=received.borrow().len();let book=received.borrow()[0].clone();cleanup().unwrap();socket.on_message(&frame).unwrap();let after=received.borrow().len();let output=serde_json::json!({\"count\":count,\"afterCleanup\":after,\"bits\":([book.bids[0].price,book.bids[0].amount,book.asks[0].price,book.asks[0].amount].map(|v|format!(\"{:016x}\",v.to_bits()))),\"sockets\":transport.sockets.borrow().len()});venue.dispose().unwrap();output}",
+        "reason": "Execute the literal concrete futures listener on a genuinely connected shared BaseWebSocket. Observe initial snapshot field bits, then a valid sequential raw change that must emit a second native book with independently expected amount bits. Execute cleanup and deliver the next valid sequential change; the callback count must stay two. Both genuine symbol/book inputs traverse actual source socket routing, with no method/getter replacement.",
+        "call": "{#[allow(dead_code)] mod fx {use crate as venue_crate;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-io-fixture.rs\"));}use safe_cex_exchange::exchange::Exchange;use std::{cell::RefCell,rc::Rc};let (h,parts,deps,transport)=fx::io::connected_parts(safe_cex_types::ExchangeName::Kucoin);let venue=$type::new(parts,deps).unwrap();let symbol=$value[\"symbol\"].as_str().unwrap();let api=$value[\"api\"].as_str().unwrap();fx::seed_market(h.store.as_ref(),fx::market(api,symbol,Some(0.5)));let price=$value[\"price\"].as_f64().unwrap();let amount=$value[\"amount\"].as_f64().unwrap();h.wire.script(\"POST\",\"/api/v1/bullet-public\",serde_json::json!({\"code\":\"200000\",\"data\":{\"token\":\"native-token\",\"instanceServers\":[{\"endpoint\":\"wss://native.invalid\",\"pingInterval\":18000}]}}));h.wire.script(\"GET\",\"/api/v1/level2/snapshot\",serde_json::json!({\"code\":\"200000\",\"data\":{\"bids\":[[price,amount]],\"asks\":[[price+1.0,amount+1.0]],\"sequence\":1}}));let socket=venue.base().get_socket(safe_cex_exchange::socket_lifecycle::SocketSlot::Public).unwrap();socket.connect_and_subscribe(false).unwrap();h.runtime.pump();h.runtime.pump();assert!(socket.is_connected());let received=Rc::new(RefCell::new(Vec::<safe_cex_types::OrderBook>::new()));let callbacks=received.clone();let cleanup=<$type as Exchange>::listen_order_book(venue.as_ref(),symbol.into(),Rc::new(move |book|callbacks.borrow_mut().push(book))).unwrap();h.runtime.pump();h.runtime.pump();let initial=received.borrow().len();let book=received.borrow()[0].clone();let update=|sequence:i64,quantity:f64|safe_cex_transport::socket::SocketFrame::Text(serde_json::json!({\"type\":\"message\",\"topic\":format!(\"/contractMarket/level2:{api}\"),\"data\":{\"sequence\":sequence,\"change\":format!(\"{price},buy,{quantity}\")}}).to_string());socket.on_message(&update(2,amount+2.0)).unwrap();let count=received.borrow().len();let updated=received.borrow().last().unwrap().bids[0].amount.to_bits();cleanup().unwrap();socket.on_message(&update(3,amount+3.0)).unwrap();let after=received.borrow().len();let output=serde_json::json!({\"initialCount\":initial,\"count\":count,\"afterCleanup\":after,\"updatedAmountBits\":format!(\"{:016x}\",updated),\"bits\":([book.bids[0].price,book.bids[0].amount,book.asks[0].price,book.asks[0].amount].map(|v|format!(\"{:016x}\",v.to_bits()))),\"sockets\":transport.sockets.borrow().len()});venue.dispose().unwrap();output}",
         "cases": [
           {
             "input": {
@@ -42047,15 +42047,17 @@
               "amount": 3.5
             },
             "output": {
-              "count": 1,
-              "afterCleanup": 1,
+              "count": 2,
+              "afterCleanup": 2,
               "bits": [
                 "4031400000000000",
                 "400c000000000000",
                 "4032400000000000",
                 "4012000000000000"
               ],
-              "sockets": 1
+              "sockets": 1,
+              "initialCount": 1,
+              "updatedAmountBits": "4016000000000000"
             }
           },
           {
@@ -42066,15 +42068,17 @@
               "amount": 7.25
             },
             "output": {
-              "count": 1,
-              "afterCleanup": 1,
+              "count": 2,
+              "afterCleanup": 2,
               "bits": [
                 "403d800000000000",
                 "401d000000000000",
                 "403e800000000000",
                 "4020800000000000"
               ],
-              "sockets": 1
+              "sockets": 1,
+              "initialCount": 1,
+              "updatedAmountBits": "4022800000000000"
             }
           }
         ]
@@ -42083,7 +42087,7 @@
   },
   "safe_cex_venue_kucoin::kucoin_exchange::KucoinSpotExchange": {
     "shape": "observed",
-    "evidence": "Reviewed full concrete KuCoin binding and all10 selected compiler APIs. Constructor remains typed; all9 selected raw trait methods retain actual native adapters. Ordinary methods inspect native models, real HTTP/state effects and connected socket callbacks/cleanup. Six genuine constant/error entrypoints preserve honest equal outputs and require exact separately reviewed shared policy; no dropped API, raw-to-typed relabeling, replacement venue body or output padding. All12 ordinary trait adapters have executed natively (24 genuine inputs); the6 constant/refusal adapters executed separately (12 inputs). Formal complete-owner native/Wasm receipts remain pending exact shared policy support.",
+    "evidence": "Reviewed the complete concrete binding and all ten selected compiler APIs: one typed constructor and nine observed raw trait methods. Five ordinary observed methods, one source-inherited error and three actual source-defined constant/no-op overrides retain genuine native inputs and outputs. Native book callbacks and cleanup traverse the real connected shared socket. Exact individually reviewed finite policies pin every constant API, Rust/TypeScript source, both executable fixtures, adapter and cases. The complete owner executes within the ordinary native and target-specific Wasm package gates; all 194 package receipts pass (106 runtime results and 88 classifications). No API omission, raw-to-typed relabeling, replacement venue method or echoed fixture output.",
     "entrypoints": [
       {
         "api": {
@@ -42778,7 +42782,7 @@
           }
         },
         "input": "observed",
-        "reason": "Actual source-defined no-op resolves unit for both genuine argument combinations; retain native unit/unchanged-state/effect observations, pending exact finite policy review.",
+        "reason": "Actual source-defined no-op resolves unit for both genuine argument combinations; retain native unit/unchanged-state/effect observations, under the exact reviewed finite policy.",
         "constantOutput": true,
         "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-constant-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::spot(); let symbol=$value[\"symbol\"].as_str().map(str::to_owned);let flag=$value[\"flag\"].as_bool().unwrap();fixture::observe(venue.as_ref(),&h,|receiver|<$type as Exchange>::change_position_mode(receiver,flag,symbol),|()|serde_json::json!({\"kind\":\"unit\"})) }",
         "cases": [
@@ -42899,7 +42903,7 @@
           }
         },
         "input": "observed",
-        "reason": "Actual source-defined no-op resolves unit for both genuine argument combinations; retain native unit/unchanged-state/effect observations, pending exact finite policy review.",
+        "reason": "Actual source-defined no-op resolves unit for both genuine argument combinations; retain native unit/unchanged-state/effect observations, under the exact reviewed finite policy.",
         "constantOutput": true,
         "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-constant-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::spot(); let symbol=$value[\"symbol\"].as_str().map(str::to_owned);let flag=$value[\"flag\"].as_bool().unwrap();fixture::observe(venue.as_ref(),&h,|receiver|<$type as Exchange>::change_margin_type(receiver,flag,symbol),|()|serde_json::json!({\"kind\":\"unit\"})) }",
         "cases": [
@@ -43127,7 +43131,7 @@
           }
         },
         "input": "observed",
-        "reason": "Exact source-inherited constant error; preserve all real symbol/limit inputs and actual native Error/state/zero-HTTP observations pending finite shared-policy review.",
+        "reason": "Exact source-inherited constant error; preserve all real symbol/limit inputs and actual native Error/state/zero-HTTP observations under the exact reviewed finite policy.",
         "constantOutput": true,
         "call": "{ #[allow(dead_code)] mod fixture { pub mod io { use crate as safe_cex_venue_kucoin; include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/exchange_runtime.rs\")); } include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/../safe-cex-parity/accepted-set/kucoin-refusal-fixture.rs\")); } use safe_cex_exchange::exchange::Exchange; let (venue,h)=fixture::io::spot(); let symbol=$value[\"symbol\"].as_str().unwrap().to_owned(); let limit=$value[\"limit\"].as_f64(); fixture::observe(venue.as_ref(),&h,|receiver| Box::pin(async move { <$type as Exchange>::fetch_public_trades(receiver,symbol,limit).await.map(|_|()) })) }",
         "cases": [
