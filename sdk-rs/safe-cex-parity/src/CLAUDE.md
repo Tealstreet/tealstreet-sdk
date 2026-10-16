@@ -110,7 +110,7 @@ Observed methods normally require distinct inputs and outputs. The two
 `Capture` serializer metadata constructors in `../accepted-set/constant-outputs/<crate>.json`
 and exact reviewed venue inherited refusals in `../accepted-set/inherited-constant-outputs/<crate>.json`
 may set `constantOutput: true`. Only individually installed GRVT, BreakoutProp,
-and Bitget policy records qualify; adding a package name alone grants no method
+Bitget and the three exact Kucoin inherited-refusal policy records qualify; adding a package name alone grants no method
 permission. Their actual compiler package, API, body span,
 whole-source hash, native adapter and cases are pinned. Inherited refusals also
 pin the maintained TS base method lines, base/venue file hashes and native
@@ -124,6 +124,13 @@ The single reviewed `DirectTransport::ws_connection` native-method record in
 package, raw-input role, Rust span/hash, maintained TS callback and exact native
 adapter/cases. Distinct URL inputs observe the returned connection capability;
 both reviewed outputs are absent. No other transport method inherits permission.
+Three reviewed Kucoin Spot overrides may use native-method records for constant
+leverage `1` and unit-returning mode changes. They require the exact maintained
+TS override body and source hash, genuine native result/state witnesses and both
+executable fixture hashes. These overrides receive no inherited-error permission.
+Kucoin inherited refusals also require both the I/O harness and observer helper
+hashes. Missing reviewed records remain refused; package eligibility installs no
+contract or permission by itself.
 The bounded `construction/<crate>.json` policy classifies Clone/Copy on private-field
 types, including service handles whose shared ownership is intentional.
 
