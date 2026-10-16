@@ -81,3 +81,23 @@ behavioral assertions; all exact restorations exited 0. This covers sixteen
 entrypoints, three amendment axes, two disposal faults and authentication
 recovery. No source reference or expected fixture was modified. Layer checks
 pass 88/88. Final registry, inventory and parity results are recorded below.
+
+
+After merging master da917a5808, registry construction and membership targets
+pass 16/16 (one Paradex loopback witness and fifteen registry tests). Removing
+only the Paradex table entry compiles and fails the named construction assertion
+with exit101; exact restoration passes. The all-features override contract,
+including its ignored live-source check, passes 6/6. All 18 new inventory entries
+were reviewed: source member dispatches call their existing body ports, socket
+disposal selects its source body, and concrete start/drop dispatch stays on the
+venue. The HTTP factory reads the supplied exchange object's name as in TS,
+without a direct base getter bypass or a new audit exception. Parity reports zero
+findings over 7,459 rows and 17,187 public items; layers pass 88/88.
+
+
+Final post-merge checks also pass eight constructed tests, strict venue host
+all-target and WASM library lint, and venue/registry formatting. Global selected
+trait declarations pass 30/31: the sole unrelated GRVT CompositionHost floor is
+22 against its recorded 21; the maintained checker accepts every selected family.
+The overseer has this foreign census failure. Extractor check remains zero
+changed/added/orphaned manifests after the merge.
