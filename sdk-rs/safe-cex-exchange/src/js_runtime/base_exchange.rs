@@ -143,11 +143,15 @@ pub fn create(
         let _ = this.define(k, v);
     };
     {
-        let base = base.clone();
+        let getter = base.clone();
+        let setter = base.clone();
         this.define_accessor(
             "isDisposed",
-            Some(Rc::new(move |_| Ok(Js::Bool(base.is_disposed())))),
-            None,
+            Some(Rc::new(move |_| Ok(Js::Bool(getter.is_disposed())))),
+            Some(Rc::new(move |_, value| {
+                setter.set_disposed_flag(value.truthy());
+                Ok(())
+            })),
         );
     }
     {
