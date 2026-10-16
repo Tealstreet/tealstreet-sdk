@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { contractFor } from './accepted-contracts.mjs';
@@ -170,7 +171,7 @@ test('reviewed serializer constants pin compiler source adapters and witnesses',
   const fs = await import('node:fs');
   const { fileURLToPath } = await import('node:url');
   const { spawnSync } = await import('node:child_process');
-  const specs = Object.values(JSON.parse(fs.readFileSync(new URL('../accepted-set/constant-outputs.json', import.meta.url), 'utf8')));
+  const specs = Object.values(loadPolicy('constant-outputs'));
   assert.equal(specs.length, 2, 'only the two reviewed serializer metadata constructors');
   assert.deepEqual(specs.map(s => s.api.name), ['serialize_unit_struct', 'serialize_tuple_struct']);
   const actual = { name: specs[0].owner, ident: 'Capture', kind: 'record', deserialize: false, generics: { params: [] }, methods: [], conversions: [], traitMethods: specs.map(({api: {kind, ...api}}) => api), rawEntrypoints: [true, true], entrypointSources: specs.map(s => ({ filename: s.source.file, begin: s.source.begin, end: s.source.end })) };

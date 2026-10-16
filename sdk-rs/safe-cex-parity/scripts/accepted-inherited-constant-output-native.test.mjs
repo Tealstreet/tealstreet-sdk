@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -9,7 +10,7 @@ import { inventory } from './accepted-inventory.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
 const ownerName = 'safe_cex_venue_grvt::binding::exchange::GrvtExchange';
-const specs = Object.values(JSON.parse(fs.readFileSync(new URL('../accepted-set/inherited-constant-outputs.json', import.meta.url))));
+const specs = Object.values(loadPolicy('inherited-constant-outputs'));
 const fixtureUrl = new URL('../fixtures/accepted-inherited-methods.json', import.meta.url);
 function cargo(args) {
   const result = spawnSync('cargo', args, { cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,

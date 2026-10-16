@@ -1,9 +1,9 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
-import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-const reviewed = JSON.parse(fs.readFileSync(new URL('../accepted-set/inherited-constant-outputs.json', import.meta.url), 'utf8'));
+const reviewed = loadPolicy('inherited-constant-outputs');
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 
 // Exact inherited refusals only. Every ordinary compiler entry remains present;

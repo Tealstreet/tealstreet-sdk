@@ -225,6 +225,7 @@ fn main() {
 // independently of rustdoc's selected sources. No invocation spelling grants it.
 fn number_output_provider(root: &std::path::Path) -> Result<serde_json::Value, String> {
     use std::{fs, path::Path};
+    use syn::spanned::Spanned;
     fn source(root: &Path, relative: &str) -> Result<syn::File, String> {
         let path = root
             .join(relative)
@@ -304,10 +305,20 @@ fn number_output_provider(root: &std::path::Path) -> Result<serde_json::Value, S
     {
         return Err("expected one unconditional macro_export definition".into());
     }
+    // Attribute coverage belongs only to this independently validated top-level
+    // definition. The ordinary scope scanner still rejects every macro_export.
+    let export = macros[0]
+        .attrs
+        .iter()
+        .find(|attr| attr.path().is_ident("macro_export"))
+        .expect("the exact export attribute was validated above")
+        .span()
+        .end();
     Ok(serde_json::json!({
         "recipeFormat": "proc-macro2-token-string-v1",
         "tokens": macros[0].mac.tokens.to_string(),
         "definition": "safe-cex-num/src/numeric_ingress/eligibility.rs",
+        "exportAttribute": { "ident": "UNSUPPORTED_ATTRIBUTE_EXPANSION:macro_export", "line": export.line, "column": export.column },
         "moduleChain": ["safe-cex-num/src/lib.rs", "safe-cex-num/src/numeric_ingress.rs", "safe-cex-num/src/numeric_ingress/eligibility.rs"]
     }))
 }

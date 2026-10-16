@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -8,7 +9,7 @@ import { reviewedConstantOutput } from './accepted-constant-output.mjs';
 import { reviewedInheritedConstantOutput } from './accepted-inherited-constant-output.mjs';
 
 const root = fileURLToPath(new URL('../..', import.meta.url));
-const specs = Object.values(JSON.parse(fs.readFileSync(new URL('../accepted-set/inherited-constant-outputs.json', import.meta.url))));
+const specs = Object.values(loadPolicy('inherited-constant-outputs'));
 function fixture(spec) {
   return {
     type: { name: spec.owner, ident: spec.ident, kind: 'record', deserialize: false, rawEntrypoints: [true], entrypointSources: [{ filename: spec.source.file, begin: spec.source.begin, end: spec.source.end }] },

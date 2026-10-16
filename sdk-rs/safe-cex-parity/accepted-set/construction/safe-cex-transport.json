@@ -1,0 +1,38 @@
+{
+  "safe_cex_transport::frames::ResponseData": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Data/configuration or shared service handle; duplication carries no one-use validation authority. Public constructors and serialized fields remain independently classified."
+  },
+  "safe_cex_transport::frames::HttpRequestArgs": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Data/configuration or shared service handle; duplication carries no one-use validation authority. Public constructors and serialized fields remain independently classified."
+  },
+  "safe_cex_transport::frames::RpcHttpResponse": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Data/configuration or shared service handle; duplication carries no one-use validation authority. Public constructors and serialized fields remain independently classified."
+  },
+  "safe_cex_transport::frames::Config": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Data/configuration or shared service handle; duplication carries no one-use validation authority. Public constructors and serialized fields remain independently classified."
+  },
+  "safe_cex_transport::frames::RequestDump": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Data/configuration or shared service handle; duplication carries no one-use validation authority. Public constructors and serialized fields remain independently classified."
+  },
+  "safe_cex_transport::socket::TunnelDialOptions": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Data/configuration or shared service handle; duplication carries no one-use validation authority. Public constructors and serialized fields remain independently classified."
+  }
+}

@@ -3477,3 +3477,106 @@ This reuse is an actual binary execution after input comparison, not a fresh
 Cargo test build. Earlier 17-test, guard-control and Clippy results keep their
 original provenance. Generator freshness, both formatter-toolchain tests,
 formatting and parity-check pass after the cutover (7,459 rows; 17,183 items).
+
+
+### Three reviewed predicate roles
+
+`order_logic`'s position-mode error recognizer compares the existing nested code
+strictly with numeric/string -4059. The deprecated balance predicate deliberately
+ignores account data and returns false. The post-only predicate classifies an
+existing error with numeric -5022, nullish code precedence and source-truthy
+message selection before shared fallible String coercion and substring checks.
+Each returns a Boolean predicate or coercion error, rather than decoding a
+representation into an owner. Each has its own reviewed compiler API and reason;
+this grants no exemption to another raw-input function.
+
+Three independently authored native tests call those actual public functions,
+including absent and present-null input, strict code types, nested/root fallback,
+message precedence and the actual native TypeError name. The existing live
+order-logic and rejection targets add 217 and 5,471 source comparisons. All five
+selected tests pass with zero ignored, both before controls and after restoration.
+
+`python3 sdk-rs/safe-cex-venue-binance/scripts/predicate-role-controls.py` completes
+three compiled wrong-result controls. Returning false from the position-mode or
+post-only predicate, and true from the deprecated balance predicate, fails each
+function's named native assertion. Every exact source restoration passes that
+same test. The final production source is byte-identical to the starting source;
+this tranche changes tests and classifications, not the predicate implementations.
+
+The maintained `predicate-role-contracts.mjs` completes fresh ordinary
+native/default compiler discovery and three explicit production non-decoder
+classification receipts with zero failed owners. These receipts validate the
+reviewed function APIs/classifications; they do not execute their predicate
+logic. The native fixtures, live oracles and behavioral controls above supply
+that separate execution evidence. Discovery remains 235 owners, 80 aliases and
+two construction policies; the three selected receipts exclude other owners,
+aliases, locals and feature/wasm coverage.
+
+Selected `accepted_predicate_roles` Clippy passes with warnings denied, as do
+formatting, frozen dependency installation and parity-check. After integrating
+master `cc32fd465b`, the Rust/dependency/test/oracle inputs compare unchanged
+against validated predicate revision `f38213c340`; the existing compiled native
+and two live targets execute five passing tests again. This is documented binary
+reuse after input comparison, not a fresh Cargo test build. Controls and Clippy
+keep their pre-merge provenance. Every master contract entry remains unchanged;
+only these three reviewed predicates are added to the Binance shard.
+
+
+### Four observed error-output functions
+
+The Futures and PM response-message wrappers and their private shared body
+preserve object-code presence, source-truthy msg/message/error precedence, shared
+fallible String coercion and the final space join. Non-object/array inputs
+produce empty text rather than an input-refusal error. The rejection-reason
+mapper consumes its actual typed Map input and observes native Some(PostOnly),
+None and coercion errors. Its substring/case behavior is preserved, including
+array String coercion and a leading BOM before an otherwise matching substring.
+
+Three independent public native tests inspect returned strings, actual rejection
+variants/absence and the native TypeError name before any enum serialization.
+They pass with the maintained live response-message and rejection targets: five
+tests, zero ignored, including 11,828 and 5,471 source comparisons. Selected
+`accepted_error_outputs` Clippy passes with warnings denied.
+
+The maintained `error-output-contracts.mjs` completes fresh ordinary native/default
+discovery and four actual production decoder-output results with zero failed
+owners. The private helper is called directly from its own instrumented module;
+its public callers are separate results. These are executed output observations,
+not non-decoder classification receipts. Fixture scope is stock JSON/UTF-8,
+including the declared native fallback and coercion-error names; arbitrary
+getters, prototype mutation and full Error identity are not asserted.
+
+`python3 sdk-rs/safe-cex-venue-binance/scripts/error-output-controls.py` completes
+four compiled wrong-output controls and four restored passes. Each control
+generates fresh compiler metadata for the changed body and executes all four
+actual production APIs. The changed owner's own result must contain native
+function-output mismatches; compilation failures and classification refusals
+cannot count. For the private helper, its own result and the two actual public
+callers fail. Restoring each exact source file passes all four production
+outputs again. The mapper's wrong-None result likewise fails its direct native
+variant witness, then restoration passes. Both production files finally compare
+byte-identical to the original revision.
+
+After the final evidence update, fresh ordinary discovery and all four actual
+production output probes pass again with zero failed owners. The restored
+existing compiled native target and two live targets execute five passing tests
+with zero ignored; this is actual binary execution after exact source
+restoration, not a second Cargo test build. Formatting, frozen dependency
+installation and parity-check pass (7,459 rows; 17,198 public Rust items). All ten
+existing Binance contracts remain unchanged; only four reviewed decoder-output
+entries are added. Discovery counts remain 235 owners, 80 aliases and two
+construction policies. Other owners, aliases, locals and feature/wasm coverage
+remain outside this four-function evidence.
+
+Latest master integration at `c2546620c7` includes the shared numeric-ingress
+enum-access repair. Its single-variant Object/MapAccess path replaces the prior
+MapDeserializer path; the incoming diff was reviewed. Binance implementations
+remain unchanged. Because a native dependency changed, a fresh pinned-toolchain
+Cargo run repeats all five native/live tests successfully, including the
+11,828/5,471 source comparisons. The earlier compiled controls and selected-test
+Clippy keep their pre-integration provenance.
+
+After that integration, fresh ordinary native/default discovery again executes
+all four production decoder-output probes with zero failed owners. Formatting,
+frozen dependency installation and parity-check also pass (7,459 rows and
+17,198 public Rust items).

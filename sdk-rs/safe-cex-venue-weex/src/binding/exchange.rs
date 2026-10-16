@@ -1,5 +1,5 @@
 //! Concrete WEEX composition over native bodies and shared runtime services.
-use super::*;
+use super::{Host, Js, Thrown, arg, await_js, from_typed, rt, to_typed};
 use safe_cex_exchange::{
     capabilities::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
@@ -16,7 +16,11 @@ use safe_cex_exchange::{
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
-use safe_cex_types::*;
+use safe_cex_types::{
+    Balance, Candle, ExchangeAccount, ExchangeName, ExchangeOptions, Execution, ExecutionsOptions,
+    IncomeHistoryOptions, IncomeRecord, Market, OHLCVOptions, Order, OrderBook, PlaceOrderOpts,
+    Position, PositionSide, PublicTrade, Ticker, UpdateOrderOpts, ValidateAccountResult,
+};
 use std::rc::Rc;
 
 pub struct WeexDependencies {
@@ -39,7 +43,7 @@ fn js<T: serde::Serialize>(value: &T) -> Result<Js, ExchangeError> {
 fn optional<T: serde::Serialize>(value: Option<T>) -> Result<Js, ExchangeError> {
     value.map_or(Ok(Js::Undefined), |v| js(&v))
 }
-macro_rules! args { ($($value:expr),*)=>{match (||->Result<Vec<Js>,ExchangeError>{Ok(vec![$($value?),*])})(){Ok(args)=>args,Err(error)=>return Box::pin(async move{Err(error)})}}; }
+macro_rules! args { ($($value:expr),*)=>{match (||->Result<Vec<Js>,ExchangeError>{Ok(std::vec![$($value?),*])})(){Ok(args)=>args,Err(error)=>return Box::pin(async move{Err(error)})}}; }
 impl WeexExchange {
     pub fn new(
         name: ExchangeName,
@@ -50,7 +54,7 @@ impl WeexExchange {
         if name != ExchangeName::Weex {
             return Err(ExchangeError::new("WeexExchange requires weex"));
         }
-        let globals = Js::object(vec![]);
+        let globals = Js::object(std::vec![]);
         let shared = Rc::new(ScopeShared::new(
             deps.runtime,
             deps.http,
@@ -134,15 +138,15 @@ impl WeexExchange {
         });
         let cleanup = self
             .host
-            .call(member, vec![subject, deliver])
+            .call(member, std::vec![subject, deliver])
             .map_err(err)?;
         Ok(Box::new(move || {
-            cleanup.call(Js::Undefined, vec![]).map_err(err)?;
+            cleanup.call(Js::Undefined, std::vec![]).map_err(err)?;
             Ok(())
         }))
     }
     pub fn fetch_balance(&self) -> ExchangeFuture<'_, Balance> {
-        self.invoke("fetchBalance", vec![])
+        self.invoke("fetchBalance", std::vec![])
     }
     pub fn fetch_order_book(
         &self,
@@ -165,19 +169,19 @@ impl Exchange for WeexExchange {
         "WeexExchange"
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
-        self.unit("start", vec![])
+        self.unit("start", std::vec![])
     }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        self.invoke("getAccount", vec![])
+        self.invoke("getAccount", std::vec![])
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
-        self.invoke("validateAccount", vec![])
+        self.invoke("validateAccount", std::vec![])
     }
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
-        self.invoke("fetchMarkets", vec![])
+        self.invoke("fetchMarkets", std::vec![])
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
-        self.invoke("fetchTickers", vec![])
+        self.invoke("fetchTickers", std::vec![])
     }
     fn fetch_positions(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Position>> {
         let args = args!(optional(symbols));
@@ -221,7 +225,7 @@ impl Exchange for WeexExchange {
         self.unit("cancelSymbolOrders", args)
     }
     fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
-        self.unit("cancelAllOrders", vec![])
+        self.unit("cancelAllOrders", std::vec![])
     }
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
         let args = args!(js(order.options()));

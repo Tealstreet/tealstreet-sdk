@@ -232,12 +232,18 @@ impl<'de> Deserializer<'de> for JsNumberDeserializer {
     ) -> Result<V::Value, Error> {
         match self.0 {
             Node::Text(value) => visitor.visit_enum(value.into_deserializer()),
-            Node::Object(entries) => de::value::MapDeserializer::new(
-                entries
-                    .into_iter()
-                    .map(|(key, value)| (key, JsNumberDeserializer(value.0))),
-            )
-            .deserialize_enum(name, variants, visitor),
+            Node::Object(entries) => {
+                if entries.len() != 1 {
+                    return Err(de::Error::custom(
+                        "expected a single externally tagged enum variant",
+                    ));
+                }
+                de::value::MapAccessDeserializer::new(Object {
+                    entries: entries.into_iter(),
+                    value: None,
+                })
+                .deserialize_enum(name, variants, visitor)
+            }
             _ => Err(de::Error::custom(
                 "expected string or externally tagged enum object",
             )),

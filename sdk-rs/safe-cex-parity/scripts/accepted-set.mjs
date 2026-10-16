@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
@@ -10,7 +11,7 @@ import { runProbes } from './accepted-probes.mjs';
 import { reviewedLocalHelper, requireNativeDecoderObservations } from './accepted-local-helpers.mjs';
 import { aliasClaim, aliasTargetIdentity, toolingAliasExemption } from './accepted-aliases.mjs';
 import { verifiedMacroOrigins } from './accepted-macro-origins.mjs';
-import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition } from './accepted-number-output.mjs';
+import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition, numberOutputDefinitionCovers } from './accepted-number-output.mjs';
 import { genericAliasProbe } from './accepted-callable-alias.mjs';
 import { buildScanner } from './accepted-scanner.mjs';
 
@@ -65,8 +66,8 @@ for (const pkg of members) {
   macroOrigins.push(...verifiedNumberOutputOrigin(doc, pkg, metadata, artifacts, scanner));
   const numberOutputDefinition = verifiedNumberOutputDefinition(doc, pkg, metadata, artifacts, scanner);
   if (numberOutputDefinition) macroOrigins.push(numberOutputDefinition.selfOrigin);
-  const defaultTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/default-traits.json'), 'utf8'));
-  const receiverTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/receiver-traits.json'), 'utf8'));
+  const defaultTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : loadPolicy('default-traits');
+  const receiverTraits = args.some(arg => arg.startsWith('--workspace=')) ? {} : loadPolicy('receiver-traits');
   const result = inventory(doc, { defaultTraits, receiverTraits, readSource: file => fs.readFileSync(path.resolve(root, file)) });
   let nativeEntry;
   if (target.kind.includes('bin') && configuration.target === 'native') {
@@ -111,15 +112,15 @@ for (const pkg of members) {
       alias.claim = aliasClaim(alias, claimContext, contract);
     }
   }
-  const construction = args.some(arg => arg.startsWith('--workspace=')) ? {} : JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/construction.json'), 'utf8'));
+  const construction = args.some(arg => arg.startsWith('--workspace=')) ? {} : loadPolicy('construction');
   for (const owner of result.construction) {
     assert.ok(construction[owner.name]?.reason?.trim(), `${owner.name}: accepted-set assertion: private-construction Clone/Copy must be classified`);
     assert.deepEqual(owner.traits, construction[owner.name].traits, `${owner.name}: accepted-set assertion: private-construction duplication traits changed`);
   }
   const local = spawnSync(scanner, ['--macro-origins-json', JSON.stringify(macroOrigins), ...[...new Set([target.src_path, ...result.sources.map(file => path.resolve(root, file))])].filter(file => !path.relative(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..'), file).startsWith('..'))], { encoding: 'utf8' });
   assert.equal(local.status, 0, `accepted-set: local type scope scan failed: ${local.stderr}`);
-  const localFunctionContracts = args.some(arg => arg.startsWith('--workspace=')) ? {} : JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/local-functions.json'), 'utf8'));
-  const localTypeHelpers = args.some(arg => arg.startsWith('--workspace=')) ? {} : JSON.parse(fs.readFileSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../accepted-set/local-type-helpers.json'), 'utf8'));
+  const localFunctionContracts = args.some(arg => arg.startsWith('--workspace=')) ? {} : loadPolicy('local-functions');
+  const localTypeHelpers = args.some(arg => arg.startsWith('--workspace=')) ? {} : loadPolicy('local-type-helpers');
   const delegatedLocals = [];
   const locals = local.stdout.trim().split('\n').filter(Boolean).map(line => {
     const [file, ident, row, column] = line.split('\t');
@@ -144,9 +145,7 @@ for (const pkg of members) {
       assert.equal(contract.sourceSha256, createHash('sha256').update(fs.readFileSync(file)).digest('hex'), `${label}: accepted-set assertion: reviewed nested-function source changed`);
       return null;
     }
-    if (numberOutputDefinition && fs.realpathSync(file) === numberOutputDefinition.file
-        && ident === numberOutputDefinition.ident && Number(row) === numberOutputDefinition.line
-        && Number(column) === numberOutputDefinition.column) return null;
+    if (numberOutputDefinitionCovers(numberOutputDefinition, file, ident, row, column)) return null;
     const scopeReason = ident.startsWith('UNSUPPORTED_MODULE_MACRO')
       ? 'module-scope macro may introduce decoder declarations and needs production coverage'
       : 'unsupported local scope needs module-scope production coverage';

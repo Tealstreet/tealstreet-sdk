@@ -325,3 +325,15 @@ pub fn on_message<H: RoutingHost>(host: &mut H, data: H::Value) -> Result<(), H:
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn utf16_encoder_preserves_native_units() {
+        assert_eq!(units(""), Vec::<u16>::new());
+        assert_eq!(units("A🚀\0"), vec![65, 55357, 56960, 0]);
+        assert_eq!(units("é雪"), vec![233, 38634]);
+    }
+}

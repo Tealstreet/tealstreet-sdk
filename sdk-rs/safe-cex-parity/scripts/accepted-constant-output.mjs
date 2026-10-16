@@ -1,10 +1,11 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import { reviewedInheritedConstantOutput } from './accepted-inherited-constant-output.mjs';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-const reviewed = JSON.parse(fs.readFileSync(new URL('../accepted-set/constant-outputs.json', import.meta.url), 'utf8'));
+const reviewed = loadPolicy('constant-outputs');
 
 // Permission belongs to exact reviewed production serializer bodies and native
 // adapters. It is never inferred from a method name or a caller's constant data.
