@@ -13,6 +13,7 @@ pub struct WeexApiRuntime<H, V, E> {
     pub truthy: fn(&V) -> bool,
     pub nullish: fn(&V) -> bool,
     pub is_undefined: fn(&V) -> bool,
+    pub is_string: fn(&V) -> bool,
     pub text: fn(&str) -> V,
     pub string_units: fn(Vec<u16>) -> V,
     pub number: fn(f64) -> V,
@@ -140,7 +141,11 @@ pub fn run_api_callback<H, V: Clone, E>(
                 (r.text)("")
             };
             let data = (r.get)(h, &value, "data")?;
-            let body = if (r.truthy)(&data) {
+            // Axios replays its already serialized body. Signing a JSON string
+            // again would add quotes/escapes absent from the transmitted bytes.
+            let body = if (r.is_string)(&data) {
+                (r.get)(h, &value, "data")?
+            } else if (r.truthy)(&data) {
                 (r.stringify)(h, (r.get)(h, &value, "data")?)?
             } else {
                 (r.text)("")
