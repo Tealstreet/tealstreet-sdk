@@ -1,6 +1,9 @@
 //! Private websocket and API factory bodies over original source bindings.
 use crate::collection_reads::{Callback, Op, ReadHost};
 use std::rc::Rc;
+
+// ts: isBitrueSignatureRejection, Binance-style -1022; codes arrive as numbers or strings.
+pub use safe_cex_transport::signature_rejection::is_binance_style_signature_rejection as is_bitrue_signature_rejection;
 pub trait PrivateHost: ReadHost {
     fn contains(&self, v: Self::Value, needle: &str) -> Result<bool, Self::Error>;
     fn less_equal(&self, a: Self::Value, b: Self::Value) -> Result<bool, Self::Error>;
@@ -43,7 +46,18 @@ pub trait PrivateHost: ReadHost {
     ) -> Result<(), Self::Error>;
     /// ts: incrementalFills cleanFloat over a Number.
     fn clean_float(&self, value: Self::Value) -> Result<Self::Value, Self::Error>;
+    /// Binds source `isRetryable`: networkErrorOnRead(LISTEN_KEY) || signatureRejectedResponse.
     fn retry_condition(&self) -> Result<Self::Value, Self::Error>;
+    /// Binds source `isBitrueSignatureRejection`, i.e. [`is_bitrue_signature_rejection`].
+    fn signature_rejection(&self) -> Result<Self::Value, Self::Error>;
+    /// Binds `resendOnSignatureRejection(xhr, response, isRejection)`: the resend
+    /// promise, or undefined. Hosts decide through `safe_cex_transport::signature_rejection`.
+    fn resend_on_signature_rejection(
+        &self,
+        client: Self::Value,
+        response: Self::Value,
+        predicate: Self::Value,
+    ) -> Result<Self::Value, Self::Error>;
     fn retry(&self, client: Self::Value, options: Self::Value) -> Result<(), Self::Error>;
     fn create_hmac(&self, algorithm: &str, secret: Self::Value)
     -> Result<Self::Value, Self::Error>;
@@ -667,5 +681,25 @@ pub fn create_api<H: PrivateHost>(
         }),
     );
     invoke(h, p, vec![interceptor])?;
+    // The HOW tunnel resolves a 4xx, so a rejection over it never reaches axios-retry.
+    let response = get(h, &get(h, &xhr, "interceptors")?, "response")?;
+    let p = method(h, response, "use")?;
+    let host = h.clone();
+    let client = xhr.clone();
+    let resend = h.named_function(
+        "",
+        Rc::new(move |args| {
+            let response = args.first().cloned().unwrap_or_else(|| host.undefined());
+            let predicate = host.signature_rejection()?;
+            let resent =
+                host.resend_on_signature_rejection(client.clone(), response.clone(), predicate)?;
+            Ok(if host.nullish(&resent) {
+                response
+            } else {
+                resent
+            })
+        }),
+    );
+    invoke(h, p, vec![resend])?;
     Ok(xhr)
 }
