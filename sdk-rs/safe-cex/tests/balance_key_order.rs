@@ -33,7 +33,12 @@ fn production_balance_enumerates_recursive_keys_like_live_javascript() {
             row["outer"],
             "live outer key order"
         );
-        let nested = currencies["USDT"].currencies.as_ref().unwrap();
+        let nested = currencies["USDT"]
+            .as_balance()
+            .unwrap()
+            .currencies
+            .as_ref()
+            .unwrap();
         assert_eq!(
             serde_json::to_value(nested.keys().collect::<Vec<_>>()).unwrap(),
             row["nested"],

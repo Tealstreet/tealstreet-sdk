@@ -49,7 +49,8 @@ fn fallback(n: f64) -> Balance {
                     coins: None,
                     currencies: None,
                     info: Some(json!({"tag":"old"})),
-                },
+                }
+                .into(),
             )]
             .into_iter()
             .collect(),
@@ -65,7 +66,7 @@ fn observe(balance: &Balance) -> Value {
         v["currencies"] = Value::Object(
             currencies
                 .iter()
-                .map(|(k, v)| (k.clone(), observe(v)))
+                .map(|(k, v)| (k.clone(), observe(v.as_balance().unwrap())))
                 .collect(),
         );
     }
@@ -300,7 +301,7 @@ fn spot_balance_live_source() {
                     .unwrap();
                 assert_eq!(key, source_key, "SBALANCE native currency order");
                 assert_eq!(
-                    observe(currency),
+                    observe(currency.as_balance().unwrap()),
                     *source_currency,
                     "SBALANCE native currency"
                 );
