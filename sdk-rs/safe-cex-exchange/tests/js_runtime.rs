@@ -1223,6 +1223,7 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
             method: method.into(),
             url: url.into(),
             params: Some(json!({"instId": "BTC-USDT-SWAP"})),
+            config_extensions: [("grvtCookie".into(), json!("gravity=bridge"))].into(),
             ..Default::default()
         };
         settle(
@@ -1250,6 +1251,11 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
     assert_eq!(
         http.sent.borrow()[0]["params"],
         json!({"instId": "BTC-USDT-SWAP"})
+    );
+    assert_eq!(
+        http.sent.borrow()[0]["grvtCookie"],
+        json!("gravity=bridge"),
+        "REST CONFIG native-to-JS bridge"
     );
     let upper =
         to_json(&run("GET", "/ok").expect("an uppercase verb dispatches like Axios")).unwrap();

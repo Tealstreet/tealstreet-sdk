@@ -473,13 +473,14 @@ impl JsRestAdapter {
         }
     }
     async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
-        let config = Js::object(
-            request
-                .params
-                .iter()
-                .map(|params| ("params", from_json(params)))
-                .collect(),
-        );
+        let config = Js::object(vec![]);
+        for (name, value) in &request.config_extensions {
+            config.define(name, from_json(value))?;
+        }
+        // Typed parameters remain authoritative over an extension of that name.
+        if let Some(params) = &request.params {
+            config.define("params", from_json(params))?;
+        }
         let url = Js::str(&request.url);
         // Axios normalizes the verb; RestRequest callers send "GET" as often as "get".
         let method = request.method.to_lowercase();
