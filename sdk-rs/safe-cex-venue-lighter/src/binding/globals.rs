@@ -2,13 +2,17 @@
 //! helpers wrapped as JS callables, plus the lighter constant tables.
 use crate::{
     account_tier::{
-        LighterAccountTier, extract_lighter_account_tier_from_payload,
-        has_non_zero_lighter_integrator_fee,
+        LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE,
+        LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE, LighterAccountTier,
+        extract_lighter_account_tier_from_payload, has_non_zero_lighter_integrator_fee,
         is_lighter_account_tier_eligible_for_partner_attribution,
     },
     builder_fee::resolve_lighter_builder_fee_config,
     deployment::{resolve_lighter_deployment_profile, resolve_lighter_interval},
-    types::{ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC},
+    types::{
+        ENDPOINTS, GRAFANA_ENDPOINTS_EVERY, GRAFANA_ENDPOINTS_PERIODIC, ORDER_SIDE, ORDER_STATUS,
+        ORDER_TIME_IN_FORCE, ORDER_TYPE,
+    },
     utils::{
         get_lighter_amount_decimals, get_lighter_order_minimums, get_lighter_price_decimals,
         parse_lighter_api_key_index, parse_lighter_positive_integer_string,
@@ -67,6 +71,54 @@ fn tier(value: &Js) -> Result<Option<LighterAccountTier>, Thrown> {
 
 fn helper(name: &str, f: impl Fn(Vec<Js>) -> Result<Js, Thrown> + 'static) -> (String, Js) {
     (name.to_owned(), Js::function(name, move |_, args| f(args)))
+}
+
+/// A `Record<string, Enum>` table, values in their serialized (TS enum) form.
+fn enum_table<T: serde::Serialize>(entries: &[(&str, T)]) -> Result<Js, Thrown> {
+    let table = Js::object(vec![]);
+    for (key, value) in entries {
+        table.define(key, from_typed(value)?)?;
+    }
+    Ok(table)
+}
+
+/// lighter.exchange.ts module constants the ported bodies resolve by name.
+fn exchange_module_constants(globals: &Js) -> Result<(), Thrown> {
+    for (name, value) in [
+        ("LIGHTER_OHLCV_POLL_INTERVAL_MS", 5_000.0),
+        ("LIGHTER_OHLCV_WS_STALE_MS", 120_000.0),
+        ("LIGHTER_OHLCV_FALLBACK_403_COOLDOWN_MS", 60_000.0),
+        ("LIGHTER_ACCOUNT_LIMITS_CACHE_MS", 5.0 * 60_000.0),
+        ("LIGHTER_ACCOUNT_LIMITS_RETRY_MS", 60_000.0),
+        ("LIGHTER_ACCOUNT_SNAPSHOT_REUSE_MS", 1_000.0),
+        ("LIGHTER_ORDER_RECONCILIATION_COOLDOWN_MS", 3_000.0),
+        ("LIGHTER_INITIAL_TICK_MAX_DELAY_MS", 2_000.0),
+        ("LIGHTER_TRANSIENT_SNAPSHOT_WARNING_COOLDOWN_MS", 60_000.0),
+        ("LIGHTER_MARGIN_FRACTION_TICK", 10_000.0),
+        ("LIGHTER_DEFAULT_STOP_SLIPPAGE_PCT", 1.0),
+        ("LIGHTER_MAX_STOP_SLIPPAGE_PCT", 50.0),
+        ("INVALIDATE_WEBSOCKET_POSITIONS_UPDATE_DELAY", 1_000.0),
+    ] {
+        globals.define(name, Js::Number(value))?;
+    }
+    globals.define("LIGHTER_DEFAULT_QUOTE", Js::str("USDC"))?;
+    globals.define(
+        "LIGHTER_KNOWN_QUOTES",
+        string_table(&["USDT", "USDC", "USDG"]),
+    )?;
+    globals.define(
+        "LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE",
+        Js::str(LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE),
+    )?;
+    globals.define(
+        "LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE",
+        Js::str(LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE),
+    )?;
+    globals.define("ORDER_SIDE", enum_table(&ORDER_SIDE)?)?;
+    globals.define("ORDER_STATUS", enum_table(&ORDER_STATUS)?)?;
+    globals.define("ORDER_TYPE", enum_table(&ORDER_TYPE)?)?;
+    globals.define("ORDER_TIME_IN_FORCE", enum_table(&ORDER_TIME_IN_FORCE)?)?;
+    Ok(())
 }
 
 fn string_table(entries: &[&str]) -> Js {
@@ -209,5 +261,6 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
         "GRAFANA_ENDPOINTS_PERIODIC",
         string_table(&GRAFANA_ENDPOINTS_PERIODIC),
     )?;
+    exchange_module_constants(globals)?;
     Ok(())
 }

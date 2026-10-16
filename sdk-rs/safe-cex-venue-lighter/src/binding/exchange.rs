@@ -85,6 +85,45 @@ fn base_exchange_class(weak: Weak<Shared>, name: ExchangeName, options: Exchange
     class
 }
 
+/// The realm the class runs in: scope, globals and every module binding the
+/// ported bodies resolve by name.
+pub(crate) fn build_realm(
+    name: &ExchangeName,
+    options: &ExchangeOptions,
+    store: &Rc<dyn Store>,
+    deps: &LighterDependencies,
+) -> Result<Realm, Thrown> {
+    let runtime: Rc<dyn ExchangeRuntime> = deps.runtime.clone();
+    let shared = Rc::new_cyclic(|weak: &Weak<Shared>| {
+        let globals = Js::object(vec![]);
+        install_builtins(&globals, weak.clone());
+        install_enums(&globals);
+        install_library(&globals, weak.clone());
+        let _ = globals.define(
+            "BaseExchange",
+            base_exchange_class(weak.clone(), name.clone(), options.clone()),
+        );
+        ScopeShared::new(
+            deps.runtime.clone(),
+            deps.http.clone(),
+            store.clone(),
+            globals,
+            LighterExtra {
+                microtasks: Microtasks::new(runtime),
+                supers: Default::default(),
+            },
+        )
+    });
+    super::globals::install(&shared.globals)?;
+    let realm = Realm(shared.clone());
+    install_sdk_client(&realm, deps.registry.clone())?;
+    super::sdk_client::install(&realm)?;
+    super::signer::install(&realm)?;
+    super::ws_public::install(&realm)?;
+    super::ws_private::install(&realm)?;
+    Ok(realm)
+}
+
 impl LighterNativeExchange {
     // ts: LighterExchange.constructor
     pub fn new(
@@ -98,33 +137,8 @@ impl LighterNativeExchange {
                 "LighterNativeExchange cannot construct this venue",
             ));
         }
-        let runtime: Rc<dyn ExchangeRuntime> = deps.runtime.clone();
-        let shared = Rc::new_cyclic(|weak: &Weak<Shared>| {
-            let globals = Js::object(vec![]);
-            install_builtins(&globals, weak.clone());
-            install_enums(&globals);
-            install_library(&globals, weak.clone());
-            let _ = globals.define(
-                "BaseExchange",
-                base_exchange_class(weak.clone(), name.clone(), options.clone()),
-            );
-            ScopeShared::new(
-                deps.runtime.clone(),
-                deps.http.clone(),
-                store.clone(),
-                globals,
-                LighterExtra {
-                    microtasks: Microtasks::new(runtime),
-                },
-            )
-        });
-        super::globals::install(&shared.globals).map_err(err)?;
-        let realm = Realm(shared.clone());
-        install_sdk_client(&realm, deps.registry.clone()).map_err(err)?;
-        super::sdk_client::install(&realm).map_err(err)?;
-        super::signer::install(&realm).map_err(err)?;
-        super::ws_public::install(&realm).map_err(err)?;
-        super::ws_private::install(&realm).map_err(err)?;
+        let realm = build_realm(&name, &options, &store, &deps).map_err(err)?;
+        let shared = realm.0.clone();
         let class = LighterExchange::define(&realm).map_err(|e| err(to_thrown(e)))?;
         let this = to_js(&class)
             .call(
@@ -345,5 +359,160 @@ impl Exchange for LighterNativeExchange {
         _limit: Option<f64>,
     ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
         inherited_rejection()
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use safe_cex_exchange::{
+        js_runtime::promise::JsFuture,
+        runtime::ExchangeTask,
+        websocket::{WebSocketConnectionOptions, WsSocket},
+    };
+    use safe_cex_transport::{TransportProvider, socket::TunnelHost};
+    use std::{future::Future, pin::Pin, sync::Arc};
+
+    /// Installing globals touches no host service; any call is a test failure.
+    struct Untouched;
+    impl ExchangeRuntime for Untouched {
+        fn monotonic_now_ms(&self) -> f64 {
+            panic!("runtime used while installing globals")
+        }
+        fn now_ms(&self) -> f64 {
+            panic!("runtime used while installing globals")
+        }
+        fn sleep(&self, _: u64) -> ExchangeFuture<'static, ()> {
+            panic!("runtime used while installing globals")
+        }
+        fn spawn_local(&self, _: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
+            panic!("runtime used while installing globals")
+        }
+        fn console(&self, _: &str, _: &str) {}
+        fn unique_id(&self) -> String {
+            panic!("runtime used while installing globals")
+        }
+        fn is_worker(&self) -> bool {
+            false
+        }
+        fn random(&self) -> f64 {
+            panic!("runtime used while installing globals")
+        }
+        fn report_exception(&self, _: &ExchangeError, _: &serde_json::Value) {}
+        fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {}
+        fn execute_worker_request(
+            &self,
+            _: serde_json::Value,
+        ) -> ExchangeFuture<'static, serde_json::Value> {
+            panic!("runtime used while installing globals")
+        }
+    }
+    impl WsRuntime for Untouched {
+        fn transport(&self) -> Arc<dyn TransportProvider> {
+            panic!("runtime used while installing globals")
+        }
+        fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
+            panic!("runtime used while installing globals")
+        }
+        fn dial(
+            &self,
+            _: String,
+            _: Vec<String>,
+            _: WebSocketConnectionOptions,
+            _: bool,
+        ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
+            panic!("runtime used while installing globals")
+        }
+        fn headers_capable(&self) -> bool {
+            false
+        }
+        fn enable_reconnecting(&self) -> bool {
+            false
+        }
+        fn min_reconnection_delay_ms(&self) -> f64 {
+            1000.0
+        }
+        fn library_min_reconnection_delay_ms(&self) -> f64 {
+            1000.0
+        }
+        fn diagnostics_enabled(&self) -> bool {
+            false
+        }
+        fn lifecycle_logs_enabled(&self) -> bool {
+            false
+        }
+    }
+    impl JsHttpHost for Untouched {
+        fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+            Rc::new(Untouched)
+        }
+        fn send(&self, _: Js) -> JsFuture<'static> {
+            panic!("http used while installing globals")
+        }
+    }
+
+    /// Every name a ported LighterExchange body resolves through `global`,
+    /// `constant` or `binding_value` (exchange_*.rs), other than `super.*`
+    /// (per-instance) and class statics (bound by `finish_class_binding`).
+    const RESOLVED_NAMES: &[&str] = &[
+        "adjust", "Array.from", "Array.isArray", "BaseExchange", "BigInt", "Boolean",
+        "CandlestickApi", "chunk", "clearTimeout", "console.error", "console.warn",
+        "createLighterSDKClient", "createLighterSignerAdapter", "createPositionId", "Date.now",
+        "Date.parse", "dayjs", "ENDPOINTS.ACCOUNT", "ENDPOINTS.ACCOUNT_LIMITS", "ENDPOINTS.CANDLES",
+        "ENDPOINTS.CHANGE_ACCOUNT_TIER", "ENDPOINTS.INACTIVE_ORDERS", "ENDPOINTS.OPEN_ORDERS",
+        "ENDPOINTS.TRADES", "Error", "extractLighterAccountTierFromPayload", "forEachSeries",
+        "getCryptoApi", "getLighterAmountDecimals", "getLighterMarketLeverageMax",
+        "getLighterOrderMinimums", "getLighterPriceDecimals", "GRAFANA_ENDPOINTS_EVERY",
+        "GRAFANA_ENDPOINTS_PERIODIC", "hasNonZeroLighterIntegratorFee", "initWasm",
+        "isLighterAccountTierEligibleForPartnerAttribution", "isWasmReady", "JSON.stringify",
+        "LIGHTER_ACCOUNT_LIMITS_CACHE_MS", "LIGHTER_ACCOUNT_LIMITS_RETRY_MS",
+        "LIGHTER_ACCOUNT_SNAPSHOT_REUSE_MS", "LIGHTER_DEFAULT_QUOTE",
+        "LIGHTER_DEFAULT_STOP_SLIPPAGE_PCT", "LIGHTER_INITIAL_TICK_MAX_DELAY_MS",
+        "LIGHTER_KNOWN_QUOTES", "LIGHTER_MARGIN_FRACTION_TICK", "LIGHTER_MAX_STOP_SLIPPAGE_PCT",
+        "LIGHTER_OHLCV_POLL_INTERVAL_MS", "LIGHTER_OHLCV_WS_STALE_MS",
+        "LIGHTER_ORDER_RECONCILIATION_COOLDOWN_MS",
+        "LIGHTER_PARTNER_ATTRIBUTION_APPROVAL_MISSING_MESSAGE",
+        "LIGHTER_PARTNER_ATTRIBUTION_TIER_REQUIREMENT_MESSAGE", "LighterPrivateWebsocket",
+        "LighterPublicWebsocket", "LogSeverity.Debug", "LogSeverity.Info", "LogSeverity.Warning",
+        "loop", "Map", "MarginType.Isolated", "Math.abs", "Math.ceil", "Math.floor", "Math.max",
+        "Math.min", "Math.random", "mergeUpdatesUsingLastUpdate", "normalizeLighterStopSlippagePct",
+        "Number", "Number.isFinite", "Number.NaN", "Number.parseFloat", "Number.parseInt",
+        "Object.entries", "Object.values", "ORDER_SIDE", "ORDER_STATUS", "ORDER_TIME_IN_FORCE",
+        "ORDER_TYPE", "OrderApi", "orderBy", "OrderSide.Buy", "OrderSide.Sell", "OrderStatus.Open",
+        "OrderTimeInForce.GoodTillCancel", "OrderTimeInForce.ImmediateOrCancel",
+        "OrderTimeInForce.PostOnly", "OrderType.Limit", "OrderType.Market", "OrderType.StopLoss",
+        "OrderType.TakeProfit", "OrderType.TrailingStopLoss", "parseFloat", "parseInt",
+        "parseLighterApiKeyIndex", "parseLighterMarginFractionRatio", "parseLighterMarketSymbol",
+        "parseLighterPositiveIntegerString", "PositionMode.OneWay", "PositionSide.Long",
+        "PositionSide.Short", "Promise.all", "Promise.allSettled", "Promise.resolve",
+        "resolveLighterBuilderFeeConfig", "resolveLighterCancelTargets",
+        "resolveLighterDeploymentProfile", "resolveLighterInterval", "setTimeout", "sleep",
+        "String", "subtract", "toLighterApiKeyIndexString", "toLighterScaledInt", "uniq", "uniqBy",
+        "URLSearchParams", "v", "virtualClock.getCurrentTimeMs",
+    ];
+
+    #[test]
+    fn every_name_the_exchange_bodies_resolve_is_bound() {
+        let deps = LighterDependencies {
+            runtime: Rc::new(Untouched),
+            http: Rc::new(Untouched),
+            registry: Rc::new(TransportRegistry::default()),
+        };
+        let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
+        let realm = build_realm(
+            &ExchangeName::Lighter,
+            &serde_json::from_value(serde_json::json!({ "key": "", "secret": "" })).unwrap(),
+            &store,
+            &deps,
+        )
+        .unwrap_or_else(|e| panic!("realm: {}", e.message()));
+        let class = LighterExchange::define(&realm).map_err(to_thrown).map(|c| to_js(&c));
+        assert!(class.is_ok(), "the class defines over the realm");
+        let missing: Vec<&str> = RESOLVED_NAMES
+            .iter()
+            .copied()
+            .filter(|name| realm.global(name).map_or(true, |v| v.is_undefined()))
+            .collect();
+        assert!(missing.is_empty(), "unbound globals: {missing:?}");
     }
 }

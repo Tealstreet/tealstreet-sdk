@@ -38,6 +38,9 @@ use std::rc::Rc;
 
 pub(crate) struct LighterExtra {
     pub(crate) microtasks: Rc<Microtasks>,
+    /// Per instance, the BaseExchange members captured before derived fields
+    /// run, so `super.member` survives a derived arrow field of the same name.
+    pub(crate) supers: std::cell::RefCell<Vec<(Js, Js)>>,
 }
 
 pub(crate) type Shared = ScopeShared<LighterExtra>;
@@ -144,6 +147,18 @@ impl ExchangeAccountAccessHost for Bound {
         Ok(Rc::new(JsCall { callee, this }))
     }
     fn global(&self, name: &str) -> SigningResult<Rc<dyn AccountAccessCall>> {
+        if let Some(member) = name.strip_prefix("super.") {
+            let supers = self.realm.0.extra.supers.borrow();
+            let found = supers.iter().find(|(o, _)| o.same_reference(&self.owner));
+            let callee = match found {
+                Some((_, members)) => members.get(member).map_err(to_signing)?,
+                None => Js::Undefined,
+            };
+            return Ok(Rc::new(JsCall {
+                callee,
+                this: self.owner.clone(),
+            }));
+        }
         let callee = self.realm.global(name).map_err(to_signing)?;
         Ok(Rc::new(JsCall {
             callee,
@@ -361,6 +376,17 @@ impl ExchangeClassRealm for Realm {
         if let Js::Object(o) = &instance {
             *o.proto.borrow_mut() = Some(prototype);
         }
+        let members = Js::object(vec![]);
+        for (key, value) in instance.own_entries().map_err(to_signing)? {
+            if value.is_callable() {
+                members.define_key(&key, value).map_err(to_signing)?;
+            }
+        }
+        self.0
+            .extra
+            .supers
+            .borrow_mut()
+            .push((instance.clone(), members));
         Ok(to_account(&instance))
     }
 }
