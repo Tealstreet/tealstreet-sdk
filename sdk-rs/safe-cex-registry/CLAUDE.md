@@ -115,6 +115,11 @@ signer hosts fail visibly until BingX signing is connected.
 `tests/native_host_bingx.rs` starts it on loopback HTTP/WS, verifies a signed order
 payload and caller client ID, and cancels the resulting order.
 
+Lighter and Lighter Robinhood construct `LighterNativeExchange` through the Rust
+table. The native host gives each instance a transport registry seeded from its
+runtime, fresh terminal HTTP and OS signing entropy. Hosted remote signing is
+refused because this binding uses the local SDK signer. Construction tests cover
+both names and their deployment-specific REST origins and quote currencies.
 
 Hyperliquid is constructed through the native Rust table with options-aware
 transport composition. All native host constructors require the same caller-owned
@@ -163,3 +168,9 @@ ApexOmni's signed native host shares the account capability with HTTP and privat
 WS auth, retaining remote accountName while keeping the API secret in the browser.
 `native_host_apexomni` verifies both signed wire paths and pending-signature
 cancellation; the Omni seed remains necessary for source L2 contract signing.
+
+Bitget, Bitget USDC and Bitget Inverse native constructors supply the common
+gateway factory through their existing `external_public_data` dependency. The
+loopback `native_host_bitget_external_data` test covers all three names: gateway
+market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
+with no venue REST or private/public venue sockets in public-only mode.

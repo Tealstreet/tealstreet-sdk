@@ -38,8 +38,8 @@
   "safe_cex_venue_binance::private_classes::PrivateBase::send_with_log": {
     "category": "non-decoder",
     "file": "safe-cex-venue-binance/src/private_classes.rs",
-    "reason": "Reviewed private_classes.rs: the default sends the outgoing payload string through send, then passes the same text to diagnostic_send. It serializes nothing and decodes nothing; the String is outbound wire text, not raw input to a decoder.",
-    "sourceSha256": "61104717bf10bed636386434cd3c953d91bc5932d914410caf6b4ad7a4c6ff08"
+    "reason": "Reviewed private_classes.rs against seed 91a50c7a2c: the complete file delta adds weak socket hooks/core access and migrates EventValue reads/construction to the shared value graph; this default body is unchanged. It sends the outgoing payload string through send, then passes the same text to diagnostic_send, with no parsing, serialization or decoded output. Native evidence: tests/private_classes.rs::private_base_send_with_log_forwards_outbound_text_and_failures invokes the actual default through &dyn PrivateBase, observes verbatim malformed/JSON-looking/empty/NUL-plus-astral text, send-before-diagnostic failure ordering and Rc error identity. Concrete overrides retain independent inventory obligations.",
+    "sourceSha256": "da6540bdbaa83e1dcf1d307d3c8aa27d348162a98ea8090e9d2268c01013b6c5"
   },
   "safe_cex_venue_blofin::exchange::BlofinPublicListeners::listen_book for alloc::rc::Rc<safe_cex_venue_blofin::public_stream_data::BlofinPublicWebsocket<H>>": {
     "category": "delegated",
