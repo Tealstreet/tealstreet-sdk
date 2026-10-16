@@ -1482,3 +1482,23 @@ cannot count as control success. No production code or protocol boundary changed
 
 These four contracts leave other Kraken owners, aliases, local functions,
 construction, the 25 receiver refusals and feature/wasm accepted coverage open.
+
+
+Helper readiness at integration `44c962414960992337f5c745f762edf35281686a`:
+full scoped Kraken tests passed **143**, with zero failures or ignored tests;
+separate native and wasm32 all-targets Clippy passed with warnings denied.
+Fresh production helper verification passed **one runtime result, three explicit
+classifications, zero failed owners**. Global structural verification passed
+**7459 rows / 17206 public Rust items**; the maintained TS extractor checked
+**83 symbols across seven slice files**. Workspace format and frozen install
+passed. Independent read-only review found no actionable issues; CodeRabbit's
+manual review was rate-limited. No unresolved review conversations were present
+at this checkpoint.
+
+The final master integration changed only other packages' accepted contracts and
+their review docs. Kraken source/tests/controls/contracts, all Cargo inputs and
+the maintained probe/indexer sources are byte-identical to the tested checkpoint.
+The separate base-URL/scoped-wrapper repair remains in PR #327; this helper PR
+does not duplicate it. These are selected native/default accepted-contract
+receipts; the successful wasm Clippy check does not establish wasm behavioral
+coverage or clear any remaining accepted-set obligation.
