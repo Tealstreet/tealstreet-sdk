@@ -331,6 +331,54 @@ status = "ported"
 note = "Concrete linear method always returns linear and does not inspect its symbol argument. Eight actual-source inputs include empty, unknown, inherited-name, whitespace and scalar/astral Unicode strings. Native method output is checked directly; derived venue policies and request composition remain separate."
 
 [[symbol]]
+ts = "BybitExchange.tradesCategoryOf"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.optionsEnabled"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.inverseEnabled"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#remainingInStoreUnits"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#publicSocketFor"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.get inversePublicWebsocket"
+kind = "accessor"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "BybitExchange.getTickerSymbolsForCategory"
 kind = "method"
 layer = "adapted"
@@ -595,6 +643,14 @@ status = "ported"
 note = "Body port: read linear settle coins, maintained mapSeries invokes current helper sequentially, then resolve preserve method before one-level flatten and return its native result. Deferred host awaits/method bindings preserve eager versus continued effects and original flattened row identities. Market/settle selection and preserve implementation remain their own rows. Renamed Rust target: safe-cex-venue-bybit/src/core_snapshot_readers.rs::fetch_orders."
 
 [[symbol]]
+ts = "BybitExchange#fetchCategoryRowsOrKeep"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "BybitExchange.fetchOrdersHelper"
 kind = "field-fn"
 layer = "adapted"
@@ -689,6 +745,54 @@ layer = "mirror"
 rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::fetch_markets"
 status = "ported"
 note = "Body port: eagerly starts linear market helper; only typed trading-markets failures may use a nonempty current cache, warning precedes a second store read, and original success/cache/error identity is retained. Live maintained-source oracle covers successful replies, empty cache, unbranded errors and log replacing the cached allocation. Helper/parser and store integration remain separate rows. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::fetch_markets."
+
+[[symbol]]
+ts = "BybitExchange.fetchOptionMarkets"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.fetchOptionChain"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.fetchOptionExpiries"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.fetchAccountGreeks"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#assertOptionsEnabled"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#refuseOptionSymbol"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "BybitExchange.fetchFees"
@@ -803,12 +907,12 @@ status = "ported"
 note = "Retains context/start/end/type forwarding and returned-Promise adoption; tested with the owned income range/body composition. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range."
 
 [[symbol]]
-ts = "BybitExchange.get incomeContext"
+ts = "BybitExchange.get incomeContexts"
 kind = "accessor"
-layer = "mirror"
-rs = "safe-cex-venue-bybit/src/ledger_history.rs::income_context"
-status = "ported"
-note = "Fresh four-field context keeps original XHR and bound logger before linear/UNIFIED literals; reentrant logger getter retains the previously captured XHR. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::income_context."
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "BybitExchange.listenOHLCV"
@@ -852,6 +956,22 @@ note = "CHOSEN: already-decoded immutable BybitPlaceOrderOpts reuse the maintain
 
 [[symbol]]
 ts = "BybitExchange.placeOrder"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#assertOptionOrderPlaceable"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#placeOptionOrder"
 kind = "field-fn"
 layer = ""
 rs = ""
@@ -1033,3 +1153,11 @@ layer = "adapted"
 rs = "safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx"
 status = "divergent"
 note = "CHOSEN: Rust Future/host polling replaces JS Promise identity and microtask scheduling. Owned inert UTF-8 JSON map copies preserve own fields and remove reduceOnly before calling the explicit index host. Nested JS object aliases, inherited/getter fields and lone UTF-16 surrogates are outside this clone ABI. Awaited numeric indexes map 0->0, 1->2, 2->1, with other numbers represented as undefined; native host errors retain identity. Constructor/order consumer wiring remains pending. Renamed Rust target: safe-cex-venue-bybit/src/execution_guards.rs::get_stop_order_position_idx."
+
+[[symbol]]
+ts = "BybitExchange.get incomeContext"
+kind = "accessor"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/ledger_history.rs::income_context"
+status = "ported"
+note = "Fresh four-field context keeps original XHR and bound logger before linear/UNIFIED literals; reentrant logger getter retains the previously captured XHR. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::income_context."

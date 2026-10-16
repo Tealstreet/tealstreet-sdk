@@ -11,6 +11,22 @@ status = "ported"
 note = "Preserves substring matching and absent URL; this is the remote-signing public/market predicate, not the broader local HMAC public bypass. Maintained TS oracle pins the distinction. Adapted targets: safe-cex-venue-okx/src/api.rs::is_public_endpoint."
 
 [[symbol]]
+ts = "isOkxSignatureRejection"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "formatOkxApiErrorMessage"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "createAPI"
 kind = "const-fn"
 layer = "adapted"

@@ -603,6 +603,30 @@ status = "ported"
 note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; default returns an empty vector without becoming an override. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_historical_orders safe-cex-exchange/src/exchange.rs::Exchange::fetch_historical_orders"
 
 [[symbol]]
+ts = "BaseExchange.fetchOptionChain"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.fetchOptionExpiries"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.fetchAccountGreeks"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "BaseExchange.fetchPublicTrades"
 kind = "field-fn"
 layer = "adapted"

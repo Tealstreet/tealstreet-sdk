@@ -59,6 +59,14 @@ status = "ported"
 note = "Extracted protocol operation to safe-cex-venue-bybit/src/ws_private.rs::ping; uses the core BaseWebSocket entrypoints with socket state explicit. Live-source oracle covers emitted frames, subscription delays and dispatch outcomes. Constructor, dialing and reconnect/auth sequencing remain pending."
 
 [[symbol]]
+ts = "BybitPrivateWebsocket#rowsThisConnectionTrades"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "BybitPrivateWebsocket.handleOrderTopic"
 kind = "field-fn"
 layer = ""
