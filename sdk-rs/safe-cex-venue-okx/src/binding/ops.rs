@@ -14,7 +14,7 @@ use crate::{
 };
 use safe_cex_exchange::js_runtime::{
     promise::await_js,
-    scope::{Scope, bound_member},
+    scope::{Scope, ScopeShared, bound_member},
     value::{Js, Thrown, arg},
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions};
@@ -27,6 +27,7 @@ pub struct OkxExtra {
 }
 
 pub(crate) type OkxScope = Scope<OkxExtra>;
+pub(crate) type OkxShared = ScopeShared<OkxExtra>;
 
 impl IntrinsicHost for OkxScope {
     fn this(&self) -> Js {
