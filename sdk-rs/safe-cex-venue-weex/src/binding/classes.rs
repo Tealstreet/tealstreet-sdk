@@ -96,6 +96,7 @@ impl ClassHost for Factory {
                     name,
                     options,
                     store,
+                    |_| Ok(()),
                 )?;
                 h.0.shared
                     .base
