@@ -9,8 +9,8 @@ import test from 'node:test';
 import { inventory } from './accepted-inventory.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
-const specs = Object.values(loadPolicy('constant-outputs'));
 const ownerName = 'safe_cex_num::numeric_ingress::output::Capture';
+const specs = Object.values(loadPolicy('constant-outputs')).filter(spec => spec.owner === ownerName);
 // This is a focused control contract, never a production classification. Every
 // compiler entry remains present. Ordinary typed arguments keep their normal
 // compiler guards; raw serializer entries execute independently authored values.
@@ -245,8 +245,64 @@ function child(mode) {
   assert.deepEqual(native[0].map(row => row.name), [ownerName]);
   return { ...result, output, rows: native[0] };
 }
+async function directProbe(mode, selected) {
+  const ownerName = 'safe_cex_transport::direct::DirectTransport';
+  const spec = Object.values(loadPolicy('constant-outputs')).find(spec => spec.owner === ownerName);
+  assert.ok(spec);
+  const env = { RUSTC_BOOTSTRAP: '1', CARGO_BUILD_JOBS: '1' };
+  const metadata = JSON.parse(cargo(['metadata', '--no-deps', '--locked', '--format-version=1'], env));
+  const pkg = metadata.packages.find(pkg => pkg.name === 'safe-cex-transport');
+  const target = pkg.targets.find(target => target.kind.includes('lib'));
+  const targetArgs = selected === 'native' ? [] : ['--target', selected];
+  cargo(['rustdoc', '--locked', '-p', pkg.name, '--lib', '--jobs=1', ...targetArgs, '--', '-Z', 'unstable-options', '--output-format=json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all'], env);
+  const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, ...targetArgs.length ? [selected] : [], 'doc/safe_cex_transport.json')));
+  const found = inventory(doc, { onlyOwners: [ownerName] });
+  assert.deepEqual(found.types.map(type => type.name), [ownerName]);
+  const owner = found.types[0];
+  assert.deepEqual(owner.traitMethods.map(method => method.name), ['ws_connection', 'ws_routing'], 'complete actual direct provider compiler owner');
+  const entrypoints = owner.traitMethods.map(method => ({ api: { kind: 'trait', ...method }, ...(method.name === 'ws_connection'
+    ? { input: 'observed', reason: 'Actual native no-connection capability on distinct URLs.', constantOutput: true, call: spec.call, cases: spec.cases }
+    : { input: 'typed', reason: 'Typed native routing operation on declared ExchangeName and RoutingOptions; no serialized provider admission.' }) }));
+  const contract = { shape: 'observed', evidence: 'Exact maintained direct provider no-connection callback.', entrypoints };
+  let injected = 0;
+  const append = fs.appendFileSync;
+  if (mode === 'drift') fs.appendFileSync = function(file, bytes, ...args) {
+    const result = append.call(this, file, bytes, ...args);
+    if (String(file).endsWith('/safe-cex-transport/src/lib.rs') && String(file).includes('/accepted-set-workspace/') && String(bytes).includes('mod __accepted_set_runtime;')) {
+      const production = path.join(path.dirname(file), 'direct.rs');
+      const source = fs.readFileSync(production, 'utf8');
+      const needle = '    fn ws_connection(&self, _: &str) -> Option<WsConnection> {\n        None\n    }';
+      assert.equal(source.split(needle).length, 2, 'one copied actual provider method');
+      fs.writeFileSync(production, source.replace(needle, needle.replace('        None', '        Some(WsConnection::Headers { headers: Default::default() })')));
+      injected++;
+    }
+    return result;
+  };
+  const { runProbes } = await import(pathToFileURL(path.join(root, 'safe-cex-parity/scripts/accepted-probes.mjs')));
+  let rows;
+  try {
+    rows = runProbes(root, metadata, [{ package: pkg.name, target, types: found.types, locals: [] }], { [ownerName]: contract }, { target: selected, features: [], jobs: 1 });
+  } finally { fs.appendFileSync = append; }
+  console.log('DIRECT_CONSTANT_NATIVE ' + JSON.stringify({ mode, selected, injected, rows }));
+  assert.equal(injected, mode === 'drift' ? 1 : 0);
+  assert.equal(rows.length, 1);
+  assert.equal(rows[0].name, ownerName);
+  assert.deepEqual(rows[0].failures, [], 'reviewed direct constant native capability witness');
+}
+function directChild(mode, selected = 'native') {
+  const result = spawnSync(process.execPath, [fileURLToPath(import.meta.url), '--direct-native', mode, selected], { encoding: 'utf8', maxBuffer: 64 * 1024 * 1024, env: { ...process.env, RUSTC_BOOTSTRAP: '1' } });
+  const output = `${result.stdout}\n${result.stderr}`;
+  assert.ok(!result.error, String(result.error));
+  assert.doesNotMatch(output, /compiler failures are not controls|compile failure is not a control|error\[E\d+\]|could not compile/);
+  const receipts = output.split('\n').filter(line => line.startsWith('DIRECT_CONSTANT_NATIVE ')).map(line => JSON.parse(line.slice('DIRECT_CONSTANT_NATIVE '.length)));
+  assert.equal(receipts.length, 1, output);
+  assert.equal(receipts[0].injected, mode === 'drift' ? 1 : 0);
+  return { ...result, output, rows: receipts[0].rows };
+}
 if (process.argv[2] === '--constant-native') await probe(process.argv[3]);
-else test('reviewed serializer constants execute actual production values and reject native drift', { timeout: 1200000 }, () => {
+else if (process.argv[2] === '--direct-native') await directProbe(process.argv[3], process.argv[4]);
+else {
+test('reviewed serializer constants execute actual production values and reject native drift', { timeout: 1200000 }, () => {
   let result = child('restored'); assert.equal(result.status, 0, result.output);
   for (const [method, label] of [['serialize_unit_struct','constant serializer unit native value'], ['serialize_tuple_struct','constant serializer tuple native state']]) {
     result = child(method);
@@ -257,3 +313,14 @@ else test('reviewed serializer constants execute actual production values and re
   }
   result = child('restored'); assert.equal(result.status, 0, result.output);
 });
+test('reviewed direct transport constant executes the complete native and wasm compiler owner', { timeout: 1200000 }, () => {
+  let result = directChild('restored'); assert.equal(result.status, 0, result.output);
+  result = directChild('drift'); assert.equal(result.status, 1, result.output);
+  assert.match(result.output, /reviewed direct constant native capability witness/);
+  assert.equal(result.rows[0].failures.length, 2);
+  assert.ok(result.rows[0].failures.every(failure => failure.startsWith('function output mismatch') && failure.includes('some')), result.output);
+  console.log('direct constant native returned capability: named assertion; process exit 1');
+  result = directChild('restored'); assert.equal(result.status, 0, result.output);
+  result = directChild('restored', 'wasm32-unknown-unknown'); assert.equal(result.status, 0, result.output);
+});
+}

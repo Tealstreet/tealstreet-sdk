@@ -23,7 +23,8 @@
       "hosted signer tuple retains its exact native type and compiler roles"
     ],
     "accepted-constant-output-native.test.mjs": [
-      "reviewed serializer constants execute actual production values and reject native drift"
+      "reviewed serializer constants execute actual production values and reject native drift",
+      "reviewed direct transport constant executes the complete native and wasm compiler owner"
     ],
     "accepted-construction-chain-native.test.mjs": [
       "selected candle-cache inventory closes every construction owner and rejects both error policy mutations"
@@ -46,7 +47,8 @@
       "open JSON and supplemental methods require native witnesses without replacing shape checks",
       "self-only Visitor unit witnesses cannot invent varying input or exempt data methods",
       "reviewed host operations bind exact compiler bodies and cannot exempt cache decoders",
-      "reviewed serializer constants pin compiler source adapters and witnesses"
+      "reviewed serializer constants pin compiler source adapters and witnesses",
+      "reviewed direct transport constant pins raw compiler source and native capability observations"
     ],
     "accepted-controls.test.mjs": [
       "private Cargo targets cannot execute a stale default scanner in production or history",
@@ -357,6 +359,9 @@
     "inherited refusal native zero HTTP",
     "Fields identity",
     "Fields members",
-    "Fields route"
+    "Fields route",
+    "direct constant maintained source pin",
+    "direct constant indexed raw method pin",
+    "direct constant native returned capability"
   ]
 }

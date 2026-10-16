@@ -100,20 +100,34 @@ impl Serialize for RemoteSignerRequest {
         map.end()
     }
 }
+struct SigningHeader {
+    kind: String,
+    exchange_name: ExchangeName,
+    account_name: Option<String>,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "SigningHeader", rename_all = "camelCase")]
+struct SigningHeaderWire {
+    #[serde(rename = "type")]
+    kind: String,
+    exchange_name: ExchangeName,
+    account_name: Option<String>,
+}
+
+impl<'de> Deserialize<'de> for SigningHeader {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        SigningHeaderWire::deserialize(safe_cex_types::strict_decode::object(d))
+    }
+}
+
 impl<'de> Deserialize<'de> for RemoteSignerRequest {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
         // Do not buffer through Value: canonical WS extraData retains deep/overflow
         // metadata as RawValue. This header decode skips the untouched payload.
         let raw = Box::<serde_json::value::RawValue>::deserialize(deserializer)?;
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Header {
-            #[serde(rename = "type")]
-            kind: String,
-            exchange_name: ExchangeName,
-            account_name: Option<String>,
-        }
-        let header: Header = serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
+        let header: SigningHeader =
+            serde_json::from_str(raw.get()).map_err(serde::de::Error::custom)?;
         match header.kind.as_str() {
             "http" => serde_json::from_str(raw.get())
                 .map(Self::Http)
@@ -600,4 +614,23 @@ fn present_json<'de, D: serde::Deserializer<'de>>(
     deserializer: D,
 ) -> Result<Option<Value>, D::Error> {
     Value::deserialize(deserializer).map(Some)
+}
+
+#[cfg(test)]
+mod header_shape_tests {
+    use super::{ExchangeName, SigningHeader};
+    use serde_json::json;
+
+    #[test]
+    fn header_requires_object_and_preserves_native_fields() {
+        crate::accepted_frame_shapes::record::<SigningHeader>(
+            json!({"type":"http","exchangeName":"binance","accountName":"native-header-account"}),
+            json!(["http", "binance", "native-header-account"]),
+            |row| {
+                assert_eq!(row.kind, "http");
+                assert_eq!(row.exchange_name, ExchangeName::Binance);
+                assert_eq!(row.account_name.as_deref(), Some("native-header-account"));
+            },
+        );
+    }
 }
