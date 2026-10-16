@@ -4,6 +4,8 @@ pub(crate) mod amend;
 pub(crate) mod cancel;
 pub(crate) mod controls;
 pub(crate) mod fills;
+pub(crate) mod inverse;
+mod inverse_mapping;
 pub(crate) mod lifecycle;
 pub(crate) mod mapping;
 pub(crate) mod markets;

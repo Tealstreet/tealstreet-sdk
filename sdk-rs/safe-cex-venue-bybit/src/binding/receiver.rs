@@ -517,5 +517,8 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitspot {
         members::spot::install(rt)?;
     }
+    if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitinverse {
+        members::inverse::install(rt)?;
+    }
     Ok(())
 }
