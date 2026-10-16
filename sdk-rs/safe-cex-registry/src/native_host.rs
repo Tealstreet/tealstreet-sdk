@@ -326,16 +326,12 @@ impl RustVenueHost for NativeVenueHost {
         self.remote.clone()
     }
     fn apexomni(&self) -> Result<safe_cex_venue_apexomni::ApexDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for apexomni on the native host",
-            ));
-        }
         Ok(safe_cex_venue_apexomni::ApexDependencies {
             runtime: self.runtime.clone(),
-            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                 self.runtime.clone(),
                 (self.adapter)()?,
+                self.remote.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
@@ -413,6 +409,20 @@ impl RustVenueHost for NativeVenueHost {
         )
     }
 
+    fn weex(&self) -> Result<safe_cex_venue_weex::WeexDependencies, ExchangeError> {
+        Ok(safe_cex_venue_weex::WeexDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            // Native SDK date helpers use a UTC host profile.
+            local_wall_time_to_utc: Rc::new(|millis| millis),
+        })
+    }
+
     fn woo(&self) -> Result<safe_cex_venue_woo::WooDependencies, ExchangeError> {
         Ok(safe_cex_venue_woo::WooDependencies {
             runtime: self.runtime.clone(),
@@ -440,6 +450,28 @@ impl RustVenueHost for NativeVenueHost {
         })
     }
 
+    fn lighter(
+        &self,
+    ) -> Result<safe_cex_venue_lighter::binding::exchange::LighterDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for lighter on the native host",
+            ));
+        }
+        let registry = Rc::new(safe_cex_transport::TransportRegistry::default());
+        registry.set_default_transport(self.runtime.transport());
+        Ok(
+            safe_cex_venue_lighter::binding::exchange::LighterDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                ),
+                registry,
+                signing_entropy: None,
+            },
+        )
+    }
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
         Ok(safe_cex_venue_kraken::KrakenDependencies {
             runtime: self.runtime.clone(),
@@ -488,7 +520,7 @@ impl RustVenueHost for NativeVenueHost {
                 (self.adapter)()?,
                 self.remote.clone(),
             ),
-            external_public_data: None,
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError> {

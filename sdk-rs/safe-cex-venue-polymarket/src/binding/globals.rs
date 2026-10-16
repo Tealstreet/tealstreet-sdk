@@ -36,6 +36,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                 arg(&a, 0),
                 arg(&a, 1),
                 arg(&a, 2),
+                |_| Ok(()),
             )?;
             rt.shared
                 .base

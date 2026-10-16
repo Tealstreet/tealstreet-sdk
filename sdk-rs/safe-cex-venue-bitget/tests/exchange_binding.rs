@@ -394,3 +394,138 @@ fn start_loads_public_data_and_logs_in_before_subscribing() {
         private.sent.borrow()
     );
 }
+
+fn signature_refusal() -> Value {
+    json!({"code":"40009", "msg":"sign signature error", "data":null})
+}
+
+#[test]
+fn signature_retry_non_2xx_replays_each_family_read_once() {
+    for name in [
+        ExchangeName::Bitget,
+        ExchangeName::Bitgetusdc,
+        ExchangeName::Bitgetinverse,
+    ] {
+        let path = "/api/v2/spot/account/info";
+        let h = harness(name.clone(), options(), |http| {
+            http.route("GET", path, 401.0, signature_refusal());
+            http.ok(
+                "GET",
+                path,
+                json!({"userId":"retried-account", "parentId":null}),
+            );
+        });
+        let account = h
+            .drive(h.venue().get_account())
+            .expect("signature refusal must retry");
+        assert_eq!(account.user_id, "retried-account", "{name:?}");
+        let calls = h.http.calls(path);
+        assert_eq!(calls.len(), 2, "signature_retry::non_2xx {name:?}");
+        assert!(calls.iter().all(|r| r.headers["ACCESS-SIGN"].is_string()));
+    }
+}
+
+#[test]
+fn signature_retry_resolved_envelope_replays_each_family_read_once() {
+    for name in [
+        ExchangeName::Bitget,
+        ExchangeName::Bitgetusdc,
+        ExchangeName::Bitgetinverse,
+    ] {
+        let path = "/api/v2/spot/account/info";
+        let h = harness(name.clone(), options(), |http| {
+            http.route("GET", path, 200.0, signature_refusal());
+            http.ok(
+                "GET",
+                path,
+                json!({"userId":"resolved-retry", "parentId":null}),
+            );
+        });
+        let account = h
+            .drive(h.venue().get_account())
+            .expect("resolved signature refusal must resend");
+        assert_eq!(account.user_id, "resolved-retry", "{name:?}");
+        assert_eq!(
+            h.http.calls(path).len(),
+            2,
+            "signature_retry::resolved {name:?}"
+        );
+    }
+}
+
+#[test]
+fn signature_retry_posts_run_signing_again_and_stop_after_second_refusal() {
+    for status in [200.0, 401.0] {
+        let path = "/api/v2/mix/account/set-position-mode";
+        let h = harness(ExchangeName::Bitget, options(), |http| {
+            http.route("POST", path, status, signature_refusal());
+            classic(http);
+        });
+        h.http.advance_after_send_ms.set(17.0);
+        h.drive(h.venue().change_position_mode(true, None)).unwrap();
+        let calls = h.http.calls(path);
+        assert_eq!(calls.len(), 2, "signature_retry::write {status}");
+        assert_ne!(
+            calls[0].headers["ACCESS-TIMESTAMP"], calls[1].headers["ACCESS-TIMESTAMP"],
+            "signature_retry::fresh_timestamp"
+        );
+        for call in &calls {
+            let body = r#"{"productType":"usdt-futures","posMode":"hedge_mode"}"#;
+            assert_eq!(call.data, serde_json::from_str::<Value>(body).unwrap());
+            let timestamp = call.headers["ACCESS-TIMESTAMP"]
+                .as_str()
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    format!("{:.0}", call.headers["ACCESS-TIMESTAMP"].as_f64().unwrap())
+                });
+            let preimage = format!("{timestamp}POST{path}{body}");
+            assert_eq!(
+                call.headers["ACCESS-SIGN"],
+                safe_cex_crypto::hmac_sha256(
+                    b"fixture-secret",
+                    preimage.as_bytes(),
+                    safe_cex_crypto::Encoding::Base64
+                ),
+                "signature_retry::write_signature"
+            );
+        }
+        assert_eq!(
+            calls[0].data, calls[1].data,
+            "signature_retry::write_payload"
+        );
+        let path = "/api/v2/spot/account/info";
+        let h = harness(ExchangeName::Bitget, options(), |http| {
+            http.route("GET", path, status, signature_refusal());
+        });
+        let result = h.drive(h.venue().get_account());
+        if status != 200.0 {
+            assert!(result.is_err());
+        }
+        assert_eq!(
+            h.http.calls(path).len(),
+            2,
+            "signature_retry::one_retry_stamp {status}"
+        );
+    }
+}
+
+#[test]
+fn signature_retry_does_not_replay_unrelated_http_or_resolved_errors() {
+    for status in [200.0, 403.0] {
+        let path = "/api/v2/spot/account/info";
+        let h = harness(ExchangeName::Bitget, options(), |http| {
+            http.route(
+                "GET",
+                path,
+                status,
+                json!({"code":"40017","msg":"unrelated refusal","data":null}),
+            );
+        });
+        let _ = h.drive(h.venue().get_account());
+        assert_eq!(
+            h.http.calls(path).len(),
+            1,
+            "signature_retry::unrelated {status}"
+        );
+    }
+}
