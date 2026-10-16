@@ -195,6 +195,7 @@ impl BybitExchange {
         });
         let api_account_name = account_name.clone();
         let relay_enabled = deps.relay_enabled;
+        let public_base = core.clone();
         let venue = BybitExchange::new(
             core,
             runtime.clone(),
@@ -249,15 +250,16 @@ impl BybitExchange {
             {
                 let runtime = runtime.clone();
                 move |parent, category| {
-                    Rc::new(crate::ws_public::PublicProtocol {
+                    Rc::new(crate::ws_public::PublicProtocol::new(
                         parent,
-                        runtime: runtime.clone(),
-                        category: match category {
+                        runtime.clone(),
+                        match category {
                             "inverse" => "inverse",
                             "spot" => "spot",
                             _ => "linear",
                         },
-                    })
+                        &public_base,
+                    ))
                 }
             },
             move |parent| {
