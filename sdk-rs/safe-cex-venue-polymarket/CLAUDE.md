@@ -1,5 +1,24 @@
 # Polymarket source mirrors
 
+The concrete `binding::exchange::PolymarketExchange` assembles the existing source
+body ports over shared `js_runtime` values, clients, sockets and store. Its native
+ethers/V2 builder boundary is compared against the actual maintained TypeScript
+signing helper and installed official SDK in 96 cases (all six tick sizes, four
+signature types, both sides and both contract families). The SDK's MIT notice is
+retained in `SDK_LICENSE.txt`. The production path never launches Node.
+
+`tests/exchange_binding.rs` drives the concrete Exchange methods; run
+`tests/binding_controls.py` sequentially after that target passes to measure all
+16 entrypoint controls. Those controls must compile, fail their named E2E, then
+pass after restoration. Existing method-body oracles and controls remain in use.
+
+FINDING: the shared JS client factory does not yet implement the source
+`safeCexAxiosCreate` proxy/tunnel policy. This binding currently uses the supplied
+HTTP host directly. Default direct-host behavior is exercised; options requesting
+`tealstreetTunnel` or proxy routing must not be represented as verified here.
+The shared-runtime lane owns the generic service. Retain this finding until a
+shared implementation and concrete routing regression replace it.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/polymarket/CLAUDE.md).
 
 The first slice covers all 13 constants rows in `constants.rs`, plus four
