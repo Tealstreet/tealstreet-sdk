@@ -2,11 +2,12 @@
 use super::{
     globals,
     promise::await_js,
-    rt::{Rt, Shared, Variant},
+    rt::{BitgetExtra, Rt, Shared, Variant},
     store,
     value::{Js, Thrown, from_typed, to_typed},
 };
 use crate::assembly;
+use safe_cex_exchange::js_runtime::scope::ScopeShared;
 use safe_cex_exchange::{
     capabilities::{CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding},
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedBatch, ValidatedOrder},
@@ -15,10 +16,7 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::Store;
 use safe_cex_types::*;
-use std::{
-    cell::{OnceCell, RefCell},
-    rc::Rc,
-};
+use std::rc::Rc;
 
 pub struct BitgetDependencies {
     pub runtime: Rc<dyn WsRuntime>,
@@ -74,20 +72,18 @@ impl BitgetExchange {
         let shared = Rc::new_cyclic(|weak: &std::rc::Weak<Shared>| {
             let globals = globals::build(weak.clone());
             super::hosts::register_all(&globals, weak.clone());
-            Shared {
-                runtime: deps.runtime.clone(),
-                http: deps.http.clone(),
-                sockets: safe_cex_exchange::js_runtime::sockets::JsSocketContext::new(deps.runtime.clone()),
-                store: store.clone(),
-                base: OnceCell::new(),
+            ScopeShared::new(
+                deps.runtime.clone(),
+                deps.http.clone(),
+                store.clone(),
                 globals,
-                exchange: RefCell::new(Js::Undefined),
-                variant,
-                name: name.clone(),
-                options: options.clone(),
-                external_public_data: deps.external_public_data.clone(),
-                timers: RefCell::default(),
-            }
+                BitgetExtra {
+                    variant,
+                    name: name.clone(),
+                    options: options.clone(),
+                    external_public_data: deps.external_public_data.clone(),
+                },
+            )
         });
         let rt = Rt { shared: shared.clone(), this: Js::Undefined };
         let js_name = from_typed(&name).map_err(err)?;

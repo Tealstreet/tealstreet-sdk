@@ -1,15 +1,15 @@
 //! Concrete AssemblyHost plus the construction-time globals: BaseExchange,
 //! BaseWebSocket, the Axios client and createAPI's imported collaborators.
 use crate::assembly::{AssemblyHost, NativeCallback};
+use safe_cex_exchange::js_runtime::base_exchange::{self, BaseExchangeParts};
 use crate::binding::{
     client,
     globals::{arg, shared},
     promise::Promise,
     rt::{Rt, Shared},
     sockets,
-    value::{Getter, Js, Thrown, error_object, from_typed, utf16},
+    value::{Js, Thrown, error_object, utf16},
 };
-use safe_cex_exchange::error_reporting::ExchangeErrorInput;
 use std::rc::{Rc, Weak};
 
 impl AssemblyHost for Rt {
@@ -84,16 +84,7 @@ impl AssemblyHost for Rt {
     }
 }
 
-/// `owner.member` read as a callable that keeps `owner` as its receiver.
-pub(crate) fn bound_member(owner: &Js, name: &str) -> Result<Js, Thrown> {
-    let value = owner.get(name)?;
-    if !value.is_callable() {
-        return Ok(value);
-    }
-    let owner = owner.clone();
-    let f = value.clone();
-    Ok(Js::function(name, move |_, a| f.call(owner.clone(), a)))
-}
+pub(crate) use safe_cex_exchange::js_runtime::scope::bound_member;
 
 fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
@@ -202,155 +193,17 @@ fn is_bitget_signature_rejection(data: &Js) -> Result<bool, Thrown> {
     Ok(msg.to_lowercase().contains("sign signature error"))
 }
 
-/// The BaseExchange instance: TS base fields plus members bridged to the Rust core.
+/// The BaseExchange instance; the Rust core is kept for `Exchange::base()`.
 fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown> {
-    let shared = rt.shared.clone();
-    let base = safe_cex_exchange::exchange::BaseExchange::new(
-        shared.name.clone(),
-        shared.options.clone(),
-        shared.store.clone(),
-        rt.exchange_runtime(),
-        crate::binding::exchange::settings(),
-    );
-    let base = Rc::new(base);
-    let _ = shared.base.set(base.clone());
-    let this = Js::object_with_class("BitgetExchange", vec![
-        ("name", name.clone()),
-        ("_exchangeName", name),
-        ("options", options),
-        ("store", store),
-    ]);
-    let def = |k: &str, v: Js| {
-        let _ = this.define(k, v);
+    let extra = &rt.shared.extra;
+    let parts = BaseExchangeParts {
+        name: extra.name.clone(),
+        options: extra.options.clone(),
+        store: rt.shared.store.clone(),
+        settings: crate::binding::exchange::settings(),
     };
-    {
-        let base = base.clone();
-        this.define_accessor(
-            "isDisposed",
-            Some(Rc::new(move |_| Ok(Js::Bool(base.is_disposed())))),
-            None,
-        );
-    }
-    {
-        let base = base.clone();
-        let getter: Getter = Rc::new(move |_| {
-            Ok(Js::Bool(base.options().public_data_only == Some(true) || !base.can_sign()))
-        });
-        this.define_accessor("isPublicDataOnly", Some(getter), None);
-    }
-    {
-        let base = base.clone();
-        def(
-            "emitter",
-            Js::object(vec![(
-                "emit",
-                Js::function("emit", move |_, a| {
-                    let event = text(&arg(&a, 0))?;
-                    let payload = crate::binding::value::to_json(&Js::array(a.into_iter().skip(1).collect()))?;
-                    base.emit(&event, payload)?;
-                    Ok(Js::Bool(true))
-                }),
-            )]),
-        );
-    }
-    {
-        let base = base.clone();
-        def(
-            "log",
-            Js::function("log", move |_, a| {
-                let severity = arg(&a, 1);
-                let severity = if severity.is_undefined() { "info".to_owned() } else { text(&severity)? };
-                base.log(&text(&arg(&a, 0))?, &severity)?;
-                Ok(Js::Undefined)
-            }),
-        );
-    }
-    {
-        let base = base.clone();
-        def(
-            "emitAndLogError",
-            Js::function("emitAndLogError", move |_, a| {
-                let error = arg(&a, 0);
-                let input = match &error {
-                    Js::Undefined => ExchangeErrorInput::Missing,
-                    Js::String(s) => ExchangeErrorInput::Message(String::from_utf16_lossy(s)),
-                    Js::Object(o) if o.class == "Error" || o.class == "AxiosError" => {
-                        ExchangeErrorInput::Error(Box::new(Thrown::new(error.clone()).to_exchange_error()))
-                    }
-                    other => ExchangeErrorInput::Raw(crate::binding::value::to_json(other)?),
-                };
-                let msg = arg(&a, 1);
-                let msg = if msg.is_undefined() { None } else { Some(text(&msg)?) };
-                let extra = arg(&a, 2);
-                let extra = if extra.is_undefined() { None } else { Some(crate::binding::value::to_json(&extra)?) };
-                base.emit_and_log_error(input, msg.as_deref(), extra.as_ref())?;
-                Ok(Js::Undefined)
-            }),
-        );
-    }
-    {
-        let receiver = this.clone();
-        def(
-            "createXhrWithSecondaryKey",
-            Js::function("createXhrWithSecondaryKey", move |_, a| {
-                let opts = arg(&a, 0);
-                let api = arg(&a, 1);
-                let other = arg(&a, 2);
-                let xhr = api.call(Js::Undefined, vec![opts, receiver.clone()])?;
-                let limit = if other.is_nullish() { Js::Undefined } else { other.get("rateLimit")? };
-                let xhr = if limit.is_callable() { limit.call(Js::Undefined, vec![xhr])? } else { xhr };
-                receiver.set("_primaryXhr", xhr.clone())?;
-                receiver.set("_secondaryXhr", xhr.clone())?;
-                Ok(xhr)
-            }),
-        );
-    }
-    {
-        let base = base.clone();
-        def(
-            "dispose",
-            Js::function("dispose", move |_, _| {
-                base.dispose()?;
-                Ok(Js::Undefined)
-            }),
-        );
-    }
-    {
-        let base = base.clone();
-        def(
-            "assertSingleNativeClientOrderId",
-            Js::function("assertSingleNativeClientOrderId", move |_, a| {
-                let id = arg(&a, 0);
-                let id = if id.is_undefined() { None } else { Some(text(&id)?) };
-                let count = arg(&a, 1).to_number()? as usize;
-                base.assert_single_native_client_order_id(id.as_deref(), count)?;
-                Ok(Js::Undefined)
-            }),
-        );
-    }
-    {
-        let base = base.clone();
-        let weak = Rc::downgrade(&shared);
-        def(
-            "getOrFetchPositionsForSymbol",
-            Js::function("getOrFetchPositionsForSymbol", move |_, a| {
-                let rt = crate::binding::globals::shared(&weak)?;
-                let symbol = text(&arg(&a, 0))?;
-                let venue = rt
-                    .shared
-                    .venue
-                    .borrow()
-                    .as_ref()
-                    .and_then(Weak::upgrade)
-                    .ok_or_else(|| Thrown::error("Error", "Bitget exchange is not assembled"))?;
-                let base = base.clone();
-                Ok(rt.spawn(Box::pin(async move {
-                    let positions = base.get_or_fetch_positions_for_symbol(venue, &symbol).await?;
-                    from_typed(&positions)
-                })))
-            }),
-        );
-    }
+    let (this, base) = base_exchange::create(&rt.shared.sockets, parts, name, options, store)?;
+    let _ = rt.shared.base.set(base);
     Ok(this)
 }
 
@@ -368,6 +221,7 @@ fn secondary_socket(rt: &Rt, index: f64) -> Js {
             }
             let venue = rt
                 .shared
+                .sockets
                 .venue
                 .borrow()
                 .as_ref()

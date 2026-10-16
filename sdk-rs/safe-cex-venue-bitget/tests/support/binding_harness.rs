@@ -6,13 +6,12 @@ use safe_cex_exchange::{
 };
 use safe_cex_transport::{TransportProvider, socket::TunnelHost};
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use safe_cex_venue_bitget::{
-    BitgetDependencies, BitgetExchange, BitgetImports,
-    binding::{
-        promise::JsFuture,
-        value::{Js, Thrown, from_json, to_json},
-    },
+use safe_cex_exchange::js_runtime::{
+    client::JsHttpHost,
+    promise::JsFuture,
+    value::{Js, Thrown, from_json, to_json},
 };
+use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -191,6 +190,7 @@ pub struct Request {
 /// Scripted HTTP: (method, path) -> queue of responses; the last one repeats.
 #[derive(Default)]
 pub struct Http {
+    pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
 }
@@ -209,7 +209,10 @@ impl Http {
         self.requests.borrow().iter().filter(|r| r.url == path).cloned().collect()
     }
 }
-impl BitgetImports for Http {
+impl JsHttpHost for Http {
+    fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+        self.runtime.borrow().clone().expect("harness runtime")
+    }
     fn send(&self, config: Js) -> JsFuture<'static> {
         let read = |k: &str| config.get(k).ok().map(|v| to_json(&v).unwrap_or(Value::Null)).unwrap_or(Value::Null);
         let method = read("method").as_str().unwrap_or("get").to_uppercase();
@@ -255,13 +258,14 @@ pub fn harness(name: ExchangeName, options: ExchangeOptions, script: impl FnOnce
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(1_700_000_000_000.0);
     let http = Rc::new(Http::default());
+    *http.runtime.borrow_mut() = Some(runtime.clone());
     script(&http);
     let store = Rc::new(safe_cex_store::store::DefaultStore::new());
     let exchange = BitgetExchange::new(
         name,
         options,
         store.clone(),
-        BitgetDependencies { runtime: runtime.clone(), imports: http.clone(), external_public_data: None },
+        BitgetDependencies { runtime: runtime.clone(), http: http.clone(), external_public_data: None },
     )
     .expect("BitgetExchange constructs from real options");
     Harness { runtime, http, store, exchange }

@@ -44,7 +44,7 @@ pub(crate) fn install(rt: &Rt) {
             Js::function("initExternalPublicData", move |_, _| {
                 let rt = rt.clone();
                 Ok(rt.clone().spawn(Box::pin(async move {
-                    let factory = rt.shared.external_public_data.clone();
+                    let factory = rt.shared.extra.external_public_data.clone();
                     let base = rt.base().clone();
                     let used = base
                         .init_external_public_data(move |config| match factory {
@@ -147,7 +147,7 @@ pub(crate) fn install(rt: &Rt) {
             }),
         );
     }
-    if rt.shared.variant == Variant::Inverse {
+    if rt.shared.extra.variant == Variant::Inverse {
         // ts: BitgetInverseExchange.getMarginCoinForSymbol
         let store = rt.shared.store.clone();
         def(

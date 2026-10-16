@@ -85,7 +85,7 @@ fn resolve_market(rt: &Rt, symbol: &str) -> Result<Option<Market>, Thrown> {
 
 /// `this.normalizeBitgetSymbol(value)`
 fn normalize_symbol(rt: &Rt, value: Option<&Value>) -> Result<String, ExchangeError> {
-    let profile = match rt.shared.variant {
+    let profile = match rt.shared.extra.variant {
         Variant::Classic => SymbolProfile::Usdt,
         Variant::Usdc => SymbolProfile::Usdc,
         Variant::Inverse => SymbolProfile::Inverse,
@@ -97,7 +97,8 @@ fn normalize_symbol(rt: &Rt, value: Option<&Value>) -> Result<String, ExchangeEr
 
 fn venue(rt: &Rt) -> Result<Rc<dyn Exchange>, Thrown> {
     rt.shared
-        .venue
+        .sockets
+            .venue
         .borrow()
         .as_ref()
         .and_then(Weak::upgrade)
@@ -413,16 +414,26 @@ fn async_member(rt: &Rt, name: &str, body: impl Fn(Rt, Vec<Js>) -> JsFuture<'sta
 
 /// `this._fetchFillsPage(params)` projected to the body's page tuple.
 async fn fills_page(rt: &Rt, params: safe_cex_num::JsJsonValue) -> Result<(Vec<Value>, Option<String>), Thrown> {
-    let page = await_js(rt.call_path("_fetchFillsPage", vec![js_json(params)])?).await?;
+    page_rows(rt, "_fetchFillsPage", "endId", params).await
+}
+
+/// One fills page through the receiver's page member: `{ rows, <cursor> }`.
+async fn page_rows(
+    rt: &Rt,
+    member: &str,
+    cursor: &str,
+    params: safe_cex_num::JsJsonValue,
+) -> Result<(Vec<Value>, Option<String>), Thrown> {
+    let page = await_js(rt.call_path(member, vec![js_json(params)])?).await?;
     let rows = page.get("rows")?;
     let rows = rows
         .array_values()
-        .ok_or_else(|| Thrown::type_error("_fetchFillsPage rows is not an array"))?
+        .ok_or_else(|| Thrown::type_error(&format!("{member} rows is not an array")))?
         .iter()
         .map(to_json)
         .collect::<Result<_, _>>()?;
-    let end_id = page.get("endId")?;
-    Ok((rows, if end_id.is_nullish() { None } else { Some(text(&end_id)?) }))
+    let next = page.get(cursor)?;
+    Ok((rows, if next.is_nullish() { None } else { Some(text(&next)?) }))
 }
 
 pub(crate) fn register(_globals: &Js, _weak: Weak<Shared>) {}
@@ -725,7 +736,8 @@ pub(crate) fn bind(rt: &Rt, _owner: &str, name: &str, targets: &[&str]) -> Resul
         "history_reads.rs::fetch_historical_fills" => async_member(rt, name, |rt, a| {
             Box::pin(async move {
                 let public_only = rt.this.get("isPublicDataOnly")?.truthy();
-                let opts: ExecutionsOptions = to_typed(&arg(&a, 0))?;
+                let original = arg(&a, 0);
+                let opts: ExecutionsOptions = to_typed(&original)?;
                 // The page error's JS value (response.data.msg) survives the typed error channel here.
                 let page_error: Rc<RefCell<Option<Thrown>>> = Rc::default();
                 let executions = crate::history_reads::fetch_historical_fills(
@@ -736,6 +748,13 @@ pub(crate) fn bind(rt: &Rt, _owner: &str, name: &str, targets: &[&str]) -> Resul
                         async move {
                             await_js(rt.call_path("ensureAccountTypeDetected", vec![])?).await?;
                             Ok(rt.this.get("usesUtaRouting")?.truthy())
+                        }
+                    },
+                    |_| {
+                        let rt = rt.clone();
+                        async move {
+                            let rows = await_js(rt.call_path("_fetchHistoricalUtaFills", vec![original])?).await?;
+                            to_typed::<Vec<safe_cex_types::Execution>>(&rows).map_err(ExchangeError::from)
                         }
                     },
                     |symbol| Ok(resolve_market(&rt, symbol)?.map(|m| (m.id, m.symbol))),
@@ -769,6 +788,64 @@ pub(crate) fn bind(rt: &Rt, _owner: &str, name: &str, targets: &[&str]) -> Resul
                 from_typed(&executions)
             })
         }),
+        "history_reads.rs::fetch_uta_fills_page" => async_member(rt, name, |rt, a| {
+            Box::pin(async move {
+                let params = to_js_json_value(&arg(&a, 0))?;
+                let (rows, cursor) = crate::history_reads::fetch_uta_fills_page::<Thrown, _>(params, |url, params| {
+                    let rt = rt.clone();
+                    async move {
+                        let data = get_data(&rt.this.get("xhr")?, url, Some(js_json(params)))?.await?;
+                        optional_json(&data)
+                    }
+                })
+                .await?;
+                Ok(Js::object(vec![
+                    ("rows", Js::array(rows.iter().map(from_json).collect())),
+                    ("cursor", cursor.map_or(Js::Undefined, |c| Js::str(&c))),
+                ]))
+            })
+        }),
+        "history_reads.rs::fetch_historical_uta_fills" => async_member(rt, name, |rt, a| {
+            Box::pin(async move {
+                let opts: ExecutionsOptions = to_typed(&arg(&a, 0))?;
+                let page_error: Rc<RefCell<Option<Thrown>>> = Rc::default();
+                let executions = crate::history_reads::fetch_historical_uta_fills(
+                    &opts,
+                    |symbol| Ok(resolve_market(&rt, symbol)?.map(|m| (m.id, m.symbol))),
+                    || Ok(text(&rt.this.get("apiUtaCategory")?)?),
+                    |params| {
+                        let rt = rt.clone();
+                        let page_error = page_error.clone();
+                        async move {
+                            page_rows(&rt, "_fetchUtaFillsPage", "cursor", params).await.map_err(|thrown| {
+                                let error = thrown.to_exchange_error();
+                                *page_error.borrow_mut() = Some(thrown);
+                                error
+                            })
+                        }
+                    },
+                    (
+                        |error: &ExchangeError| match page_error.borrow_mut().take() {
+                            Some(thrown) if thrown.value.is_undefined() => None,
+                            Some(thrown) => Some(
+                                to_json(&thrown.value).unwrap_or_else(|_| Value::String(thrown.value.to_display())),
+                            ),
+                            None => Some(serde_json::json!({ "message": error.message })),
+                        },
+                        |message: Option<Value>| {
+                            let message = message.as_ref().map_or(Js::Undefined, from_json);
+                            rt.call_path("emitAndLogError", vec![message]).map(|_| ()).map_err(ExchangeError::from)
+                        },
+                    ),
+                )
+                .await?;
+                from_typed(&executions)
+            })
+        }),
         _ => return Ok(None),
     }))
+}
+
+fn to_js_json_value(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown> {
+    super::assembly::to_js_json(value)
 }
