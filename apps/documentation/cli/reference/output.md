@@ -208,7 +208,7 @@ Every fill on the active exchange produces a one-liner:
 ```
 
 When you're inside a watch mode, the fill is appended via `addWatchMessage`
-to whichever panel is up. Source: `apps/cli/src/repl.ts:850-858`.
+to whichever panel is up. Source: `apps/cli/src/exchange-listeners.ts`.
 
 ---
 
@@ -217,7 +217,7 @@ to whichever panel is up. Source: `apps/cli/src/repl.ts:850-858`.
 Per-account critical errors (geo-blocked, invalid API key, etc.) are
 classified by `HealthMonitor` and **only printed once** per category.
 If your error scrolled by an hour ago, check `cli.log` — it's still in there.
-Source: `apps/cli/src/repl.ts:872-884`.
+Source: `apps/cli/src/exchange-listeners.ts`.
 
 ---
 
