@@ -273,7 +273,6 @@ pub fn fetch_markets<H: ReadHost>(h: Rc<H>) -> impl Future<Output = Result<H::Va
                         ("spot", h.boolean(false)),
                         ("swap", h.boolean(true)),
                         ("future", h.boolean(false)),
-                        ("option", h.boolean(false)),
                         ("contract", h.boolean(true)),
                         ("linear", h.boolean(true)),
                         ("inverse", h.boolean(false)),

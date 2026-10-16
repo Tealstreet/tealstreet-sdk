@@ -175,7 +175,7 @@ fn dispatch(
     host: Host,
     state: Rc<RefCell<ClientState>>,
     defaults: Js,
-    request: Js,
+    mut request: Js,
 ) -> JsFuture<'static> {
     Box::pin(async move {
         let mut attempt = 0;
@@ -196,6 +196,13 @@ fn dispatch(
                         };
                     if !retry {
                         return Err(error);
+                    }
+                    // axios-retry resubmits the effective failed config. This
+                    // retains interceptor changes and the predicate's one-shot
+                    // signature-retry stamp across request re-signing.
+                    let failed_config = error.value.get("config")?;
+                    if failed_config.is_object() {
+                        request = failed_config;
                     }
                     attempt += 1;
                 }

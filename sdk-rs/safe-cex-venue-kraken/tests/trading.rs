@@ -441,6 +441,29 @@ impl ApiHost for Host {
         self.event(vec![("kind", text("skip"))]);
         Ok(())
     }
+    fn spot_retry_condition(&self, _posted: Vec<&'static str>) -> Result<Rc<Raw>, E> {
+        Ok(text("spotCondition"))
+    }
+    fn qs_parse(&self, value: Rc<Raw>) -> Result<Rc<Raw>, E> {
+        self.event(vec![("kind", text("qsParse")), ("value", value)]);
+        let parsed = get(&self.cfg, "parsed");
+        Ok(if self.undefined(&parsed) {
+            self.object(vec![
+                (units("nonce"), text("previous")),
+                (units("volume"), text("17.25")),
+            ])?
+        } else {
+            copy_raw(&parsed)
+        })
+    }
+    fn resend(
+        &self,
+        _client: Rc<Raw>,
+        config: Rc<Raw>,
+    ) -> Result<impl Future<Output = Result<Rc<Raw>, E>>, E> {
+        self.event(vec![("kind", text("resend")), ("config", config)]);
+        Ok(async { Ok(text("RESENT")) })
+    }
 }
 async fn yield_once() {
     let mut yielded = false;
@@ -688,22 +711,21 @@ fn api_family(spot: bool, floor: usize) {
                 }
             }
             let cfg = decode(&step["input"]);
+            // The source's synchronous prefix: events recorded before its first await.
+            let prefix =
+                h.events.borrow().len() + step["syncEvents"].as_u64().unwrap_or(0) as usize;
             let selected = step["client"].as_u64().unwrap() as usize;
             let api = &clients[selected];
             let (result, original) = match step["kind"].as_str().unwrap() {
                 "request" => (api.request(cfg.clone()), Some(cfg.clone())),
                 "success" => (
-                    complete(api.success(cfg.clone()), &h, h.events.borrow().len()),
+                    complete(api.success(cfg.clone()), &h, prefix),
                     Some(cfg.clone()),
                 ),
                 "rejected" => {
                     let response = h.original.response.clone().unwrap_or(cfg.clone());
                     (
-                        complete(
-                            api.rejected(h.original.clone()),
-                            &h,
-                            h.events.borrow().len(),
-                        ),
+                        complete(api.rejected(h.original.clone()), &h, prefix),
                         Some(response),
                     )
                 }
@@ -768,5 +790,5 @@ fn futures_api_native() {
 }
 #[test]
 fn spot_api_native() {
-    api_family(true, 34);
+    api_family(true, 38);
 }

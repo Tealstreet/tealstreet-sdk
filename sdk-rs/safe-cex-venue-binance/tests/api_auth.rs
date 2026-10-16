@@ -91,7 +91,8 @@ struct Factory {
     mode: Option<ClientMode>,
     retry: Option<(u32, RetryRead)>,
     request: Option<RequestInterceptor>,
-    response: Option<(ResponseInterceptor, ResponseInterceptor)>,
+    response: Option<(ResponseInterceptor, Option<ResponseInterceptor>)>,
+    retry_signature: Option<bool>,
     trace: Vec<Value>,
     installed: Option<(EventValue, EventValue, EventValue, ResponseTransform)>,
 }
@@ -123,10 +124,17 @@ impl FactoryBindings for Factory {
         self.config = Some(config);
         Ok(self.client.clone())
     }
-    fn retry(&mut self, c: EventValue, n: u32, r: RetryRead) -> Result<(), Failure> {
+    fn retry(
+        &mut self,
+        c: EventValue,
+        n: u32,
+        r: RetryRead,
+        signature: bool,
+    ) -> Result<(), Failure> {
         self.trace.push(json!(["retry"]));
         assert!(c.same(&self.client), "native retry original client");
         self.retry = Some((n, r));
+        self.retry_signature = Some(signature);
         if self.case == "retry-fail" {
             Err(self.error.clone())
         } else {
@@ -169,7 +177,7 @@ impl FactoryBindings for Factory {
         &mut self,
         c: EventValue,
         s: ResponseInterceptor,
-        f: ResponseInterceptor,
+        f: Option<ResponseInterceptor>,
     ) -> Result<(), Failure> {
         self.trace.push(json!(["response_use"]));
         assert!(c.same(&self.client), "native response original client");
@@ -241,6 +249,10 @@ impl ResponseBindings for Response {
     fn emit(&mut self, m: EventValue) -> Result<(), Failure> {
         self.messages.push(m);
         Ok(())
+    }
+    // No fixture is a -1022 rejection, so the actual resend declines every response.
+    fn resend(&mut self, _: EventValue) -> Result<EventValue, Failure> {
+        Ok(EventValue::Undefined)
     }
 }
 fn options(name: &str) -> EventValue {
@@ -347,6 +359,7 @@ fn factories(family: &str) {
             config: None,
             mode: None,
             retry: None,
+            retry_signature: None,
             request: None,
             response: None,
             trace: vec![],
@@ -364,7 +377,14 @@ fn factories(family: &str) {
                 "{label}: native returned client"
             );
         }
-        let response_expected = family == "futures" && !failed;
+        let response_expected = !is_public(family) && !failed;
+        if let Some(signature) = b.retry_signature {
+            assert_eq!(
+                signature,
+                !is_public(family),
+                "{label}: native signature-rejection retry arm"
+            );
+        }
         assert_eq!(
             b.response.is_some(),
             response_expected,
@@ -654,7 +674,22 @@ fn factories(family: &str) {
                 );
                 requests.push(json!({"name":rn,"calls":calls.borrow().0,"value":value.as_ref().map(wire).unwrap_or(json!({"$undefined":true})),"refs":value.as_ref().ok().map(|v|json!({"input":v.same(&input),"headers":v.get("headers").unwrap().same(&headers),"nested":v.get("nested").unwrap().same(&nested)})),"signRefs":request.sign_refs,"failure":value.as_ref().err().map(|e|error_wire(e,&error))}));
             }
-            if let Some((success, failure)) = &b.response {
+            if let Some((success, None)) = &b.response {
+                // PM/spot: the last interceptor only resends, so every response passes.
+                for r in fixtures["responses"].as_array().unwrap() {
+                    let rn = r["name"].as_str().unwrap();
+                    let response = record([("data", decoded(r["data"].clone()))]);
+                    let mut effects = Response { messages: vec![] };
+                    let ResponseReturn::Value(v) = success(response.clone(), &mut effects).unwrap()
+                    else {
+                        panic!("native resend-only interceptor rejected {rn}");
+                    };
+                    assert!(v.same(&response), "native resend-only referent {rn}");
+                    assert!(effects.messages.is_empty(), "native resend-only emits {rn}");
+                    responses.push(json!({"name":rn,"which":"success","emitted":[],"value":wire(&v),"refs":true,"error":Value::Null}));
+                }
+            }
+            if let Some((success, Some(failure))) = &b.response {
                 for (j, r) in fixtures["responses"].as_array().unwrap().iter().enumerate() {
                     let rn = r["name"].as_str().unwrap();
                     let data = decoded(r["data"].clone());
@@ -719,7 +754,12 @@ fn factories(family: &str) {
                                 message,
                                 code,
                                 response: got,
+                                emitted,
                             }) => {
+                                assert!(
+                                    emitted,
+                                    "{label}: native generated rejection carries the emit flag"
+                                );
                                 assert!(
                                     rejected && which == "success",
                                     "{label}: native generated rejection variant"

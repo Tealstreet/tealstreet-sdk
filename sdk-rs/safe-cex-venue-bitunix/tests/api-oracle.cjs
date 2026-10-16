@@ -115,8 +115,19 @@ function make(fixture) {
         },
         retry: (c, opts) => {
             assert.equal(c, client);
-            assert.equal(opts.retryCondition, condition);
+            // networkErrorOnRead() now runs per evaluation, inside the condition.
+            assert.equal(typeof opts.retryCondition, 'function');
             note('retry', opts.retries);
+        },
+        isBitunixSignatureRejection: function isBitunixSignatureRejection() {},
+        signatureRejectedResponse: () => {
+            note('signature-condition');
+            return () => false;
+        },
+        resendOnSignatureRejection: (c, response, predicate) => {
+            assert.equal(c, client);
+            note('resend', predicate.name);
+            return fixture.resend ? 'RESENT' : undefined;
         },
         installTransportAdapter: (c, o, name) => {
             assert.equal(c, client);
@@ -142,7 +153,7 @@ for (const testnet of [false, true])
     }
 for (const fail of ['create', 'condition', 'retry', 'transport']) {
     const run = make({ fail });
-    factory.push({ fixture: { fail }, events: run.events, identity: false, error: run.error });
+    factory.push({ fixture: { fail }, events: run.events, identity: run.result === run.client, error: run.error ?? null });
 }
 const requests = [];
 const base = {
@@ -169,6 +180,7 @@ for (const fixture of [
     { fail: 'headers' },
     { config: { ...base, headers: null } },
     { config: { ...base, data: { 2: 'b', 1: 'a', str: 'x' } } },
+    { config: { ...base, data: '{"qty":"2.5","price":"12.25"}' } },
 ]) {
     const run = make(fixture);
     run.events.length = 0;
@@ -210,8 +222,10 @@ const responses = [];
         { fail: 'header' },
         { fail: 'emit' },
         { status: 429 },
+        { resend: true },
+        { twice: true },
     ]) {
-        const run = make({ fail: fixture.fail === 'emit' ? 'emit' : undefined });
+        const run = make({ fail: fixture.fail === 'emit' ? 'emit' : undefined, resend: fixture.resend });
         run.events.length = 0;
         let reads = 0;
         const config = {
@@ -237,6 +251,8 @@ const responses = [];
         let result, error;
         try {
             result = await run.response(response);
+            // An axios-retry resend reaches the interceptor again with the same response.
+            if (fixture.twice) result = await run.response(response);
         } catch (e) {
             error = { name: e.name, message: e.message };
         }
@@ -245,12 +261,25 @@ const responses = [];
             events: run.events,
             error: error ?? null,
             identity: result === response,
+            resent: result === 'RESENT',
         });
     }
+    const signatureCorpus = [{code:10007},{code:'10007'},{msg:'Sign Signature Error'},{code:1,msg:'sign signature error: bad'},{msg:['sign signature error']},{code:[10007]},{code:10006},{code:null,msg:null},{msg:'signature error'},'10007',[],null];
+    const { isBitunixSignatureRejection } = (() => {
+        const declaration = ast.statements
+            .filter(ts.isVariableStatement)
+            .flatMap((n) => [...n.declarationList.declarations])
+            .find((n) => n.name.getText(ast) === 'isBitunixSignatureRejection');
+        const fn = vm.runInNewContext(
+            ts.transpileModule('(' + declaration.initializer.getText(ast) + ')', { compilerOptions: { target: ts.ScriptTarget.ES2022 } }).outputText,
+        );
+        return { isBitunixSignatureRejection: fn };
+    })();
+    const signature = { corpus: signatureCorpus, results: signatureCorpus.map((data) => isBitunixSignatureRejection(data)) };
     assert.equal(factory.length, 8);
-    assert.equal(requests.length, 17);
-    assert.equal(responses.length, 17);
-    process.stdout.write(JSON.stringify({ factory, requests, responses }));
+    assert.equal(requests.length, 18);
+    assert.equal(responses.length, 19);
+    process.stdout.write(JSON.stringify({ factory, requests, responses, signature }));
 })().catch((e) => {
     console.error(e);
     process.exitCode = 1;
