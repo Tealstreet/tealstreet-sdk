@@ -8,7 +8,7 @@ use safe_cex_exchange::{
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
 use safe_cex_registry::{
-    native_host::{native_venue_host_signed, native_venue_host_with},
+    native_host::{NativeVenueHost, native_venue_host_signed, native_venue_host_with},
     rust_venues::rust_constructor,
 };
 use safe_cex_store::Store;
@@ -363,6 +363,26 @@ pub async fn binance_harness_over(
     signer: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
     runtime: Rc<NativeRuntime>,
 ) -> Harness {
+    venue_harness(extra, options, signer, runtime, |host, options, store| {
+        rust_constructor(&ExchangeName::Binance, host)
+            .expect("binance is a Rust-constructed venue")
+            .construct(ExchangeName::Binance, options, store)
+            .expect("registry constructs BinanceExchange on the production native host")
+    })
+    .await
+}
+/// Builds one exchange on the native host from local servers; `construct` picks the class.
+pub async fn venue_harness(
+    extra: Handler,
+    options: Value,
+    signer: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
+    runtime: Rc<NativeRuntime>,
+    construct: impl FnOnce(
+        Rc<NativeVenueHost>,
+        safe_cex_types::ExchangeOptions,
+        Rc<dyn Store>,
+    ) -> Rc<dyn safe_cex_exchange::exchange::Exchange>,
+) -> Harness {
     let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ws = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let http_origin = format!("http://{}", http.local_addr().unwrap());
@@ -388,13 +408,9 @@ pub async fn binance_harness_over(
         Some((signer, account)) => native_venue_host_signed(host, adapters, signer, account),
         None => native_venue_host_with(host, adapters),
     };
-    let constructor = rust_constructor(&ExchangeName::Binance, host)
-        .expect("binance is a Rust-constructed venue");
     let options = serde_json::from_value(options).unwrap();
     let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
-    let exchange = constructor
-        .construct(ExchangeName::Binance, options, store.clone())
-        .expect("registry constructs BinanceExchange on the production native host");
+    let exchange = construct(host, options, store.clone());
     Harness {
         exchange,
         store,
