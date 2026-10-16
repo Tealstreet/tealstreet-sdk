@@ -3589,37 +3589,37 @@
   },
   {
     "function": "install",
-    "body": "d269ecf6e0eb661f",
+    "body": "0858624e3dde1a3b",
     "reference": "reads :: fetch_orders",
     "file": "safe-cex-venue-bybit/src/binding/members/spot.rs"
   },
   {
     "function": "install",
-    "body": "d269ecf6e0eb661f",
+    "body": "0858624e3dde1a3b",
     "reference": "reads :: fetch_markets",
     "file": "safe-cex-venue-bybit/src/binding/members/spot.rs"
   },
   {
     "function": "install",
-    "body": "d269ecf6e0eb661f",
+    "body": "0858624e3dde1a3b",
     "reference": "super :: markets :: fetch_tickers",
     "file": "safe-cex-venue-bybit/src/binding/members/spot.rs"
   },
   {
     "function": "install",
-    "body": "d269ecf6e0eb661f",
+    "body": "0858624e3dde1a3b",
     "reference": "reads :: update_order",
     "file": "safe-cex-venue-bybit/src/binding/members/spot.rs"
   },
   {
     "function": "install",
-    "body": "d269ecf6e0eb661f",
+    "body": "0858624e3dde1a3b",
     "reference": "writes :: cancel_orders",
     "file": "safe-cex-venue-bybit/src/binding/members/spot.rs"
   },
   {
     "function": "install",
-    "body": "d269ecf6e0eb661f",
+    "body": "0858624e3dde1a3b",
     "reference": "writes :: cancel_symbol_orders",
     "file": "safe-cex-venue-bybit/src/binding/members/spot.rs"
   },
@@ -3741,6 +3741,12 @@
     "function": "register_handlers",
     "body": "92c480d00f43a876",
     "call": "socket . emitter () . name ()",
+    "file": "safe-cex-venue-bybit/src/ws_public.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "86c04db7b95fcfea",
+    "call": "self . topics . dispose ()",
     "file": "safe-cex-venue-bybit/src/ws_public.rs"
   },
   {
