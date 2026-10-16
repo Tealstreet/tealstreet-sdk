@@ -40,7 +40,11 @@ fn cryptocom_registry_constructs_native_inputs_and_reads_markets_over_http() {
             h.store.markets().is_empty(),
             "fetchMarkets stays pure through registry construction"
         );
-        assert!(h.seen.borrow().iter().any(|request|request.method=="GET" && request.path=="/exchange/v1/public/get-instruments"),"REGISTRY Crypto.com read reaches real local HTTP");
+        assert!(
+            h.seen.borrow().iter().any(|request| request.method == "GET"
+                && request.path == "/exchange/v1/public/get-instruments"),
+            "REGISTRY Crypto.com read reaches real local HTTP"
+        );
         h.exchange.dispose().expect("Crypto.com dispose");
     });
 }
