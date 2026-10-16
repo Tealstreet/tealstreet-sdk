@@ -83,6 +83,29 @@ The monorepo still owns, and must keep owning:
   and should not try; edit `mirrors/tealstreet-sdk/.github/workflows/ci.yml`
   in the monorepo and let the export carry it.
 
+## 3a. This repo's Actions policy allows GitHub-owned actions ONLY
+
+Measured 2026-10-16: `allowed_actions: selected`, `github_owned_allowed: true`,
+`verified_allowed: false`, `patterns_allowed: []`. So a step naming anything
+outside `actions/*` makes the whole **run** fail at startup — and a startup
+failure is per run, not per job, so it takes `ci` and `secret-scan` down with
+the offending job.
+
+That happened the moment the Rust job arrived: `dtolnay/rust-toolchain@stable`
+turned three consecutive exports into `startup_failure` and **this mirror ran
+nothing for about seven hours**, including the nine package suites the monorepo
+had already stopped running on the strength of this repo running them. Nothing
+alerted — which is §7's missing failure routing, demonstrated rather than
+predicted.
+
+The fix keeps the policy as it is: `ubuntu-latest` ships rustup, and `rustup
+show` in a directory carrying `rust-toolchain.toml` installs the pinned
+toolchain and components, so the action was never doing anything the image
+cannot. `mirrors/scripts/mirror-workflow-actions.test.mjs` now fails
+`yarn test:mirror-guards` on any non-`actions/*` step in any mirror workflow.
+If a third-party action is genuinely needed, the repo setting has to change
+deliberately and the pattern must be recorded in that guard.
+
 ## 4. What can run here today
 
 Measured on 2026-10-16 against `TEALSTREET_SDK_FILES`: **33 of the 36 Rust gate

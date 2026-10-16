@@ -52,9 +52,19 @@ jobs:
       CARGO_TERM_COLOR: always
     steps:
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
-      # Loads the pin and components from sdk-rs/rust-toolchain.toml. The step
-      # above only guarantees rustup exists.
+      # NO third-party action here, and that is load-bearing rather than taste.
+      # This repo's Actions policy is `selected` with `github_owned_allowed:
+      # true`, `verified_allowed: false` and an EMPTY pattern list, so anything
+      # outside `actions/*` makes the whole RUN fail at startup - taking the
+      # `ci` and `secret-scan` jobs down with it, since a startup failure is per
+      # run and not per job. `dtolnay/rust-toolchain@stable` did exactly that on
+      # 2026-10-16: three consecutive exports produced `startup_failure` and the
+      # mirror ran nothing at all for seven hours, including the suites this
+      # monorepo has stopped running itself.
+      #
+      # `ubuntu-latest` ships rustup and cargo, and `rustup show` in a directory
+      # carrying rust-toolchain.toml installs the pinned toolchain and its
+      # components, so the action was never doing anything the image cannot.
       - name: Load workspace toolchain
         run: rustup show
       - uses: actions/cache@v4
