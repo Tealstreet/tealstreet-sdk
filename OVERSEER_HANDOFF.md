@@ -106,6 +106,34 @@ cannot. `mirrors/scripts/mirror-workflow-actions.test.mjs` now fails
 If a third-party action is genuinely needed, the repo setting has to change
 deliberately and the pattern must be recorded in that guard.
 
+## 3b. The first real run found a genuine hole: the SDK reached outside the slice
+
+`sdk-rs/safe-cex-transport/src/lib.rs` declares `mod frames;` with a path
+attribute pointing at `infra/tradetunnel/src/frames.rs`, and `how.rs` asserts
+the workspace `serde_json` pin is byte-identical to that crate's manifest.
+Neither file was in the slice, so the first real Rust run here failed at
+`cargo fmt --all --check` — rustfmt resolves modules before formatting, so it
+never reached clippy or build.
+
+That is worth stating as more than a CI fix: **a published SDK that compiles
+only inside the monorepo is not publishable**, and no monorepo gate could see
+it, because there the file is simply present. Only running in this repo found
+it. Both files are now in the slice, and only those two: the broker-id
+enforcement in `relay.rs` and `http_request.rs` stays private. `frames.rs` is
+63 lines of wire shapes this SDK already speaks.
+
+The manifest is there purely so one test can compare pins. If that reads wrong
+later, the alternative is to move that assertion into the monorepo's
+`scripts/rust-ci-wiring.test.mjs`, which is never published, and drop the
+manifest from the slice. Either is defensible; what is not is skipping the
+assertion when the file is absent.
+
+**Measurement caveat, so the next person does not repeat it:** the 33-of-36
+figure in §4 counted the GATE SCRIPTS' own inputs. It did not count what the
+crates compile, and this is what that gap looked like. Before claiming another
+gate can move, check the crate sources for path attributes and `include_str!`
+reaching above `sdk-rs/`.
+
 ## 4. What can run here today
 
 Measured on 2026-10-16 against `TEALSTREET_SDK_FILES`: **33 of the 36 Rust gate

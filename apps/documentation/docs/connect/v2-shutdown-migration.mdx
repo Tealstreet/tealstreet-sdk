@@ -1,0 +1,225 @@
+---
+title: V2 Shutdown and IP Whitelist Migration
+description: Draft guide for moving V2 users to V3 and helping V3 users update exchange IP whitelists.
+sidebar_position: 2
+hide_title: false
+draft: true
+hide_table_of_contents: false
+---
+
+:::caution Draft placeholder
+This page is being prepared before the migration window opens. Final dates,
+Tealstreet IP addresses, and exchange screenshots will be added after the new
+infrastructure fleet is ready.
+:::
+
+:::note Temporary migration page
+This page is intended for the V2 shutdown and IP whitelist migration window.
+Retire it 30-60 days after the migration is complete, once support confirms the
+old Tealstreet IPs are no longer needed.
+:::
+
+Tealstreet is moving legacy infrastructure to a new setup. Most users only need
+to know which path applies to them:
+
+- If you still use the old V2 terminal, move to V3 and add your exchange
+  accounts there.
+- If you already use V3 with Tealstreet IP whitelisting enabled, update the IP
+  whitelist on each exchange API key during the overlap window.
+
+## Which one am I?
+
+### I use V2
+
+You are a V2 user if you still trade from the old Tealstreet terminal or have
+not created a V3 Tealstreet account yet. V2 account data and exchange
+connections do not move automatically into V3.
+
+Follow [V2 user - move to V3](#v2-user---move-to-v3).
+
+### I already use V3
+
+You are a V3 user if you already sign in to the current Tealstreet terminal and
+have added exchange API keys there.
+
+If any of your exchange API keys use the Tealstreet Network, TS Network, or
+Tealstreet IP whitelist option, follow
+[V3 user - update your exchange IP whitelist](#v3-user---update-your-exchange-ip-whitelist).
+
+If your exchange key does not use Tealstreet IP whitelisting, this migration
+should not require an exchange-side whitelist edit.
+
+## Migration timeline
+
+| Item | Status |
+| --- | --- |
+| Announcement date | `[add date]` |
+| New Tealstreet IP list available | `[add date]` |
+| Overlap window | `[add start and end dates]` |
+| Final V2 shutdown | `[add date]` |
+| Old AWS IPs retired | `[add date after grace period]` |
+
+During the overlap window, keep both the old and new Tealstreet IPs on your
+exchange API key when the exchange allows it. Do not remove the old IPs until
+Tealstreet announces that the cutover is complete.
+
+## V2 user - move to V3
+
+V2 is being retired. To keep trading on Tealstreet, create or use a V3 account
+and add your exchange API keys there.
+
+### Before you start
+
+- Keep your exchange website open in a separate tab. Some exchanges require
+  two-factor authentication or email confirmation before you can create or edit
+  API keys.
+- Leave enough time for exchange security cooldowns. Some venues delay API key
+  changes before they become active.
+- If you have open positions, plan the move when you can monitor your exchange
+  account directly.
+
+### Move your account
+
+1. Sign in to the current Tealstreet V3 terminal.
+2. Open **Settings** and choose **Add new key**.
+3. Select your exchange.
+4. Create a new API key on the exchange, or edit an existing key if the
+   exchange supports doing that safely.
+5. Add the required permissions shown in the exchange-specific guide.
+6. Add the Tealstreet IP whitelist values shown in the V3 API key form.
+7. Paste the API key and secret into Tealstreet V3.
+8. Save the key and confirm that the account connects successfully.
+
+Start with the general API walkthrough, then use the guide for your exchange:
+
+- [API General](/docs/connect/api-general)
+- [Binance](/docs/connect/binance)
+- [Bybit](/docs/connect/bybit)
+- [Bitget](/docs/connect/bitget)
+- [BloFin](/docs/connect/blofin)
+- [Coinbase](/docs/connect/coinbase)
+- [OKX](/docs/connect/okx)
+- [WOO X](/docs/connect/woo)
+
+:::tip Third-party app selectors
+Some exchanges offer a Tealstreet third-party app selector instead of a manual
+IP whitelist field. If your exchange guide shows that option, use the selector
+shown there and follow the exchange-specific instructions.
+:::
+
+### Screenshot placeholders
+
+Final screenshots will be added before publication:
+
+- V3 **Settings** button.
+- V3 **Add new key** button.
+- Exchange selection menu.
+- Tealstreet IP whitelist field or copy button.
+- Example exchange-side API whitelist screen.
+
+## V3 user - update your exchange IP whitelist
+
+If you already use V3, you usually do not need a new Tealstreet account. The
+main task is to update the IP whitelist on every exchange API key that uses
+Tealstreet routing.
+
+### What changes
+
+Tealstreet is replacing the old AWS IP addresses used by the Tealstreet Network
+with new Tealstreet IP addresses. For a short overlap window, both sets should
+work. After the migration window closes, keys that still allow only the old IPs
+may stop connecting through Tealstreet.
+
+### IP list
+
+The final IP list will be added after the new fleet is ready.
+
+| Region or role | Old Tealstreet IPs | New Tealstreet IPs |
+| --- | --- | --- |
+| Japan / Tokyo routing | `[add old AWS IPs]` | `[add new IPs]` |
+| Singapore routing | `[add old AWS IPs]` | `[add new IPs]` |
+| WebSocket or proxy routing | `[add old AWS IPs]` | `[add new IPs]` |
+| Exchange-specific extras | `[add old AWS IPs]` | `[add new IPs]` |
+
+When Tealstreet shows both old and new blocks in the API key form, copy the new
+Tealstreet IP list for your exchange. Keep the old list in place until the
+published retirement date when the exchange allows both lists.
+
+### Update each exchange key
+
+Repeat these steps for each Tealstreet-connected exchange account:
+
+1. Open the Tealstreet V3 API key settings for that exchange account.
+2. Copy the new Tealstreet IP list shown in the form.
+3. Open the API management page on the exchange website.
+4. Find the API key used by Tealstreet.
+5. Edit the IP whitelist or allowed IP addresses.
+6. Add the new Tealstreet IPs.
+7. Keep the old Tealstreet IPs during the overlap window, if the exchange allows
+   enough entries.
+8. Save the exchange-side API key changes and complete any 2FA or email checks.
+9. Return to Tealstreet and reconnect or validate the account.
+
+:::warning Give exchanges time to apply the change
+API key edits can take several minutes to propagate. Some exchanges also apply
+security cooldowns after changing API permissions or IP whitelists. If a key
+does not reconnect immediately, wait a few minutes and try again before deleting
+or recreating it.
+:::
+
+### If the exchange does not allow both lists
+
+Some exchanges limit how many IP addresses can be added to one API key. If you
+cannot keep both the old and new Tealstreet IPs at the same time:
+
+- Confirm that you copied the exact new list shown in Tealstreet.
+- Check the exchange-specific guide for that venue.
+- Contact Tealstreet support before removing the old list if you are unsure.
+- Avoid making the change while you are actively managing a position only
+  through Tealstreet.
+
+## Exchange screenshot placeholders
+
+Support will add exchange-specific screenshots as demand surfaces.
+
+| Exchange | Placeholder needed |
+| --- | --- |
+| Binance | API whitelist edit screen |
+| Bybit | Third-party app selector or IP whitelist screen |
+| Bitget | API whitelist edit screen |
+| BloFin | Third-party app selector or IP whitelist screen |
+| Coinbase | API key allowed IP screen |
+| OKX | Third-party app selector or IP whitelist screen |
+| WOO X | API whitelist edit screen |
+
+## Troubleshooting
+
+### Tealstreet says my API key, secret, or whitelist is incorrect
+
+Check the exchange API key first:
+
+- The API key and secret must match the key you added to Tealstreet.
+- The key must still have the required trading permissions.
+- The IP whitelist must include the new Tealstreet IPs for your routing option.
+- If the old and new lists are both required during the overlap window, confirm
+  both were saved.
+
+### I updated the whitelist and it still will not connect
+
+Wait a few minutes, refresh Tealstreet, and validate the account again. If it
+still fails, take a screenshot of the exchange-side API whitelist and contact
+support.
+
+### Should I create a brand-new exchange API key?
+
+If the exchange allows you to safely edit the IP whitelist on the existing key,
+editing is usually faster. If the exchange applies long cooldowns, has a strict
+IP limit, or the key has old permissions you no longer understand, creating a
+fresh key may be safer. Follow the exchange-specific guide before deleting the
+old key.
+
+### Where can I get help?
+
+Use the [Contact Us](/docs/support/contact-us) page if you need help from the
+Tealstreet team. Include your exchange name, whether you are moving from V2 or
+already on V3, and the exact error shown in Tealstreet.
