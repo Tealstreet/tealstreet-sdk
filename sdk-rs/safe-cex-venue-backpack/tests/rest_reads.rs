@@ -882,7 +882,6 @@ fn markets() {
                     (m.spot, "spot"),
                     (m.swap, "swap"),
                     (m.future, "future"),
-                    (m.option, "option"),
                     (m.contract, "contract"),
                     (m.linear, "linear"),
                     (m.inverse, "inverse"),
@@ -890,6 +889,10 @@ fn markets() {
                 ] {
                     assert_eq!(Some(b), e[k].as_bool(), "MARKETS native flags");
                 }
+                assert!(
+                    !e.as_object().unwrap().contains_key("option"),
+                    "MARKETS source omits option metadata"
+                );
                 num(m.contract_size, &e["contractSize"], "MARKETS contractSize");
                 for (n, k) in m.precision.iter().zip(["amount", "price", "base", "quote"]) {
                     num(*n, &e["precision"][k], &format!("MARKETS precision {k}"));

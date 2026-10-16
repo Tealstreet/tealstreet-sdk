@@ -6,6 +6,7 @@ use safe_cex_exchange::{
     socket_lifecycle::SocketSlot,
 };
 use safe_cex_types::{OrderSide, OrderType};
+use safe_cex_venue_backpack::native_value::NativeValue;
 use safe_cex_venue_backpack::{
     native_value::Value as Native, public_adapter::Throttle, public_control::JsString, rest_reads,
 };
@@ -332,4 +333,66 @@ fn concrete_exchange_limits_to_ten_requests_per_second() {
         "CLASS native RPS resumes after interval"
     );
     o.dispose().unwrap();
+}
+
+#[test]
+fn shared_runtime_graph_reaches_backpack_throttled_ticker_without_projection() {
+    use safe_cex_exchange::js_runtime::value::Js;
+    use safe_cex_num::JsJsonValue;
+
+    let (owner, runtime, store, _) = support::fixture();
+    let socket = owner.public_websocket.get().unwrap();
+    let data = Js::object(vec![
+        ("s", Js::str("BTC_USDC")),
+        ("c", Js::str("-0")),
+        ("P", Js::Number(f64::NAN)),
+        ("v", Js::Number(f64::INFINITY)),
+        ("q", Js::Number(f64::NEG_INFINITY)),
+    ]);
+    let prior_percentage = store.tickers()[0].percentage;
+    assert!(data.field("P").unwrap().as_f64().unwrap().is_nan());
+    socket.ticker_handler.call(data.clone()).unwrap();
+    let ticker = store.tickers()[0].clone();
+    assert_eq!(ticker.last.to_bits(), (-0.0f64).to_bits());
+    assert_eq!(ticker.percentage.to_bits(), prior_percentage.to_bits());
+    assert_eq!(ticker.volume, f64::INFINITY);
+    assert_eq!(ticker.quote_volume, f64::NEG_INFINITY);
+
+    runtime.now.set(50.0);
+    socket.ticker_handler.call(data.clone()).unwrap();
+    assert!(
+        socket
+            .ticker_handler
+            .pending
+            .borrow()
+            .as_ref()
+            .unwrap()
+            .same_reference(&data),
+        "SHARED GRAPH throttle retains the caller's runtime object"
+    );
+    data.set("c", Js::Number(37.5)).unwrap();
+    runtime.now.set(1000.0);
+    runtime.pump();
+    assert_eq!(
+        store.tickers()[0].last,
+        37.5,
+        "SHARED GRAPH deferred reader sees runtime mutation"
+    );
+
+    let child = Js::holey_array(vec![None, Some(Js::Number(-0.0))]);
+    let input = Js::object(vec![("child", child.clone())]);
+    let spread = Native::spread(&[input]).unwrap();
+    assert!(spread.field("child").unwrap().same_reference(&child));
+    assert!(
+        matches!(&spread.prepared().unwrap(), JsJsonValue::Object(rows)
+        if matches!(&rows[0].1, JsJsonValue::Array(items)
+            if matches!(items[0], JsJsonValue::Undefined)
+                && matches!(items[1], JsJsonValue::Number(n) if n.to_bits() == (-0.0f64).to_bits())))
+    );
+    let lone = Js::utf16(&[0xd800]);
+    assert_eq!(lone.string().unwrap(), [0xd800]);
+    assert!(
+        lone.prepared().is_err(),
+        "shared storage keeps the explicit UTF-8 projection refusal"
+    );
 }

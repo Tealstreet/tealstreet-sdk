@@ -551,7 +551,7 @@ still cannot propagate the source synchronous throw; no local ABI is invented.
 
 Enrichment's labeled field-identity supplement preserves the original oracle
 bytes and independently reads retained Order/extra fields after production.
-The AST census covers 21 plus nine properties and 43 compatible field pairs;
+The AST census covers 22 plus nine properties and 46 compatible field pairs;
 24 owned/unowned outputs contrast optional trigger enums, flags and quantities.
 Source total/per-case counts and native expected/actual length assertions guard
 the comparison before zip; a dropped unowned output cannot silently skip a row.
@@ -640,3 +640,10 @@ keys, then checks native cleanup order and values before source projections.
 Worker offline recovery dispatches through the object-safe Exchange hook. Each
 socket enforces its protocol recovery flag after disposed/force-closed guards;
 the base visits every socket before reducing the boolean results.
+
+The task identity and numeric graph source walkers include Market.option's closed
+literal fields and optional price limits. Independent native field projections
+cover all option terms, price minimum and Order.clientOrderId. Fixed inventories
+include 36 market-identity cases, 59/43 TWAP option cases/leaves, 56/41 TWAP state
+cases/leaves and 3960 numeric comparisons; future source additions still fail
+closed instead of shrinking the compared fields.

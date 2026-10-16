@@ -999,3 +999,14 @@ The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
 worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
 completion hook and reconstructed error properties. Arguments/results use the
 existing JSON worker boundary; it does not create a parallel worker protocol.
+
+Configured js_runtime retries retain `config["axios-retry"]` through the effective
+failed-config replay. The source condition sees the current retryCount; retryDelay
+sees its incremented value. The shared runtime owns the delay, and request start
+time resets in the installed request interceptor. Unless shouldResetTimeout is
+truthy, elapsed wall time and the chosen delay consume the remaining timeout;
+an exhausted budget rejects the original error before sleeping or sending.
+`tests/client_retry.rs` compares native traces against installed Axios/axios-retry,
+including request overrides, async predicate results, timer failure and loss of
+an observer during a pending delay. This covers configured callbacks within the
+runtime's existing HTTP and timer profiles.
