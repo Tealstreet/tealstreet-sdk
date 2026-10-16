@@ -426,6 +426,20 @@ impl RustVenueHost for NativeVenueHost {
         )
     }
 
+    fn weex(&self) -> Result<safe_cex_venue_weex::WeexDependencies, ExchangeError> {
+        Ok(safe_cex_venue_weex::WeexDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            // Native SDK date helpers use a UTC host profile.
+            local_wall_time_to_utc: Rc::new(|millis| millis),
+        })
+    }
+
     fn woo(&self) -> Result<safe_cex_venue_woo::WooDependencies, ExchangeError> {
         Ok(safe_cex_venue_woo::WooDependencies {
             runtime: self.runtime.clone(),

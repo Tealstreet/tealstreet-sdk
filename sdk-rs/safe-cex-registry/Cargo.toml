@@ -32,6 +32,7 @@ safe-cex-venue-cryptocom.workspace = true
 safe-cex-venue-paradex.workspace = true
 safe-cex-venue-phemex.workspace = true
 safe-cex-venue-woo.workspace = true
+safe-cex-venue-weex.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

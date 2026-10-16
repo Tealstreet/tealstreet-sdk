@@ -767,6 +767,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Grvt,
             ExchangeName::Bybit,
             ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
             ExchangeName::Coinbase,
             ExchangeName::Coinbasespot,
             ExchangeName::Cryptocom,
@@ -787,6 +788,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Phemex,
             ExchangeName::Polymarket,
             ExchangeName::Woo,
+            ExchangeName::Weex,
         ],
         "REGISTRY table membership is a deliberate, reviewed list"
     );

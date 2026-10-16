@@ -3984,6 +3984,7 @@ dependencies = [
  "safe-cex-venue-paradex",
  "safe-cex-venue-phemex",
  "safe-cex-venue-polymarket",
+ "safe-cex-venue-weex",
  "safe-cex-venue-woo",
  "serde",
  "serde_json",
@@ -4439,10 +4440,12 @@ name = "safe-cex-venue-weex"
 version = "0.1.0"
 dependencies = [
  "base64 0.22.1",
+ "futures",
  "hmac 0.12.1",
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",
