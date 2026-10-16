@@ -292,7 +292,10 @@ pub(crate) fn install(
         def(
             name,
             Js::function(name, move |_, a| {
-                let host = shared(&w)?.extra.api.with_options(to_typed(&arg(&a, 0))?);
+                let host = shared(&w)?
+                    .extra
+                    .api
+                    .with_options(base_exchange::exchange_options(&arg(&a, 0))?);
                 Ok(client::create(host, Js::object(vec![])))
             }),
         )?;
