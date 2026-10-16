@@ -26,7 +26,7 @@ MUTATIONS = [
     ("place_orders", '"placeOrders"', '"placeOrder"', "place_orders_places_each_order_in_series"),
     ("start", '"start"', '"fetchMarkets"', "start_loads_markets_tickers_sockets_and_the_private_snapshot"),
     ("get_account", '"getAccount"', '"validateAccount"', "get_account_reads_the_account_uuid"),
-    ("validate_account", "project_balance(&balance)", "Ok::<_, Thrown>(())", "validate_account_returns_the_balance_on_success"),
+    ("validate_account", '"validateAccount"', '"getAccount"', "validate_account_returns_the_balance_on_success"),
     ("fetch_positions", '"fetchPositions"', '"fetchOrders"', "fetch_positions_maps_signed_quantity"),
     ("fetch_orders", '"fetchOrders"', '"fetchPositions"', "fetch_orders_merges_regular_and_advanced_books"),
     ("fetch_markets", '"fetchMarkets"', '"fetchTickers"', "fetch_markets_maps_perpetual_instruments"),

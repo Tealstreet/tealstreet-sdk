@@ -239,7 +239,27 @@ fn validate_account_returns_the_balance_on_success() {
     assert_eq!(serde_json::to_value(&result.error).unwrap(), json!(""));
     let balance = result.balance.expect("balance");
     assert_eq!(balance.total, 123.0);
-    assert_eq!(balance.currencies.expect("currencies")["USD"].free, 9.0);
+    let usd = balance
+        .currencies
+        .expect("currencies")
+        .get("USD")
+        .expect("USD")
+        .clone();
+    assert!(
+        matches!(
+            usd,
+            safe_cex_types::CurrencyBalance::AvailableLocked {
+                available: 9.0,
+                locked: 6.0
+            }
+        ),
+        "REST currency retains its source variant"
+    );
+    assert_eq!(
+        serde_json::to_value(usd).unwrap(),
+        json!({"available":9.0,"locked":6.0}),
+        "validation preserves exact currency field names"
+    );
     assert_eq!(
         safe_cex_store::Store::balance(h.store.as_ref()).total,
         0.0,
@@ -487,7 +507,21 @@ fn start_loads_markets_tickers_sockets_and_the_private_snapshot() {
     let balance = safe_cex_store::Store::balance(h.store.as_ref());
     assert_eq!(balance.total, 123.0, "tick stores the REST balance");
     let usd = &balance.currencies.as_ref().expect("currencies")["USD"];
-    assert_eq!((usd.free, usd.used, usd.total), (9.0, 6.0, 15.0));
+    assert!(
+        matches!(
+            usd,
+            safe_cex_types::CurrencyBalance::AvailableLocked {
+                available: 9.0,
+                locked: 6.0
+            }
+        ),
+        "REST currency keeps raw available/locked shape in Store"
+    );
+    assert_eq!(
+        serde_json::to_value(usd).unwrap(),
+        json!({"available":9.0,"locked":6.0}),
+        "Store preserves exact currency field names"
+    );
     drop(balance);
     h.venue().dispose().expect("dispose");
 }

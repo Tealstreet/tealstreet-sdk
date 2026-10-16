@@ -24,13 +24,13 @@ venue's rejection formatter. Delaying rejection formatting preserves the HTTP
 response/config used to identify a signature rejection. Removing the wrapper
 must fail the non-2xx signature-resend E2E test until the shared ordering is fixed.
 
-Open binding finding: source REST `fetchBalance` returns currency records with
-`available`/`locked` fields under an `as any` cast. The inherited binding projects
-them to the shared typed Balance shape. This changes observable output and is
-tracked on the class manifest row; it is not accepted as parity. Resolve that
-boundary before marking the binding ready. Run `parity:check` against the actual
-workspace; the historical one-crate source view lacks the workspace's exemption
-and structural re-export context.
+Source REST `fetchBalance` returns currency records with `available`/`locked`
+under an `as any` cast. The binding uses shared `CurrencyBalance::AvailableLocked`
+at both validation and Store boundaries, preserving those exact fields. It does
+not normalize them to free/used/total/upnl. Native E2E checks USD available9/locked6
+from quantity15 and max_withdrawal_balance9, including exact serialized keys.
+Run `parity:check` against the actual workspace; the historical one-crate source
+view lacks workspace exemption and structural re-export context.
 
 The first slice mirrors the eight configuration constants and
 `mapCandlestickInterval` from `cryptocom.types.ts`. Eleven wire records (Instrument, Ticker, Candlestick, PositionBalance, Error, Trade, AccountsResponse, BalanceSummary, Book, TradeFill and Order)

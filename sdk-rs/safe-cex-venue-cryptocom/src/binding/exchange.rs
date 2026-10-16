@@ -71,51 +71,6 @@ fn not_implemented<'a, T: 'a>() -> ExchangeFuture<'a, T> {
     Box::pin(async { Err(ExchangeError::new("Not implemented")) })
 }
 
-/// CHOSEN: REST `fetchBalance` casts `{ available, locked }` rows into
-/// `Balance.currencies`; the typed model takes them in the private socket's
-/// currency shape (free = available, used = locked, total = their sum, upnl 0).
-fn project_balance(balance: &Js) -> Result<(), Thrown> {
-    let currencies = balance.get("currencies")?;
-    if currencies.is_nullish() {
-        return Ok(());
-    }
-    for (key, row) in currencies.own_entries()? {
-        if !row.has_own("available") || row.has_own("total") {
-            continue;
-        }
-        let (available, locked) = (row.get("available")?, row.get("locked")?);
-        let total = safe_cex_exchange::js_runtime::ops::add(&available, &locked)?;
-        currencies.set_key(
-            &key,
-            Js::object(vec![
-                ("total", total),
-                ("free", available),
-                ("used", locked),
-                ("upnl", Js::Number(0.0)),
-            ]),
-        )?;
-    }
-    Ok(())
-}
-
-/// The Store facade, with `update({ balance })` taking the projected currencies.
-fn store_facade(store: Rc<dyn Store>) -> Result<Js, Thrown> {
-    let facade = store::facade(store);
-    let update = facade.get("update")?;
-    let receiver = facade.clone();
-    facade.define(
-        "update",
-        Js::function("update", move |_, a| {
-            let balance = arg(&a, 0).get("balance")?;
-            if !balance.is_nullish() {
-                project_balance(&balance)?;
-            }
-            update.call(receiver.clone(), a)
-        }),
-    )?;
-    Ok(facade)
-}
-
 /// Define the module-scope classes and `createAPI`, which need the live scope.
 fn define_classes(weak: &std::rc::Weak<Shared>, globals: &Js) -> Result<Js, Thrown> {
     let runtime = ops::runtime_ops(weak.clone());
@@ -175,7 +130,7 @@ impl CryptocomExchange {
         let class = define_classes(&weak, &shared.globals).map_err(err)?;
         let js_name = from_typed(&name).map_err(err)?;
         let js_options = from_typed(&options).map_err(err)?;
-        let js_store = store_facade(store.clone()).map_err(err)?;
+        let js_store = store::facade(store.clone());
         let receiver =
             ops::construct(&weak, class, vec![js_name, js_options, js_store]).map_err(err)?;
         *shared.exchange.borrow_mut() = receiver.clone();
@@ -265,17 +220,7 @@ impl Exchange for CryptocomExchange {
         self.invoke("getAccount", vec![])
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
-        let this = self.rt.this.clone();
-        Box::pin(async move {
-            let value = await_js(this.call_method("validateAccount", vec![]).map_err(err)?)
-                .await
-                .map_err(err)?;
-            let balance = value.get("balance").map_err(err)?;
-            if !balance.is_nullish() {
-                project_balance(&balance).map_err(err)?;
-            }
-            to_typed(&value).map_err(err)
-        })
+        self.invoke("validateAccount", vec![])
     }
     // ts: fetchPositions / fetchOrders take no symbol filter.
     fn fetch_positions(&self, _symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Position>> {
