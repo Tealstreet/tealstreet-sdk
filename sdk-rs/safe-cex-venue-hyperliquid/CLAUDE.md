@@ -1,8 +1,10 @@
 # Hyperliquid Rust venue
 
 Behavioral authority: [Hyperliquid guidance](../../packages/safe-cex/src/exchanges/hyperliquid/CLAUDE.md).
-Current implementation covers types/tables, API and pure exchange/history helpers; exchange identity/TIF/cancel state is being ported over BaseExchange; transport
-constructor composition and WS remain pending.
+The production constructor binds the class to shared BaseExchange, store, REST and
+socket hosts. The native registry supplies options-aware transport, hosted signers
+and a caller-owned limiter. Earlier continuation notes below are historical;
+the production binding section records the current entrypoint and runtime choices.
 `deriveClosedPositions` is separate from `fetchClosedPnl`. Future exchange work
 must preserve the surgical store mutation in `fetchOrdersInternal` and the
 explicit fire-and-forget `refreshOrders` wrapper, never generalize the exception.
