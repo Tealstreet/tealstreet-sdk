@@ -1,6 +1,7 @@
 //! The JS BaseExchange instance a venue's assembled class extends: TS base
 //! fields plus members bridged to the Rust core BaseExchange.
 use super::{
+    client::JsRestAdapter,
     promise::Promise,
     sockets::JsSocketContext,
     value::{Getter, Js, Thrown, arg, from_typed, to_json, to_typed},
@@ -9,13 +10,22 @@ use crate::{
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     external::ExternalPublicData,
-    runtime::ExchangeRuntime,
+    runtime::{ExchangeRuntime, ListenerCleanup},
 };
 use safe_cex_store::Store;
-use safe_cex_types::{
-    ExchangeName, ExchangeOptions, ExchangeOptionsExternalPublicData, Market, PlaceOrderOpts,
+use safe_cex_transport::{
+    RestAdapter, TransportError, TransportProvider,
+    secondary::{RateLimitWrapper, create_api_with_secondary_key},
 };
-use std::rc::{Rc, Weak};
+use safe_cex_types::{
+    Candle, ExchangeName, ExchangeOptions, ExchangeOptionsExternalPublicData, Market, OHLCVOptions,
+    OrderBook, PlaceOrderOpts,
+};
+use std::{
+    cell::RefCell,
+    rc::{Rc, Weak},
+    sync::Arc,
+};
 
 /// Builds the `options.externalPublicData` provider; the host supplies it.
 pub type ExternalPublicDataFactory =
@@ -218,25 +228,91 @@ pub fn create(
     }
     {
         let receiver = this.clone();
+        let ws_runtime = context.runtime.clone();
         def(
             "createXhrWithSecondaryKey",
             Js::function("createXhrWithSecondaryKey", move |_, a| {
-                let other = arg(&a, 2);
-                let xhr = arg(&a, 1).call(Js::Undefined, vec![arg(&a, 0), receiver.clone()])?;
-                let limit = if other.is_nullish() {
-                    Js::Undefined
-                } else {
-                    other.get("rateLimit")?
-                };
-                let xhr = if limit.is_callable() {
-                    limit.call(Js::Undefined, vec![xhr])?
-                } else {
-                    xhr
-                };
-                receiver.set("_primaryXhr", xhr.clone())?;
-                receiver.set("_secondaryXhr", xhr.clone())?;
+                let (xhr, primary, secondary) =
+                    create_xhr_with_secondary_key(ws_runtime.transport().as_ref(), &receiver, &a)?;
+                receiver.set("_primaryXhr", primary)?;
+                receiver.set("_secondaryXhr", secondary)?;
                 Ok(xhr)
             }),
+        );
+    }
+    {
+        let context = Rc::downgrade(context);
+        let runtime = runtime.clone();
+        def(
+            "fetchAndSetPrivateSnapshot",
+            Js::function("fetchAndSetPrivateSnapshot", move |_, a| {
+                let venue = assembled_venue(&context)?;
+                let tries = arg(&a, 0);
+                // ts: `while (count < tries)` with `tries = 1`, so a fraction rounds up.
+                let tries = if tries.is_undefined() {
+                    1.0
+                } else {
+                    tries.to_number()?
+                };
+                let tries = if tries > 0.0 {
+                    tries.ceil().min(f64::from(u32::MAX)) as u32
+                } else {
+                    0
+                };
+                Ok(Js::Promise(Promise::spawn(
+                    &runtime,
+                    Box::pin(async move {
+                        venue.fetch_and_set_private_snapshot(tries).await?;
+                        Ok(Js::Undefined)
+                    }),
+                )))
+            }),
+        );
+    }
+    {
+        let context = Rc::downgrade(context);
+        let runtime = runtime.clone();
+        def(
+            "fetchAndSetOrders",
+            Js::function("fetchAndSetOrders", move |_, a| {
+                let venue = assembled_venue(&context)?;
+                let symbols = arg(&a, 0);
+                let symbols: Option<Vec<String>> = if symbols.truthy() {
+                    Some(to_typed(&symbols)?)
+                } else {
+                    None
+                };
+                Ok(Js::Promise(Promise::spawn(
+                    &runtime,
+                    Box::pin(async move {
+                        let orders = venue.fetch_and_set_orders(symbols).await?;
+                        from_typed(&orders)
+                    }),
+                )))
+            }),
+        );
+    }
+    {
+        let base = base.clone();
+        let runtime = runtime.clone();
+        // One JS object per live provider, so repeated reads keep the field's identity.
+        let held: Rc<RefCell<Option<(Rc<dyn ExternalPublicData>, Js)>>> = Rc::default();
+        this.define_accessor(
+            "externalPublicDataProvider",
+            Some(Rc::new(move |_| {
+                let Some(provider) = base.external_public_data_provider.borrow().clone() else {
+                    return Ok(Js::Undefined);
+                };
+                if let Some((current, object)) = &*held.borrow()
+                    && Rc::ptr_eq(current, &provider)
+                {
+                    return Ok(object.clone());
+                }
+                let object = external_provider_object(provider.clone(), runtime.clone());
+                *held.borrow_mut() = Some((provider, object.clone()));
+                Ok(object)
+            })),
+            None,
         );
     }
     {
@@ -397,6 +473,210 @@ pub fn create(
         );
     }
     Ok((this, base))
+}
+
+type ClientRows = RefCell<Vec<(Arc<dyn RestAdapter>, Js)>>;
+
+/// ts: createApiWithSecondaryKey through the typed `create_api_with_secondary_key`, which
+/// decides the split, the secondary_* overrides and the secondary proxy precedence.
+/// Returns `[xhr, primaryXhr, secondaryXhr]`; without a secondary key all three are one client.
+fn create_xhr_with_secondary_key(
+    transport: &dyn TransportProvider,
+    receiver: &Js,
+    a: &[Js],
+) -> Result<(Js, Js, Js), Thrown> {
+    let opts = arg(a, 0);
+    let create_api = arg(a, 1);
+    let other = arg(a, 2);
+    let other_member = |key: &str| {
+        if other.is_nullish() {
+            Ok(Js::Undefined)
+        } else {
+            other.get(key)
+        }
+    };
+    let proxy_url = other_member("proxyUrl")?
+        .as_str()
+        .map(|url| String::from_utf16_lossy(url));
+    let rate_limit = other_member("rateLimit")?;
+    let secondary_rate_limit = other_member("secondaryRateLimit")?;
+    let typed: ExchangeOptions = to_typed(&opts)?;
+
+    let rows: ClientRows = RefCell::default();
+    let failure: RefCell<Option<Thrown>> = RefCell::default();
+    let created = std::cell::Cell::new(0_u32);
+    let record = |xhr: Js| -> Arc<dyn RestAdapter> {
+        // The typed helper takes `Arc` adapters; a JS client stays on its own thread.
+        #[expect(clippy::arc_with_non_send_sync)]
+        let adapter: Arc<dyn RestAdapter> = Arc::new(JsRestAdapter::new(xhr.clone()));
+        rows.borrow_mut().push((adapter.clone(), xhr));
+        adapter
+    };
+    let client_of = |adapter: &Arc<dyn RestAdapter>| {
+        rows.borrow()
+            .iter()
+            .find(|(row, _)| Arc::ptr_eq(row, adapter))
+            .map(|(_, xhr)| xhr.clone())
+    };
+    let fail = |thrown: Thrown| {
+        let message = thrown.message();
+        failure.borrow_mut().get_or_insert(thrown);
+        TransportError::Host(message)
+    };
+    let create = |options: &ExchangeOptions| {
+        let call = created.get();
+        created.set(call + 1);
+        let options = if call == 0 {
+            opts.clone()
+        } else {
+            secondary_options(&opts, options.override_proxy_url.as_deref()).map_err(fail)?
+        };
+        let xhr = create_api
+            .call(Js::Undefined, vec![options, receiver.clone()])
+            .map_err(fail)?;
+        Ok(record(xhr))
+    };
+    let limiter = |limit: Js| {
+        move |adapter: Arc<dyn RestAdapter>| -> Arc<dyn RestAdapter> {
+            let Some(xhr) = client_of(&adapter) else {
+                return adapter;
+            };
+            match limit.call(Js::Undefined, vec![xhr]) {
+                Ok(limited) => record(limited),
+                Err(thrown) => {
+                    fail(thrown);
+                    adapter
+                }
+            }
+        }
+    };
+    let primary_limit = rate_limit.truthy().then(|| limiter(rate_limit.clone()));
+    let secondary_limit = secondary_rate_limit
+        .truthy()
+        .then(|| limiter(secondary_rate_limit.clone()));
+    let clients = create_api_with_secondary_key(
+        &typed,
+        transport,
+        proxy_url.as_deref(),
+        create,
+        primary_limit.as_ref().map(|f| f as &RateLimitWrapper<'_>),
+        secondary_limit.as_ref().map(|f| f as &RateLimitWrapper<'_>),
+    );
+    if let Some(thrown) = failure.borrow_mut().take() {
+        return Err(thrown);
+    }
+    let clients = clients.map_err(|error| Thrown::error("Error", &error.to_string()))?;
+    let primary = client_of(&clients.primary)
+        .ok_or_else(|| Thrown::error("Error", "createApi returned no primary client"))?;
+    if clients.shares_primary_adapter() {
+        return Ok((primary.clone(), primary.clone(), primary));
+    }
+    // The secondary client is the last one built: created after the primary, then rate limited.
+    let secondary = rows
+        .borrow()
+        .last()
+        .map(|(_, xhr)| xhr.clone())
+        .ok_or_else(|| Thrown::error("Error", "createApi returned no secondary client"))?;
+    Ok((reads_on(&primary, &secondary), primary, secondary))
+}
+
+/// ts: `{ ...options, ...secondary_* overrides, overrideProxyUrl }` over the JS options object.
+fn secondary_options(opts: &Js, proxy: Option<&str>) -> Result<Js, Thrown> {
+    let prefix = super::value::utf16("secondary_");
+    let out = opts.spread_object()?;
+    for (key, value) in opts.own_entries()? {
+        if let Some(stripped) = key.strip_prefix(prefix.as_ref()) {
+            out.define_key(stripped, value)?;
+        }
+    }
+    out.define("overrideProxyUrl", proxy.map_or(Js::Undefined, Js::str))?;
+    Ok(out)
+}
+
+/// ts: the get-trapping Proxy over the primary client. Every other member is read through
+/// the prototype link to the primary; `get(url, config)` goes to the secondary client.
+fn reads_on(primary: &Js, secondary: &Js) -> Js {
+    let secondary = secondary.clone();
+    let routed = Js::object_with_class(
+        "Axios",
+        vec![(
+            "get",
+            Js::function("get", move |_, a| {
+                secondary.call_method("get", vec![arg(&a, 0), arg(&a, 1)])
+            }),
+        )],
+    );
+    if let Js::Object(object) = &routed {
+        *object.proto.borrow_mut() = Some(primary.clone());
+    }
+    routed
+}
+
+/// The `externalPublicDataProvider` members venue bodies call, bound to the Rust provider.
+/// A candle or book the JS callback throws on is reported, as a provider listener would be.
+fn external_provider_object(
+    provider: Rc<dyn ExternalPublicData>,
+    runtime: Rc<dyn ExchangeRuntime>,
+) -> Js {
+    fn deliver<T: serde::Serialize>(
+        callback: &Js,
+        value: &T,
+        runtime: &Rc<dyn ExchangeRuntime>,
+        source: &str,
+    ) {
+        let delivered = from_typed(value).and_then(|v| callback.call(Js::Undefined, vec![v]));
+        if let Err(error) = delivered {
+            runtime.report_exception(
+                &error.to_exchange_error(),
+                &serde_json::json!({ "source": source }),
+            );
+        }
+    }
+    fn unsubscribe(cleanup: ListenerCleanup) -> Js {
+        let slot = RefCell::new(Some(cleanup));
+        Js::function("unsubscribe", move |_, _| {
+            let cleanup = slot.borrow_mut().take();
+            if let Some(cleanup) = cleanup {
+                cleanup()?;
+            }
+            Ok(Js::Undefined)
+        })
+    }
+    let (candles, books) = (provider.clone(), provider);
+    let (candle_runtime, book_runtime) = (runtime.clone(), runtime);
+    Js::object_with_class(
+        "ExternalPublicDataProvider",
+        vec![
+            (
+                "subscribeCandle",
+                Js::function("subscribeCandle", move |_, a| {
+                    let options: OHLCVOptions = to_typed(&arg(&a, 0))?;
+                    let (callback, runtime) = (arg(&a, 1), candle_runtime.clone());
+                    let cleanup = candles.listen_ohlcv(
+                        options,
+                        Rc::new(move |candle: Candle| {
+                            deliver(&callback, &candle, &runtime, "subscribeCandle")
+                        }),
+                    )?;
+                    Ok(unsubscribe(cleanup))
+                }),
+            ),
+            (
+                "subscribeOrderbook",
+                Js::function("subscribeOrderbook", move |_, a| {
+                    let symbol = text(&arg(&a, 0))?;
+                    let (callback, runtime) = (arg(&a, 1), book_runtime.clone());
+                    let cleanup = books.listen_order_book(
+                        symbol,
+                        Rc::new(move |book: OrderBook| {
+                            deliver(&callback, &book, &runtime, "subscribeOrderbook")
+                        }),
+                    )?;
+                    Ok(unsubscribe(cleanup))
+                }),
+            ),
+        ],
+    )
 }
 
 /// A JS `(markets) => markets` overlay as the core's typed overlay; null is none.
