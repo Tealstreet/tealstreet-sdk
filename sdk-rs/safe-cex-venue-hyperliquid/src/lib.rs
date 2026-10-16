@@ -1,6 +1,7 @@
 //! Hyperliquid types and REST API; exchange/WS implementations remain pending.
 pub mod agent;
 pub mod balance_state;
+pub mod binding;
 pub mod browser_approval_flows;
 pub mod builder_fee;
 pub mod constants;

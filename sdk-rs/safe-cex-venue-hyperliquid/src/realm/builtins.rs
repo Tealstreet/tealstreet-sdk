@@ -945,6 +945,82 @@ fn replace(r: &mut Realm, this: &Value, args: &[Value], all: bool) -> Result<Val
     Ok(Value::str(&out))
 }
 
+/// V8 DoubleToRadixCString: shortest digits that round-trip, for any radix.
+pub fn radix_string(value: f64, radix: u32) -> String {
+    if value.is_nan() {
+        return "NaN".into();
+    }
+    if value.is_infinite() {
+        return if value > 0.0 { "Infinity".into() } else { "-Infinity".into() };
+    }
+    if value == 0.0 {
+        return "0".into();
+    }
+    let chars: Vec<char> = "0123456789abcdefghijklmnopqrstuvwxyz".chars().collect();
+    let negative = value < 0.0;
+    let value = value.abs();
+    let mut integer = value.floor();
+    let mut fraction = value - integer;
+    let next_up = f64::from_bits(value.to_bits() + 1);
+    let mut delta = (0.5 * (next_up - value)).max(f64::from_bits(1));
+    let mut digits: Vec<char> = vec![];
+    if fraction >= delta {
+        loop {
+            fraction *= radix as f64;
+            delta *= radix as f64;
+            let digit = fraction as u32;
+            digits.push(chars[digit as usize]);
+            fraction -= digit as f64;
+            if (fraction > 0.5 || (fraction == 0.5 && digit & 1 == 1)) && fraction + delta > 1.0 {
+                // Round up, propagating carries into the integer part.
+                loop {
+                    match digits.pop() {
+                        None => {
+                            integer += 1.0;
+                            break;
+                        }
+                        Some(c) => {
+                            let d = c.to_digit(36).unwrap();
+                            if d + 1 < radix {
+                                digits.push(chars[(d + 1) as usize]);
+                                break;
+                            }
+                        }
+                    }
+                }
+                break;
+            }
+            if fraction < delta {
+                break;
+            }
+        }
+    }
+    let mut int_digits: Vec<char> = vec![];
+    // Beyond 2^53 the low digits are not representable; V8 emits zeros for them.
+    while integer / radix as f64 >= 9007199254740992.0 {
+        integer /= radix as f64;
+        int_digits.push('0');
+    }
+    while integer >= 1.0 {
+        let remainder = integer % radix as f64;
+        int_digits.push(chars[remainder as usize]);
+        integer = (integer - remainder) / radix as f64;
+    }
+    if int_digits.is_empty() {
+        int_digits.push('0');
+    }
+    let mut out = String::new();
+    if negative {
+        out.push('-');
+    }
+    out.extend(int_digits.iter().rev());
+    if !digits.is_empty() {
+        out.push('.');
+        out.extend(digits);
+    }
+    out
+}
+
 fn this_number(r: &mut Realm, this: &Value) -> Result<f64, Thrown> {
     match this {
         Value::Number(n) => Ok(*n),
@@ -970,21 +1046,8 @@ fn install_number(realm: &mut Realm) {
                 if radix == 10.0 {
                     return Ok(Value::str(&safe_cex_num::js_number_string(n)));
                 }
-                if n.fract() == 0.0 && n.is_finite() && (2.0..=36.0).contains(&radix) {
-                    let mut v = n.abs() as u128;
-                    let radix = radix as u128;
-                    let mut digits = vec![];
-                    loop {
-                        digits.push(std::char::from_digit((v % radix) as u32, radix as u32).unwrap());
-                        v /= radix;
-                        if v == 0 {
-                            break;
-                        }
-                    }
-                    if n < 0.0 {
-                        digits.push('-');
-                    }
-                    return Ok(Value::str(&digits.into_iter().rev().collect::<String>()));
+                if (2.0..=36.0).contains(&radix) && radix.fract() == 0.0 {
+                    return Ok(Value::str(&radix_string(n, radix as u32)));
                 }
                 Err(r.error_of("RangeError", "toString() radix must be between 2 and 36"))
             }

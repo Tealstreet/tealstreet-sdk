@@ -1,42 +1,33 @@
 //! Hyperliquid-owned state over the shared exchange core. Transport/WS wiring is incomplete.
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
-    exchange::{BaseExchange, Exchange},
+    exchange::BaseExchange,
 };
 use safe_cex_types::{Market, OrderSide, OrderTimeInForce, PlaceOrderOpts, PositionSide};
 use std::{
     cell::{Cell, RefCell},
     collections::BTreeMap,
+    rc::Rc,
 };
 
 pub struct HyperliquidExchange {
-    base: BaseExchange,
+    pub(crate) base: Rc<BaseExchange>,
     last_nonce: Cell<f64>,
-    capabilities: ExchangeCapabilities,
+    pub(crate) capabilities: ExchangeCapabilities,
     placed_tif: RefCell<Vec<(String, OrderTimeInForce)>>,
     cancelled: RefCell<BTreeMap<String, f64>>,
-}
-impl Exchange for HyperliquidExchange {
-    type PlaceOpts = PlaceOrderOpts;
-    fn base(&self) -> &BaseExchange {
-        &self.base
-    }
-    fn capabilities(&self) -> &ExchangeCapabilities {
-        &self.capabilities
-    }
-    fn is_public_data_only(&self) -> bool {
-        HyperliquidExchange::is_public_data_only(self)
-    }
+    pub(crate) binding: RefCell<Option<crate::binding::Binding>>,
 }
 impl HyperliquidExchange {
     /// Incomplete constructor composition: API clients and sockets are not attached yet.
     pub fn from_base(base: BaseExchange) -> Self {
         Self {
-            base,
+            base: Rc::new(base),
             last_nonce: Cell::new(0.0),
             capabilities: ExchangeCapabilities::default(),
             placed_tif: RefCell::new(Vec::new()),
             cancelled: RefCell::new(BTreeMap::new()),
+            binding: RefCell::new(None),
         }
     }
     pub fn generate_nonce(&self) -> f64 {
@@ -165,7 +156,7 @@ impl HyperliquidExchange {
 mod tests {
     use super::*;
     use safe_cex_exchange::{
-        exchange::ExchangeSettings,
+        exchange::{Exchange, ExchangeSettings},
         runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     };
     use safe_cex_store::store::DefaultStore;
@@ -263,9 +254,8 @@ mod tests {
                 .get(index)
                 .expect("PLACEMENT-CARDINALITY native index coverage");
             let store = Rc::new(DefaultStore::new());
-            let mut state = subject(json!({}), Rc::new(Clock::default()));
             let trace = read_trace::new(store.clone());
-            state.base.store = trace.clone();
+            let state = subject_with(json!({}), Rc::new(Clock::default()), trace.clone());
             if row["kind"] == "price" {
                 let nums: Vec<f64> = row["values"]
                     .as_array()
@@ -436,13 +426,20 @@ mod tests {
         }
     }
     fn subject(options: Value, clock: Rc<Clock>) -> HyperliquidExchange {
+        subject_with(options, clock, Rc::new(DefaultStore::new()))
+    }
+    fn subject_with(
+        options: Value,
+        clock: Rc<Clock>,
+        store: Rc<dyn safe_cex_store::Store>,
+    ) -> HyperliquidExchange {
         let mut options = options.as_object().unwrap().clone();
         options.entry("key").or_insert(json!(""));
         options.entry("secret").or_insert(json!(""));
         HyperliquidExchange::from_base(BaseExchange::new(
             ExchangeName::Hyperliquid,
             serde_json::from_value(Value::Object(options)).unwrap(),
-            Rc::new(DefaultStore::new()),
+            store,
             clock,
             ExchangeSettings::default(),
         ))

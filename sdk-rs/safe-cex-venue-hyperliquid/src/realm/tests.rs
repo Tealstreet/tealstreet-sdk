@@ -125,3 +125,21 @@ fn operators_follow_abstract_semantics() {
     let s = r.to_string(&e).unwrap();
     assert_eq!(String::from_utf16_lossy(&s), "Error: boom");
 }
+
+#[test]
+fn number_to_string_with_radix_matches_v8() {
+    use super::builtins::radix_string;
+    // Values printed by Node v24.20.0 (`v.toString(r)`).
+    for (v, radix, expected) in [
+        (0.5, 36, "0.i"),
+        (255.0, 16, "ff"),
+        (-255.5, 2, "-11111111.1"),
+        (0.1, 2, "0.0001100110011001100110011001100110011001100110011001101"),
+        (0.123456789, 36, "0.4fzzzxjylrx"),
+        (1e21, 36, "5v1j4f4ds7c000"),
+        (123.456, 7, "234.312256641535441"),
+        (std::f64::consts::PI, 16, "3.243f6a8885a3"),
+    ] {
+        assert_eq!(radix_string(v, radix), expected, "{v}.toString({radix})");
+    }
+}

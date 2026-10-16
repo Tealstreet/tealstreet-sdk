@@ -11,10 +11,12 @@ pub mod promise;
 pub mod regex;
 pub mod value;
 
-mod builtins;
+pub(crate) mod builtins;
 pub mod facade_exchange;
 pub mod facade_rest;
+pub mod facade_socket;
 pub mod facade_store;
+pub mod imports;
 mod host_classes;
 mod host_core;
 mod host_leaves;
