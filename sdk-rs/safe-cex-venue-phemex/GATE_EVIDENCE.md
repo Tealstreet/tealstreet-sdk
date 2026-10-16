@@ -1006,3 +1006,69 @@ are byte-unchanged from the previously recorded merge (standalone diffs 0).
 Compiler/native/control/indexer exits stand. Extractor freshness rerun on this
 merge returns **0, 0 manifests would change, 0 added/orphaned symbols**.
 Tomllib again measures **66 / 13 / 0** with all 79 rows off pending.
+
+## Production Exchange binding and owned finding repairs (2026-10-16)
+
+`binding/exchange.rs::PhemexExchange::new` assembles the existing venue bodies
+with the shared Js runtime, base exchange, Store and socket facades. The typed
+Exchange entry points execute signed HTTP, order formatting/cancellation,
+settings changes and public/private startup. Tests use distinct amount/price
+steps, caller IDs, suspension across disposal, public-only mode, delayed remote
+signing, failed signing and auth acknowledgement before subscription.
+
+The 23 `tests/exchange_binding.rs` E2E tests passed through production construction.
+The four `tests/binding_values.rs` tests passed, including actual TypeScript
+observations for every one of the 2048 lone-surrogate units. Raw ticker output
+retains the response object and D800USDT symbol; formatSymbolOut retains raw
+info.symbol D800. The nine private transport tests passed, including the actual
+source oracle and a new account-read/timer/queue observation before future polling.
+
+`scripts/binding-controls.py` passed all 23 compiling production controls:
+19 Exchange method/disposal controls and four helper controls. Each mutation
+failed its named runtime test with exit101, then the exact restored bytes passed
+with exit0. The four repaired findings are formatSymbolIn, formatSymbolOut,
+fetchTickersRaw and eager private reconciliation. Moving begin_sync back behind
+the native future boundary is the eager-start negative control.
+
+Five typed-edge FINDING rows remain, as assigned by the overseer to shared
+string-model task ddi2il-10: PhemexApiResponse.msg, POSITIONS_RESPONSE.account.currency,
+getAccount.userId, validateAccount.error, and parseTickers' symbol/Store key.
+They are Rust representation losses, not TS-carried defects, and remain marked
+as findings. The source's missing ticker-error emit(undefined)/null-return behavior
+is carried by the production reader; no fixture silently fixes it.
+
+Readiness checkpoint before the Crypto.com registry follow-up: full scoped
+all-targets suite passed 91 tests across 17 targets, zero ignored. Strict host
+all-targets and wasm library Clippy passed. Canonical workspace parity passed
+(7459 rows / 17060 public Rust items) after adding exact binding split targets
+and detached AccountRead mapping; those mapping edits did not change Rust code.
+Registry integration remains to be added in the Phemex PR.
+
+## Registry and source-super disposal integration
+
+Phemex is now in the Rust registry, with native Js HTTP, hosted signing, the
+external-data factory and the shared limiter host API. The native HTTP witness
+checks distinct0.003 amount/0.25 price steps, read purity, user123 and HMAC over
+the actual currency=USDT account query. Its compiling wrong-factory mutation
+fails101 and the exact restored table passes0.
+
+The source Phemex dispose calls super.dispose, unlike Crypto.com. The wrapper
+now delegates once through the bound source body, with no extra early base call.
+The new E2E observes the disposed flag and removed inherited listener; skipping
+SessionHost::base_dispose compiles and fails that regression, then restores green.
+The original source-dispose-call suppression control also fails/restores.
+
+Full scoped suite:92 tests across17 targets, zero ignored;24 binding E2E tests.
+After master185/164 integration,37 binding/helper/private-transport tests and14
+native construction/table tests passed. The shared production dispatch guard
+passed after reviewing21 new Phemex call/reference records; its sole base cleanup
+call is the source-super adapter with explicit source/native evidence.
+The original23 method/helper control checkpoint remains valid; the added skip-super
+control makes24 and the registry factory control is separate.
+
+Final integrated static gates passed for Phemex plus registry: strict host
+all-target and wasm library Clippy; canonical parity7459 rows /17114 public
+items; layers88/88; live source registry48 ordered names. Read-only extractor
+freshness reports0 changed manifests,0 added and0 orphaned symbols after taking
+the author's formatting-only #190. Five shared typed-edge findings stay marked
+under ddi2il-10; these gates do not reclassify them as ported.

@@ -9,7 +9,10 @@ use safe_cex_exchange::{
 };
 use safe_cex_num::JsJsonValue as J;
 use safe_cex_types::{ExchangeName, ExchangeOptions};
-use std::rc::{Rc, Weak};
+use std::{
+    rc::{Rc, Weak},
+    task::{Context, Poll, Waker},
+};
 
 pub(super) struct SocketHost {
     pub owner: Weak<Host>,
@@ -167,14 +170,38 @@ impl ApexSocketHost for SocketHost {
             SocketListener::Open(callback) => (
                 "open",
                 Js::function("onOpen", move |_, _| {
-                    let future = callback();
-                    Ok(Js::Promise(Promise::spawn(
-                        &runtime,
-                        Box::pin(async move {
-                            future.await.map_err(Thrown::from)?;
-                            Ok(Js::Undefined)
-                        }),
-                    )))
+                    let mut future = callback();
+                    let promise = Promise::pending(&runtime);
+                    match future
+                        .as_mut()
+                        .poll(&mut Context::from_waker(Waker::noop()))
+                    {
+                        Poll::Ready(result) => {
+                            promise.settle(result.map(|()| Js::Undefined).map_err(Thrown::from))
+                        }
+                        Poll::Pending => {
+                            let owner = weak
+                                .upgrade()
+                                .ok_or_else(|| Thrown::error("Error", "Apex host released"))?;
+                            // The eager first poll may synchronously dispose the venue.
+                            // Do not register new work after its cancellation sweep.
+                            if owner.base().is_disposed() {
+                                promise.settle(Ok(Js::Undefined));
+                                return Ok(Js::Promise(promise));
+                            }
+                            let result = promise.clone();
+                            owner.schedule(
+                                0.,
+                                Box::pin(async move {
+                                    result.settle(
+                                        future.await.map(|()| Js::Undefined).map_err(Thrown::from),
+                                    );
+                                    Ok(())
+                                }),
+                            );
+                        }
+                    }
+                    Ok(Js::Promise(promise))
                 }),
             ),
             SocketListener::Message(callback) => (
@@ -299,13 +326,38 @@ impl ApexSocketHost for SocketHost {
         self.call("dispose", vec![])
     }
     fn remote_signer_account(&self) -> Option<J> {
-        None
+        self.owner
+            .upgrade()?
+            .scope
+            .http
+            .hosted_signer()
+            .map(|(_, account)| account.map_or(J::Undefined, J::String))
     }
-    fn remote_sign(&self, _: J) -> ExchangeFuture<'_, J> {
-        Box::pin(async {
-            Err(ExchangeError::new(
-                "Apex remote signer capability unavailable",
-            ))
+    fn remote_sign(&self, request: J) -> ExchangeFuture<'_, J> {
+        // Clone only the capability before awaiting: an owned socket task must
+        // not retain the host that owns its cancellation handle.
+        let signer = self.owner().and_then(|owner| {
+            owner
+                .scope
+                .http
+                .hosted_signer()
+                .map(|(signer, _)| signer)
+                .ok_or_else(|| ExchangeError::new("Apex remote signer capability unavailable"))
+        });
+        let request = safe_cex_exchange::js_runtime::value::to_json(&super::hosts::js(&request))
+            .map_err(error)
+            .and_then(|value| {
+                serde_json::from_value::<safe_cex_transport::signing::RemoteSignerRequest>(value)
+                    .map_err(|e| ExchangeError::new(e.to_string()))
+            });
+        Box::pin(async move {
+            let response = signer?
+                .sign(request?)
+                .await
+                .map_err(|e| ExchangeError::new(e.to_string()))?;
+            serde_json::to_value(&response)
+                .map(J::from)
+                .map_err(|e| ExchangeError::new(e.to_string()))
         })
     }
 }
