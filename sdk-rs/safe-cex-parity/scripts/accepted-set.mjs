@@ -92,7 +92,7 @@ for (const pkg of members) {
       members.push(alias.artifact.owner);
     }
   }
-  const aliasCompilerContext = { macroOrigins, externalTypeAliases: result.externalTypeAliases };
+  const aliasCompilerContext = { macroOrigins, externalTypeAliases: result.externalTypeAliases, packageMetadata: pkg, workspace: root };
   if (result.publicAliases.length) {
     const aliasSources = [...new Set(result.publicAliases.map(alias => path.relative(root, path.resolve(root, alias.span.filename)).split(path.sep).join('/')))];
     const claims = spawnSync(scanner, ['--alias-claims-json', root, ...aliasSources], { encoding: 'utf8', maxBuffer: 32 * 1024 * 1024 });

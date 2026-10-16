@@ -106,6 +106,13 @@
       "exact borrowed Fields policy retains every route and refuses compiler or witness redirects",
       "borrowed Fields executes actual static and owned routes and rejects native drift"
     ],
+    "accepted-hyperliquid-projection-native.test.mjs": [
+      "six associated aliases execute ordinary native and wasm traits and reject concrete owner drift"
+    ],
+    "accepted-hyperliquid-projection.test.mjs": [
+      "six associated projections retain exact compiler roots implementation and fixed host",
+      "associated projection compiler provenance and fixed policy guards reject executed mutations"
+    ],
     "accepted-identity-alias.test.mjs": [
       "identity aliases select one internal actual-alias monomorphization",
       "generic identity probes reject bounds defaults synthetic parameters and where clauses",
@@ -362,6 +369,12 @@
     "Fields route",
     "direct constant maintained source pin",
     "direct constant indexed raw method pin",
-    "direct constant native returned capability"
+    "direct constant native returned capability",
+    "projection same-crate compiler root",
+    "projection compiler associated identity",
+    "projection exact raw target",
+    "projection fixed Realm host",
+    "projection selected workspace source",
+    "projection native concrete owner identity"
   ]
 }

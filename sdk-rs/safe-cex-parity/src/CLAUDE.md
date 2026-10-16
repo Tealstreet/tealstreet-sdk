@@ -263,3 +263,16 @@ admits. Every ordinary alternate trait detector still runs. The general borrowed
 AliasProbe guard and DeserializeOwned bound remain unchanged. The finite route
 policy cannot classify another alias, type argument, target, package or adapter;
 a reviewed consumer contract and all 36 route witnesses are still required.
+
+Six Hyperliquid Value/Error aliases retain their actual associated projections
+`<H as WsPingHost>::Value/Error`. Their finite generic-policy records select only
+`Realm` and independently expect its concrete `realm::value::Value`. Discovery
+authenticates the same-crate trait, Realm and Value compiler roots, the unique
+Realm implementation, its ownership links and actual associated binding before
+normalizing compiler IDs. The route checks exact raw/expanded targets, unbounded
+host parameters, source files and selected workspace package. Contracts cannot
+redirect the host or expected type. Native invariant equality and all ordinary
+Serde/conversion detectors remain required; these capability identities do not
+execute callbacks or classify other host instantiations. The compiled control
+renames only the copied concrete value owner while retaining its Value alias;
+all six native owner-identity receipts must fail before restoration passes.
