@@ -7411,8 +7411,8 @@
         "output": "a_PERP_Perp"
       },
       {
-        "input": "\ud83d\udca0_perp",
-        "output": "\ud83d\udca0_Perp"
+        "input": "💠_perp",
+        "output": "💠_Perp"
       },
       {
         "input": "",
@@ -7894,11 +7894,11 @@
       },
       {
         "input": {
-          "address": "0xABC\u00c4",
+          "address": "0xABCÄ",
           "fee": "0.00005"
         },
         "output": {
-          "builder": "0xabc\u00e4",
+          "builder": "0xabcä",
           "fee": "0.00005",
           "raw_bits": "3ff0000000000000"
         }
