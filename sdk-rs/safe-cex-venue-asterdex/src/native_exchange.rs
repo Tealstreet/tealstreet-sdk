@@ -127,7 +127,8 @@ impl Exchange for AsterDEXExchange {
         crate::exchange_helpers::can_sign(
             &self.base().options(),
             &self.rt.shared.extra.version,
-            self.base().options().remote_signer.is_some(),
+            self.base().options().remote_signer.is_some()
+                || self.base().signers.remote_signer.is_some(),
         )
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {

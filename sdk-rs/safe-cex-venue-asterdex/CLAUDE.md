@@ -55,3 +55,10 @@ TypeScript. The HTTP factory receives each client's own transport options.
 scheduleCancel rejection and declared uppercase public-trade side boundary remain.
 The registry supplies production native HTTP and gateway dependencies.
 See BINDING_GATES.md for compiled mutation controls and scoped verification.
+
+
+Native hosted signer handles stay in BaseExchange.signers and the JS options
+receiver, outside structural options. Preserve the source's API-key requirement
+and use the existing exchange_options decoder when inspecting fields beside a
+runtime handle. Bare clock axios sends skip the shared remote adapter; account
+clients keep the same hosted identity through post-sign transport selection.

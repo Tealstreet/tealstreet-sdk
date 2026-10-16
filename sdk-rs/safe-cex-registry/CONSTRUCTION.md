@@ -310,6 +310,14 @@ are checked. `scripts/phemex-tunnel-controls.py` proves missing/no-op native
 provider mutations compile and fail this witness, then restores exact bytes.
 
 
+AsterDEX native hosts now share their hosted account with the source receiver
+and signed HTTP clients through the common signer bridge, retaining per-lane
+post-sign routing. V1 and V3 account reads and validation work without local
+secrets; the source's nonempty API-key rule remains. Its raw clock HTTP bypasses
+hosted signing. `native_host_asterdex` covers metadata, exact returned wire
+configuration and the key refusal; its four compiled controls live in
+`scripts/asterdex-hosted-controls.py`.
+
 Paradex's Rust entry calls `native_exchange::ParadexExchange::new` with shared
 runtime HTTP and external-data hosts. `native_host_paradex` constructs the
 production registry route over local HTTP and checks native amount/price steps,
