@@ -35,6 +35,7 @@ pub struct State {
     pub effects: Vec<N>,
     pub settled: Vec<Result<N, N>>,
     pub sign_args: Vec<N>,
+    pub mints: usize,
 }
 impl HelperTaskHost<N, N> for Host {
     fn start_task(&self, task: Pin<Box<dyn Future<Output = ()>>>) {
@@ -88,6 +89,7 @@ impl WsPingHost for Host {
                 "generateNonce",
                 "priceToPrecision",
                 "resolveReduceOnly",
+                "recordPlacement",
                 "addToPrePlacementCache",
                 "postOrderAction",
                 "validateResponseAndExtractOrderIds",
@@ -172,7 +174,17 @@ impl WsPingHost for Host {
             "createLimitOrderWires" => {
                 assert!(eq(r, &self.base.exchange), "LIMIT wires receiver");
                 assert!(eq(&a, &self.st.borrow().opts), "LIMIT opts alias");
-                create_limit_order_wires(self, r, &a)
+                let cloid = args.get(1).cloned().unwrap_or(N::U);
+                create_limit_order_wires(self, r, &a, &cloid)
+            }
+            "mintHyperliquidCloid" => {
+                self.record(id, args);
+                let n = {
+                    let mut st = self.st.borrow_mut();
+                    st.mints += 1;
+                    st.mints
+                };
+                Ok(s(&format!("0xmint{n}")))
             }
             "getBuilderInfo" => {
                 self.record(id, args);
@@ -228,6 +240,7 @@ impl WsPingHost for Host {
                 }
             }
             "addToPrePlacementCache"
+            | "recordPlacement"
             | "rememberLimitOrderTimeInForce"
             | "addPendingHip3Order"
             | "refreshHip3OrdersWithRetry"
@@ -569,6 +582,7 @@ impl Host {
                 effects: vec![],
                 settled: vec![],
                 sign_args: vec![],
+                mints: 0,
             })),
         }
     }

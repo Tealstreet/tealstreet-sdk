@@ -355,6 +355,16 @@ impl CrossCacheHost for Host {
                     Ok(arr(out))
                 }
             }
+            (N::A(v), "some") => {
+                let input = v.borrow().clone();
+                for (i, e) in input.into_iter().enumerate() {
+                    let yes = self.call(&a, &N::U, &[e, N::Num(i as f64), r.clone()])?;
+                    if self.truthy(&yes) {
+                        return Ok(N::B(true));
+                    }
+                }
+                Ok(N::B(false))
+            }
             (N::A(v), "indexOf") => Ok(N::Num(
                 v.borrow()
                     .iter()
@@ -481,6 +491,9 @@ impl CacheOrdersHost for Host {
     }
     fn singleton(&mut self) -> Result<N, String> {
         Err("perp delegate outside fixture".into())
+    }
+    fn imported(&mut self, name: &str) -> Result<N, String> {
+        Err(format!("import {name} outside fixture"))
     }
 }
 impl CacheRuntimeHost for Host {

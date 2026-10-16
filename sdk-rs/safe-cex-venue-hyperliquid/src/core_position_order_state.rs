@@ -14,7 +14,7 @@ pub enum PositionCallback<V> {
     FetchHip3Positions3([V; 2]),
     FetchHip3Positions4([V; 2]),
     ParseOpenOrders0([V; 1]),
-    ParseOpenOrders1([V; 2]),
+    ParseOpenOrders1([V; 1]),
     ParseOpenOrders2([V; 0]),
 }
 pub trait PositionOrderHost: CoreSnapshotHost {
@@ -559,191 +559,17 @@ pub fn run_position_callback<H: PositionOrderHost>(
             return Ok(h.boolean(true));
         }
         PositionCallback::ParseOpenOrders1(captures) => {
-            let markets_by_id = captures[0].clone();
-            let this_value = captures[1].clone();
+            let this_value = captures[0].clone();
             let open_order = args.get(0).cloned().unwrap_or_else(|| h.undefined());
-            let mut market = {
-                let object = markets_by_id.clone();
-                {
-                    let key = {
-                        let object = open_order.clone();
-                        h.get(&object, "coin")?
-                    };
-                    h.index(&object, &key)?
-                }
-            };
-            if {
-                let condition = {
-                    let left = {
-                        let value = market.clone();
-                        h.boolean(!h.truthy(&value))
-                    };
-                    if !h.truthy(&left) {
-                        left
-                    } else {
-                        {
-                            let receiver = {
-                                let object = open_order.clone();
-                                h.get(&object, "coin")?
-                            };
-                            let function = h.get(&receiver, "includes")?;
-                            let arg0 = lit(h, ":");
-                            h.call(&function, &receiver, &[arg0])?
-                        }
-                    }
-                };
-                h.truthy(&condition)
-            } {
-                market = {
-                    let receiver = {
-                        let object = this_value.clone();
-                        h.get(&object, "marketsLowerCaseMap")?
-                    };
-                    let function = h.get(&receiver, "get")?;
-                    let arg0 = {
-                        let receiver = {
-                            let object = open_order.clone();
-                            h.get(&object, "coin")?
-                        };
-                        let function = h.get(&receiver, "toLowerCase")?;
-                        h.call(&function, &receiver, &[])?
-                    };
-                    h.call(&function, &receiver, &[arg0])?
-                };
-            }
-            if {
-                let condition = {
-                    let value = market.clone();
-                    h.boolean(!h.truthy(&value))
-                };
-                h.truthy(&condition)
-            } {
-                return Ok(h.null_value());
-            }
-            let inferred = {
-                let function = h.global("inferHyperliquidOrderTypeAndPrice")?;
-                let receiver = h.undefined();
-                let arg0 = open_order.clone();
-                h.call(&function, &receiver, &[arg0])?
-            };
             return Ok({
-                let object = h.object()?;
-                let value = {
-                    let mut units: Vec<u16> = vec![];
-                    let value = {
-                        let object = open_order.clone();
-                        h.get(&object, "oid")?
-                    };
-                    units.extend(h.template_string(&value)?.0);
-                    units.extend_from_slice(&[]);
-                    h.literal(&JsString(units))
-                };
-                h.define_data(&object, "id", &value)?;
-                let value = {
+                let receiver = this_value.clone();
+                let function = h.get(&receiver, "mapOpenOrderRow")?;
+                let arg0 = open_order.clone();
+                let arg1 = {
                     let object = h.global("OrderStatus")?;
                     h.get(&object, "Open")?
                 };
-                h.define_data(&object, "status", &value)?;
-                let value = {
-                    let object = market.clone();
-                    h.get(&object, "symbol")?
-                };
-                h.define_data(&object, "symbol", &value)?;
-                let value = {
-                    let object = inferred.clone();
-                    h.get(&object, "type")?
-                };
-                h.define_data(&object, "type", &value)?;
-                let value = {
-                    let condition = {
-                        let left = {
-                            let object = open_order.clone();
-                            h.get(&object, "side")?
-                        };
-                        let right = lit(h, "B");
-                        h.boolean(h.strict_equal(&left, &right))
-                    };
-                    if h.truthy(&condition) {
-                        {
-                            let object = h.global("OrderSide")?;
-                            h.get(&object, "Buy")?
-                        }
-                    } else {
-                        {
-                            let object = h.global("OrderSide")?;
-                            h.get(&object, "Sell")?
-                        }
-                    }
-                };
-                h.define_data(&object, "side", &value)?;
-                let value = {
-                    let object = inferred.clone();
-                    h.get(&object, "price")?
-                };
-                h.define_data(&object, "price", &value)?;
-                let value = {
-                    let value = {
-                        let object = open_order.clone();
-                        h.get(&object, "origSz")?
-                    };
-                    h.position_unary("plus", &value)?
-                };
-                h.define_data(&object, "amount", &value)?;
-                let value = {
-                    let left = {
-                        let value = {
-                            let object = open_order.clone();
-                            h.get(&object, "origSz")?
-                        };
-                        h.position_unary("plus", &value)?
-                    };
-                    let right = {
-                        let value = {
-                            let object = open_order.clone();
-                            h.get(&object, "sz")?
-                        };
-                        h.position_unary("plus", &value)?
-                    };
-                    h.position_operator("subtract", &left, &right)?
-                };
-                h.define_data(&object, "filled", &value)?;
-                let value = {
-                    let value = {
-                        let object = open_order.clone();
-                        h.get(&object, "sz")?
-                    };
-                    h.position_unary("plus", &value)?
-                };
-                h.define_data(&object, "remaining", &value)?;
-                let value = {
-                    let function = h.global("Boolean")?;
-                    let receiver = h.undefined();
-                    let arg0 = {
-                        let object = open_order.clone();
-                        h.get(&object, "reduceOnly")?
-                    };
-                    h.call(&function, &receiver, &[arg0])?
-                };
-                h.define_data(&object, "reduceOnly", &value)?;
-                let value = {
-                    let receiver = h.global("Date")?;
-                    let function = h.get(&receiver, "now")?;
-                    h.call(&function, &receiver, &[])?
-                };
-                h.define_data(&object, "lastUpdate", &value)?;
-                let value = {
-                    let function = h.global("parseHyperliquidOrderTimeInForce")?;
-                    let receiver = h.undefined();
-                    let arg0 = {
-                        let object = open_order.clone();
-                        h.get(&object, "tif")?
-                    };
-                    h.call(&function, &receiver, &[arg0])?
-                };
-                h.define_data(&object, "timeInForce", &value)?;
-                let value = open_order.clone();
-                h.define_data(&object, "info", &value)?;
-                object
+                h.call(&function, &receiver, &[arg0, arg1])?
             });
         }
         PositionCallback::ParseOpenOrders2(_) => {
@@ -3654,6 +3480,15 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                     let object = update.clone();
                     h.get(&object, "status")?
                 };
+                let cloid = {
+                    let function = h.global("readHyperliquidCloid")?;
+                    let receiver = h.undefined();
+                    let arg0 = {
+                        let object = order_data.clone();
+                        h.get(&object, "cloid")?
+                    };
+                    h.call(&function, &receiver, &[arg0])?
+                };
                 let _ = {
                     let receiver = {
                         let object = this_value.clone();
@@ -3790,6 +3625,20 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                         let arg0 = order_id.clone();
                         h.call(&function, &receiver, &[arg0])?
                     };
+                    if {
+                        let condition = cloid.clone();
+                        h.truthy(&condition)
+                    } {
+                        let _ = {
+                            let receiver = {
+                                let object = this_value.clone();
+                                h.get(&object, "parent")?
+                            };
+                            let function = h.get(&receiver, "forgetPlacementRecord")?;
+                            let arg0 = cloid.clone();
+                            h.call(&function, &receiver, &[arg0])?
+                        };
+                    }
                     return Ok(());
                 }
                 if {
@@ -3863,8 +3712,55 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                         let arg0 = lit(h, ":");
                         h.call(&function, &receiver, &[arg0])?
                     };
+                    let side = {
+                        let condition = {
+                            let left = {
+                                let object = order_data.clone();
+                                h.get(&object, "side")?
+                            };
+                            let right = lit(h, "B");
+                            h.boolean(h.strict_equal(&left, &right))
+                        };
+                        if h.truthy(&condition) {
+                            {
+                                let object = h.global("OrderSide")?;
+                                h.get(&object, "Buy")?
+                            }
+                        } else {
+                            {
+                                let object = h.global("OrderSide")?;
+                                h.get(&object, "Sell")?
+                            }
+                        }
+                    };
+                    let record = {
+                        let condition = cloid.clone();
+                        if h.truthy(&condition) {
+                            {
+                                let receiver = {
+                                    let object = this_value.clone();
+                                    h.get(&object, "parent")?
+                                };
+                                let function = h.get(&receiver, "getPlacementRecord")?;
+                                let arg0 = cloid.clone();
+                                h.call(&function, &receiver, &[arg0])?
+                            }
+                        } else {
+                            h.undefined()
+                        }
+                    };
                     let pending_order = {
-                        let condition = is_hip3.clone();
+                        let condition = {
+                            let left = {
+                                let value = record.clone();
+                                h.boolean(!h.truthy(&value))
+                            };
+                            if !h.truthy(&left) {
+                                left
+                            } else {
+                                is_hip3.clone()
+                            }
+                        };
                         if h.truthy(&condition) {
                             {
                                 let receiver = {
@@ -3880,327 +3776,81 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                         }
                     };
                     if {
-                        let condition = pending_order.clone();
+                        let condition = {
+                            let left = record.clone();
+                            if !h.truthy(&left) {
+                                left
+                            } else {
+                                cloid.clone()
+                            }
+                        };
                         h.truthy(&condition)
                     } {
                         inferred_type = {
-                            let object = pending_order.clone();
+                            let object = record.clone();
                             h.get(&object, "type")?
                         };
                         inferred_price = {
-                            let object = pending_order.clone();
+                            let object = record.clone();
                             h.get(&object, "price")?
                         };
-                        inference_source = lit(h, "pending-cache");
+                        inference_source = lit(h, "cloid-record");
                         let _ = {
                             let receiver = {
                                 let object = this_value.clone();
                                 h.get(&object, "parent")?
                             };
-                            let function = h.get(&receiver, "removePendingHip3Order")?;
-                            let arg0 = order_id.clone();
-                            h.call(&function, &receiver, &[arg0])?
-                        };
-                        let side = {
-                            let condition = {
-                                let left = {
-                                    let object = order_data.clone();
-                                    h.get(&object, "side")?
-                                };
-                                let right = lit(h, "B");
-                                h.boolean(h.strict_equal(&left, &right))
-                            };
-                            if h.truthy(&condition) {
-                                {
-                                    let object = h.global("OrderSide")?;
-                                    h.get(&object, "Buy")?
-                                }
-                            } else {
-                                {
-                                    let object = h.global("OrderSide")?;
-                                    h.get(&object, "Sell")?
-                                }
-                            }
-                        };
-                        let _ = {
-                            let receiver = {
-                                let object = this_value.clone();
-                                h.get(&object, "parent")?
-                            };
-                            let function = h.get(&receiver, "matchPrePlacement")?;
+                            let function = h.get(&receiver, "forgetPrePlacement")?;
                             let arg0 = {
                                 let object = order_data.clone();
                                 h.get(&object, "coin")?
                             };
                             let arg1 = side.clone();
-                            h.call(&function, &receiver, &[arg0, arg1])?
+                            let arg2 = cloid.clone();
+                            h.call(&function, &receiver, &[arg0, arg1, arg2])?
                         };
                     } else {
                         if {
-                            let condition = {
-                                let left = {
-                                    let left = {
-                                        let left = is_hip3.clone();
-                                        if !h.truthy(&left) {
-                                            left
-                                        } else {
-                                            {
-                                                let value = {
-                                                    let object = order_data.clone();
-                                                    h.get(&object, "orderType")?
-                                                };
-                                                h.boolean(!h.truthy(&value))
-                                            }
-                                        }
-                                    };
-                                    if !h.truthy(&left) {
-                                        left
-                                    } else {
-                                        {
-                                            let value = {
-                                                let object = order_data.clone();
-                                                h.get(&object, "triggerPx")?
-                                            };
-                                            h.boolean(!h.truthy(&value))
-                                        }
-                                    }
-                                };
-                                if !h.truthy(&left) {
-                                    left
-                                } else {
-                                    {
-                                        let object = order_data.clone();
-                                        h.get(&object, "limitPx")?
-                                    }
-                                }
-                            };
+                            let condition = pending_order.clone();
                             h.truthy(&condition)
                         } {
-                            let existing_order = {
-                                let object = existing_orders_by_id.clone();
-                                {
-                                    let key = order_id.clone();
-                                    h.index(&object, &key)?
-                                }
+                            inferred_type = {
+                                let object = pending_order.clone();
+                                h.get(&object, "type")?
                             };
-                            if {
-                                let condition = existing_order.clone();
-                                h.truthy(&condition)
-                            } {
-                                inferred_type = {
-                                    let object = existing_order.clone();
-                                    h.get(&object, "type")?
+                            inferred_price = {
+                                let object = pending_order.clone();
+                                h.get(&object, "price")?
+                            };
+                            inference_source = lit(h, "pending-cache");
+                            let _ = {
+                                let receiver = {
+                                    let object = this_value.clone();
+                                    h.get(&object, "parent")?
                                 };
-                                inferred_price = {
-                                    let object = existing_order.clone();
-                                    h.get(&object, "price")?
+                                let function = h.get(&receiver, "removePendingHip3Order")?;
+                                let arg0 = order_id.clone();
+                                h.call(&function, &receiver, &[arg0])?
+                            };
+                            let _ = {
+                                let receiver = {
+                                    let object = this_value.clone();
+                                    h.get(&object, "parent")?
                                 };
-                                if {
-                                    let condition = {
-                                        let left = {
-                                            let left = {
-                                                let object = existing_order.clone();
-                                                h.get(&object, "status")?
-                                            };
-                                            let right = {
-                                                let object = h.global("OrderStatus")?;
-                                                h.get(&object, "Creating")?
-                                            };
-                                            h.boolean(h.strict_equal(&left, &right))
-                                        };
-                                        if h.truthy(&left) {
-                                            left
-                                        } else {
-                                            {
-                                                let left = {
-                                                    let object = existing_order.clone();
-                                                    h.get(&object, "status")?
-                                                };
-                                                let right = {
-                                                    let object = h.global("OrderStatus")?;
-                                                    h.get(&object, "Updating")?
-                                                };
-                                                h.boolean(h.strict_equal(&left, &right))
-                                            }
-                                        }
-                                    };
-                                    h.truthy(&condition)
-                                } {
-                                    inference_source = lit(h, "optimistic-preserved");
-                                } else {
-                                    inference_source = lit(h, "store-preserved");
-                                }
-                            } else {
-                                let side = {
-                                    let condition = {
-                                        let left = {
-                                            let object = order_data.clone();
-                                            h.get(&object, "side")?
-                                        };
-                                        let right = lit(h, "B");
-                                        h.boolean(h.strict_equal(&left, &right))
-                                    };
-                                    if h.truthy(&condition) {
-                                        {
-                                            let object = h.global("OrderSide")?;
-                                            h.get(&object, "Buy")?
-                                        }
-                                    } else {
-                                        {
-                                            let object = h.global("OrderSide")?;
-                                            h.get(&object, "Sell")?
-                                        }
-                                    }
+                                let function = h.get(&receiver, "matchPrePlacement")?;
+                                let arg0 = {
+                                    let object = order_data.clone();
+                                    h.get(&object, "coin")?
                                 };
-                                let ws_limit_px = {
-                                    let left = {
-                                        let function = h.global("parseFloat")?;
-                                        let receiver = h.undefined();
-                                        let arg0 = {
-                                            let object = order_data.clone();
-                                            h.get(&object, "limitPx")?
-                                        };
-                                        h.call(&function, &receiver, &[arg0])?
-                                    };
-                                    if h.truthy(&left) { left } else { h.undefined() }
-                                };
-                                let ws_amount = {
-                                    let condition = {
-                                        let object = order_data.clone();
-                                        h.get(&object, "origSz")?
-                                    };
-                                    if h.truthy(&condition) {
-                                        {
-                                            let value = {
-                                                let object = order_data.clone();
-                                                h.get(&object, "origSz")?
-                                            };
-                                            h.position_unary("plus", &value)?
-                                        }
-                                    } else {
-                                        h.undefined()
-                                    }
-                                };
-                                let pre_placement = {
-                                    let receiver = {
-                                        let object = this_value.clone();
-                                        h.get(&object, "parent")?
-                                    };
-                                    let function = h.get(&receiver, "matchPrePlacement")?;
-                                    let arg0 = {
-                                        let object = order_data.clone();
-                                        h.get(&object, "coin")?
-                                    };
-                                    let arg1 = side.clone();
-                                    let arg2 = ws_limit_px.clone();
-                                    let arg3 = ws_amount.clone();
-                                    h.call(&function, &receiver, &[arg0, arg1, arg2, arg3])?
-                                };
-                                if {
-                                    let condition = pre_placement.clone();
-                                    h.truthy(&condition)
-                                } {
-                                    inferred_type = {
-                                        let object = pre_placement.clone();
-                                        h.get(&object, "type")?
-                                    };
-                                    inferred_price = {
-                                        let object = pre_placement.clone();
-                                        h.get(&object, "price")?
-                                    };
-                                    inference_source = lit(h, "pre-placement-cache");
-                                } else {
-                                    inferred_type = {
-                                        let object = h.global("OrderType")?;
-                                        h.get(&object, "Limit")?
-                                    };
-                                    inferred_price = {
-                                        let left = {
-                                            let function = h.global("parseFloat")?;
-                                            let receiver = h.undefined();
-                                            let arg0 = {
-                                                let object = order_data.clone();
-                                                h.get(&object, "limitPx")?
-                                            };
-                                            h.call(&function, &receiver, &[arg0])?
-                                        };
-                                        if h.truthy(&left) { left } else { h.number(0.0) }
-                                    };
-                                    inference_source = lit(h, "hip3-unconfirmed-placeholder");
-                                    let _ = {
-                                        let receiver = {
-                                            let object = this_value.clone();
-                                            h.get(&object, "parent")?
-                                        };
-                                        let function = h.get(&receiver, "scheduleOrderRefresh")?;
-                                        h.call(&function, &receiver, &[])?
-                                    };
-                                }
-                            }
+                                let arg1 = side.clone();
+                                h.call(&function, &receiver, &[arg0, arg1])?
+                            };
                         } else {
                             if {
                                 let condition = {
                                     let left = {
                                         let left = {
-                                            let left = {
-                                                let left = {
-                                                    let left = {
-                                                        let value = is_hip3.clone();
-                                                        h.boolean(!h.truthy(&value))
-                                                    };
-                                                    if !h.truthy(&left) {
-                                                        left
-                                                    } else {
-                                                        {
-                                                            let function = h.global("Boolean")?;
-                                                            let receiver = h.undefined();
-                                                            let arg0 = {
-                                                                let object = order_data.clone();
-                                                                h.get(&object, "reduceOnly")?
-                                                            };
-                                                            h.call(&function, &receiver, &[arg0])?
-                                                        }
-                                                    }
-                                                };
-                                                if !h.truthy(&left) {
-                                                    left
-                                                } else {
-                                                    {
-                                                        let left = {
-                                                            let value = {
-                                                                let object = order_data.clone();
-                                                                h.get(&object, "origSz")?
-                                                            };
-                                                            h.boolean(!h.truthy(&value))
-                                                        };
-                                                        if h.truthy(&left) {
-                                                            left
-                                                        } else {
-                                                            {
-                                                                let left = {
-                                                                    let function =
-                                                                        h.global("Number")?;
-                                                                    let receiver = h.undefined();
-                                                                    let arg0 = {
-                                                                        let object =
-                                                                            order_data.clone();
-                                                                        h.get(&object, "origSz")?
-                                                                    };
-                                                                    h.call(
-                                                                        &function,
-                                                                        &receiver,
-                                                                        &[arg0],
-                                                                    )?
-                                                                };
-                                                                let right = h.number(0.0);
-                                                                h.boolean(
-                                                                    h.strict_equal(&left, &right),
-                                                                )
-                                                            }
-                                                        }
-                                                    }
-                                                }
-                                            };
+                                            let left = is_hip3.clone();
                                             if !h.truthy(&left) {
                                                 left
                                             } else {
@@ -4229,11 +3879,8 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                                         left
                                     } else {
                                         {
-                                            let value = {
-                                                let object = order_data.clone();
-                                                h.get(&object, "isTrigger")?
-                                            };
-                                            h.boolean(!h.truthy(&value))
+                                            let object = order_data.clone();
+                                            h.get(&object, "limitPx")?
                                         }
                                     }
                                 };
@@ -4258,7 +3905,7 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                                         let object = existing_order.clone();
                                         h.get(&object, "price")?
                                     };
-                                    inference_source = {
+                                    if {
                                         let condition = {
                                             let left = {
                                                 let left = {
@@ -4287,88 +3934,461 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                                                 }
                                             }
                                         };
+                                        h.truthy(&condition)
+                                    } {
+                                        inference_source = lit(h, "optimistic-preserved");
+                                    } else {
+                                        inference_source = lit(h, "store-preserved");
+                                    }
+                                } else {
+                                    let ws_limit_px = {
+                                        let left = {
+                                            let function = h.global("parseFloat")?;
+                                            let receiver = h.undefined();
+                                            let arg0 = {
+                                                let object = order_data.clone();
+                                                h.get(&object, "limitPx")?
+                                            };
+                                            h.call(&function, &receiver, &[arg0])?
+                                        };
+                                        if h.truthy(&left) { left } else { h.undefined() }
+                                    };
+                                    let ws_amount = {
+                                        let condition = {
+                                            let object = order_data.clone();
+                                            h.get(&object, "origSz")?
+                                        };
                                         if h.truthy(&condition) {
-                                            lit(h, "optimistic-preserved")
+                                            {
+                                                let value = {
+                                                    let object = order_data.clone();
+                                                    h.get(&object, "origSz")?
+                                                };
+                                                h.position_unary("plus", &value)?
+                                            }
                                         } else {
-                                            lit(h, "store-preserved")
+                                            h.undefined()
                                         }
                                     };
-                                } else {
-                                    let _ = {
+                                    let pre_placement = {
                                         let receiver = {
                                             let object = this_value.clone();
                                             h.get(&object, "parent")?
                                         };
-                                        let function = h.get(&receiver, "log")?;
+                                        let function = h.get(&receiver, "matchPrePlacement")?;
                                         let arg0 = {
-                                            let left = lit(
-                                                h,
-                                                "[orderUpdates] Deferring positional TP/SL insert (core-perp WS lacks orderType/triggerPx/isTrigger): ",
-                                            );
-                                            let right = {
-                                                let mut units: Vec<u16> = vec![111, 105, 100, 61];
-                                                let value = order_id.clone();
-                                                units.extend(h.template_string(&value)?.0);
-                                                units.extend_from_slice(&[
-                                                    32, 99, 111, 105, 110, 61,
-                                                ]);
-                                                let value = {
-                                                    let object = order_data.clone();
-                                                    h.get(&object, "coin")?
-                                                };
-                                                units.extend(h.template_string(&value)?.0);
-                                                units.extend_from_slice(&[
-                                                    32, 108, 105, 109, 105, 116, 80, 120, 61,
-                                                ]);
-                                                let value = {
+                                            let object = order_data.clone();
+                                            h.get(&object, "coin")?
+                                        };
+                                        let arg1 = side.clone();
+                                        let arg2 = ws_limit_px.clone();
+                                        let arg3 = ws_amount.clone();
+                                        h.call(&function, &receiver, &[arg0, arg1, arg2, arg3])?
+                                    };
+                                    if {
+                                        let condition = pre_placement.clone();
+                                        h.truthy(&condition)
+                                    } {
+                                        inferred_type = {
+                                            let object = pre_placement.clone();
+                                            h.get(&object, "type")?
+                                        };
+                                        inferred_price = {
+                                            let object = pre_placement.clone();
+                                            h.get(&object, "price")?
+                                        };
+                                        inference_source = lit(h, "pre-placement-cache");
+                                    } else {
+                                        inferred_type = {
+                                            let object = h.global("OrderType")?;
+                                            h.get(&object, "Limit")?
+                                        };
+                                        inferred_price = {
+                                            let left = {
+                                                let function = h.global("parseFloat")?;
+                                                let receiver = h.undefined();
+                                                let arg0 = {
                                                     let object = order_data.clone();
                                                     h.get(&object, "limitPx")?
                                                 };
-                                                units.extend(h.template_string(&value)?.0);
-                                                units.extend_from_slice(&[
-                                                    46, 32, 83, 99, 104, 101, 100, 117, 108, 105,
-                                                    110, 103, 32, 82, 69, 83, 84, 32, 114, 101,
-                                                    102, 114, 101, 115, 104, 46,
-                                                ]);
-                                                h.literal(&JsString(units))
+                                                h.call(&function, &receiver, &[arg0])?
                                             };
-                                            h.position_operator("add", &left, &right)?
+                                            if h.truthy(&left) { left } else { h.number(0.0) }
                                         };
-                                        let arg1 = {
-                                            let object = h.global("LogSeverity")?;
-                                            h.get(&object, "Debug")?
+                                        inference_source = lit(h, "hip3-unconfirmed-placeholder");
+                                        let _ = {
+                                            let receiver = {
+                                                let object = this_value.clone();
+                                                h.get(&object, "parent")?
+                                            };
+                                            let function =
+                                                h.get(&receiver, "scheduleOrderRefresh")?;
+                                            h.call(&function, &receiver, &[])?
                                         };
-                                        h.call(&function, &receiver, &[arg0, arg1])?
-                                    };
-                                    let _ = {
-                                        let receiver = {
-                                            let object = this_value.clone();
-                                            h.get(&object, "parent")?
-                                        };
-                                        let function = h.get(&receiver, "scheduleOrderRefresh")?;
-                                        h.call(&function, &receiver, &[])?
-                                    };
-                                    return Ok(());
+                                    }
                                 }
                             } else {
-                                let inferred = {
-                                    let function = h.global("inferHyperliquidOrderTypeAndPrice")?;
-                                    let receiver = h.undefined();
-                                    let arg0 = order_data.clone();
-                                    h.call(&function, &receiver, &[arg0])?
-                                };
-                                inferred_type = {
-                                    let object = inferred.clone();
-                                    h.get(&object, "type")?
-                                };
-                                inferred_price = {
-                                    let object = inferred.clone();
-                                    h.get(&object, "price")?
-                                };
-                                inference_source = {
-                                    let object = inferred.clone();
-                                    h.get(&object, "source")?
-                                };
+                                if {
+                                    let condition = {
+                                        let left = {
+                                            let left = {
+                                                let left = {
+                                                    let left = {
+                                                        let value = is_hip3.clone();
+                                                        h.boolean(!h.truthy(&value))
+                                                    };
+                                                    if !h.truthy(&left) {
+                                                        left
+                                                    } else {
+                                                        {
+                                                            let function = h.global("Boolean")?;
+                                                            let receiver = h.undefined();
+                                                            let arg0 = {
+                                                                let object = order_data.clone();
+                                                                h.get(&object, "reduceOnly")?
+                                                            };
+                                                            h.call(&function, &receiver, &[arg0])?
+                                                        }
+                                                    }
+                                                };
+                                                if !h.truthy(&left) {
+                                                    left
+                                                } else {
+                                                    {
+                                                        let value = {
+                                                            let object = order_data.clone();
+                                                            h.get(&object, "orderType")?
+                                                        };
+                                                        h.boolean(!h.truthy(&value))
+                                                    }
+                                                }
+                                            };
+                                            if !h.truthy(&left) {
+                                                left
+                                            } else {
+                                                {
+                                                    let value = {
+                                                        let object = order_data.clone();
+                                                        h.get(&object, "triggerPx")?
+                                                    };
+                                                    h.boolean(!h.truthy(&value))
+                                                }
+                                            }
+                                        };
+                                        if !h.truthy(&left) {
+                                            left
+                                        } else {
+                                            {
+                                                let value = {
+                                                    let object = order_data.clone();
+                                                    h.get(&object, "isTrigger")?
+                                                };
+                                                h.boolean(!h.truthy(&value))
+                                            }
+                                        }
+                                    };
+                                    h.truthy(&condition)
+                                } {
+                                    let existing_order = {
+                                        let object = existing_orders_by_id.clone();
+                                        {
+                                            let key = order_id.clone();
+                                            h.index(&object, &key)?
+                                        }
+                                    };
+                                    if {
+                                        let condition = existing_order.clone();
+                                        h.truthy(&condition)
+                                    } {
+                                        inferred_type = {
+                                            let object = existing_order.clone();
+                                            h.get(&object, "type")?
+                                        };
+                                        inferred_price = {
+                                            let object = existing_order.clone();
+                                            h.get(&object, "price")?
+                                        };
+                                        inference_source = {
+                                            let condition = {
+                                                let left = {
+                                                    let left = {
+                                                        let object = existing_order.clone();
+                                                        h.get(&object, "status")?
+                                                    };
+                                                    let right = {
+                                                        let object = h.global("OrderStatus")?;
+                                                        h.get(&object, "Creating")?
+                                                    };
+                                                    h.boolean(h.strict_equal(&left, &right))
+                                                };
+                                                if h.truthy(&left) {
+                                                    left
+                                                } else {
+                                                    {
+                                                        let left = {
+                                                            let object = existing_order.clone();
+                                                            h.get(&object, "status")?
+                                                        };
+                                                        let right = {
+                                                            let object = h.global("OrderStatus")?;
+                                                            h.get(&object, "Updating")?
+                                                        };
+                                                        h.boolean(h.strict_equal(&left, &right))
+                                                    }
+                                                }
+                                            };
+                                            if h.truthy(&condition) {
+                                                lit(h, "optimistic-preserved")
+                                            } else {
+                                                lit(h, "store-preserved")
+                                            }
+                                        };
+                                    } else {
+                                        let _ = {
+                                            let receiver = {
+                                                let object = this_value.clone();
+                                                h.get(&object, "parent")?
+                                            };
+                                            let function = h.get(&receiver, "log")?;
+                                            let arg0 = {
+                                                let left = lit(
+                                                    h,
+                                                    "[orderUpdates] Deferring reduce-only insert (core-perp WS lacks orderType/triggerPx/isTrigger): ",
+                                                );
+                                                let right = {
+                                                    let mut units: Vec<u16> =
+                                                        vec![111, 105, 100, 61];
+                                                    let value = order_id.clone();
+                                                    units.extend(h.template_string(&value)?.0);
+                                                    units.extend_from_slice(&[
+                                                        32, 99, 111, 105, 110, 61,
+                                                    ]);
+                                                    let value = {
+                                                        let object = order_data.clone();
+                                                        h.get(&object, "coin")?
+                                                    };
+                                                    units.extend(h.template_string(&value)?.0);
+                                                    units.extend_from_slice(&[
+                                                        32, 108, 105, 109, 105, 116, 80, 120, 61,
+                                                    ]);
+                                                    let value = {
+                                                        let object = order_data.clone();
+                                                        h.get(&object, "limitPx")?
+                                                    };
+                                                    units.extend(h.template_string(&value)?.0);
+                                                    units.extend_from_slice(&[
+                                                        46, 32, 83, 99, 104, 101, 100, 117, 108,
+                                                        105, 110, 103, 32, 82, 69, 83, 84, 32, 114,
+                                                        101, 102, 114, 101, 115, 104, 46,
+                                                    ]);
+                                                    h.literal(&JsString(units))
+                                                };
+                                                h.position_operator("add", &left, &right)?
+                                            };
+                                            let arg1 = {
+                                                let object = h.global("LogSeverity")?;
+                                                h.get(&object, "Debug")?
+                                            };
+                                            h.call(&function, &receiver, &[arg0, arg1])?
+                                        };
+                                        let _ = {
+                                            let receiver = {
+                                                let object = this_value.clone();
+                                                h.get(&object, "parent")?
+                                            };
+                                            let function =
+                                                h.get(&receiver, "scheduleOrderRefresh")?;
+                                            h.call(&function, &receiver, &[])?
+                                        };
+                                        return Ok(());
+                                    }
+                                } else {
+                                    let existing_order = {
+                                        let condition = {
+                                            let value = is_hip3.clone();
+                                            h.boolean(!h.truthy(&value))
+                                        };
+                                        if h.truthy(&condition) {
+                                            {
+                                                let object = existing_orders_by_id.clone();
+                                                {
+                                                    let key = order_id.clone();
+                                                    h.index(&object, &key)?
+                                                }
+                                            }
+                                        } else {
+                                            h.undefined()
+                                        }
+                                    };
+                                    let stop_entry = {
+                                        let condition = {
+                                            let left = {
+                                                let left = {
+                                                    let left = {
+                                                        let left = {
+                                                            let value = is_hip3.clone();
+                                                            h.boolean(!h.truthy(&value))
+                                                        };
+                                                        if !h.truthy(&left) {
+                                                            left
+                                                        } else {
+                                                            {
+                                                                let value = existing_order.clone();
+                                                                h.boolean(!h.truthy(&value))
+                                                            }
+                                                        }
+                                                    };
+                                                    if !h.truthy(&left) {
+                                                        left
+                                                    } else {
+                                                        {
+                                                            let value = {
+                                                                let object = order_data.clone();
+                                                                h.get(&object, "orderType")?
+                                                            };
+                                                            h.boolean(!h.truthy(&value))
+                                                        }
+                                                    }
+                                                };
+                                                if !h.truthy(&left) {
+                                                    left
+                                                } else {
+                                                    {
+                                                        let value = {
+                                                            let object = order_data.clone();
+                                                            h.get(&object, "triggerPx")?
+                                                        };
+                                                        h.boolean(!h.truthy(&value))
+                                                    }
+                                                }
+                                            };
+                                            if !h.truthy(&left) {
+                                                left
+                                            } else {
+                                                {
+                                                    let value = {
+                                                        let object = order_data.clone();
+                                                        h.get(&object, "isTrigger")?
+                                                    };
+                                                    h.boolean(!h.truthy(&value))
+                                                }
+                                            }
+                                        };
+                                        if h.truthy(&condition) {
+                                            {
+                                                let receiver = {
+                                                    let object = this_value.clone();
+                                                    h.get(&object, "parent")?
+                                                };
+                                                let function =
+                                                    h.get(&receiver, "matchPrePlacementTrigger")?;
+                                                let arg0 = {
+                                                    let object = order_data.clone();
+                                                    h.get(&object, "coin")?
+                                                };
+                                                let arg1 = side.clone();
+                                                let arg2 = {
+                                                    let value = {
+                                                        let object = order_data.clone();
+                                                        h.get(&object, "origSz")?
+                                                    };
+                                                    h.position_unary("plus", &value)?
+                                                };
+                                                h.call(&function, &receiver, &[arg0, arg1, arg2])?
+                                            }
+                                        } else {
+                                            h.undefined()
+                                        }
+                                    };
+                                    if {
+                                        let condition = stop_entry.clone();
+                                        h.truthy(&condition)
+                                    } {
+                                        inferred_type = {
+                                            let object = stop_entry.clone();
+                                            h.get(&object, "type")?
+                                        };
+                                        inferred_price = {
+                                            let object = stop_entry.clone();
+                                            h.get(&object, "price")?
+                                        };
+                                        inference_source = lit(h, "pre-placement-trigger");
+                                    } else {
+                                        if {
+                                            let condition = {
+                                                let left = {
+                                                    let left = {
+                                                        let left = existing_order.clone();
+                                                        if !h.truthy(&left) {
+                                                            left
+                                                        } else {
+                                                            {
+                                                                let value = {
+                                                                    let object = order_data.clone();
+                                                                    h.get(&object, "orderType")?
+                                                                };
+                                                                h.boolean(!h.truthy(&value))
+                                                            }
+                                                        }
+                                                    };
+                                                    if !h.truthy(&left) {
+                                                        left
+                                                    } else {
+                                                        {
+                                                            let value = {
+                                                                let object = order_data.clone();
+                                                                h.get(&object, "triggerPx")?
+                                                            };
+                                                            h.boolean(!h.truthy(&value))
+                                                        }
+                                                    }
+                                                };
+                                                if !h.truthy(&left) {
+                                                    left
+                                                } else {
+                                                    {
+                                                        let value = {
+                                                            let object = order_data.clone();
+                                                            h.get(&object, "isTrigger")?
+                                                        };
+                                                        h.boolean(!h.truthy(&value))
+                                                    }
+                                                }
+                                            };
+                                            h.truthy(&condition)
+                                        } {
+                                            inferred_type = {
+                                                let object = existing_order.clone();
+                                                h.get(&object, "type")?
+                                            };
+                                            inferred_price = {
+                                                let object = existing_order.clone();
+                                                h.get(&object, "price")?
+                                            };
+                                            inference_source = lit(h, "store-preserved");
+                                        } else {
+                                            let inferred = {
+                                                let function =
+                                                    h.global("inferHyperliquidOrderTypeAndPrice")?;
+                                                let receiver = h.undefined();
+                                                let arg0 = order_data.clone();
+                                                h.call(&function, &receiver, &[arg0])?
+                                            };
+                                            inferred_type = {
+                                                let object = inferred.clone();
+                                                h.get(&object, "type")?
+                                            };
+                                            inferred_price = {
+                                                let object = inferred.clone();
+                                                h.get(&object, "price")?
+                                            };
+                                            inference_source = {
+                                                let object = inferred.clone();
+                                                h.get(&object, "source")?
+                                            };
+                                        }
+                                    }
+                                }
                             }
                         }
                     }
@@ -4438,18 +4458,38 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                         }
                     };
                     let mut inferred_time_in_force = {
-                        let function = h.global("parseHyperliquidOrderTimeInForce")?;
-                        let receiver = h.undefined();
-                        let arg0 = {
-                            let object = order_data.clone();
-                            h.get(&object, "tif")?
-                        };
-                        h.call(&function, &receiver, &[arg0])?
+                        let condition = record.clone();
+                        if h.truthy(&condition) {
+                            {
+                                let object = record.clone();
+                                h.get(&object, "timeInForce")?
+                            }
+                        } else {
+                            {
+                                let function = h.global("parseHyperliquidOrderTimeInForce")?;
+                                let receiver = h.undefined();
+                                let arg0 = {
+                                    let object = order_data.clone();
+                                    h.get(&object, "tif")?
+                                };
+                                h.call(&function, &receiver, &[arg0])?
+                            }
+                        }
                     };
                     if {
                         let condition = {
-                            let value = inferred_time_in_force.clone();
-                            h.boolean(!h.truthy(&value))
+                            let left = {
+                                let value = inferred_time_in_force.clone();
+                                h.boolean(!h.truthy(&value))
+                            };
+                            if !h.truthy(&left) {
+                                left
+                            } else {
+                                {
+                                    let value = record.clone();
+                                    h.boolean(!h.truthy(&value))
+                                }
+                            }
                         };
                         h.truthy(&condition)
                     } {
@@ -4487,8 +4527,18 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                     if {
                         let condition = {
                             let left = {
-                                let value = inferred_time_in_force.clone();
-                                h.boolean(!h.truthy(&value))
+                                let left = {
+                                    let value = inferred_time_in_force.clone();
+                                    h.boolean(!h.truthy(&value))
+                                };
+                                if !h.truthy(&left) {
+                                    left
+                                } else {
+                                    {
+                                        let value = record.clone();
+                                        h.boolean(!h.truthy(&value))
+                                    }
+                                }
                             };
                             if !h.truthy(&left) {
                                 left
@@ -4527,27 +4577,7 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                         h.define_data(&object, "symbol", &value)?;
                         let value = inferred_type.clone();
                         h.define_data(&object, "type", &value)?;
-                        let value = {
-                            let condition = {
-                                let left = {
-                                    let object = order_data.clone();
-                                    h.get(&object, "side")?
-                                };
-                                let right = lit(h, "B");
-                                h.boolean(h.strict_equal(&left, &right))
-                            };
-                            if h.truthy(&condition) {
-                                {
-                                    let object = h.global("OrderSide")?;
-                                    h.get(&object, "Buy")?
-                                }
-                            } else {
-                                {
-                                    let object = h.global("OrderSide")?;
-                                    h.get(&object, "Sell")?
-                                }
-                            }
-                        };
+                        let value = side.clone();
                         h.define_data(&object, "side", &value)?;
                         let value = inferred_price.clone();
                         h.define_data(&object, "price", &value)?;
@@ -4586,13 +4616,23 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                         };
                         h.define_data(&object, "remaining", &value)?;
                         let value = {
-                            let function = h.global("Boolean")?;
-                            let receiver = h.undefined();
-                            let arg0 = {
-                                let object = order_data.clone();
-                                h.get(&object, "reduceOnly")?
-                            };
-                            h.call(&function, &receiver, &[arg0])?
+                            let condition = record.clone();
+                            if h.truthy(&condition) {
+                                {
+                                    let object = record.clone();
+                                    h.get(&object, "reduceOnly")?
+                                }
+                            } else {
+                                {
+                                    let function = h.global("Boolean")?;
+                                    let receiver = h.undefined();
+                                    let arg0 = {
+                                        let object = order_data.clone();
+                                        h.get(&object, "reduceOnly")?
+                                    };
+                                    h.call(&function, &receiver, &[arg0])?
+                                }
+                            }
                         };
                         h.define_data(&object, "reduceOnly", &value)?;
                         let value = {
@@ -4603,6 +4643,23 @@ pub fn handle_order_updates<H: PositionOrderHost>(
                         h.define_data(&object, "lastUpdate", &value)?;
                         let value = inferred_time_in_force.clone();
                         h.define_data(&object, "timeInForce", &value)?;
+                        let value = {
+                            let condition = cloid.clone();
+                            if h.truthy(&condition) {
+                                {
+                                    let object = h.object()?;
+                                    let value = cloid.clone();
+                                    h.define_data(&object, "clientOrderId", &value)?;
+                                    object
+                                }
+                            } else {
+                                {
+                                    let object = h.object()?;
+                                    object
+                                }
+                            }
+                        };
+                        h.spread_into(&object, &value)?;
                         let value = order_data.clone();
                         h.define_data(&object, "info", &value)?;
                         object
@@ -6137,13 +6194,6 @@ pub fn parse_open_orders<H: PositionOrderHost>(
     open_orders: &H::Value,
 ) -> Result<H::Value, H::Error> {
     let open_orders = open_orders.clone();
-    let markets_by_id = {
-        let object = {
-            let object = this_value.clone();
-            h.get(&object, "store")?
-        };
-        h.get(&object, "marketsById")?
-    };
     return Ok({
         let receiver = {
             let receiver = {
@@ -6154,14 +6204,234 @@ pub fn parse_open_orders<H: PositionOrderHost>(
                 h.call(&function, &receiver, &[arg0])?
             };
             let function = h.get(&receiver, "map")?;
-            let arg0 = h.position_callback(PositionCallback::ParseOpenOrders1([
-                markets_by_id.clone(),
-                this_value.clone(),
-            ]))?;
+            let arg0 =
+                h.position_callback(PositionCallback::ParseOpenOrders1([this_value.clone()]))?;
             h.call(&function, &receiver, &[arg0])?
         };
         let function = h.get(&receiver, "filter")?;
         let arg0 = h.position_callback(PositionCallback::ParseOpenOrders2([]))?;
         h.call(&function, &receiver, &[arg0])?
+    });
+}
+/// Source: hyperliquid.exchange.ts::mapOpenOrderRow
+pub fn map_open_order_row<H: PositionOrderHost>(
+    h: &mut H,
+    this_value: &H::Value,
+    open_order: &H::Value,
+    status: &H::Value,
+) -> Result<H::Value, H::Error> {
+    let open_order = open_order.clone();
+    let status = status.clone();
+    let mut market = {
+        let object = {
+            let object = {
+                let object = this_value.clone();
+                h.get(&object, "store")?
+            };
+            h.get(&object, "marketsById")?
+        };
+        {
+            let key = {
+                let object = open_order.clone();
+                h.get(&object, "coin")?
+            };
+            h.index(&object, &key)?
+        }
+    };
+    if {
+        let condition = {
+            let left = {
+                let value = market.clone();
+                h.boolean(!h.truthy(&value))
+            };
+            if !h.truthy(&left) {
+                left
+            } else {
+                {
+                    let receiver = {
+                        let object = open_order.clone();
+                        h.get(&object, "coin")?
+                    };
+                    let function = h.get(&receiver, "includes")?;
+                    let arg0 = lit(h, ":");
+                    h.call(&function, &receiver, &[arg0])?
+                }
+            }
+        };
+        h.truthy(&condition)
+    } {
+        market = {
+            let receiver = {
+                let object = this_value.clone();
+                h.get(&object, "marketsLowerCaseMap")?
+            };
+            let function = h.get(&receiver, "get")?;
+            let arg0 = {
+                let receiver = {
+                    let object = open_order.clone();
+                    h.get(&object, "coin")?
+                };
+                let function = h.get(&receiver, "toLowerCase")?;
+                h.call(&function, &receiver, &[])?
+            };
+            h.call(&function, &receiver, &[arg0])?
+        };
+    }
+    if {
+        let condition = {
+            let value = market.clone();
+            h.boolean(!h.truthy(&value))
+        };
+        h.truthy(&condition)
+    } {
+        return Ok(h.null_value());
+    }
+    let inferred = {
+        let function = h.global("inferHyperliquidOrderTypeAndPrice")?;
+        let receiver = h.undefined();
+        let arg0 = open_order.clone();
+        h.call(&function, &receiver, &[arg0])?
+    };
+    let client_order_id = {
+        let function = h.global("readHyperliquidCloid")?;
+        let receiver = h.undefined();
+        let arg0 = {
+            let object = open_order.clone();
+            h.get(&object, "cloid")?
+        };
+        h.call(&function, &receiver, &[arg0])?
+    };
+    return Ok({
+        let object = h.object()?;
+        let value = {
+            let mut units: Vec<u16> = vec![];
+            let value = {
+                let object = open_order.clone();
+                h.get(&object, "oid")?
+            };
+            units.extend(h.template_string(&value)?.0);
+            units.extend_from_slice(&[]);
+            h.literal(&JsString(units))
+        };
+        h.define_data(&object, "id", &value)?;
+        let value = status.clone();
+        h.define_data(&object, "status", &value)?;
+        let value = {
+            let object = market.clone();
+            h.get(&object, "symbol")?
+        };
+        h.define_data(&object, "symbol", &value)?;
+        let value = {
+            let object = inferred.clone();
+            h.get(&object, "type")?
+        };
+        h.define_data(&object, "type", &value)?;
+        let value = {
+            let condition = {
+                let left = {
+                    let object = open_order.clone();
+                    h.get(&object, "side")?
+                };
+                let right = lit(h, "B");
+                h.boolean(h.strict_equal(&left, &right))
+            };
+            if h.truthy(&condition) {
+                {
+                    let object = h.global("OrderSide")?;
+                    h.get(&object, "Buy")?
+                }
+            } else {
+                {
+                    let object = h.global("OrderSide")?;
+                    h.get(&object, "Sell")?
+                }
+            }
+        };
+        h.define_data(&object, "side", &value)?;
+        let value = {
+            let object = inferred.clone();
+            h.get(&object, "price")?
+        };
+        h.define_data(&object, "price", &value)?;
+        let value = {
+            let value = {
+                let object = open_order.clone();
+                h.get(&object, "origSz")?
+            };
+            h.position_unary("plus", &value)?
+        };
+        h.define_data(&object, "amount", &value)?;
+        let value = {
+            let left = {
+                let value = {
+                    let object = open_order.clone();
+                    h.get(&object, "origSz")?
+                };
+                h.position_unary("plus", &value)?
+            };
+            let right = {
+                let value = {
+                    let object = open_order.clone();
+                    h.get(&object, "sz")?
+                };
+                h.position_unary("plus", &value)?
+            };
+            h.position_operator("subtract", &left, &right)?
+        };
+        h.define_data(&object, "filled", &value)?;
+        let value = {
+            let value = {
+                let object = open_order.clone();
+                h.get(&object, "sz")?
+            };
+            h.position_unary("plus", &value)?
+        };
+        h.define_data(&object, "remaining", &value)?;
+        let value = {
+            let function = h.global("Boolean")?;
+            let receiver = h.undefined();
+            let arg0 = {
+                let object = open_order.clone();
+                h.get(&object, "reduceOnly")?
+            };
+            h.call(&function, &receiver, &[arg0])?
+        };
+        h.define_data(&object, "reduceOnly", &value)?;
+        let value = {
+            let receiver = h.global("Date")?;
+            let function = h.get(&receiver, "now")?;
+            h.call(&function, &receiver, &[])?
+        };
+        h.define_data(&object, "lastUpdate", &value)?;
+        let value = {
+            let function = h.global("parseHyperliquidOrderTimeInForce")?;
+            let receiver = h.undefined();
+            let arg0 = {
+                let object = open_order.clone();
+                h.get(&object, "tif")?
+            };
+            h.call(&function, &receiver, &[arg0])?
+        };
+        h.define_data(&object, "timeInForce", &value)?;
+        let value = {
+            let condition = client_order_id.clone();
+            if h.truthy(&condition) {
+                {
+                    let object = h.object()?;
+                    let value = client_order_id.clone();
+                    h.define_data(&object, "clientOrderId", &value)?;
+                    object
+                }
+            } else {
+                {
+                    let object = h.object()?;
+                    object
+                }
+            }
+        };
+        h.spread_into(&object, &value)?;
+        let value = open_order.clone();
+        h.define_data(&object, "info", &value)?;
+        object
     });
 }
