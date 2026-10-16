@@ -1650,9 +1650,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "49255a1bb85843d457056786c2f1858034487d185770e5168e2df529c4fef8ba",
+      "producer_sha256": "23fedfff2d514542fac7b8be7c001113615406f45e8b6fa6e9f80ce47b3878b1",
       "classification": "no-owned-latch",
-      "reason": "Retry loop with a local attempt counter; interceptor lists and the retry condition are cloned out of client state before each await."
+      "reason": "Retry loop owns only its local attempt counter and effective request config; interceptor lists and the retry condition are cloned out of client state before each await. Reusing the failed config adds no task, waiter, registration or borrow across an await."
     },
     {
       "owner": "src/js_runtime/client.rs::send_once",
