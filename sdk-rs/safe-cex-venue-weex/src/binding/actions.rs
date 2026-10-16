@@ -26,7 +26,7 @@ fn fields(values: Option<Vec<(&'static str, WeexActionValue)>>) -> Js {
 pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thrown> {
     a::WeexAccountActionRuntime {
         request: |h, request| {
-            let config = Js::object(vec![]);
+            let config = Js::object(std::vec![]);
             let params = fields(request.params);
             if !params.is_undefined() {
                 config.define("params", params)?;
@@ -35,13 +35,13 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
             let pending = match request.method {
                 WeexActionMethod::Post => h
                     .root("xhr")?
-                    .call_method("post", vec![Js::str(request.endpoint), body, config])?,
+                    .call_method("post", std::vec![Js::str(request.endpoint), body, config])?,
                 WeexActionMethod::Delete => {
                     if !body.is_undefined() {
                         config.define("data", body)?;
                     }
                     h.root("xhr")?
-                        .call_method("delete", vec![Js::str(request.endpoint), config])?
+                        .call_method("delete", std::vec![Js::str(request.endpoint), config])?
                 }
             };
             Ok(Box::pin(async move {
@@ -51,7 +51,7 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
         },
         promise_all: |_, a, b| {
             Ok(Box::pin(async move {
-                futures::try_join!(a, b)?;
+                futures::future::try_join(a, b).await?;
                 Ok(())
             }))
         },
@@ -71,10 +71,10 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
         update_orders_status: |h, ids, status| {
             h.call(
                 "store.updateOrdersStatus",
-                vec![
+                std::vec![
                     Js::array(
                         ids.into_iter()
-                            .map(|id| Js::object(vec![("id", Js::utf16(&id))]))
+                            .map(|id| Js::object(std::vec![("id", Js::utf16(&id))]))
                             .collect(),
                     ),
                     from_typed(&status)?,
@@ -103,7 +103,7 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
         config: |h, symbol, refetch| {
             let pending = h.call(
                 "getOrFetchSymbolConfig",
-                vec![Js::utf16(symbol), Js::Bool(refetch)],
+                std::vec![Js::utf16(symbol), Js::Bool(refetch)],
             )?;
             Ok(Box::pin(await_js(pending)))
         },
@@ -131,23 +131,23 @@ pub(super) fn runtime() -> a::WeexAccountActionRuntime<Host, Js, Js, Js, Js, Thr
             let value = config.spread_object()?;
             value.define("positionMode", from_typed(&mode)?)?;
             h.root("symbolSettings")?
-                .call_method("set", vec![Js::utf16(symbol), value])?;
+                .call_method("set", std::vec![Js::utf16(symbol), value])?;
             Ok(())
         },
         set_account_mode: |h, mode| h.this().set("accountPositionMode", from_typed(&mode)?),
         set_hedged: |h, hedged| {
             h.call(
                 "store.setSetting",
-                vec![Js::str("isHedged"), Js::Bool(hedged)],
+                std::vec![Js::str("isHedged"), Js::Bool(hedged)],
             )?;
             Ok(())
         },
         fetch_positions: |h| {
-            let pending = h.call("fetchPositions", vec![])?;
+            let pending = h.call("fetchPositions", std::vec![])?;
             Ok(Box::pin(await_js(pending)))
         },
         update_positions: |h, positions| {
-            h.call("store.addOrUpdatePositions", vec![positions])?;
+            h.call("store.addOrUpdatePositions", std::vec![positions])?;
             Ok(())
         },
         new_error: |_, message| Thrown::error("Error", &String::from_utf16_lossy(&message)),

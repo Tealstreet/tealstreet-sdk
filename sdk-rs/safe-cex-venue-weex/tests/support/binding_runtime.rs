@@ -1,4 +1,4 @@
-//! Scripted native HTTP and WS host; no venue operation is mocked.
+// Scripted native HTTP and WS host; no venue operation is mocked.
 use safe_cex_exchange::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
