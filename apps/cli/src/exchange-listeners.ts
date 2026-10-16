@@ -25,14 +25,21 @@ function formatFill(fill: OrderFillEvent): string {
   return `${side} ${fill.amount} ${fill.symbol} @ $${priceStr}`;
 }
 
+// `use <account>` on an account that is already enabled hands back the same
+// exchange; wiring it again printed every fill once per switch.
+const wiredEmitters = new WeakSet<object>();
+
 /**
- * Setup event listeners on an exchange
+ * Setup event listeners on an exchange, once per exchange
  */
 export function setupExchangeListeners(
   exchange: Pick<ExchangeLike, 'emitter'>,
   context: ExchangeListenerContext,
   accountName?: string,
 ): void {
+  if (wiredEmitters.has(exchange.emitter)) return;
+  wiredEmitters.add(exchange.emitter);
+
   const { adapter, logger, recordFill, addWatchMessage } = context;
 
   // Listen for command output. ExchangeLike.emitter is a generic

@@ -378,6 +378,8 @@ and large payloads are truncated.
 
 **Convention:** Use `logger.*` for operational details (file only). Use `print()` for user-facing status lines (terminal only).
 
+**Exchange events (`✓ Fill:`, command output, `Exchange error:` / `warning:`) are wired by `setupExchangeListeners`, once per emitter** — `use` on an already enabled account returns the same exchange, and re-wiring it printed every fill once per switch. Add handlers there; never call `exchange.emitter.on(...)` at a call site.
+
 **`logger.ts` must add no module-level timers at all.** `src/index.ts` imports
 it at the top, so every subcommand pays for it: a ref'd `setInterval` here meant
 `account add`, `exec` and friends printed their output, finished, and then hung
