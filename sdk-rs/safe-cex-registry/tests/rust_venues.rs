@@ -787,6 +787,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Paradex,
             ExchangeName::Phemex,
             ExchangeName::Polymarket,
+            ExchangeName::Txflow,
             ExchangeName::Woo,
             ExchangeName::Weex,
         ],
