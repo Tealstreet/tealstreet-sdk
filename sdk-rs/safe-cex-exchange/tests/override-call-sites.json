@@ -4639,7 +4639,7 @@
   },
   {
     "function": "store_object",
-    "body": "48f2b1686705ce57",
+    "body": "13a244caa990fb9f",
     "call": "s . update_order (& id , & changes)",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_store.rs"
   },

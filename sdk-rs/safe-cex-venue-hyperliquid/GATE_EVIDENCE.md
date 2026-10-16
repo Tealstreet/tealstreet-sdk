@@ -1426,3 +1426,12 @@ family base getter binds inherited BaseExchange isPublicDataOnly. Neither source
 Hyperliquid class overrides canSign. The new Spot start capability calls the
 concrete venue hook. Only affected existing pins and these two new calls are
 reconciled; other lanes' rows are retained.
+
+Spot integration follow-up: inherited merged #229's GRVT delegate review and
+current master, retaining both Spot and ApexOmni construction docs. Core18 and
+Spot21 production tests pass again; live TS override inventory passes1/1. The
+full guard reached the final inventory comparison: manually reviewed Spot/base
+class/core-dispose rows match. A further Store facade enclosing-body pin is
+updated for the typed Store.update bridge; its native Store.update_order call
+is unchanged. Remaining stale Binance rows on that master tree were reported
+to their author lane for review; they are not regenerated or edited here.
