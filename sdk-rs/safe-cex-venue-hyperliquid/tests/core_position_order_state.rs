@@ -342,6 +342,19 @@ impl WsPingHost for Host {
         for (a, b) in args.iter().zip(expected) {
             assert_native(a, &Native::decode(b), &self.case);
         }
+        // A call into another lowered root runs its Rust body here: the source
+        // trace records the call frame first and the callee's body frames after it.
+        if function.tag() == "mapOpenOrderRow" {
+            let native = map_open_order_row(self, receiver, &args[0], &args[1]);
+            match (&native, f.get("throw")) {
+                (Err(a), Some(b)) => assert_native(a, &Native::decode(b), &self.case),
+                (Ok(a), None) => assert_native(a, &Native::decode(&f["result"]), &self.case),
+                _ => panic!("DISPATCH native nested root outcome {}", self.case),
+            }
+            let wire = json!({"function":function.wire(),"receiver":receiver.wire(),"args":args.iter().map(Native::wire).collect::<Vec<_>>()});
+            self.finish(f, wire)?;
+            return native;
+        }
         let mut callback_results = vec![];
         if let Some(callbacks) = f.get("callbacks") {
             let capture = self
@@ -756,8 +769,8 @@ fn actual_source_position_order_state_native_values() {
     );
     let oracle: Value = serde_json::from_slice(&output.stdout).unwrap();
     let cases = oracle["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 106);
-    assert_eq!(oracle["iterationStop"], 105);
+    assert_eq!(cases.len(), 116);
+    assert_eq!(oracle["iterationStop"], 115);
     let names = [
         "applyCoreClearinghouseState",
         "handleHip3ClearinghouseState",
@@ -769,8 +782,9 @@ fn actual_source_position_order_state_native_values() {
         "syncBalanceFromLivePositions",
         "fetchHip3Positions",
         "parseOpenOrders",
+        "mapOpenOrderRow",
     ];
-    let counts = [10, 10, 10, 12, 16, 8, 8, 12, 10, 10];
+    let counts = [10, 10, 10, 12, 20, 8, 8, 12, 10, 10, 6];
     for (n, count) in names.iter().zip(counts) {
         assert_eq!(
             cases.iter().filter(|c| c["name"] == *n).count(),
@@ -778,7 +792,7 @@ fn actual_source_position_order_state_native_values() {
             "independent floor {n}"
         );
     }
-    let expected_awaits = [0, 0, 0, 0, 0, 0, 0, 0, 9, 0];
+    let expected_awaits = [0, 0, 0, 0, 0, 0, 0, 0, 9, 0, 0];
     for (name, expected) in names.iter().zip(expected_awaits) {
         assert_eq!(
             cases
@@ -875,6 +889,7 @@ fn actual_source_position_order_state_native_values() {
                 }
                 "fetchHip3Positions" => block_on(fetch_hip3_positions(&mut h, &exchange, &arg(0))),
                 "parseOpenOrders" => parse_open_orders(&mut h, &exchange, &arg(0)),
+                "mapOpenOrderRow" => map_open_order_row(&mut h, &exchange, &arg(0), &arg(1)),
                 _ => panic!("unknown root"),
             };
             match (&result, c["result"].get("throw")) {
