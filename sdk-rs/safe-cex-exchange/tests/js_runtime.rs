@@ -274,6 +274,43 @@ fn operators_follow_ecmascript_and_refuse_bigint_mixing() {
     assert!(ops::less_than(&big(1), &Js::Number(1.5)).unwrap());
     assert!(!ops::less_equal(&Js::Number(f64::NAN), &Js::Number(1.0)).unwrap());
     assert!(ops::greater_equal(&big(2), &Js::str("2")).unwrap());
+    // Exact BigInt ordering beyond 2^53 and StringToBigInt radix literals.
+    let beyond = Js::BigInt(Rc::new("9007199254740993".parse().unwrap()));
+    assert!(ops::less_than(&beyond, &Js::Number(9007199254740994.0)).unwrap());
+    assert!(ops::greater_than(&beyond, &Js::Number(9007199254740992.0)).unwrap());
+    assert!(ops::less_than(&big(1), &Js::Number(1.5)).unwrap());
+    assert!(!ops::less_than(&big(2), &Js::Number(1.5)).unwrap());
+    assert!(ops::less_than(&big(15), &Js::str("0x10")).unwrap());
+    assert!(!ops::less_than(&big(1), &Js::str("1.5")).unwrap());
+    assert!(!ops::greater_equal(&big(1), &Js::str("1.5")).unwrap());
+    // OrdinaryToPrimitive consults an own valueOf.
+    let boxed = Js::object(vec![(
+        "valueOf",
+        Js::function("valueOf", |_, _| Ok(Js::Number(7.0))),
+    )]);
+    assert!(
+        ops::multiply(&boxed, &Js::Number(2.0))
+            .unwrap()
+            .strict_equals(&Js::Number(14.0))
+    );
+    // Remainder and unary minus.
+    assert!(
+        ops::remainder(&Js::Number(-7.0), &Js::Number(2.0))
+            .unwrap()
+            .strict_equals(&Js::Number(-1.0))
+    );
+    assert!(
+        ops::remainder(&big(-7), &big(2))
+            .unwrap()
+            .strict_equals(&big(-1))
+    );
+    assert_eq!(
+        ops::remainder(&big(1), &big(0)).unwrap_err().message(),
+        "Division by zero"
+    );
+    let negative_zero = ops::negate(&Js::Number(0.0)).unwrap().as_f64().unwrap();
+    assert!(negative_zero == 0.0 && negative_zero.is_sign_negative());
+    assert!(ops::negate(&big(3)).unwrap().strict_equals(&big(-3)));
 }
 
 #[test]
