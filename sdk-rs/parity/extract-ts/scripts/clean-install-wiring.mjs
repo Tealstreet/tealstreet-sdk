@@ -10,7 +10,7 @@ const requiredPaths = [
   // already covers it. What replaces it here is the mirror's own workflow: the
   // wasm policy audit now validates whichever workflow declares the wasm job,
   // so an edit to the mirror's CI must trigger this one.
-  'mirrors/tealstreet-sdk/.github/workflows/ci.yml',
+  'mirrors/tealstreet-sdk/.github/workflows/rust.yml',
   'packages/safe-cex-web/src/candleCache/**',
   'packages/safe-cex-server/src/candleCache/**',
   'packages/safe-cex-react-native/src/candleCache/**',
