@@ -323,18 +323,15 @@ describe('StopCommand — sized stops (partial)', () => {
     expect(order.amount).toBe(0.01);
   });
 
-  it.each([
-    [['stop', '$600', 'at', '60000'], 60_000, 60_000],
-    [['stop', '600$', 'at', '60000', 'trigger', '65000'], 60_000, 65_000],
-  ])('sizes USD at the resolved stop price (%s)', async (args, price, triggerPrice) => {
+  it('sizes USD at the stop price, not the trigger or last price', async () => {
     const ex = makeExchange([pos()]);
     ex.store!.tickers![0].last = 80_000;
     ex.store!.tickers![0].mark = 80_000;
 
-    const result = await cmd.execute(ctx(args, ex));
+    const result = await cmd.execute(ctx(['stop', '600$', 'at', '60000', 'trigger', '65000'], ex));
 
     expect(result.success).toBe(true);
-    expect(lastOrder(ex)).toMatchObject({ price, triggerPrice, amount: 0.01 });
+    expect(lastOrder(ex)).toMatchObject({ price: 60_000, triggerPrice: 65_000, amount: 0.01 });
   });
 
   it('"500$ at -1%" suffix form also resolves', async () => {
