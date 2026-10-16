@@ -817,6 +817,18 @@
           "file": "sdk-rs/safe-cex-venue-phemex/src/session_control.rs",
           "contains": "host.base_dispose()?;"
         }
+      ],
+      "dispose_source": [
+        {
+          "file": "packages/safe-cex/src/exchanges/phemex/phemex.exchange.ts",
+          "class": "PhemexExchange",
+          "definition_file": "packages/safe-cex/src/exchanges/phemex/phemex.exchange.ts",
+          "definition_class": "PhemexExchange",
+          "start_line": 88,
+          "end_line": 92,
+          "own": true,
+          "super_call": true
+        }
       ]
     }
   ]
