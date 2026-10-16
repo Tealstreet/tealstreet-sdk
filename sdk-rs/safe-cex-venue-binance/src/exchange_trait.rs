@@ -73,6 +73,13 @@ fn cleanup(
     }))
 }
 
+/// TS `BaseExchange` default these classes inherit: `await Promise.reject(new Error('Not implemented'))`
+/// (base.ts getAccount L734, fetchSymbolMaxLeverage L799, setLeverage L808, changePositionMode L832,
+/// changeMarginType L836, scheduleCancel L989, fetchPublicTrades L1138). No request, no emit.
+fn base_exchange_rejection<'a, T: 'a>() -> ExchangeFuture<'a, T> {
+    Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+}
+
 impl Exchange for BinanceExchange {
     type PlaceOpts = PlaceOrderOpts;
     fn base(&self) -> &BaseExchange {
@@ -309,6 +316,12 @@ impl Exchange for BinanceExchange {
             .after_method_called_in_worker(method.as_str().expect("worker method string"), args)
             .map_err(|e| (*e).clone())
     }
+    fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
+        base_exchange_rejection()
+    }
+    fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
+    }
 }
 
 impl Exchange for BinancePMExchange {
@@ -436,6 +449,19 @@ impl Exchange for BinancePMExchange {
             ]),
         ))
     }
+    fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
+        base_exchange_rejection()
+    }
+    fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
+    }
+    fn fetch_public_trades(
+        &self,
+        _symbol: String,
+        _limit: Option<f64>,
+    ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
+        base_exchange_rejection()
+    }
 }
 
 impl Exchange for BinanceSpotExchange {
@@ -527,5 +553,43 @@ impl Exchange for BinanceSpotExchange {
             )
         });
         cleanup(result)
+    }
+    fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
+        base_exchange_rejection()
+    }
+    fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
+    }
+    fn fetch_public_trades(
+        &self,
+        _symbol: String,
+        _limit: Option<f64>,
+    ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
+        base_exchange_rejection()
+    }
+    fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
+        base_exchange_rejection()
+    }
+    fn set_leverage(
+        &self,
+        _symbol: String,
+        _leverage: f64,
+        _side: Option<PositionSide>,
+    ) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
+    }
+    fn change_position_mode(
+        &self,
+        _hedged: bool,
+        _symbol: Option<String>,
+    ) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
+    }
+    fn change_margin_type(
+        &self,
+        _isolated: bool,
+        _symbol: Option<String>,
+    ) -> ExchangeFuture<'_, ()> {
+        base_exchange_rejection()
     }
 }

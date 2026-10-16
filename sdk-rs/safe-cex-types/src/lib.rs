@@ -391,6 +391,14 @@ pub struct Order {
     )]
     #[ts(type = "any", optional)]
     pub info: Option<serde_json::Value>,
+    // The venue client order ID where the adapter maps it to the top level
+    // (Hyperliquid's cloid): `info` is stripped before a worker posts the store.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub client_order_id: Option<String>,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -1359,6 +1367,8 @@ pub enum ExchangeName {
     Salsadex,
     #[serde(rename = "tealstreet-dex")]
     TealstreetDex,
+    #[serde(rename = "txflow")]
+    Txflow,
     #[serde(rename = "what")]
     What,
     #[serde(rename = "weex")]
@@ -3571,6 +3581,12 @@ mod strict_codecs {
             deserialize_with = "deserialize_present",
             skip_serializing_if = "Option::is_none"
         )]
+        client_order_id: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
         time_in_force: Option<OrderTimeInForce>,
         last_update: f64,
         #[serde(
@@ -4640,6 +4656,8 @@ mod strict_codecs {
         Salsadex,
         #[serde(rename = "tealstreet-dex")]
         TealstreetDex,
+        #[serde(rename = "txflow")]
+        Txflow,
         #[serde(rename = "what")]
         What,
         #[serde(rename = "weex")]
@@ -6835,6 +6853,11 @@ mod strict_codecs {
                         .unwrap()
                         .to_owned(),
                     serde_json::to_value(ExchangeName::TealstreetDex)
+                        .unwrap()
+                        .as_str()
+                        .unwrap()
+                        .to_owned(),
+                    serde_json::to_value(ExchangeName::Txflow)
                         .unwrap()
                         .as_str()
                         .unwrap()

@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.order-inference.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/order_inference.rs" ]
 
 [[symbol]]
 ts = "HyperliquidOrderInferenceSource"

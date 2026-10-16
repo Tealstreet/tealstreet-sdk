@@ -42,7 +42,7 @@ test('Backpack declares exactly its helper and factory files', () => {
   ], 'BACKPACK native source declarations');
   const row = data.symbol.find(row => row.ts === 'createAPI' && row.kind === 'const-fn');
   assert.ok(row, 'BACKPACK source factory row exists');
-  assert.equal(row.rs, 'safe-cex-venue-backpack/src/api_factory.rs::create_api');
+  assert.equal([row.rs].flat()[0], 'safe-cex-venue-backpack/src/api_factory.rs::create_api', 'BACKPACK factory body is the primary target');
   assert.equal(row.layer, 'adapted');
   assert.equal(row.status, 'divergent');
 });

@@ -452,6 +452,7 @@ impl PrivateStream {
             let amount = parsed(d.get("q"))?;
             let filled = parsed(d.get("z"))?;
             let order = Order {
+                client_order_id: None,
                 id: id.ok_or_else(|| {
                     ExchangeError::new("Missing private order id cannot enter native Order")
                 })?,

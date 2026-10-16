@@ -1023,6 +1023,7 @@
       "mode",
       "salsadex",
       "tealstreet-dex",
+      "txflow",
       "what",
       "weex",
       "woo",
@@ -53501,7 +53502,6 @@
       "supportedOnMobile": false,
       "supportsSpotToggle": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "leverageMagnets": [
         1029,
         1041
@@ -53605,7 +53605,7 @@
     },
     "evidence": "Complete 86-field declared-source native witness floor; primitive/options read directly, enum variants matched, nested feature fields/map payloads inspected. Derived sequence admission remains a required repair.",
     "nativeObservation": {
-      "call": "{ fn __features(v:&crate::exchange_metadata::ExchangeFeatures)->serde_json::Value { serde_json::json!({\"kline\":v.kline,\"orderbook\":v.orderbook,\"orders\":v.orders,\"positions\":v.positions,\"balance\":v.balance}) } fn __metadata(v:&crate::exchange_metadata::ExchangeMetadata)->serde_json::Value { let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"exchange_name\".into(),serde_json::json!(match &v.exchange_name {crate::ExchangeName::Bybit=>\"bybit\",crate::ExchangeName::Binance=>\"binance\",_=>\"outside_fixed_fixture\"}));out.insert(\"logo\".into(),serde_json::json!(&v.logo));out.insert(\"light_logo\".into(),serde_json::json!(&v.light_logo));out.insert(\"dark_logo\".into(),serde_json::json!(&v.dark_logo));out.insert(\"ref_image\".into(),serde_json::json!(&v.ref_image));out.insert(\"requires_passphrase\".into(),serde_json::json!(&v.requires_passphrase));out.insert(\"requires_application_id\".into(),serde_json::json!(&v.requires_application_id));out.insert(\"requires_api_key_index\".into(),serde_json::json!(&v.requires_api_key_index));out.insert(\"requires_no_secret\".into(),serde_json::json!(&v.requires_no_secret));out.insert(\"ref_link\".into(),serde_json::json!(&v.ref_link));out.insert(\"enabled\".into(),serde_json::json!(&v.enabled));out.insert(\"enabled_in_dev\".into(),serde_json::json!(&v.enabled_in_dev));out.insert(\"enable_in_preview\".into(),serde_json::json!(&v.enable_in_preview));out.insert(\"hidden_from_new_account_picker\".into(),serde_json::json!(&v.hidden_from_new_account_picker));out.insert(\"supported_on_mobile\".into(),serde_json::json!(&v.supported_on_mobile));out.insert(\"supports_spot_toggle\".into(),serde_json::json!(&v.supports_spot_toggle));out.insert(\"supports_testnet\".into(),serde_json::json!(&v.supports_testnet));out.insert(\"supports_executions_history\".into(),serde_json::json!(&v.supports_executions_history));out.insert(\"leverage_magnets\".into(),serde_json::json!(v.leverage_magnets.iter().map(|n|n.to_bits().to_string()).collect::<Vec<_>>()));out.insert(\"orderbook_tick_delay\".into(),serde_json::json!(v.orderbook_tick_delay.to_bits().to_string()));out.insert(\"pretty_name\".into(),serde_json::json!(&v.pretty_name));out.insert(\"tv_intra_day_multipliers\".into(),serde_json::json!(&v.tv_intra_day_multipliers));out.insert(\"tv_has_daily\".into(),serde_json::json!(&v.tv_has_daily));out.insert(\"tv_has_weekly_and_monthly\".into(),serde_json::json!(&v.tv_has_weekly_and_monthly));out.insert(\"tv_max_get_bar_fetches\".into(),serde_json::json!(v.tv_max_get_bar_fetches.to_bits().to_string()));out.insert(\"candle_api_count_limit\".into(),serde_json::json!(v.candle_api_count_limit.to_bits().to_string()));out.insert(\"default_quote\".into(),serde_json::json!(&v.default_quote));out.insert(\"position_modes\".into(),serde_json::json!(v.position_modes.iter().map(|x|match x {crate::PositionMode::Hedged=>\"hedged\",crate::PositionMode::OneWay=>\"oneway\"}).collect::<Vec<_>>()));out.insert(\"margin_types\".into(),serde_json::json!(v.margin_types.iter().map(|x|match x {crate::MarginType::Isolated=>\"isolated\",crate::MarginType::Cross=>\"cross\"}).collect::<Vec<_>>()));out.insert(\"leverage_slider_disabled\".into(),serde_json::json!(&v.leverage_slider_disabled));out.insert(\"has_independent_hedged_leverage_in_isolated_margin\".into(),serde_json::json!(&v.has_independent_hedged_leverage_in_isolated_margin));out.insert(\"has_independent_hedged_leverage_in_cross_margin\".into(),serde_json::json!(&v.has_independent_hedged_leverage_in_cross_margin));out.insert(\"supports_trailing_stop_loss\".into(),serde_json::json!(&v.supports_trailing_stop_loss));out.insert(\"supports_opening_trigger_orders\".into(),serde_json::json!(&v.supports_opening_trigger_orders));out.insert(\"supported_tpsl_trigger_types\".into(),serde_json::json!(v.supported_tpsl_trigger_types.iter().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"}).collect::<Vec<_>>()));out.insert(\"private_proxy_ips\".into(),serde_json::json!(&v.private_proxy_ips));out.insert(\"default_tp_trigger_type\".into(),serde_json::json!(v.default_tp_trigger_type.as_ref().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"})));out.insert(\"default_sl_trigger_type\".into(),serde_json::json!(v.default_sl_trigger_type.as_ref().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"})));out.insert(\"order_pending_update_delay\".into(),serde_json::json!(v.order_pending_update_delay.to_bits().to_string()));out.insert(\"stop_order_pending_update_delay\".into(),serde_json::json!(v.stop_order_pending_update_delay.to_bits().to_string()));out.insert(\"requires_cors\".into(),serde_json::json!(&v.requires_cors));out.insert(\"forbid_cors\".into(),serde_json::json!(&v.forbid_cors));out.insert(\"tick_interval\".into(),serde_json::json!(v.tick_interval.to_bits().to_string()));out.insert(\"has_empty_positions\".into(),serde_json::json!(&v.has_empty_positions));out.insert(\"position_mode_is_global\".into(),serde_json::json!(&v.position_mode_is_global));out.insert(\"margin_type_is_global\".into(),serde_json::json!(&v.margin_type_is_global));out.insert(\"leverage_is_global\".into(),serde_json::json!(&v.leverage_is_global));out.insert(\"disconnect_warning_threshold\".into(),serde_json::json!(v.disconnect_warning_threshold.to_bits().to_string()));out.insert(\"supports_fee_rates\".into(),serde_json::json!(&v.supports_fee_rates));out.insert(\"market_order_delay_in_seconds\".into(),serde_json::json!(v.market_order_delay_in_seconds.to_bits().to_string()));out.insert(\"private_proxy_regions\".into(),serde_json::json!(v.private_proxy_regions.iter().map(|(k,v)|serde_json::json!([k,v])).collect::<Vec<_>>()));out.insert(\"auto_down_size_reduce_orders\".into(),serde_json::json!(&v.auto_down_size_reduce_orders));out.insert(\"supports_chaser\".into(),serde_json::json!(&v.supports_chaser));out.insert(\"supports_position_margin\".into(),serde_json::json!(&v.supports_position_margin));out.insert(\"supports_closed_pn_l_endpoint\".into(),serde_json::json!(&v.supports_closed_pn_l_endpoint));out.insert(\"supports_partial_stops\".into(),serde_json::json!(&v.supports_partial_stops));out.insert(\"supports_infinity_stops\".into(),serde_json::json!(&v.supports_infinity_stops));out.insert(\"supports_max_cross_leverage\".into(),serde_json::json!(&v.supports_max_cross_leverage));out.insert(\"supports_tunnel\".into(),serde_json::json!(&v.supports_tunnel));out.insert(\"supports_ws_route\".into(),serde_json::json!(&v.supports_ws_route));out.insert(\"supports_vault\".into(),serde_json::json!(&v.supports_vault));out.insert(\"requires_omni_key_seed\".into(),serde_json::json!(&v.requires_omni_key_seed));out.insert(\"requires_paradex_address\".into(),serde_json::json!(&v.requires_paradex_address));out.insert(\"supports_subaccount\".into(),serde_json::json!(&v.supports_subaccount));out.insert(\"supports_fetch_symbol_max_leverage\".into(),serde_json::json!(&v.supports_fetch_symbol_max_leverage));out.insert(\"unified_margin\".into(),serde_json::json!(&v.unified_margin));out.insert(\"supports_kline_seconds\".into(),serde_json::json!(&v.supports_kline_seconds));out.insert(\"default_symbol\".into(),serde_json::json!(&v.default_symbol));out.insert(\"default_trading_view_symbol\".into(),serde_json::json!(&v.default_trading_view_symbol));out.insert(\"supports_read_only_key\".into(),serde_json::json!(&v.supports_read_only_key));out.insert(\"secondary_api_key_tick_interval\".into(),serde_json::json!(v.secondary_api_key_tick_interval.map(|n|n.to_bits().to_string())));out.insert(\"always_calculate_unrealized_pnl_from_last_price\".into(),serde_json::json!(&v.always_calculate_unrealized_pnl_from_last_price));out.insert(\"force_account_position_mode_change_on_exchange_itself\".into(),serde_json::json!(&v.force_account_position_mode_change_on_exchange_itself));out.insert(\"hide_margin_type_selector\".into(),serde_json::json!(&v.hide_margin_type_selector));out.insert(\"hide_position_mode_selector\".into(),serde_json::json!(&v.hide_position_mode_selector));out.insert(\"hide_lightweight_charts_popovers\".into(),serde_json::json!(&v.hide_lightweight_charts_popovers));out.insert(\"supports_tpsl_close_attribute\".into(),serde_json::json!(&v.supports_tpsl_close_attribute));out.insert(\"kline_callback_reset_threshold\".into(),serde_json::json!(v.kline_callback_reset_threshold.map(|n|n.to_bits().to_string())));out.insert(\"fetch_leverage_on_margin_symbol_change\".into(),serde_json::json!(&v.fetch_leverage_on_margin_symbol_change));out.insert(\"enforce_ws_tunnel\".into(),serde_json::json!(&v.enforce_ws_tunnel));out.insert(\"does_not_support_open_interest\".into(),serde_json::json!(&v.does_not_support_open_interest));out.insert(\"latency_domain\".into(),serde_json::json!(&v.latency_domain));out.insert(\"requires_tickers_for_markets_loaded\".into(),serde_json::json!(&v.requires_tickers_for_markets_loaded));out.insert(\"features\".into(),serde_json::json!(__features(&v.features)));out.insert(\"fetch_ohlcv_in_worker\".into(),serde_json::json!(&v.fetch_ohlcv_in_worker));out.insert(\"supports_public_only\".into(),serde_json::json!(&v.supports_public_only));serde_json::Value::Object(out) } match serde_json::from_value::<$type>($value.clone()) { Ok(decoded)=>__metadata(&decoded),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ fn __features(v:&crate::exchange_metadata::ExchangeFeatures)->serde_json::Value { serde_json::json!({\"kline\":v.kline,\"orderbook\":v.orderbook,\"orders\":v.orders,\"positions\":v.positions,\"balance\":v.balance}) } fn __metadata(v:&crate::exchange_metadata::ExchangeMetadata)->serde_json::Value { let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"exchange_name\".into(),serde_json::json!(match &v.exchange_name {crate::ExchangeName::Bybit=>\"bybit\",crate::ExchangeName::Binance=>\"binance\",_=>\"outside_fixed_fixture\"}));out.insert(\"logo\".into(),serde_json::json!(&v.logo));out.insert(\"light_logo\".into(),serde_json::json!(&v.light_logo));out.insert(\"dark_logo\".into(),serde_json::json!(&v.dark_logo));out.insert(\"ref_image\".into(),serde_json::json!(&v.ref_image));out.insert(\"requires_passphrase\".into(),serde_json::json!(&v.requires_passphrase));out.insert(\"requires_application_id\".into(),serde_json::json!(&v.requires_application_id));out.insert(\"requires_api_key_index\".into(),serde_json::json!(&v.requires_api_key_index));out.insert(\"requires_no_secret\".into(),serde_json::json!(&v.requires_no_secret));out.insert(\"ref_link\".into(),serde_json::json!(&v.ref_link));out.insert(\"enabled\".into(),serde_json::json!(&v.enabled));out.insert(\"enabled_in_dev\".into(),serde_json::json!(&v.enabled_in_dev));out.insert(\"enable_in_preview\".into(),serde_json::json!(&v.enable_in_preview));out.insert(\"hidden_from_new_account_picker\".into(),serde_json::json!(&v.hidden_from_new_account_picker));out.insert(\"supported_on_mobile\".into(),serde_json::json!(&v.supported_on_mobile));out.insert(\"supports_spot_toggle\".into(),serde_json::json!(&v.supports_spot_toggle));out.insert(\"supports_testnet\".into(),serde_json::json!(&v.supports_testnet));out.insert(\"leverage_magnets\".into(),serde_json::json!(v.leverage_magnets.iter().map(|n|n.to_bits().to_string()).collect::<Vec<_>>()));out.insert(\"orderbook_tick_delay\".into(),serde_json::json!(v.orderbook_tick_delay.to_bits().to_string()));out.insert(\"pretty_name\".into(),serde_json::json!(&v.pretty_name));out.insert(\"tv_intra_day_multipliers\".into(),serde_json::json!(&v.tv_intra_day_multipliers));out.insert(\"tv_has_daily\".into(),serde_json::json!(&v.tv_has_daily));out.insert(\"tv_has_weekly_and_monthly\".into(),serde_json::json!(&v.tv_has_weekly_and_monthly));out.insert(\"tv_max_get_bar_fetches\".into(),serde_json::json!(v.tv_max_get_bar_fetches.to_bits().to_string()));out.insert(\"candle_api_count_limit\".into(),serde_json::json!(v.candle_api_count_limit.to_bits().to_string()));out.insert(\"default_quote\".into(),serde_json::json!(&v.default_quote));out.insert(\"position_modes\".into(),serde_json::json!(v.position_modes.iter().map(|x|match x {crate::PositionMode::Hedged=>\"hedged\",crate::PositionMode::OneWay=>\"oneway\"}).collect::<Vec<_>>()));out.insert(\"margin_types\".into(),serde_json::json!(v.margin_types.iter().map(|x|match x {crate::MarginType::Isolated=>\"isolated\",crate::MarginType::Cross=>\"cross\"}).collect::<Vec<_>>()));out.insert(\"leverage_slider_disabled\".into(),serde_json::json!(&v.leverage_slider_disabled));out.insert(\"has_independent_hedged_leverage_in_isolated_margin\".into(),serde_json::json!(&v.has_independent_hedged_leverage_in_isolated_margin));out.insert(\"has_independent_hedged_leverage_in_cross_margin\".into(),serde_json::json!(&v.has_independent_hedged_leverage_in_cross_margin));out.insert(\"supports_trailing_stop_loss\".into(),serde_json::json!(&v.supports_trailing_stop_loss));out.insert(\"supports_opening_trigger_orders\".into(),serde_json::json!(&v.supports_opening_trigger_orders));out.insert(\"supported_tpsl_trigger_types\".into(),serde_json::json!(v.supported_tpsl_trigger_types.iter().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"}).collect::<Vec<_>>()));out.insert(\"private_proxy_ips\".into(),serde_json::json!(&v.private_proxy_ips));out.insert(\"default_tp_trigger_type\".into(),serde_json::json!(v.default_tp_trigger_type.as_ref().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"})));out.insert(\"default_sl_trigger_type\".into(),serde_json::json!(v.default_sl_trigger_type.as_ref().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"})));out.insert(\"order_pending_update_delay\".into(),serde_json::json!(v.order_pending_update_delay.to_bits().to_string()));out.insert(\"stop_order_pending_update_delay\".into(),serde_json::json!(v.stop_order_pending_update_delay.to_bits().to_string()));out.insert(\"requires_cors\".into(),serde_json::json!(&v.requires_cors));out.insert(\"forbid_cors\".into(),serde_json::json!(&v.forbid_cors));out.insert(\"tick_interval\".into(),serde_json::json!(v.tick_interval.to_bits().to_string()));out.insert(\"has_empty_positions\".into(),serde_json::json!(&v.has_empty_positions));out.insert(\"position_mode_is_global\".into(),serde_json::json!(&v.position_mode_is_global));out.insert(\"margin_type_is_global\".into(),serde_json::json!(&v.margin_type_is_global));out.insert(\"leverage_is_global\".into(),serde_json::json!(&v.leverage_is_global));out.insert(\"disconnect_warning_threshold\".into(),serde_json::json!(v.disconnect_warning_threshold.to_bits().to_string()));out.insert(\"supports_fee_rates\".into(),serde_json::json!(&v.supports_fee_rates));out.insert(\"market_order_delay_in_seconds\".into(),serde_json::json!(v.market_order_delay_in_seconds.to_bits().to_string()));out.insert(\"private_proxy_regions\".into(),serde_json::json!(v.private_proxy_regions.iter().map(|(k,v)|serde_json::json!([k,v])).collect::<Vec<_>>()));out.insert(\"auto_down_size_reduce_orders\".into(),serde_json::json!(&v.auto_down_size_reduce_orders));out.insert(\"supports_chaser\".into(),serde_json::json!(&v.supports_chaser));out.insert(\"supports_position_margin\".into(),serde_json::json!(&v.supports_position_margin));out.insert(\"supports_closed_pn_l_endpoint\".into(),serde_json::json!(&v.supports_closed_pn_l_endpoint));out.insert(\"supports_partial_stops\".into(),serde_json::json!(&v.supports_partial_stops));out.insert(\"supports_infinity_stops\".into(),serde_json::json!(&v.supports_infinity_stops));out.insert(\"supports_max_cross_leverage\".into(),serde_json::json!(&v.supports_max_cross_leverage));out.insert(\"supports_tunnel\".into(),serde_json::json!(&v.supports_tunnel));out.insert(\"supports_ws_route\".into(),serde_json::json!(&v.supports_ws_route));out.insert(\"supports_vault\".into(),serde_json::json!(&v.supports_vault));out.insert(\"requires_omni_key_seed\".into(),serde_json::json!(&v.requires_omni_key_seed));out.insert(\"requires_paradex_address\".into(),serde_json::json!(&v.requires_paradex_address));out.insert(\"supports_subaccount\".into(),serde_json::json!(&v.supports_subaccount));out.insert(\"supports_fetch_symbol_max_leverage\".into(),serde_json::json!(&v.supports_fetch_symbol_max_leverage));out.insert(\"unified_margin\".into(),serde_json::json!(&v.unified_margin));out.insert(\"supports_kline_seconds\".into(),serde_json::json!(&v.supports_kline_seconds));out.insert(\"default_symbol\".into(),serde_json::json!(&v.default_symbol));out.insert(\"default_trading_view_symbol\".into(),serde_json::json!(&v.default_trading_view_symbol));out.insert(\"supports_read_only_key\".into(),serde_json::json!(&v.supports_read_only_key));out.insert(\"secondary_api_key_tick_interval\".into(),serde_json::json!(v.secondary_api_key_tick_interval.map(|n|n.to_bits().to_string())));out.insert(\"always_calculate_unrealized_pnl_from_last_price\".into(),serde_json::json!(&v.always_calculate_unrealized_pnl_from_last_price));out.insert(\"force_account_position_mode_change_on_exchange_itself\".into(),serde_json::json!(&v.force_account_position_mode_change_on_exchange_itself));out.insert(\"hide_margin_type_selector\".into(),serde_json::json!(&v.hide_margin_type_selector));out.insert(\"hide_position_mode_selector\".into(),serde_json::json!(&v.hide_position_mode_selector));out.insert(\"hide_lightweight_charts_popovers\".into(),serde_json::json!(&v.hide_lightweight_charts_popovers));out.insert(\"supports_tpsl_close_attribute\".into(),serde_json::json!(&v.supports_tpsl_close_attribute));out.insert(\"kline_callback_reset_threshold\".into(),serde_json::json!(v.kline_callback_reset_threshold.map(|n|n.to_bits().to_string())));out.insert(\"fetch_leverage_on_margin_symbol_change\".into(),serde_json::json!(&v.fetch_leverage_on_margin_symbol_change));out.insert(\"enforce_ws_tunnel\".into(),serde_json::json!(&v.enforce_ws_tunnel));out.insert(\"does_not_support_open_interest\".into(),serde_json::json!(&v.does_not_support_open_interest));out.insert(\"latency_domain\".into(),serde_json::json!(&v.latency_domain));out.insert(\"requires_tickers_for_markets_loaded\".into(),serde_json::json!(&v.requires_tickers_for_markets_loaded));out.insert(\"features\".into(),serde_json::json!(__features(&v.features)));out.insert(\"fetch_ohlcv_in_worker\".into(),serde_json::json!(&v.fetch_ohlcv_in_worker));out.insert(\"supports_public_only\".into(),serde_json::json!(&v.supports_public_only));serde_json::Value::Object(out) } match serde_json::from_value::<$type>($value.clone()) { Ok(decoded)=>__metadata(&decoded),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -53626,7 +53626,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -53747,7 +53746,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -53875,7 +53873,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": null,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               2029,
               2041
@@ -53992,7 +53989,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": null,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4656638451817381888",
               "4656691228375515136"
@@ -54116,7 +54112,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -54237,7 +54232,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -54365,7 +54359,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -54486,7 +54479,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -54614,7 +54606,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -54735,7 +54726,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -54863,7 +54853,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -54984,7 +54973,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -55112,7 +55100,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -55233,7 +55220,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -55361,7 +55347,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -55482,7 +55467,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -55610,7 +55594,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -55731,7 +55714,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -55859,7 +55841,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -55980,7 +55961,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -56108,7 +56088,6 @@
             "supportedOnMobile": true,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -56229,7 +56208,6 @@
             "supported_on_mobile": true,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -56357,7 +56335,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": true,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -56478,7 +56455,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": true,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -56606,7 +56582,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": true,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -56727,7 +56702,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": true,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -56855,7 +56829,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": true,
             "leverageMagnets": [
               1029,
               1041
@@ -56976,7 +56949,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": true,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -57104,7 +57076,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -57225,7 +57196,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -57353,7 +57323,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -57474,7 +57443,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -57602,7 +57570,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -57723,7 +57690,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -57851,7 +57817,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -57972,7 +57937,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -58100,7 +58064,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -58221,7 +58184,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -58349,7 +58311,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -58470,7 +58431,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -58598,7 +58558,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -58719,7 +58678,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -58847,7 +58805,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -58968,7 +58925,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -59096,7 +59052,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -59217,7 +59172,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -59345,7 +59299,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -59466,7 +59419,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -59594,7 +59546,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -59715,7 +59666,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -59843,7 +59793,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -59964,7 +59913,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -60092,7 +60040,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -60213,7 +60160,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -60341,7 +60287,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -60462,7 +60407,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -60590,7 +60534,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -60711,7 +60654,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -60839,7 +60781,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -60960,7 +60901,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -61088,7 +61028,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -61209,7 +61148,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -61337,7 +61275,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -61458,7 +61395,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -61586,7 +61522,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -61707,7 +61642,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -61835,7 +61769,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -61956,7 +61889,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -62084,7 +62016,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -62205,7 +62136,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -62333,7 +62263,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -62454,7 +62383,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -62582,7 +62510,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -62703,7 +62630,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -62831,7 +62757,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -62952,7 +62877,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -63080,7 +63004,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -63201,7 +63124,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -63329,7 +63251,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -63450,7 +63371,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -63578,7 +63498,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -63699,7 +63618,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -63827,7 +63745,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -63948,7 +63865,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -64076,7 +63992,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -64197,7 +64112,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -64325,7 +64239,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -64446,7 +64359,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -64574,7 +64486,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -64695,7 +64606,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -64823,7 +64733,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -64944,7 +64853,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -65072,7 +64980,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -65193,7 +65100,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -65321,7 +65227,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -65442,7 +65347,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -65570,7 +65474,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -65691,7 +65594,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -65819,7 +65721,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -65940,7 +65841,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -66068,7 +65968,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -66189,7 +66088,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -66317,7 +66215,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -66438,7 +66335,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -66566,7 +66462,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -66687,7 +66582,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -66815,7 +66709,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -66936,7 +66829,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -67064,7 +66956,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -67185,7 +67076,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -67313,7 +67203,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -67434,7 +67323,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -67562,7 +67450,6 @@
             "supportedOnMobile": false,
             "supportsSpotToggle": false,
             "supportsTestnet": false,
-            "supportsExecutionsHistory": false,
             "leverageMagnets": [
               1029,
               1041
@@ -67683,7 +67570,6 @@
             "supported_on_mobile": false,
             "supports_spot_toggle": false,
             "supports_testnet": false,
-            "supports_executions_history": false,
             "leverage_magnets": [
               "4652240405306277888",
               "4652293181864411136"
@@ -67811,7 +67697,6 @@
         "supported_on_mobile",
         "supports_spot_toggle",
         "supports_testnet",
-        "supports_executions_history",
         "leverage_magnets",
         "orderbook_tick_delay",
         "pretty_name",
@@ -67905,7 +67790,6 @@
           "supportedOnMobile": false,
           "supportsSpotToggle": false,
           "supportsTestnet": false,
-          "supportsExecutionsHistory": false,
           "leverageMagnets": [
             1029,
             1041
@@ -68025,7 +67909,6 @@
           "supportedOnMobile": false,
           "supportsSpotToggle": null,
           "supportsTestnet": false,
-          "supportsExecutionsHistory": false,
           "leverageMagnets": [
             2029,
             2041
@@ -68142,7 +68025,6 @@
         "supportedOnMobile": false,
         "supportsSpotToggle": null,
         "supportsTestnet": false,
-        "supportsExecutionsHistory": false,
         "leverageMagnets": [
           2029,
           2041
@@ -68243,7 +68125,7 @@
     },
     "evidence": "Private generated metadata snapshot decoder: direct native map entries and distinct unified record. Derived sequence admission remains visible.",
     "nativeObservation": {
-      "call": "{ fn __features(v:&crate::exchange_metadata::ExchangeFeatures)->serde_json::Value { serde_json::json!({\"kline\":v.kline,\"orderbook\":v.orderbook,\"orders\":v.orders,\"positions\":v.positions,\"balance\":v.balance}) } fn __metadata(v:&crate::exchange_metadata::ExchangeMetadata)->serde_json::Value { let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"exchange_name\".into(),serde_json::json!(match &v.exchange_name {crate::ExchangeName::Bybit=>\"bybit\",crate::ExchangeName::Binance=>\"binance\",_=>\"outside_fixed_fixture\"}));out.insert(\"logo\".into(),serde_json::json!(&v.logo));out.insert(\"light_logo\".into(),serde_json::json!(&v.light_logo));out.insert(\"dark_logo\".into(),serde_json::json!(&v.dark_logo));out.insert(\"ref_image\".into(),serde_json::json!(&v.ref_image));out.insert(\"requires_passphrase\".into(),serde_json::json!(&v.requires_passphrase));out.insert(\"requires_application_id\".into(),serde_json::json!(&v.requires_application_id));out.insert(\"requires_api_key_index\".into(),serde_json::json!(&v.requires_api_key_index));out.insert(\"requires_no_secret\".into(),serde_json::json!(&v.requires_no_secret));out.insert(\"ref_link\".into(),serde_json::json!(&v.ref_link));out.insert(\"enabled\".into(),serde_json::json!(&v.enabled));out.insert(\"enabled_in_dev\".into(),serde_json::json!(&v.enabled_in_dev));out.insert(\"enable_in_preview\".into(),serde_json::json!(&v.enable_in_preview));out.insert(\"hidden_from_new_account_picker\".into(),serde_json::json!(&v.hidden_from_new_account_picker));out.insert(\"supported_on_mobile\".into(),serde_json::json!(&v.supported_on_mobile));out.insert(\"supports_spot_toggle\".into(),serde_json::json!(&v.supports_spot_toggle));out.insert(\"supports_testnet\".into(),serde_json::json!(&v.supports_testnet));out.insert(\"supports_executions_history\".into(),serde_json::json!(&v.supports_executions_history));out.insert(\"leverage_magnets\".into(),serde_json::json!(v.leverage_magnets.iter().map(|n|n.to_bits().to_string()).collect::<Vec<_>>()));out.insert(\"orderbook_tick_delay\".into(),serde_json::json!(v.orderbook_tick_delay.to_bits().to_string()));out.insert(\"pretty_name\".into(),serde_json::json!(&v.pretty_name));out.insert(\"tv_intra_day_multipliers\".into(),serde_json::json!(&v.tv_intra_day_multipliers));out.insert(\"tv_has_daily\".into(),serde_json::json!(&v.tv_has_daily));out.insert(\"tv_has_weekly_and_monthly\".into(),serde_json::json!(&v.tv_has_weekly_and_monthly));out.insert(\"tv_max_get_bar_fetches\".into(),serde_json::json!(v.tv_max_get_bar_fetches.to_bits().to_string()));out.insert(\"candle_api_count_limit\".into(),serde_json::json!(v.candle_api_count_limit.to_bits().to_string()));out.insert(\"default_quote\".into(),serde_json::json!(&v.default_quote));out.insert(\"position_modes\".into(),serde_json::json!(v.position_modes.iter().map(|x|match x {crate::PositionMode::Hedged=>\"hedged\",crate::PositionMode::OneWay=>\"oneway\"}).collect::<Vec<_>>()));out.insert(\"margin_types\".into(),serde_json::json!(v.margin_types.iter().map(|x|match x {crate::MarginType::Isolated=>\"isolated\",crate::MarginType::Cross=>\"cross\"}).collect::<Vec<_>>()));out.insert(\"leverage_slider_disabled\".into(),serde_json::json!(&v.leverage_slider_disabled));out.insert(\"has_independent_hedged_leverage_in_isolated_margin\".into(),serde_json::json!(&v.has_independent_hedged_leverage_in_isolated_margin));out.insert(\"has_independent_hedged_leverage_in_cross_margin\".into(),serde_json::json!(&v.has_independent_hedged_leverage_in_cross_margin));out.insert(\"supports_trailing_stop_loss\".into(),serde_json::json!(&v.supports_trailing_stop_loss));out.insert(\"supports_opening_trigger_orders\".into(),serde_json::json!(&v.supports_opening_trigger_orders));out.insert(\"supported_tpsl_trigger_types\".into(),serde_json::json!(v.supported_tpsl_trigger_types.iter().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"}).collect::<Vec<_>>()));out.insert(\"private_proxy_ips\".into(),serde_json::json!(&v.private_proxy_ips));out.insert(\"default_tp_trigger_type\".into(),serde_json::json!(v.default_tp_trigger_type.as_ref().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"})));out.insert(\"default_sl_trigger_type\".into(),serde_json::json!(v.default_sl_trigger_type.as_ref().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"})));out.insert(\"order_pending_update_delay\".into(),serde_json::json!(v.order_pending_update_delay.to_bits().to_string()));out.insert(\"stop_order_pending_update_delay\".into(),serde_json::json!(v.stop_order_pending_update_delay.to_bits().to_string()));out.insert(\"requires_cors\".into(),serde_json::json!(&v.requires_cors));out.insert(\"forbid_cors\".into(),serde_json::json!(&v.forbid_cors));out.insert(\"tick_interval\".into(),serde_json::json!(v.tick_interval.to_bits().to_string()));out.insert(\"has_empty_positions\".into(),serde_json::json!(&v.has_empty_positions));out.insert(\"position_mode_is_global\".into(),serde_json::json!(&v.position_mode_is_global));out.insert(\"margin_type_is_global\".into(),serde_json::json!(&v.margin_type_is_global));out.insert(\"leverage_is_global\".into(),serde_json::json!(&v.leverage_is_global));out.insert(\"disconnect_warning_threshold\".into(),serde_json::json!(v.disconnect_warning_threshold.to_bits().to_string()));out.insert(\"supports_fee_rates\".into(),serde_json::json!(&v.supports_fee_rates));out.insert(\"market_order_delay_in_seconds\".into(),serde_json::json!(v.market_order_delay_in_seconds.to_bits().to_string()));out.insert(\"private_proxy_regions\".into(),serde_json::json!(v.private_proxy_regions.iter().map(|(k,v)|serde_json::json!([k,v])).collect::<Vec<_>>()));out.insert(\"auto_down_size_reduce_orders\".into(),serde_json::json!(&v.auto_down_size_reduce_orders));out.insert(\"supports_chaser\".into(),serde_json::json!(&v.supports_chaser));out.insert(\"supports_position_margin\".into(),serde_json::json!(&v.supports_position_margin));out.insert(\"supports_closed_pn_l_endpoint\".into(),serde_json::json!(&v.supports_closed_pn_l_endpoint));out.insert(\"supports_partial_stops\".into(),serde_json::json!(&v.supports_partial_stops));out.insert(\"supports_infinity_stops\".into(),serde_json::json!(&v.supports_infinity_stops));out.insert(\"supports_max_cross_leverage\".into(),serde_json::json!(&v.supports_max_cross_leverage));out.insert(\"supports_tunnel\".into(),serde_json::json!(&v.supports_tunnel));out.insert(\"supports_ws_route\".into(),serde_json::json!(&v.supports_ws_route));out.insert(\"supports_vault\".into(),serde_json::json!(&v.supports_vault));out.insert(\"requires_omni_key_seed\".into(),serde_json::json!(&v.requires_omni_key_seed));out.insert(\"requires_paradex_address\".into(),serde_json::json!(&v.requires_paradex_address));out.insert(\"supports_subaccount\".into(),serde_json::json!(&v.supports_subaccount));out.insert(\"supports_fetch_symbol_max_leverage\".into(),serde_json::json!(&v.supports_fetch_symbol_max_leverage));out.insert(\"unified_margin\".into(),serde_json::json!(&v.unified_margin));out.insert(\"supports_kline_seconds\".into(),serde_json::json!(&v.supports_kline_seconds));out.insert(\"default_symbol\".into(),serde_json::json!(&v.default_symbol));out.insert(\"default_trading_view_symbol\".into(),serde_json::json!(&v.default_trading_view_symbol));out.insert(\"supports_read_only_key\".into(),serde_json::json!(&v.supports_read_only_key));out.insert(\"secondary_api_key_tick_interval\".into(),serde_json::json!(v.secondary_api_key_tick_interval.map(|n|n.to_bits().to_string())));out.insert(\"always_calculate_unrealized_pnl_from_last_price\".into(),serde_json::json!(&v.always_calculate_unrealized_pnl_from_last_price));out.insert(\"force_account_position_mode_change_on_exchange_itself\".into(),serde_json::json!(&v.force_account_position_mode_change_on_exchange_itself));out.insert(\"hide_margin_type_selector\".into(),serde_json::json!(&v.hide_margin_type_selector));out.insert(\"hide_position_mode_selector\".into(),serde_json::json!(&v.hide_position_mode_selector));out.insert(\"hide_lightweight_charts_popovers\".into(),serde_json::json!(&v.hide_lightweight_charts_popovers));out.insert(\"supports_tpsl_close_attribute\".into(),serde_json::json!(&v.supports_tpsl_close_attribute));out.insert(\"kline_callback_reset_threshold\".into(),serde_json::json!(v.kline_callback_reset_threshold.map(|n|n.to_bits().to_string())));out.insert(\"fetch_leverage_on_margin_symbol_change\".into(),serde_json::json!(&v.fetch_leverage_on_margin_symbol_change));out.insert(\"enforce_ws_tunnel\".into(),serde_json::json!(&v.enforce_ws_tunnel));out.insert(\"does_not_support_open_interest\".into(),serde_json::json!(&v.does_not_support_open_interest));out.insert(\"latency_domain\".into(),serde_json::json!(&v.latency_domain));out.insert(\"requires_tickers_for_markets_loaded\".into(),serde_json::json!(&v.requires_tickers_for_markets_loaded));out.insert(\"features\".into(),serde_json::json!(__features(&v.features)));out.insert(\"fetch_ohlcv_in_worker\".into(),serde_json::json!(&v.fetch_ohlcv_in_worker));out.insert(\"supports_public_only\".into(),serde_json::json!(&v.supports_public_only));serde_json::Value::Object(out) } match serde_json::from_value::<$type>($value.clone()) { Ok(decoded)=>serde_json::json!({\"ok\":true,\"metadata\":decoded.metadata.iter().map(|(k,v)|serde_json::json!([k,__metadata(v)])).collect::<Vec<_>>(),\"unified\":__metadata(&decoded.unified)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "call": "{ fn __features(v:&crate::exchange_metadata::ExchangeFeatures)->serde_json::Value { serde_json::json!({\"kline\":v.kline,\"orderbook\":v.orderbook,\"orders\":v.orders,\"positions\":v.positions,\"balance\":v.balance}) } fn __metadata(v:&crate::exchange_metadata::ExchangeMetadata)->serde_json::Value { let mut out=serde_json::Map::new();out.insert(\"ok\".into(),serde_json::Value::Bool(true));out.insert(\"exchange_name\".into(),serde_json::json!(match &v.exchange_name {crate::ExchangeName::Bybit=>\"bybit\",crate::ExchangeName::Binance=>\"binance\",_=>\"outside_fixed_fixture\"}));out.insert(\"logo\".into(),serde_json::json!(&v.logo));out.insert(\"light_logo\".into(),serde_json::json!(&v.light_logo));out.insert(\"dark_logo\".into(),serde_json::json!(&v.dark_logo));out.insert(\"ref_image\".into(),serde_json::json!(&v.ref_image));out.insert(\"requires_passphrase\".into(),serde_json::json!(&v.requires_passphrase));out.insert(\"requires_application_id\".into(),serde_json::json!(&v.requires_application_id));out.insert(\"requires_api_key_index\".into(),serde_json::json!(&v.requires_api_key_index));out.insert(\"requires_no_secret\".into(),serde_json::json!(&v.requires_no_secret));out.insert(\"ref_link\".into(),serde_json::json!(&v.ref_link));out.insert(\"enabled\".into(),serde_json::json!(&v.enabled));out.insert(\"enabled_in_dev\".into(),serde_json::json!(&v.enabled_in_dev));out.insert(\"enable_in_preview\".into(),serde_json::json!(&v.enable_in_preview));out.insert(\"hidden_from_new_account_picker\".into(),serde_json::json!(&v.hidden_from_new_account_picker));out.insert(\"supported_on_mobile\".into(),serde_json::json!(&v.supported_on_mobile));out.insert(\"supports_spot_toggle\".into(),serde_json::json!(&v.supports_spot_toggle));out.insert(\"supports_testnet\".into(),serde_json::json!(&v.supports_testnet));out.insert(\"leverage_magnets\".into(),serde_json::json!(v.leverage_magnets.iter().map(|n|n.to_bits().to_string()).collect::<Vec<_>>()));out.insert(\"orderbook_tick_delay\".into(),serde_json::json!(v.orderbook_tick_delay.to_bits().to_string()));out.insert(\"pretty_name\".into(),serde_json::json!(&v.pretty_name));out.insert(\"tv_intra_day_multipliers\".into(),serde_json::json!(&v.tv_intra_day_multipliers));out.insert(\"tv_has_daily\".into(),serde_json::json!(&v.tv_has_daily));out.insert(\"tv_has_weekly_and_monthly\".into(),serde_json::json!(&v.tv_has_weekly_and_monthly));out.insert(\"tv_max_get_bar_fetches\".into(),serde_json::json!(v.tv_max_get_bar_fetches.to_bits().to_string()));out.insert(\"candle_api_count_limit\".into(),serde_json::json!(v.candle_api_count_limit.to_bits().to_string()));out.insert(\"default_quote\".into(),serde_json::json!(&v.default_quote));out.insert(\"position_modes\".into(),serde_json::json!(v.position_modes.iter().map(|x|match x {crate::PositionMode::Hedged=>\"hedged\",crate::PositionMode::OneWay=>\"oneway\"}).collect::<Vec<_>>()));out.insert(\"margin_types\".into(),serde_json::json!(v.margin_types.iter().map(|x|match x {crate::MarginType::Isolated=>\"isolated\",crate::MarginType::Cross=>\"cross\"}).collect::<Vec<_>>()));out.insert(\"leverage_slider_disabled\".into(),serde_json::json!(&v.leverage_slider_disabled));out.insert(\"has_independent_hedged_leverage_in_isolated_margin\".into(),serde_json::json!(&v.has_independent_hedged_leverage_in_isolated_margin));out.insert(\"has_independent_hedged_leverage_in_cross_margin\".into(),serde_json::json!(&v.has_independent_hedged_leverage_in_cross_margin));out.insert(\"supports_trailing_stop_loss\".into(),serde_json::json!(&v.supports_trailing_stop_loss));out.insert(\"supports_opening_trigger_orders\".into(),serde_json::json!(&v.supports_opening_trigger_orders));out.insert(\"supported_tpsl_trigger_types\".into(),serde_json::json!(v.supported_tpsl_trigger_types.iter().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"}).collect::<Vec<_>>()));out.insert(\"private_proxy_ips\".into(),serde_json::json!(&v.private_proxy_ips));out.insert(\"default_tp_trigger_type\".into(),serde_json::json!(v.default_tp_trigger_type.as_ref().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"})));out.insert(\"default_sl_trigger_type\".into(),serde_json::json!(v.default_sl_trigger_type.as_ref().map(|x|match x {crate::OrderStopTriggerType::MarkPrice=>\"mark_price\",crate::OrderStopTriggerType::LastPrice=>\"last_price\",crate::OrderStopTriggerType::IndexPrice=>\"index_price\"})));out.insert(\"order_pending_update_delay\".into(),serde_json::json!(v.order_pending_update_delay.to_bits().to_string()));out.insert(\"stop_order_pending_update_delay\".into(),serde_json::json!(v.stop_order_pending_update_delay.to_bits().to_string()));out.insert(\"requires_cors\".into(),serde_json::json!(&v.requires_cors));out.insert(\"forbid_cors\".into(),serde_json::json!(&v.forbid_cors));out.insert(\"tick_interval\".into(),serde_json::json!(v.tick_interval.to_bits().to_string()));out.insert(\"has_empty_positions\".into(),serde_json::json!(&v.has_empty_positions));out.insert(\"position_mode_is_global\".into(),serde_json::json!(&v.position_mode_is_global));out.insert(\"margin_type_is_global\".into(),serde_json::json!(&v.margin_type_is_global));out.insert(\"leverage_is_global\".into(),serde_json::json!(&v.leverage_is_global));out.insert(\"disconnect_warning_threshold\".into(),serde_json::json!(v.disconnect_warning_threshold.to_bits().to_string()));out.insert(\"supports_fee_rates\".into(),serde_json::json!(&v.supports_fee_rates));out.insert(\"market_order_delay_in_seconds\".into(),serde_json::json!(v.market_order_delay_in_seconds.to_bits().to_string()));out.insert(\"private_proxy_regions\".into(),serde_json::json!(v.private_proxy_regions.iter().map(|(k,v)|serde_json::json!([k,v])).collect::<Vec<_>>()));out.insert(\"auto_down_size_reduce_orders\".into(),serde_json::json!(&v.auto_down_size_reduce_orders));out.insert(\"supports_chaser\".into(),serde_json::json!(&v.supports_chaser));out.insert(\"supports_position_margin\".into(),serde_json::json!(&v.supports_position_margin));out.insert(\"supports_closed_pn_l_endpoint\".into(),serde_json::json!(&v.supports_closed_pn_l_endpoint));out.insert(\"supports_partial_stops\".into(),serde_json::json!(&v.supports_partial_stops));out.insert(\"supports_infinity_stops\".into(),serde_json::json!(&v.supports_infinity_stops));out.insert(\"supports_max_cross_leverage\".into(),serde_json::json!(&v.supports_max_cross_leverage));out.insert(\"supports_tunnel\".into(),serde_json::json!(&v.supports_tunnel));out.insert(\"supports_ws_route\".into(),serde_json::json!(&v.supports_ws_route));out.insert(\"supports_vault\".into(),serde_json::json!(&v.supports_vault));out.insert(\"requires_omni_key_seed\".into(),serde_json::json!(&v.requires_omni_key_seed));out.insert(\"requires_paradex_address\".into(),serde_json::json!(&v.requires_paradex_address));out.insert(\"supports_subaccount\".into(),serde_json::json!(&v.supports_subaccount));out.insert(\"supports_fetch_symbol_max_leverage\".into(),serde_json::json!(&v.supports_fetch_symbol_max_leverage));out.insert(\"unified_margin\".into(),serde_json::json!(&v.unified_margin));out.insert(\"supports_kline_seconds\".into(),serde_json::json!(&v.supports_kline_seconds));out.insert(\"default_symbol\".into(),serde_json::json!(&v.default_symbol));out.insert(\"default_trading_view_symbol\".into(),serde_json::json!(&v.default_trading_view_symbol));out.insert(\"supports_read_only_key\".into(),serde_json::json!(&v.supports_read_only_key));out.insert(\"secondary_api_key_tick_interval\".into(),serde_json::json!(v.secondary_api_key_tick_interval.map(|n|n.to_bits().to_string())));out.insert(\"always_calculate_unrealized_pnl_from_last_price\".into(),serde_json::json!(&v.always_calculate_unrealized_pnl_from_last_price));out.insert(\"force_account_position_mode_change_on_exchange_itself\".into(),serde_json::json!(&v.force_account_position_mode_change_on_exchange_itself));out.insert(\"hide_margin_type_selector\".into(),serde_json::json!(&v.hide_margin_type_selector));out.insert(\"hide_position_mode_selector\".into(),serde_json::json!(&v.hide_position_mode_selector));out.insert(\"hide_lightweight_charts_popovers\".into(),serde_json::json!(&v.hide_lightweight_charts_popovers));out.insert(\"supports_tpsl_close_attribute\".into(),serde_json::json!(&v.supports_tpsl_close_attribute));out.insert(\"kline_callback_reset_threshold\".into(),serde_json::json!(v.kline_callback_reset_threshold.map(|n|n.to_bits().to_string())));out.insert(\"fetch_leverage_on_margin_symbol_change\".into(),serde_json::json!(&v.fetch_leverage_on_margin_symbol_change));out.insert(\"enforce_ws_tunnel\".into(),serde_json::json!(&v.enforce_ws_tunnel));out.insert(\"does_not_support_open_interest\".into(),serde_json::json!(&v.does_not_support_open_interest));out.insert(\"latency_domain\".into(),serde_json::json!(&v.latency_domain));out.insert(\"requires_tickers_for_markets_loaded\".into(),serde_json::json!(&v.requires_tickers_for_markets_loaded));out.insert(\"features\".into(),serde_json::json!(__features(&v.features)));out.insert(\"fetch_ohlcv_in_worker\".into(),serde_json::json!(&v.fetch_ohlcv_in_worker));out.insert(\"supports_public_only\".into(),serde_json::json!(&v.supports_public_only));serde_json::Value::Object(out) } match serde_json::from_value::<$type>($value.clone()) { Ok(decoded)=>serde_json::json!({\"ok\":true,\"metadata\":decoded.metadata.iter().map(|(k,v)|serde_json::json!([k,__metadata(v)])).collect::<Vec<_>>(),\"unified\":__metadata(&decoded.unified)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
       "cases": [
         {
           "input": {
@@ -68266,7 +68148,6 @@
                 "supportedOnMobile": false,
                 "supportsSpotToggle": false,
                 "supportsTestnet": false,
-                "supportsExecutionsHistory": false,
                 "leverageMagnets": [
                   1029,
                   1041
@@ -68386,7 +68267,6 @@
                 "supportedOnMobile": false,
                 "supportsSpotToggle": null,
                 "supportsTestnet": false,
-                "supportsExecutionsHistory": false,
                 "leverageMagnets": [
                   2029,
                   2041
@@ -68503,7 +68383,6 @@
               "supportedOnMobile": false,
               "supportsSpotToggle": null,
               "supportsTestnet": false,
-              "supportsExecutionsHistory": false,
               "leverageMagnets": [
                 2029,
                 2041
@@ -68626,7 +68505,6 @@
                   "supported_on_mobile": false,
                   "supports_spot_toggle": false,
                   "supports_testnet": false,
-                  "supports_executions_history": false,
                   "leverage_magnets": [
                     "4652240405306277888",
                     "4652293181864411136"
@@ -68756,7 +68634,6 @@
                   "supported_on_mobile": false,
                   "supports_spot_toggle": null,
                   "supports_testnet": false,
-                  "supports_executions_history": false,
                   "leverage_magnets": [
                     "4656638451817381888",
                     "4656691228375515136"
@@ -68881,7 +68758,6 @@
               "supported_on_mobile": false,
               "supports_spot_toggle": null,
               "supports_testnet": false,
-              "supports_executions_history": false,
               "leverage_magnets": [
                 "4656638451817381888",
                 "4656691228375515136"
@@ -69008,7 +68884,6 @@
                 "supportedOnMobile": false,
                 "supportsSpotToggle": null,
                 "supportsTestnet": false,
-                "supportsExecutionsHistory": false,
                 "leverageMagnets": [
                   2029,
                   2041
@@ -69124,7 +68999,6 @@
                 "supportedOnMobile": false,
                 "supportsSpotToggle": false,
                 "supportsTestnet": false,
-                "supportsExecutionsHistory": false,
                 "leverageMagnets": [
                   1029,
                   1041
@@ -69245,7 +69119,6 @@
               "supportedOnMobile": false,
               "supportsSpotToggle": false,
               "supportsTestnet": false,
-              "supportsExecutionsHistory": false,
               "leverageMagnets": [
                 1029,
                 1041
@@ -69372,7 +69245,6 @@
                   "supported_on_mobile": false,
                   "supports_spot_toggle": null,
                   "supports_testnet": false,
-                  "supports_executions_history": false,
                   "leverage_magnets": [
                     "4656638451817381888",
                     "4656691228375515136"
@@ -69498,7 +69370,6 @@
                   "supported_on_mobile": false,
                   "supports_spot_toggle": false,
                   "supports_testnet": false,
-                  "supports_executions_history": false,
                   "leverage_magnets": [
                     "4652240405306277888",
                     "4652293181864411136"
@@ -69627,7 +69498,6 @@
               "supported_on_mobile": false,
               "supports_spot_toggle": false,
               "supports_testnet": false,
-              "supports_executions_history": false,
               "leverage_magnets": [
                 "4652240405306277888",
                 "4652293181864411136"

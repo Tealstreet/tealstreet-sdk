@@ -70,7 +70,7 @@ impl JsNumberOutput for safe_cex_types::DataProvenance {
 
 impl JsNumberOutput for safe_cex_types::ExchangeName {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binancespot, Binancepm, Bingx, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Breakoutprop, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Salsadex, TealstreetDex, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
+        crate::js_number_output!(self, enum { Apexomni, Asterdex, Backpack, Binance, Binancespot, Binancepm, Bingx, Bitget, Bitgetinverse, Bitgetusdc, Bitrue, Bitunix, Blofin, Breakoutprop, Bybit, Bybitdemo, Bybitinverse, Bybitspot, Hyrotrader, Coinbase, Coinbasespot, Cryptocom, Grvt, Hyperliquid, Hyperliquidspot, Lighter, LighterRobinhood, Mexc, Okx, Okxdemo, Okxeu, Okxeudemo, Paradex, Phemex, Polymarket, Kodiakfi, Mode, Salsadex, TealstreetDex, Txflow, What, Weex, Woo, Woofi, Kucoin, Kucoinspot, Kraken, Krakenspot });
     }
 }
 
@@ -385,7 +385,7 @@ impl JsNumberOutput for safe_cex_types::Market {
 
 impl JsNumberOutput for safe_cex_types::Order {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { id, parent_id, status, symbol, r#type, side, price, amount, filled, remaining, reduce_only, close, time_in_force, last_update, trigger_type, tp_trigger_type, sl_trigger_type, take_profit, stop_loss, extra } passthrough { info });
+        crate::js_number_output!(self, struct { id, parent_id, status, symbol, r#type, side, price, amount, filled, remaining, reduce_only, close, client_order_id, time_in_force, last_update, trigger_type, tp_trigger_type, sl_trigger_type, take_profit, stop_loss, extra } passthrough { info });
     }
 }
 

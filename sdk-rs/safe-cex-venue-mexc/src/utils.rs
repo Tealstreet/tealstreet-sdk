@@ -726,6 +726,7 @@ pub fn normalize_position(
 
 fn empty_order(id: String, symbol: String, side: OrderSide) -> safe_cex_types::Order {
     safe_cex_types::Order {
+        client_order_id: None,
         id,
         parent_id: None,
         status: OrderStatus::Open,
