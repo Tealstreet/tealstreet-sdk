@@ -115,6 +115,9 @@ slice identity, native element fields/bits, error name/message and Display befor
 serialization. `scripts/response-shape-controls.py` requires seven independently
 compiled failures and exact-restoration passes; fresh production observations and
 classification receipts are checked by `scripts/response-shape-contracts.mjs`.
+All five Binance accepted-set runners read reviewed policy shards through the
+shared `loadPolicy` API; never restore deleted flat maps. See the
+[policy storage guide](../safe-cex-parity/accepted-set/POLICY-FILES.md).
 This selected native/default scope does not cover other owners or the feature
 matrix. Keep the existing [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary)
 and [typed-output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) boundaries.

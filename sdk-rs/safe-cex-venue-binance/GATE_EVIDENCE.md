@@ -3634,3 +3634,21 @@ results plus four explicit classifications pass again with zero failed owners.
 Formatting, frozen dependency installation and parity-check pass (7,459 rows;
 17,204 public Rust items). This is a selected seven-owner tranche, not a
 whole-venue accepted-set zero claim.
+
+
+Policy storage integration at e2c1181ea9 preserves every master shard. All five
+Binance direct runners now use the shared loadPolicy API. Parsed merged
+receiver-trait and default-trait maps compare exactly equal to the complete
+pre-cutover maps used by the controls. No native source, test, dependency, lock,
+compiler or source-oracle input changed across this integration; the restored
+compiled targets execute all eight tests again with zero ignored. Earlier
+compiled controls and selected-test Clippy retain their pre-integration provenance.
+
+Fresh post-cutover gates pass independently for records (four runtime results),
+string enums (three runtime results), predicates (three classification receipts),
+error outputs (four runtime results) and response shapes (three runtime results,
+four classification receipts). All five report zero failed owners: fourteen
+runtime results and seven explicit classifications in these disjoint selected
+scopes. This does not turn classification receipts into behavioral execution or
+establish coverage for the remaining inventory. Post-integration formatting,
+frozen installation and parity-check pass (7,459 rows; 17,204 public Rust items).
