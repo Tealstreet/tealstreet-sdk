@@ -2,6 +2,7 @@
   "name": "@tealstreet/parity-extract-ts",
   "version": "0.0.0",
   "private": true,
+  "license": "MIT",
   "type": "module",
   "scripts": {
     "extract": "node --import tsx src/cli.ts",
