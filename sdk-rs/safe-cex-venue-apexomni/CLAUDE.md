@@ -324,3 +324,35 @@ P4 native cancellation choice to a source Promise that would keep running.
 request account/metadata, delayed login, relay failure and pending-auth disposal.
 `scripts/hosted-signing-controls.py` independently removes capability edges and
 callback ownership; each must compile and fail its named native test, then restore.
+
+
+## Accepted-set map records
+
+`public_records`, `private_records` and `config_records` use 26 private Serde
+remote schemas at their existing concrete `Deserialize` boundaries. Preserve
+all original field/rename/default/presence/custom-passthrough attributes, numeric
+ingress, Serialize and exhaustive JsNumberOutput registrations. The previous
+ordinary local derived Fields decoders have independent obligations; their
+parent guards do not exempt them. A remote companion must remain private and
+must not acquire independent trait/conversion implementations or extra APIs.
+
+`tests/accepted_map_records.rs` independently observes every native field,
+Option presence, nested collection and f64 bit pattern before owner serialization.
+The authored fixture bases and explicit deltas preserve raw numeric tokens,
+including -0 and overflow, and contain one complete valid literal positional
+array per owner in reviewed Serde declaration order. Expected values come from
+the TS declarations, never from owner Serialize. All seven ordinary, qualified
+and shared numeric paths run for each case. Existing live-source record tests
+remain required; these selected contracts do not replace them.
+
+Run the selected test and `scripts/accepted-map-record-controls.py` serially from
+sdk-rs with its pinned toolchain and one Cargo job. Each control removes only one
+owner's object guard, requires the named compiled complete-array admission
+failure, restores all source bytes exactly and reruns all 26 native tests.
+`scripts/accepted-map-record-contracts.mjs` performs fresh native/default compiler
+inventory and actual runtime probes for the selected 26 owners; it separately
+inspects every actual nonblanket companion implementation and the exact returned
+owner identity. New traits/conversions/inherent APIs must refuse. Other records,
+functions, aliases, receiver policies, feature and wasm behavior remain separate
+accepted-set obligations. Follow accepted-set/MAP-ONLY-INGRESS.md and
+MANIFEST-SPEC#numeric-ingress-defect rather than adding a new primitive.
