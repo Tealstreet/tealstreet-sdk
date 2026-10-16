@@ -3777,3 +3777,47 @@ Deleting just that three-line registration reproduces the previous receiver
 file byte-identically. The selector dynamically calls the already-bound
 category/option/inverse members; it does not capture a BaseExchange method.
 No delegation classification or bypass exemption is added.
+
+
+## Spot facade and registry composition
+
+Production checkpoint `2fb414e5e1`, witness/mapping checkpoint `86e247c10e`:
+`exchange_binding` 22, `option_binding` 1, `private_event_delivery` 6 and
+`spot_binding` 6 all pass, including ignored live source comparisons. The primary
+order-write oracle retains 92 cases; private delivery independently asserts 48
+source/native compositions (two actual handlers/mappers, four flag modes, six
+scenes). Spot private frames publish live orders and replay-suppressed fills;
+position/execution/wallet topics retain the source ignores. Valid-array corpus
+coverage does not establish malformed-frame error-message parity.
+
+The serial Spot control runner compiled and caught 17 trait consumer mutations
+plus removal of the early source isSpot initializer. It restored exact production
+bytes and all six Spot E2Es passed. The typed base now receives is_spot=true before
+Rc publication through the single shared factory from #233; no venue-name policy
+is placed in core. Unsupported source BaseExchange hooks retain their exact
+Not implemented rejection, including max-leverage lookup, public trades and
+schedule cancel; market metadata separately advertises Spot leverage 1.
+
+The override inventory review retains all existing references and adds only eight
+Bybit references: six actual Spot helper-body delegates plus emitter name reads
+for order-only subscriptions and Spot ticker projection. The 13 existing receiver
+references retain their targets; only its enclosing install body changes when
+Spot members are installed. Account validation keeps the primary consumer while
+selecting the existing derived validator for Spot. No delegation exemption is
+added, and foreign inventory rows are preserved.
+
+FINDING ddi2il-38 remains explicit: the shared public protocol's active-symbol
+selection, both live change callbacks and retained topic reconciliation are not
+wired yet. The public class/constructor rows remain pending. This facade/registry
+slice does not claim that public composition or the remaining Inverse/HyroTrader
+constructors.
+
+Final scoped gates: native Bybit registry 3 passed (local/hosted signing and
+untouched demo origin), registry constructors 14 passed, core cancellation
+inventory 6 passed plus one explicit export ignored, override contract 4 passed
+plus one existing live-source inventory ignored. Host all-targets and wasm library
+clippy for Bybit/registry passed. Parity reports 7459 rows / 17145 public items
+with zero findings; extractor reports zero changed/added/orphaned. Registry-data
+and layers checks pass. The 1073 existing override entries are retained and the
+eight reviewed Bybit entries give a total of 1081; the incoming eight-row Binance
+repair is the owner's commit 04bfb16ccf, not an independent reclassification.

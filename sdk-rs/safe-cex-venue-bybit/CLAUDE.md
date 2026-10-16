@@ -546,3 +546,9 @@ private_event_delivery compares the actual Spot handler/mapOrder alongside the
 primary source bodies. Valid-array source cases are distinct from malformed-frame
 error coverage. The registry uses its existing Bybit host/dependency edge with the
 caller-owned limiter, including local and secretless hosted HTTP signing.
+
+FINDING ddi2il-38: concrete shared PublicProtocol currently rebuilds public topics
+from Store markets, bypassing source active-symbol selection and both live change
+callbacks/topic retention. Public class/constructor rows remain pending. The
+existing public_ticker_topics/public_ws_lifecycle body ports do not prove that
+wiring; it is a separate production follow-up before Inverse/HyroTrader binding.
