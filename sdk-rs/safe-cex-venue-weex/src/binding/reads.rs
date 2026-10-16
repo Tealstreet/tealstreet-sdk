@@ -5,7 +5,7 @@ use crate::{account_reads as a, income_reads as i, market_reads as m};
 pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
     m::WeexMarketReadRuntime {
         request: |h, request| {
-            let config = Js::object(vec![]);
+            let config = Js::object(std::vec![]);
             if let Some(params) = request.params {
                 config.define("params", params)?;
             }
@@ -14,7 +14,11 @@ pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
             }
             h.request("get", Js::str(request.endpoint), config)
         },
-        all: |_, a, b| Ok(Box::pin(async move { futures::try_join!(a, b) })),
+        all: |_, a, b| {
+            Ok(Box::pin(
+                async move { futures::future::try_join(a, b).await },
+            ))
+        },
         get: v::get,
         optional_get: v::optional,
         truthy: Js::truthy,
@@ -66,10 +70,10 @@ pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
         is_array: |_, value| Ok(value.is_array()),
         new_map: v::new_map,
         map_getter: |h, map| v::method(h, map, "get"),
-        map_lookup: |_, get, key| get.call(Js::Undefined, vec![key]),
+        map_lookup: |_, get, key| get.call(Js::Undefined, std::vec![key]),
         push_method: |h, array| v::method(h, array, "push"),
         push: |_, push, value| {
-            push.call(Js::Undefined, vec![value])?;
+            push.call(Js::Undefined, std::vec![value])?;
             Ok(())
         },
         markets: |h| h.root("store.markets"),
@@ -97,11 +101,13 @@ pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
         provider: |h| h.root("externalPublicDataProvider"),
         public_websocket: |h| h.root("publicWebsocket"),
         method: v::method,
-        call: |_, function, receiver, opts, callback| function.call(receiver, vec![opts, callback]),
+        call: |_, function, receiver, opts, callback| {
+            function.call(receiver, std::vec![opts, callback])
+        },
         error_value: |e| e.value.clone(),
         error_sink: |h| v::method(h, &h.this(), "emitAndLogError"),
         emit_error: |_, sink, error| {
-            sink.call(Js::Undefined, vec![error])?;
+            sink.call(Js::Undefined, std::vec![error])?;
             Ok(())
         },
         new_error: |_, s| Thrown::error("Error", &String::from_utf16_lossy(&s)),
@@ -110,7 +116,7 @@ pub(super) fn market_runtime() -> m::WeexMarketReadRuntime<Host, Js, Thrown> {
 pub(super) fn account_runtime() -> a::WeexAccountReadRuntime<Host, Js, Thrown> {
     a::WeexAccountReadRuntime {
         request: |h, request| {
-            let config = Js::object(vec![]);
+            let config = Js::object(std::vec![]);
             if let Some(params) = request.params {
                 config.define("params", Js::object(params))?;
             }
@@ -118,19 +124,26 @@ pub(super) fn account_runtime() -> a::WeexAccountReadRuntime<Host, Js, Thrown> {
             Ok(Box::pin(async move { pending.await?.get("data") }))
         },
         config: |h, symbol, refetch| {
-            let pending = h.call("getOrFetchSymbolConfig", vec![symbol, Js::Bool(refetch)])?;
+            let pending = h.call(
+                "getOrFetchSymbolConfig",
+                std::vec![symbol, Js::Bool(refetch)],
+            )?;
             Ok(Box::pin(await_js(pending)))
         },
         balance: |h| {
-            let pending = h.call("fetchBalance", vec![])?;
+            let pending = h.call("fetchBalance", std::vec![])?;
             Ok(Box::pin(await_js(pending)))
         },
         positions: |h| {
-            let pending = h.call("fetchPositions", vec![])?;
+            let pending = h.call("fetchPositions", std::vec![])?;
             Ok(Box::pin(await_js(pending)))
         },
-        all: |_, a, b| Ok(Box::pin(async move { futures::try_join!(a, b) })),
-        settled: |_, a, b| Ok(Box::pin(async move { futures::join!(a, b) })),
+        all: |_, a, b| {
+            Ok(Box::pin(
+                async move { futures::future::try_join(a, b).await },
+            ))
+        },
+        settled: |_, a, b| Ok(Box::pin(async move { futures::future::join(a, b).await })),
         public_only: |h| Ok(h.root("isPublicDataOnly")?.truthy()),
         markets_by_symbol: |h| h.root("store.marketsBySymbol"),
         market: |_, markets, key| markets.get_key(&key.to_js_string()?),
@@ -167,7 +180,7 @@ pub(super) fn account_runtime() -> a::WeexAccountReadRuntime<Host, Js, Thrown> {
         is_array: |_, value| Ok(value.is_array()),
         uniq_by_id: |h, value| {
             h.global("uniqBy")?
-                .call(Js::Undefined, vec![value, Js::str("id")])
+                .call(Js::Undefined, std::vec![value, Js::str("id")])
         },
         store_updater: |h| {
             h.0.owner_and_member("store.update")
@@ -177,13 +190,13 @@ pub(super) fn account_runtime() -> a::WeexAccountReadRuntime<Host, Js, Thrown> {
         copy_properties: |_, value| value.spread_object(),
         set_property: |_, object, key, value| object.set_key(&key.to_js_string()?, value),
         store_update: |_, f, value| {
-            f.call(Js::Undefined, vec![value])?;
+            f.call(Js::Undefined, std::vec![value])?;
             Ok(())
         },
         cache: |h| h.root("symbolSettings"),
         config_setter: |h, cache| v::method(h, cache, "set"),
         set_config: |_, set, key, config| {
-            set.call(Js::Undefined, vec![key, v::default_config(config)?])?;
+            set.call(Js::Undefined, std::vec![key, v::default_config(config)?])?;
             Ok(())
         },
         push_method: |h, array| v::method(h, array, "push"),
@@ -220,7 +233,7 @@ pub(super) fn income_runtime() -> i::WeexIncomeRuntime<Host, Js, Thrown> {
         public_only: |h| Ok(h.root("isPublicDataOnly")?.truthy()),
         request_factory: |h| v::method(h, &h.root("xhr")?, "post"),
         post: |_, post, endpoint, payload| {
-            let pending = post.call(Js::Undefined, vec![Js::str(endpoint), payload])?;
+            let pending = post.call(Js::Undefined, std::vec![Js::str(endpoint), payload])?;
             Ok(Box::pin(await_js(pending)))
         },
         optional_get: v::optional,
@@ -242,14 +255,14 @@ pub(super) fn income_runtime() -> i::WeexIncomeRuntime<Host, Js, Thrown> {
 pub(super) fn range_runtime() -> i::WeexIncomeRangeRuntime<Host, Js> {
     i::WeexIncomeRangeRuntime {
         fetch_page: |h, params, kind| {
-            let opts = Js::object(vec![
+            let opts = Js::object(std::vec![
                 ("startTime", Js::Number(params.start_time)),
                 ("endTime", Js::Number(params.end_time)),
                 ("limit", Js::Number(params.limit)),
                 ("incomeType", kind),
             ]);
             let pending = h
-                .call("fetchIncomeHistory", vec![opts])
+                .call("fetchIncomeHistory", std::vec![opts])
                 .map_err(|e| e.to_exchange_error())?;
             Ok(Box::pin(async move {
                 to_typed(&await_js(pending).await.map_err(|e| e.to_exchange_error())?)
@@ -259,14 +272,14 @@ pub(super) fn range_runtime() -> i::WeexIncomeRangeRuntime<Host, Js> {
         sleep: |h, ms| Ok(h.0.shared.runtime.sleep(ms.max(0.0) as u64)),
         warning_sink: |h| v::method(h, &h.this(), "log").map_err(|e| e.to_exchange_error()),
         warning: |_, sink, s| {
-            sink.call(Js::Undefined, vec![Js::utf16(&s), Js::str("warning")])
+            sink.call(Js::Undefined, std::vec![Js::utf16(&s), Js::str("warning")])
                 .map_err(|e| e.to_exchange_error())?;
             Ok(())
         },
         iso_date: |h, ms| {
             h.global("Date")
-                .and_then(|date| date.call(Js::Undefined, vec![Js::Number(ms)]))
-                .and_then(|date| date.call_method("toISOString", vec![]))
+                .and_then(|date| date.call(Js::Undefined, std::vec![Js::Number(ms)]))
+                .and_then(|date| date.call_method("toISOString", std::vec![]))
                 .and_then(|s| v::units(&s))
                 .map_err(|e| e.to_exchange_error())
         },
