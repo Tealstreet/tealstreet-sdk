@@ -38,6 +38,6 @@ note = "MIXED: chosen explicit host-owned nonce boundary and corrected reference
 ts = "PoseidonCrypto"
 kind = "type"
 layer = "adapted"
-rs = "safe_cex_crypto::poseidon_loaders::PoseidonCrypto"
+rs = "safe-cex-crypto/src/poseidon_loaders.rs::PoseidonCrypto"
 status = "divergent"
 note = "MIXED: FORCED UTF-8 argument/result strings. CHOSEN concrete owned loader/API context with seven callable methods and live readiness, returning explicit typed CryptoValue variants and LoaderError Results instead of open JS interface extension/global declarations. Reuses native SchnorrKeyPair/WasmError; no duplicate key-validation algorithm is introduced. Required host function handles preserve global versus captured-unbound calls and current export lookup. Extra object fields/prototypes, arbitrary global return objects and JS method replacement are outside this native interface. Existing Poseidon2Hasher/SchnorrSigner algorithm rows remain unchanged and separately divergent. Native LoaderError carries owned name/message rather than JS error identity/stack/arbitrary thrown values; CryptoValue unifies text/boolean/key-pair/error variants instead of per-method TS unions."

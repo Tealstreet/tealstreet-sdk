@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/external-public-data.ts"
-rust_files = [ "safe-cex-registry/src/public_data.rs", "safe-cex-types/src/gateway.rs", "safe-cex-registry/src/external_public_data.rs", "safe-cex-registry/src/public_data_host.rs", "safe-cex-registry/src/in_process_public_data.rs" ]
+rust_files = [ "safe-cex-registry/src/public_data.rs", "safe-cex-types/src/gateway.rs", "safe-cex-registry/src/external_public_data.rs" ]
 
 [[symbol]]
 ts = "EXTERNAL_PUBLIC_DATA_PING_THRESHOLD_MS"

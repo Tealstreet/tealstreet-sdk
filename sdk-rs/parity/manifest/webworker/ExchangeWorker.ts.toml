@@ -30,7 +30,7 @@ note = "FINDING owner: safe-cex-webworker audit. New annotation finding: Exchang
 ts = "ExchangeWorker"
 kind = "class"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker"
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker"
 status = "divergent"
 note = "MIXED: FORCED shared String/ExchangeName ingress cannot retain non-USV or arbitrary JS names (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). CHOSEN explicit native host, typed mutable Rc store frames, Result business errors and thread-local manager binding replace browser/global ownership. Handler constructor objects are nine ordered tags, chosen to keep registry/factory initialization separate rather than invent absent implementations. Construction, store delivery and teardown are real bodies; start, handlePayload, processor/handler initialization and event installation now have separately mapped real bodies. Existing log, error, buffer and payload-helper rows keep independent mappings. Hosts release retained borrows before callbacks."
 
@@ -38,23 +38,23 @@ note = "MIXED: FORCED shared String/ExchangeName ingress cannot retain non-USV o
 ts = "ExchangeWorker#_throttledStoreUpdate"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::StoreUpdateThrottle"
+rs = "safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle"
 status = "divergent"
-note = "CHOSEN: actual lodash leading/trailing/maxWait=wait logic is native call/cancel with binary64 delays and zero-valued opaque timer support; omits lodash flush and mutable function-object properties. Explicit host queues timers; callback errors use Result and timer-time errors go to host reporting. Weak worker/timer closures and Drop cancellation replace source closure retention to avoid native Rc cycles. Retains exact latest mutable frame through trailing invocation, arms timer before leading callback, commits invocation state before errors, reschedules early wakeups and preserves wall-clock rollback. Seven constructor wait cases and one six-delivery trace are a floor, not exhaustive clock enumeration."
+note = "CHOSEN: actual lodash leading/trailing/maxWait=wait logic is native call/cancel with binary64 delays and zero-valued opaque timer support; omits lodash flush and mutable function-object properties. Explicit host queues timers; callback errors use Result and timer-time errors go to host reporting. Weak worker/timer closures and Drop cancellation replace source closure retention to avoid native Rc cycles. Retains exact latest mutable frame through trailing invocation, arms timer before leading callback, commits invocation state before errors, reschedules early wakeups and preserves wall-clock rollback. Seven constructor wait cases and one six-delivery trace are a floor, not exhaustive clock enumeration. Rename target: `safe-cex-webworker/src/exchange_worker.rs::StoreUpdateThrottle`."
 
 [[symbol]]
 ts = "ExchangeWorker#_cancelStartup"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe_cex_webworker::exchange_worker::StartupCancellation", "safe_cex_webworker::exchange_worker::ExchangeWorker::cancel_startup" ]
+rs = [ "safe-cex-webworker/src/exchange_worker.rs::StartupCancellation", "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker" ]
 status = "divergent"
-note = "CHOSEN: nullable opaque Rc Fn() -> Result callback retains identity and represents business throws without duplicating JS thrown-value objects. Ordinary JS callback receiver binding is absent; the actual pending start arrow callback does not use its receiver. Callback may explicitly capture native worker identity. Initialization is None; dispose invokes retained live callback after incrementing token, aborts without clearing on Err, and clears even a replacement callback after success. Startup creation/settlement is separately mapped to the real start body."
+note = "CHOSEN: nullable opaque Rc Fn() -> Result callback retains identity and represents business throws without duplicating JS thrown-value objects. Ordinary JS callback receiver binding is absent; the actual pending start arrow callback does not use its receiver. Callback may explicitly capture native worker identity. Initialization is None; dispose invokes retained live callback after incrementing token, aborts without clearing on Err, and clears even a replacement callback after success. Startup creation/settlement is separately mapped to the real start body. `safe_cex_webworker::exchange_worker::ExchangeWorker::cancel_startup` is a struct field, which the parity index treats as structural, so the row maps its owning item `safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker`. Rename target: `safe-cex-webworker/src/exchange_worker.rs::StartupCancellation`."
 
 [[symbol]]
 ts = "ExchangeWorker.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::new"
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::new"
 status = "divergent"
 note = "FINDING owner: safe-cex-webworker audit. New annotation finding: ExchangeWorker.ts constructor retains caller ctx/options/settings/metadata and creates fresh DefaultStore before reading throttle tuning; exchange_worker.rs:216 does that through WorkerConstruction/Rc and nine ordered handler tags. The note enumerates typed host/configuration/Result limitations and leaves throttle differences to their own row, but supplies no reason for retaining the constructor host/representation adaptation over mirroring. Closed ExchangeName is not itself proof of a non-USV venue-name observation. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): MIXED: FORCED shared String/ExchangeName boundary for account, venue, session and optional instance ID (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). CHOSEN typed host and retained Rc configuration replace JS receiver/argument objects; nine handler constructor identities are represented by ordered tags with actual opaque host factories in the separately mapped initialization. Creates fresh real DefaultStore before reading tuning, initializes empty runtime state and native preparer baselines, and retains configuration handles. Multiplier || 1 preserves missing, signed zero and NaN fallback, negative and infinite delays; lodash throttle closure lifetime/API differences belong to its separately mapped field."
 
@@ -86,7 +86,7 @@ note = "CHOSEN: Renamed to safe-cex-webworker/src/worker_buffer.rs::flush_buffer
 ts = "ExchangeWorker.start"
 kind = "method"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::start"
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::start"
 status = "divergent"
 note = "FINDING owner: safe-cex-webworker audit. New annotation finding: ExchangeWorker.ts::start awaits real clock/loader/start promises; exchange_worker_start.rs:160 builds cancellation/clock prefix synchronously, then owns native race tasks whose ready futures can proceed within a poll. The note explicitly enumerates this scheduling/ownership difference and bounded success/timeout/cancellation evidence, but gives no why-mirroring-would-be-worse rationale for retaining its distinct Promise engine adaptation. This is an annotation-only gap, not a newly observed startup race. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): MIXED: FORCED shared UTF-8 account/venue identifiers inherit the class boundary. CHOSEN explicit owned native futures/timer queues replace JS microtask/Promise object scheduling: ready leaf futures can continue in the same poll; host must retain spawned start tasks. Real clock/load/constructor/initialization/event wiring, cancellation race, 30s timeout, loser retention, token/disposed checks, buffer flush and forced snapshot execute here. Existing logger/Sentry helpers are called rather than stubbed. Selected native/source witnesses cover success, timeout, cancellation and unknown loader, not every overlapping startup schedule."
 
@@ -142,15 +142,15 @@ note = "CHOSEN: Split: safe-cex-webworker/src/store_payload.rs::StorePayloadPrep
 ts = "ExchangeWorker#_storeUpdate"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::store_update"
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::store_update"
 status = "divergent"
-note = "MIXED: FORCED shared StoreData row String fields cannot represent non-USV text (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). CHOSEN: typed mutable StoreFrame and explicit Result host/processor ABI replace arbitrary JS objects/throws. Re-reads current dependent list per index before current independent list per index; all processors receive identical mutable frame and errors abort later work. Calls real StorePayloadPreparer, inheriting its separately documented owned-nested-snapshot vs live-alias boundary (sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias). Typed op/data envelope preserves nonfinite numbers and omits instanceId. Versions/options are read after processors, cache updates commit before post failure. Preparation and each callback release RefCell borrows before reentry; no JSON numeric roundtrip."
+note = "MIXED: FORCED shared StoreData row String fields cannot represent non-USV text (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). CHOSEN: typed mutable StoreFrame and explicit Result host/processor ABI replace arbitrary JS objects/throws. Re-reads current dependent list per index before current independent list per index; all processors receive identical mutable frame and errors abort later work. Calls real StorePayloadPreparer, inheriting its separately documented owned-nested-snapshot vs live-alias boundary (sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias). Typed op/data envelope preserves nonfinite numbers and omits instanceId. Versions/options are read after processors, cache updates commit before post failure. Preparation and each callback release RefCell borrows before reentry; no JSON numeric roundtrip. Rename target: `safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::store_update`."
 
 [[symbol]]
 ts = "ExchangeWorker.get store"
 kind = "accessor"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::store"
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::store"
 status = "ported"
 note = "Returns the identical stored live Store handle, without cloning state or serializing it. Independent calls are pointer-identical; separate constructed workers have independent stores. Rc cloning retains opaque identity. Class representation has its own row."
 
@@ -158,7 +158,7 @@ note = "Returns the identical stored live Store handle, without cloning state or
 ts = "ExchangeWorker.get exchange"
 kind = "accessor"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::exchange"
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::exchange"
 status = "ported"
 note = "Returns the current nullable opaque exchange handle with identical Rc identity, without snapshots or conversion. None models source null; reads observe replacement and successful disposal retains the original stored handle. No extra projection is introduced by this getter."
 
@@ -166,7 +166,7 @@ note = "Returns the current nullable opaque exchange handle with identical Rc id
 ts = "ExchangeWorker.sendSnapshot"
 kind = "method"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::send_snapshot"
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::send_snapshot"
 status = "divergent"
 note = "MIXED: FORCED shared StoreData row String fields cannot represent non-USV text (sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary). CHOSEN: native typed Store serialization and Result error ABI inherit real DefaultStore/StorePayloadPreparer owned nested values rather than arbitrary live JS aliases (sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias). Cancels real throttle before checking live disposed exchange, no-exchange still sends, and forces full baseline through actual store_update/processors. Processor/post errors propagate without rolling back committed cache."
 
@@ -174,7 +174,7 @@ note = "MIXED: FORCED shared StoreData row String fields cannot represent non-US
 ts = "ExchangeWorker.dispose"
 kind = "method"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::dispose"
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::dispose"
 status = "divergent"
 note = "FINDING owner: safe-cex-webworker audit. New annotation finding: ExchangeWorker.ts::dispose increments token, invokes cancellation, clears cancellation, runs real global manager cleanup, re-reads exchange for dispose and clears pipeline. exchange_worker.rs:328 mirrors that order through required host manager/supervisor and Result. The note enumerates the native host/error/global-Promise ownership choice, but supplies no reason why retaining that particular adaptation is preferable to mirroring. Mandatory real cleanup is present, so no default-success or absent-manager runtime defect is alleged. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): CHOSEN: explicit native host manager/supervisor and Result error ABI replace source global Promise/throw ownership; heavy chaser cleanup is a required explicit dependency backed by ChaserEngine, never default success. Binary64 token increments before live cancellation, callback Err retains cancellation and aborts, success clears replacement cancellation; real manager cleanup precedes re-reading current exchange for dispose, then real pipeline clear. Exchange slot stays retained. Cancellation receiver binding limitation belongs to its field row. Start/event wiring has separate implemented rows."
 
@@ -182,15 +182,15 @@ note = "FINDING owner: safe-cex-webworker audit. New annotation finding: Exchang
 ts = "ExchangeWorker#_clearRuntimePipeline"
 kind = "method"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::clear_runtime_pipeline"
+rs = "safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::clear_runtime_pipeline"
 status = "divergent"
-note = "FINDING owner: safe-cex-webworker audit. Annotation-only: dense Rc arrays/Result error projection disclose omissions but give no reason for declining sparse/proxy array/throw identity. No new disposal mismatch is inferred. packages/safe-cex/src/webworker/ExchangeWorker.ts:688 :: _clearRuntimePipeline cancels throttle, source forEach observes original array/initial length, throws abort resets. sdk-rs/safe-cex-webworker/src/exchange_worker.rs:348 captures handler list+initial length, clones each current index, invokes disposers, resets all slots only on success. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): CHOSEN: dense typed Rc arrays and Result disposers omit arbitrary sparse/proxy JS arrays and thrown object identity. Cancels throttle first; captures original handler-array identity and initial length like forEach, observes in-place removal/reorder, ignores appends beyond initial length and ignores replacement list during traversal. Only after all disposers succeed replaces three list slots with fresh empty arrays, preserving external aliases to old arrays. A disposer Err prevents all three resets."
+note = "FINDING owner: safe-cex-webworker audit. Annotation-only: dense Rc arrays/Result error projection disclose omissions but give no reason for declining sparse/proxy array/throw identity. No new disposal mismatch is inferred. packages/safe-cex/src/webworker/ExchangeWorker.ts:688 :: _clearRuntimePipeline cancels throttle, source forEach observes original array/initial length, throws abort resets. sdk-rs/safe-cex-webworker/src/exchange_worker.rs:348 captures handler list+initial length, clones each current index, invokes disposers, resets all slots only on success. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): CHOSEN: dense typed Rc arrays and Result disposers omit arbitrary sparse/proxy JS arrays and thrown object identity. Cancels throttle first; captures original handler-array identity and initial length like forEach, observes in-place removal/reorder, ignores appends beyond initial length and ignores replacement list during traversal. Only after all disposers succeed replaces three list slots with fresh empty arrays, preserving external aliases to old arrays. A disposer Err prevents all three resets. Rename target: `safe-cex-webworker/src/exchange_worker.rs::ExchangeWorker::clear_runtime_pipeline`."
 
 [[symbol]]
 ts = "ExchangeWorker.handlePayload"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::handle_payload"
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::handle_payload"
 status = "divergent"
 note = "CHOSEN: typed StoreWorkerPayload and owned serde_json/StoreUpdate decode reject malformed/nonobject shapes and omit JS primitive/object spread and live nested aliases, to reuse the native store contract (sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias). Real buffering/overflow, store updates, loaded/stats merge, dispose/deactivate and per-index live handler dispatch execute in source order; host invokes opaque actual handlers. Result errors replace arbitrary thrown object identity."
 
@@ -198,14 +198,14 @@ note = "CHOSEN: typed StoreWorkerPayload and owned serde_json/StoreUpdate decode
 ts = "ExchangeWorker#_initializeProcessorsAndHandlers"
 kind = "method"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::initialize_processors_and_handlers"
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::initialize_processors_and_handlers"
 status = "divergent"
-note = "FINDING owner: safe-cex-webworker audit. Annotation-only: actual constructor hosting and dense versus sparse Array.map cost are stated but no why for declining sparse/JS constructor behavior. Actual implementation exists in another impl file; do not invent a missing symbol. packages/safe-cex/src/webworker/ExchangeWorker.ts:761 :: Initializes independent list unless hosted, then dependent list then nine handlers; each list slot assigned only after its map completes. sdk-rs/safe-cex-webworker/src/exchange_worker_start.rs:437 ExchangeWorker::initialize_processors_and_handlers implements the type-qualified target from exchange_worker module. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): CHOSEN: explicit actual PostprocessorRegistry and opaque host constructors replace browser imported JS constructors; dense Rc class arrays reject holes rather than Array.map sparse skipping. Preserves list identity/initial length, 3/4-argument distinction, hosted independent skip, dependent constructors and nine handler tags in source order; assignments occur only after complete successful construction. Native checks precede actual-source comparison."
+note = "FINDING owner: safe-cex-webworker audit. Annotation-only: actual constructor hosting and dense versus sparse Array.map cost are stated but no why for declining sparse/JS constructor behavior. Actual implementation exists in another impl file; do not invent a missing symbol. packages/safe-cex/src/webworker/ExchangeWorker.ts:761 :: Initializes independent list unless hosted, then dependent list then nine handlers; each list slot assigned only after its map completes. sdk-rs/safe-cex-webworker/src/exchange_worker_start.rs:437 ExchangeWorker::initialize_processors_and_handlers implements the type-qualified target from exchange_worker module. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): CHOSEN: explicit actual PostprocessorRegistry and opaque host constructors replace browser imported JS constructors; dense Rc class arrays reject holes rather than Array.map sparse skipping. Preserves list identity/initial length, 3/4-argument distinction, hosted independent skip, dependent constructors and nine handler tags in source order; assignments occur only after complete successful construction. Native checks precede actual-source comparison. Rename target: `safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::initialize_processors_and_handlers`."
 
 [[symbol]]
 ts = "ExchangeWorker#_setupExchangeEventListeners"
 kind = "method"
 layer = "adapted"
-rs = "safe_cex_webworker::exchange_worker::ExchangeWorker::setup_exchange_event_listeners"
+rs = "safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::setup_exchange_event_listeners"
 status = "divergent"
-note = "CHOSEN: real native Store subscriptions accept typed owned StoreData snapshots; BaseExchange events accept one owned JSON payload rather than variadic JS values/live nested aliases; log bridges wrap that single payload into args. Weak worker closure lifetime replaces JS strong listener retention to avoid Rc cycles. Registers real store throttle, fill, twelve logs, reconnect and deactivate bodies. Selected event enumeration stops at twelve log registrations plus three special events."
+note = "CHOSEN: real native Store subscriptions accept typed owned StoreData snapshots; BaseExchange events accept one owned JSON payload rather than variadic JS values/live nested aliases; log bridges wrap that single payload into args. Weak worker closure lifetime replaces JS strong listener retention to avoid Rc cycles. Registers real store throttle, fill, twelve logs, reconnect and deactivate bodies. Selected event enumeration stops at twelve log registrations plus three special events. Rename target: `safe-cex-webworker/src/exchange_worker_start.rs::ExchangeWorker::setup_exchange_event_listeners`."

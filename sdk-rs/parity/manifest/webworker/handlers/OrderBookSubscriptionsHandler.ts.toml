@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/webworker/handlers/OrderBookSubscriptionsHandler.ts"
-rust_files = [ "safe-cex-webworker/src/subscriptions.rs" ]
+rust_files = [ "safe-cex-webworker/src/subscriptions.rs", "safe-cex-webworker/src/order_book_post.rs" ]
 
 [[symbol]]
 ts = "OrderBookSubscriptionsHandler"
@@ -8,7 +8,7 @@ kind = "class"
 layer = "adapted"
 rs = [ "safe-cex-webworker/src/subscriptions.rs::OrderBookSubscriptionsHandler", "safe-cex-webworker/src/subscriptions.rs::OrderBookSubscriptionsHandler::new", "safe-cex-webworker/src/order_book_post.rs::OrderBookPost::new" ]
 status = "divergent"
-note = "CHOSEN: Split across the subscription state/new constructor and the mandatory OrderBookPost::new dependency. The Rust host supplies separate regular JSON and native-book post sinks; the source constructor inherits one general ctx.postMessage. The regular BaseHandler callback still returns unit, so its fallible post dependency is adapted into runtime exception reporting rather than a source throw. The native book sink has no default JSON adapter. This explicit host binding keeps inherited buffering/disposal and avoids silently converting binary64 book values. No complete browser-worker composition or arbitrary JavaScript ctx identity is claimed."
+note = "CHOSEN: Split across the subscription state/new constructor and the mandatory OrderBookPost::new dependency. The Rust host supplies separate regular JSON and native-book post sinks; the source constructor inherits one general ctx.postMessage. The regular BaseHandler callback still returns unit, so its fallible post dependency is adapted into runtime exception reporting rather than a source throw. The native book sink has no default JSON adapter. This explicit host binding keeps inherited buffering/disposal and avoids silently converting binary64 book values. No complete browser-worker composition or arbitrary JavaScript ctx identity is claimed. Rename target: `safe-cex-webworker/src/subscriptions.rs::OrderBookSubscriptionsHandler::new`. Rename target: `safe-cex-webworker/src/order_book_post.rs::OrderBookPost::new`."
 
 [[symbol]]
 ts = "OrderBookSubscriptionsHandler#_sendOrderBookUpdate"
