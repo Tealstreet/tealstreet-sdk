@@ -16,6 +16,7 @@ safe-cex-venue-bingx.workspace = true
 safe-cex-venue-bitget.workspace = true
 safe-cex-venue-bitunix.workspace = true
 safe-cex-venue-blofin.workspace = true
+safe-cex-venue-coinbase.workspace = true
 safe-cex-venue-cryptocom.workspace = true
 safe-cex-venue-phemex.workspace = true
 safe-cex-venue-okx.workspace = true

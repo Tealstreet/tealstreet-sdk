@@ -189,9 +189,8 @@ impl Exchange for CryptocomExchange {
         &self.capabilities
     }
     fn dispose(&self) -> Result<(), ExchangeError> {
-        // js_runtime exposes isDisposed through the typed base's read-only
-        // getter. Close that owner before the source tears down its sockets.
-        self.base().dispose()?;
+        // Source assigns isDisposed through the shared writable facade, then
+        // disposes its two sockets without invoking BaseExchange.dispose.
         self.rt
             .this
             .call_method("dispose", vec![])

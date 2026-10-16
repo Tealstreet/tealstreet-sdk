@@ -102,6 +102,7 @@ safe-cex-venue-bingx = { path = "safe-cex-venue-bingx" }
 safe-cex-venue-bitget = { path = "safe-cex-venue-bitget" }
 safe-cex-venue-bitunix = { path = "safe-cex-venue-bitunix" }
 safe-cex-venue-blofin = { path = "safe-cex-venue-blofin" }
+safe-cex-venue-coinbase = { path = "safe-cex-venue-coinbase" }
 safe-cex-venue-cryptocom = { path = "safe-cex-venue-cryptocom" }
 safe-cex-venue-phemex = { path = "safe-cex-venue-phemex" }
 safe-cex-venue-okx = { path = "safe-cex-venue-okx" }

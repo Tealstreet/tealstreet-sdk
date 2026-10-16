@@ -7228,3 +7228,31 @@ reason = "FFI boundary glue: napi export pushing remote-signer availability from
 [[exempt]]
 rs = "safe-cex-ffi/src/native_exchange.rs::native_account_close"
 reason = "FFI boundary glue: napi export disposing a native-host account, with no TypeScript counterpart."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/zklink/contract.rs::Contract"
+reason = "Imported SDK input ABI after wasm-bindgen conversions, not the locally declared SignContractPayload (which remains mapped to the venue). Holds the exact ContractBuilder fields from zkLinkProtocol/zklink_sdk@3152525e2615ecbbdb56fd6728ce265ad2dde485. SDK roots are outside the extractor; the new contracts.cjs pinned npm witness executes every field independently."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/zklink/contract.rs::Contract::signing_bytes"
+reason = "Imported SDK Contract::get_bytes primitive outside extracted TS roots; exact 36-byte preimage is tested through actual npm ContractBuilder signatures. Unsafe packing and >120-bit price inputs return explicit errors instead of SDK panics; those bounds are priced in the crypto guide. The venue signContract orchestration retains its own mapped implementation."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/zklink/contract.rs::closest_packable_amount"
+reason = "Imported SDK closestPackableTransactionAmount outside extracted TS roots, using the pinned decimal/5-exponent/35-mantissa FloatConversions algorithm. Actual npm rounding witnesses and a compiled wrong-rounding control are in zklink_contract tests; no venue arithmetic is exempted."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/zklink/contract.rs::closest_packable_fee"
+reason = "Imported SDK closestPackableTransactionFee outside extracted TS roots, using 5-exponent/11-mantissa FloatConversions. Actual npm rounding witnesses pin its distinct width and bounded overflow refusal. No venue signOrder/signTransfer body is replaced or exempted."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/zklink/contract.rs::ContractSigner"
+reason = "C3 opaque native capability for the imported JsonRpcSigner seed-only contract operations. Owns a zeroizing Ethereum signature with no Debug/serde/export. No locally declared TypeScript class is replaced; no provider or other transaction support is claimed."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/zklink/contract.rs::ContractSigner::from_signature"
+reason = "Imported SDK JsonRpcSigner.initZklinkSigner Ethereum-signature branch outside extracted TS roots: exact65-byte hex decoding and verbatim recovery byte. Actual npm initZklinkSigner/createSignedContract known answers pin v=0/1/28/255. Wallet-provider seed acquisition remains unavailable and outside this primitive."
+
+[[exempt]]
+rs = "safe-cex-crypto/src/zklink/contract.rs::ContractSigner::sign_contract"
+reason = "Imported SDK JsonRpcSigner.createSignedContract outside extracted TS roots: exact preimage, existing Rescue/MuSig primitive, canonical decimal fields and source signature wire record. The venue transaction_signing.rs::sign_contract still owns the mapped TS orchestration. Pinned npm24-contract field/signature corpus exercises this capability."

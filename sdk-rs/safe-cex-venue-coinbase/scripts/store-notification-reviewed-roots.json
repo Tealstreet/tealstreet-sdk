@@ -1615,14 +1615,14 @@
       "file": "packages/safe-cex/src/exchanges/coinbase/coinbase.utils.ts",
       "name": "getSigningKey",
       "kind": "function",
-      "review": "ported",
+      "review": "crypto-choice",
       "declarationKind": "body"
     },
     {
       "file": "packages/safe-cex/src/exchanges/coinbase/coinbase.utils.ts",
       "name": "sign",
       "kind": "const-fn",
-      "review": "ported",
+      "review": "crypto-choice",
       "declarationKind": "body"
     },
     {

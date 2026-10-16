@@ -1,7 +1,8 @@
 # Rust venue construction through the registry
 
 Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, `cryptocom`, `phemex`, the Kraken family (`kraken`, `krakenspot`),
+`bitgetusdc`), `bitunix`, `blofin`, Coinbase (`coinbase`, `coinbasespot`),
+`cryptocom`, `phemex`, the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
@@ -37,6 +38,12 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   - `blofin`, built with `BlofinNativeExchange::new` from a registry-built
     `BaseExchange` and `BlofinDependencies` (runtime, the common HTTP builder,
     optional externalPublicData provider, remote-signer account name).
+  - `coinbase` and `coinbasespot`, one constructor around `CoinbaseExchange::new`.
+    `CoinbaseDependencies` carries the shared HTTP/runtime hosts, signing cache,
+    external-data factory and local-wall-time conversion. The native host retains
+    its cache and routes hosted signing through the existing shared HTTP host.
+    `tests/native_host_coinbase.rs` runs both names over local HTTP/WS servers and
+    checks Coinbase Spot's source external-provider refusal.
   - `okx`, `okxdemo`, `okxeu` and `okxeudemo`, one shared constructor around
     `OkxExchange::new`; the name picks the class. `OkxDependencies` carries the
     runtime and a `JsHttpHost`; the native host builds it with js_runtime

@@ -8,6 +8,21 @@
   },
   "delegations": [
     {
+      "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs",
+      "finding": "dispose_base bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/coinbase/coinbase.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-coinbase/src/binding/lifecycle.rs",
+          "contains": "self.base().dispose().map_err(failure)"
+        }
+      ]
+    },
+    {
       "file": "safe-cex-venue-hyperliquid/src/binding.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
@@ -31,8 +46,14 @@
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
       "evidence": [
-        {"file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts", "contains": "super.dispose();"},
-        {"file": "sdk-rs/safe-cex-venue-bybit/src/binding/exchange.rs", "contains": "|| self.base.dispose(),"}
+        {
+          "file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-bybit/src/binding/exchange.rs",
+          "contains": "|| self.base.dispose(),"
+        }
       ]
     },
     {
@@ -40,8 +61,14 @@
       "finding": "invoke bypasses dynamic hook dispose through base",
       "kind": "source-super",
       "evidence": [
-        {"file": "packages/safe-cex/src/exchanges/woo/woo.exchange.ts", "contains": "super.dispose();"},
-        {"file": "sdk-rs/safe-cex-venue-woo/src/binding/hosts/fill_recovery.rs", "contains": "Prepared::BaseDispose => {\n                self.rt()?.base().dispose()?;"}
+        {
+          "file": "packages/safe-cex/src/exchanges/woo/woo.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-woo/src/binding/hosts/fill_recovery.rs",
+          "contains": "Prepared::BaseDispose => {\n                self.rt()?.base().dispose()?;"
+        }
       ]
     },
     {
@@ -49,66 +76,122 @@
       "finding": "dispose_base bypasses dynamic hook dispose through base",
       "kind": "source-super",
       "evidence": [
-        {"file": "packages/safe-cex/src/exchanges/kraken/kraken.exchange.ts", "contains": "super.dispose();"},
-        {"file": "sdk-rs/safe-cex-venue-kraken/src/binding/host_typed.rs", "contains": "fn dispose_base(&self) -> Result<(), ExchangeError> {\n        self.base().dispose()\n    }"}
+        {
+          "file": "packages/safe-cex/src/exchanges/kraken/kraken.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-kraken/src/binding/host_typed.rs",
+          "contains": "fn dispose_base(&self) -> Result<(), ExchangeError> {\n        self.base().dispose()\n    }"
+        }
       ]
     },
     {
       "file": "safe-cex-venue-apexomni/src/exchange.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/apexomni/apexomni.exchange.ts", "contains": "super.dispose();"}]
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/apexomni/apexomni.exchange.ts",
+          "contains": "super.dispose();"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-apexomni/src/historical_fills.rs",
       "finding": "fetch_historical_fills bypasses dynamic hook can_sign through base",
       "kind": "no-venue-override",
       "member": "canSign",
-      "classes": ["ApexOmniExchange"],
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/base.ts", "contains": "return this.options.publicDataOnly === true || !this.canSign;"}]
+      "classes": [
+        "ApexOmniExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/base.ts",
+          "contains": "return this.options.publicDataOnly === true || !this.canSign;"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-backpack/src/adapter.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "chosen-base",
-      "evidence": [{"file": "sdk-rs/parity/manifest/exchanges/backpack/backpack.exchange.ts.toml", "contains": "Disposal intentionally uses BaseExchange cleanup"}]
+      "evidence": [
+        {
+          "file": "sdk-rs/parity/manifest/exchanges/backpack/backpack.exchange.ts.toml",
+          "contains": "Disposal intentionally uses BaseExchange cleanup"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-backpack/src/adapter.rs",
       "finding": "public_only bypasses dynamic hook can_sign through base",
       "kind": "no-venue-override",
       "member": "canSign",
-      "classes": ["BackpackExchange"],
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/base.ts", "contains": "return this.options.publicDataOnly === true || !this.canSign;"}]
+      "classes": [
+        "BackpackExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/base.ts",
+          "contains": "return this.options.publicDataOnly === true || !this.canSign;"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-backpack/src/adapter_runtime.rs",
       "finding": "public_only bypasses dynamic hook can_sign through base",
       "kind": "no-venue-override",
       "member": "canSign",
-      "classes": ["BackpackExchange"],
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/base.ts", "contains": "return this.options.publicDataOnly === true || !this.canSign;"}]
+      "classes": [
+        "BackpackExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/base.ts",
+          "contains": "return this.options.publicDataOnly === true || !this.canSign;"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-backpack/src/private_adapter.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "socket-receiver",
-      "evidence": [{"file": "sdk-rs/safe-cex-venue-backpack/src/private_adapter.rs", "contains": "pub base: Rc<BaseWebSocket>,"}]
+      "evidence": [
+        {
+          "file": "sdk-rs/safe-cex-venue-backpack/src/private_adapter.rs",
+          "contains": "pub base: Rc<BaseWebSocket>,"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-backpack/src/public_adapter.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "socket-receiver",
-      "evidence": [{"file": "sdk-rs/safe-cex-venue-backpack/src/public_adapter.rs", "contains": "pub base: Rc<BaseWebSocket>,"}]
+      "evidence": [
+        {
+          "file": "sdk-rs/safe-cex-venue-backpack/src/public_adapter.rs",
+          "contains": "pub base: Rc<BaseWebSocket>,"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-binance/src/exchange_classes.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
       "evidence": [
-        {"file": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts", "contains": "super.dispose();"},
-        {"file": "packages/safe-cex/src/exchanges/binance/binancepm.exchange.ts", "contains": "super.dispose();"},
-        {"file": "packages/safe-cex/src/exchanges/binance/binancespot.exchange.ts", "contains": "super.dispose();"}
+        {
+          "file": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "packages/safe-cex/src/exchanges/binance/binancepm.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "packages/safe-cex/src/exchanges/binance/binancespot.exchange.ts",
+          "contains": "super.dispose();"
+        }
       ]
     },
     {
@@ -116,90 +199,202 @@
       "finding": "public_only bypasses dynamic hook can_sign through base",
       "kind": "no-venue-override",
       "member": "canSign",
-      "classes": ["BinanceExchange", "BinancePMExchange", "BinanceSpotExchange"],
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/base.ts", "contains": "return this.options.publicDataOnly === true || !this.canSign;"}]
+      "classes": [
+        "BinanceExchange",
+        "BinancePMExchange",
+        "BinanceSpotExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/base.ts",
+          "contains": "return this.options.publicDataOnly === true || !this.canSign;"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-binance/src/private_classes.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "socket-receiver",
-      "evidence": [{"file": "sdk-rs/safe-cex-venue-binance/src/private_classes.rs", "contains": "fn base(&self) -> Rc<dyn PrivateBase> {"}]
+      "evidence": [
+        {
+          "file": "sdk-rs/safe-cex-venue-binance/src/private_classes.rs",
+          "contains": "fn base(&self) -> Rc<dyn PrivateBase> {"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-binance/src/public_classes.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "socket-receiver",
-      "evidence": [{"file": "sdk-rs/safe-cex-venue-binance/src/public_classes.rs", "contains": "pub fn base(&self) -> Rc<BaseWebSocket> {"}]
+      "evidence": [
+        {
+          "file": "sdk-rs/safe-cex-venue-binance/src/public_classes.rs",
+          "contains": "pub fn base(&self) -> Rc<BaseWebSocket> {"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-bingx/src/exchange.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/bingx/bingx.exchange.ts", "contains": "super.dispose();"}]
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/bingx/bingx.exchange.ts",
+          "contains": "super.dispose();"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-bitunix/src/adapter.rs",
       "finding": "dispose_venue bypasses dynamic hook dispose through base",
       "kind": "source-super",
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/bitunix/bitunix.exchange.ts", "contains": "super.dispose();"}]
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/bitunix/bitunix.exchange.ts",
+          "contains": "super.dispose();"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-bitunix/src/sockets.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "socket-receiver",
-      "evidence": [{"file": "sdk-rs/safe-cex-venue-bitunix/src/sockets.rs", "contains": "pub(crate) base: Rc<BaseWebSocket>,"}]
+      "evidence": [
+        {
+          "file": "sdk-rs/safe-cex-venue-bitunix/src/sockets.rs",
+          "contains": "pub(crate) base: Rc<BaseWebSocket>,"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-breakoutprop/src/lifecycle.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/breakoutprop/breakoutprop.exchange.ts", "contains": "super.dispose();"}]
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/breakoutprop/breakoutprop.exchange.ts",
+          "contains": "super.dispose();"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-breakoutprop/src/runtime.rs",
       "finding": "public_only bypasses dynamic hook is_public_data_only through base",
       "kind": "no-venue-override",
       "member": "isPublicDataOnly",
-      "classes": ["BreakoutpropExchange"],
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/breakoutprop/breakoutprop.exchange.ts", "contains": "this.isPublicDataOnly"}]
+      "classes": [
+        "BreakoutpropExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/breakoutprop/breakoutprop.exchange.ts",
+          "contains": "this.isPublicDataOnly"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-mexc/src/exchange.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/mexc/mexc.exchange.ts", "contains": "super.dispose();"}]
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/mexc/mexc.exchange.ts",
+          "contains": "super.dispose();"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-mexc/src/exchange.rs",
       "finding": "fetch_leverage_for_symbol bypasses dynamic hook is_public_data_only through base",
       "kind": "no-venue-override",
       "member": "isPublicDataOnly",
-      "classes": ["MexcExchange"],
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/mexc/mexc.exchange.ts", "contains": "if (market && !this.isPublicDataOnly) {"}]
+      "classes": [
+        "MexcExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/mexc/mexc.exchange.ts",
+          "contains": "if (market && !this.isPublicDataOnly) {"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-mexc/src/exchange_binding.rs",
       "finding": "base_dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/mexc/mexc.exchange.ts", "contains": "super.dispose();"}]
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/mexc/mexc.exchange.ts",
+          "contains": "super.dispose();"
+        }
+      ]
     },
     {
       "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs",
       "finding": "create bypasses dynamic hook dispose through base",
       "kind": "source-super",
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts", "contains": "super.dispose();"}]
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts",
+          "contains": "super.dispose();"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
       "finding": "secondary_socket bypasses dynamic hook dispose through base",
       "kind": "socket-receiver",
-      "evidence": [{"file": "sdk-rs/safe-cex-venue-bitget/src/secondary_public.rs", "contains": "pub fn base(&self) -> &Rc<BaseWebSocket> {"}]
+      "evidence": [
+        {
+          "file": "sdk-rs/safe-cex-venue-bitget/src/secondary_public.rs",
+          "contains": "pub fn base(&self) -> &Rc<BaseWebSocket> {"
+        }
+      ]
     },
     {
       "file": "safe-cex-venue-bitget/src/binding/hosts/private.rs",
       "finding": "super_dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
-      "evidence": [{"file": "packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts", "contains": "super.dispose();"}]
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts",
+          "contains": "super.dispose();"
+        }
+      ]
+    },
+    {
+      "file": "safe-cex-venue-bingx/src/binding/hosts.rs",
+      "finding": "is_public_data_only bypasses dynamic hook can_sign through base",
+      "kind": "no-venue-override",
+      "member": "canSign",
+      "classes": [
+        "BingxExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/base.ts",
+          "contains": "return this.options.publicDataOnly === true || !this.canSign;"
+        }
+      ]
+    },
+    {
+      "file": "safe-cex-venue-asterdex/src/binding/host.rs",
+      "finding": "base_dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/asterdex/asterdex.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-asterdex/src/binding/host.rs",
+          "contains": "fn base_dispose(&self, _: Js) -> ResultValue<Js>"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-asterdex/src/exchange_runtime.rs",
+          "contains": "h.base_dispose(owner)?;"
+        }
+      ]
     }
   ]
 }

@@ -325,25 +325,25 @@
   },
   {
     "function": "create",
-    "body": "106e408f35a9bd80",
+    "body": "85016447f1ac0a9c",
     "call": "venue . is_public_data_only ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "106e408f35a9bd80",
+    "body": "85016447f1ac0a9c",
     "call": "venue . fetch_and_set_private_snapshot (tries)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "106e408f35a9bd80",
+    "body": "85016447f1ac0a9c",
     "call": "venue . fetch_and_set_orders (symbols)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "106e408f35a9bd80",
+    "body": "85016447f1ac0a9c",
     "call": "base . dispose ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
@@ -811,21 +811,153 @@
   },
   {
     "function": "create_api",
-    "body": "314c2843d18ce993",
+    "body": "8a233eaddab4926d",
     "call": "host . start (Box :: pin (async move { signed_request (h , ex , opts , config) . await }))",
     "file": "safe-cex-venue-asterdex/src/api_runtime.rs"
   },
   {
     "function": "create_api",
-    "body": "314c2843d18ce993",
-    "call": "host . start (Box :: pin (async move { response_ok (h , ex , response) . await }))",
+    "body": "8a233eaddab4926d",
+    "call": "host . start (Box :: pin (async move { response_ok (h , ex , api , response) . await } ,))",
     "file": "safe-cex-venue-asterdex/src/api_runtime.rs"
   },
   {
     "function": "create_api",
-    "body": "314c2843d18ce993",
+    "body": "8a233eaddab4926d",
     "call": "host . start (Box :: pin (async move { response_error (h , ex , opts , api , error) . await }))",
     "file": "safe-cex-venue-asterdex/src/api_runtime.rs"
+  },
+  {
+    "function": "build",
+    "body": "f75e79ba10171d65",
+    "call": "clock . start (arg (& a , 0) . truthy () , to_typed (& arg (& a , 1)) ?)",
+    "file": "safe-cex-venue-asterdex/src/binding/globals.rs"
+  },
+  {
+    "function": "base_dispose",
+    "body": "2e8f8190615440e1",
+    "call": "self . rt () ? . base () . dispose ()",
+    "file": "safe-cex-venue-asterdex/src/binding/host.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "reference": "crate :: exchange_runtime :: dispose",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "account (& rt) . fetch_markets ()",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "account (& rt) . fetch_tickers ()",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "account (& rt) . fetch_positions (symbols . as_deref ())",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "account (& rt) . fetch_orders (symbols . as_deref ())",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "orders (& rt) . validate_account ()",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "account (& rt) . set_leverage (& text (& first) ? , arg (& a , 1) . to_number () ? , optional (arg (& a , 2)) ?)",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "account (& rt) . change_position_mode (first . truthy () , symbol . as_deref ())",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "account (& rt) . fetch_markets ()",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "reference": "helpers :: fetch_symbol_max_leverage",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "orders (& rt) . update_order (& to_typed (& first) ?)",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "80eac0980e3f5dcb",
+    "call": "orders (& rt) . cancel_orders (& to_typed :: < Vec < Order > > (& first) ?)",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "listen",
+    "body": "bab9b6831c635df1",
+    "call": "rt . shared . extra . listeners . listen_order_book (& text (& arg (& a , 0)) ? , Rc :: new (move | book | { callback . call (Js :: Undefined , vec ! [from_typed (& book) ?]) ? ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "listen",
+    "body": "bab9b6831c635df1",
+    "call": "rt . shared . extra . listeners . listen_ohlcv (& opts . symbol , opts . interval , Rc :: new (move | candle | { callback . call (Js :: Undefined , vec ! [Js :: object (vec ! [(\"timestamp\" , candle . timestamp . as_ref () . map_or (Js :: Undefined , from_json) ,) , (\"open\" , Js :: Number (candle . open)) , (\"high\" , Js :: Number (candle . high)) , (\"low\" , Js :: Number (candle . low)) , (\"close\" , Js :: Number (candle . close)) , (\"volume\" , Js :: Number (candle . volume)) ,])] ,) ? ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-asterdex/src/binding/members.rs"
+  },
+  {
+    "function": "name",
+    "body": "0b5dc9c944566c01",
+    "call": "self . inner . name ()",
+    "file": "safe-cex-venue-asterdex/src/binding/sockets.rs"
+  },
+  {
+    "function": "fetch_and_set_private_snapshot",
+    "body": "3ca5c08bb95c7f30",
+    "call": "self . inner . fetch_and_set_private_snapshot (retries)",
+    "file": "safe-cex-venue-asterdex/src/binding/sockets.rs"
+  },
+  {
+    "function": "fetch_positions",
+    "body": "fe643327f1c3f290",
+    "call": "rt . shared . extra . account . get () . expect (\"account assembled\") . fetch_positions (None)",
+    "file": "safe-cex-venue-asterdex/src/binding/sockets.rs"
+  },
+  {
+    "function": "fetch_orders",
+    "body": "fba13fbb7d8c85b7",
+    "call": "rt . shared . extra . account . get () . expect (\"account assembled\") . fetch_orders (None)",
+    "file": "safe-cex-venue-asterdex/src/binding/sockets.rs"
+  },
+  {
+    "function": "facade",
+    "body": "eebfe865afd23dad",
+    "call": "rt . shared . extra . private . get () . expect (\"private socket assembled\") . dispose ()",
+    "file": "safe-cex-venue-asterdex/src/binding/sockets.rs"
+  },
+  {
+    "function": "facade",
+    "body": "eebfe865afd23dad",
+    "call": "rt . shared . extra . public . get () . expect (\"public socket assembled\") . dispose ()",
+    "file": "safe-cex-venue-asterdex/src/binding/sockets.rs"
   },
   {
     "function": "start_exchange",
@@ -838,6 +970,42 @@
     "body": "4912a257d99860ee",
     "call": "h . start (Box :: pin (async move { let h = host ; if h . truthy (& h . get (& owner , \"isDisposed\") ?) { return Ok (h . undefined ()) ; } let time = now (h . as_ref ()) ? ; let balance = due (h . as_ref () , & owner , time . clone () , \"lastBalanceReconciliationAt\" , 25000. ,) ? ; let positions = due (h . as_ref () , & owner , time . clone () , \"lastPositionSafetyReconciliationAt\" , 25000. ,) ? ; let orders = due (h . as_ref () , & owner , time , \"lastOrderSafetyReconciliationAt\" , 75000. ,) ? ; if balance { awaited (h . as_ref () , invoke ! (h . as_ref () , owner . clone () , \"reconcileBalanceAfterPrivateUpdate\" , vec ! [h . get (& owner , \"balanceStateVersion\") ?] ,) ,) . await ? ; } if positions { let version = invoke ! (h . as_ref () , owner . clone () , \"getPositionStateVersion\" , vec ! []) ? ; let attempt = async { let positions = awaited (h . as_ref () , invoke ! (h . as_ref () , owner . clone () , \"fetchPositions\" , vec ! []) ,) . await ? ; if h . truthy (& h . get (& owner , \"isDisposed\") ?) { return Ok (true) ; } if h . strict_equal (& version , & invoke ! (h . as_ref () , owner . clone () , \"getPositionStateVersion\" , vec ! []) ? ,) { let store = h . get (& owner , \"store\") ? ; invoke ! (h . as_ref () , store . clone () , \"addOrUpdatePositionsFull\" , vec ! [positions] ,) ? ; let store = h . get (& owner , \"store\") ? ; let function = h . get (& store , \"update\") ? ; let loaded = copy (h . as_ref () , h . get (& h . get (& owner , \"store\") ? , \"loaded\") ?) ? ; h . define (& loaded , \"positions\" , h . boolean (true)) ? ; h . call (function , store , vec ! [h . object (vec ! [(\"loaded\" , loaded)])]) ? ; } h . set (& owner , \"lastPositionSafetyReconciliationAt\" , now (h . as_ref ()) ? ,) ? ; Ok :: < _ , H :: Value > (false) } . await ; match attempt { Ok (true) => return Ok (h . undefined ()) , Err (error) => emit_log ! (h . as_ref () , owner . clone () , h . template (vec ! [h . text (\"Position safety reconciliation failed: \") , h . get (& error , \"message\") ?,]) ?, \"Warning\" ,) ? , _ => { } } } if orders { let attempt = async { let orders = awaited (h . as_ref () , invoke ! (h . as_ref () , owner . clone () , \"fetchOrders\" , vec ! []) ,) . await ? ; if h . truthy (& h . get (& owner , \"isDisposed\") ?) { return Ok (true) ; } update (h . as_ref () , & owner , \"orders\" , orders) ? ; h . set (& owner , \"lastOrderSafetyReconciliationAt\" , now (h . as_ref ()) ?) ? ; Ok :: < _ , H :: Value > (false) } . await ; match attempt { Ok (true) => return Ok (h . undefined ()) , Err (error) => emit_log ! (h . as_ref () , owner . clone () , h . template (vec ! [h . text (\"Order safety reconciliation failed: \") , h . get (& error , \"message\") ?,]) ?, \"Warning\" ,) ? , _ => { } } } if ! h . truthy (& h . get (& owner , \"isDisposed\") ?) { let host = h . clone () ; let ex = owner . clone () ; let callback = h . function (Rc :: new (move | _ | { invoke ! (host . as_ref () , ex . clone () , \"tick\" , vec ! []) })) ; h . import (\"loop\" , vec ! [callback , h . number (3000.)]) ? ; } Ok (h . undefined ()) }))",
     "file": "safe-cex-venue-asterdex/src/exchange_runtime.rs"
+  },
+  {
+    "function": "drop",
+    "body": "54a564a787365788",
+    "call": "self . dispose ()",
+    "file": "safe-cex-venue-asterdex/src/native_exchange.rs"
+  },
+  {
+    "function": "new",
+    "body": "5a7ebdde5fa3ef6d",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-asterdex/src/native_exchange.rs"
+  },
+  {
+    "function": "new",
+    "body": "5a7ebdde5fa3ef6d",
+    "call": "venue . fetch_historical_fills (opts)",
+    "file": "safe-cex-venue-asterdex/src/native_exchange.rs"
+  },
+  {
+    "function": "can_sign",
+    "body": "f58cf9404a887e22",
+    "reference": "crate :: exchange_helpers :: can_sign",
+    "file": "safe-cex-venue-asterdex/src/native_exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "091a5464edf25af6",
+    "call": "self . rt . shared . extra . listeners . listen_ohlcv (& opts . symbol , opts . interval , cb)",
+    "file": "safe-cex-venue-asterdex/src/native_exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "4c5d41ec81889aaf",
+    "call": "self . rt . shared . extra . listeners . listen_order_book (& symbol , Rc :: new (move | book | { callback (book) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-asterdex/src/native_exchange.rs"
   },
   {
     "function": "update_order",
@@ -1570,6 +1738,156 @@
     "body": "0ef7343e23399dca",
     "call": "self . history . fetch_orders ()",
     "file": "safe-cex-venue-bingx/src/amendment.rs"
+  },
+  {
+    "function": "new",
+    "body": "d0b8cec127f06ff7",
+    "call": "v . start ()",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "new",
+    "body": "d0b8cec127f06ff7",
+    "call": "v . fetch_historical_fills (o)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "start",
+    "body": "3b9b41079766f3f0",
+    "call": "self . inner . start ()",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "get_account",
+    "body": "649f4eb2cce727a1",
+    "reference": "crate :: account_reads :: get_account",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "validate_account",
+    "body": "6cfe2ec7ecd6a08b",
+    "call": "self . inner . reads . validate_account ()",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_positions",
+    "body": "9c475a76cb7d41d4",
+    "call": "self . inner . reads . fetch_positions (symbols . as_deref ())",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_orders",
+    "body": "c16d350ce148d8e1",
+    "call": "self . inner . history . fetch_orders ()",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_markets",
+    "body": "f376edcb99299d02",
+    "call": "self . inner . reads . fetch_markets ()",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_tickers",
+    "body": "470d95e09c179974",
+    "call": "self . inner . reads . fetch_tickers ()",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_leverage_for_symbol",
+    "body": "4fcc7ae77b1fe9d7",
+    "call": "self . inner . reads . fetch_leverage_for_symbol (& symbol)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "set_leverage",
+    "body": "53114b8cdeef9cb2",
+    "call": "self . inner . reads . set_leverage (& symbol , leverage , side)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "change_position_mode",
+    "body": "1f59d2987eb6306a",
+    "call": "self . inner . reads . change_position_mode (hedged)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "change_margin_type",
+    "body": "6429872af0b0c27c",
+    "call": "self . inner . reads . change_margin_type (isolated , symbol . as_deref ())",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "update_order",
+    "body": "70a90369be6bcfcf",
+    "call": "self . inner . amendment . update_order (& opts)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "cancel_orders",
+    "body": "30802af65bddb0b8",
+    "call": "self . inner . reads . cancel_orders (& orders)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "cancel_symbol_orders",
+    "body": "40f7c17db884ac07",
+    "call": "self . inner . reads . cancel_symbol_orders (& symbol)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_ohlcv",
+    "body": "85d2ef3754a9451f",
+    "call": "self . inner . history . fetch_ohlcv (& opts)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_historical_fills",
+    "body": "373b58bfaee1d0eb",
+    "call": "self . inner . history . fetch_historical_fills (& opts)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "97f02db91c65f317",
+    "call": "self . inner . public_websocket . subscriptions . listen_ohlcv (& opts , Rc :: new (move | candle | { callback (candle) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "3f930a2c546ff44a",
+    "call": "self . inner . public_websocket . subscriptions . listen_order_book (& symbol , Rc :: new (move | book | { callback (book . borrow () . clone ()) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "41a5ff04151d3d4f",
+    "call": "self . inner . dispose ()",
+    "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
+  },
+  {
+    "function": "is_public_data_only",
+    "body": "10829d41605ccff3",
+    "call": "base . can_sign ()",
+    "file": "safe-cex-venue-bingx/src/binding/hosts.rs"
+  },
+  {
+    "function": "is_public_data_only",
+    "body": "a80af39573fc73e3",
+    "reference": "ExchangeHost :: is_public_data_only",
+    "file": "safe-cex-venue-bingx/src/binding/hosts.rs"
+  },
+  {
+    "function": "base_dispose",
+    "body": "fdd46ac3e17d0e41",
+    "call": "self . core (true) ? . dispose ()",
+    "file": "safe-cex-venue-bingx/src/binding/sockets.rs"
+  },
+  {
+    "function": "public_base_dispose",
+    "body": "dc71d83f1109b414",
+    "call": "self . core (false) ? . dispose ()",
+    "file": "safe-cex-venue-bingx/src/binding/sockets.rs"
   },
   {
     "function": "metadata_pair",
@@ -2551,7 +2869,7 @@
   },
   {
     "function": "send_login",
-    "body": "a94847e2ca83f393",
+    "body": "7a23887ce5ab9e15",
     "reference": "Exchange :: name",
     "file": "safe-cex-venue-bitunix/src/sockets.rs"
   },
@@ -2605,7 +2923,7 @@
   },
   {
     "function": "change_margin_type",
-    "body": "31e28e8d554dd17e",
+    "body": "e3a7becbe3ccb1ff",
     "reference": "order_rest :: change_margin_type",
     "file": "safe-cex-venue-blofin/src/exchange.rs"
   },
@@ -3240,6 +3558,126 @@
     "file": "safe-cex-venue-bybit/src/ws_public.rs"
   },
   {
+    "function": "new",
+    "body": "58a475a01e1b314d",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "is_public_data_only",
+    "body": "78be3261ff32793e",
+    "call": "self . class . is_public_data_only ()",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "8e8b17c0f9404af2",
+    "reference": "exchange_lifecycle :: dispose",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "start",
+    "body": "ee9d8ecc438fbb2b",
+    "reference": "exchange_lifecycle :: start",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "get_account",
+    "body": "225756092b9f8ce5",
+    "call": "self . class . get_account ()",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "validate_account",
+    "body": "45fb1f305466d6ba",
+    "reference": "exchange_lifecycle :: validate_account",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_orders",
+    "body": "7efaf034959e5156",
+    "reference": "crate :: order_sync :: fetch_orders",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "update_order",
+    "body": "4fd469da50f305e9",
+    "reference": "order_edit :: update_order",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_ohlcv",
+    "body": "a028c8b466a2361c",
+    "reference": "public_market_reads :: fetch_ohlcv",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "64e078057f071bba",
+    "call": "socket . listen_ohlcv (options_root (options) , Rc :: new (move | candle | { let candle = match candle { PublicData :: Candle (candle) => candle . borrow () . clone () , other => { let value = Js :: object (vec ! []) ; for (key , field) in other . fields () { value . define_key (& key , field . as_ref () . map (to_js) . unwrap_or (Js :: Undefined) ,) . map_err (| error | { Rc :: new (crate :: public_stream_dispatch :: PublicStreamFailure { name : error . to_exchange_error () . name , message : error . to_exchange_error () . message , } ,) }) ? ; } to_typed (& value) . map_err (| error | { Rc :: new (crate :: public_stream_dispatch :: PublicStreamFailure { name : error . to_exchange_error () . name , message : error . to_exchange_error () . message , }) }) ? } } ; callback (candle) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "5c2bbefa8ac10616",
+    "call": "socket . listen_order_book (symbol , Rc :: new (move | book | { callback (super :: sockets :: native_book (& book)) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "sign_ws_auth",
+    "body": "a2b2da1900175eed",
+    "reference": "exchange_ws_auth :: sign_ws_auth",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "class_name",
+    "body": "21a0bfaa41418127",
+    "call": "self . name ()",
+    "file": "safe-cex-venue-coinbase/src/binding/exchange.rs"
+  },
+  {
+    "function": "market_values",
+    "body": "f4586f9bfd9c97b7",
+    "reference": "public_market_reads :: fetch_markets",
+    "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs"
+  },
+  {
+    "function": "ticker_values",
+    "body": "18a4de3a21ed724f",
+    "reference": "market_position_reads :: fetch_tickers",
+    "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs"
+  },
+  {
+    "function": "position_values",
+    "body": "f7b53938f6285302",
+    "reference": "market_position_reads :: fetch_positions",
+    "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs"
+  },
+  {
+    "function": "dispose_base",
+    "body": "397043d34be7c3ff",
+    "call": "self . base () . dispose ()",
+    "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs"
+  },
+  {
+    "function": "cancel",
+    "body": "775061d4f4b97dd4",
+    "reference": "order_create :: cancel_orders",
+    "file": "safe-cex-venue-coinbase/src/binding/orders.rs"
+  },
+  {
+    "function": "public_only",
+    "body": "3102b5c09be0b51c",
+    "call": "class . is_public_data_only ()",
+    "file": "safe-cex-venue-coinbase/src/binding/rt.rs"
+  },
+  {
+    "function": "fetch_ohlcv_detached",
+    "body": "630e2c10c0e00b4c",
+    "reference": "crate :: public_market_reads :: fetch_ohlcv",
+    "file": "safe-cex-venue-coinbase/src/binding/sockets.rs"
+  },
+  {
     "function": "listen_ohlcv",
     "body": "e0113c19726f822e",
     "reference": "crate :: public_market_listeners :: listen_ohlcv",
@@ -3280,6 +3718,12 @@
     "body": "25898593dd8862c2",
     "call": "r . host . cancel_orders (orders)",
     "file": "safe-cex-venue-coinbase/src/order_edit.rs"
+  },
+  {
+    "function": "capabilities",
+    "body": "f8c7e5965bfbc3e3",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-cryptocom/src/binding/exchange.rs"
   },
   {
     "function": "member",
