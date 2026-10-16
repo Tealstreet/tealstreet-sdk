@@ -258,7 +258,7 @@
       503,
       2
     ],
-    "evidence": "sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; source review of the exact 16 compiler-selected raw-input/decoded-output candidates. Other defaults and concrete overrides retain ordinary coverage. Re-reviewed origin 53ee502232..0286f63437: the only source delta is BaseExchange::wait_for_remote_signer eager future construction at lines 1189 onward; Exchange trait declaration, all fifty default bodies and the sixteen classified candidates are unchanged. The whole-file pin is refreshed for that separately maintained method; it does not classify the signer-wait algorithm.",
+    "evidence": "sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary; source review of the exact 16 compiler-selected raw-input/decoded-output candidates. Other defaults and concrete overrides retain ordinary coverage. Re-reviewed origin 53ee502232..0286f63437: the only source delta is BaseExchange::wait_for_remote_signer eager future construction at lines 1189 onward; Exchange trait declaration, all fifty default bodies and the sixteen classified candidates are unchanged. The whole-file pin is refreshed for that separately maintained method; it does not classify the signer-wait algorithm. Re-reviewed origin 1b79e7b880..03e37cae55 (c95c90da16, mexc raw error reporting): the only source deltas are the error_reporting import list at lines 9-10 and BaseExchange::handle_error raw-input projection at lines 950 onward; lines 1-503, including the Exchange trait declaration, all fifty default bodies and the sixteen classified candidates, are unchanged. The pin is refreshed for that separately maintained method; it does not classify raw error reporting.",
     "file": "safe-cex-exchange/src/exchange.rs",
     "methods": [
       {
@@ -3656,6 +3656,6 @@
         "reason": "No-op returns Ok(()) and ignores its symbol selector."
       }
     ],
-    "sourceSha256": "f907fbb465bc3477fec84fb899d0bd483adc51f3c46864899c380706342af02e"
+    "sourceSha256": "3e56f88777989f51155cf1a03e4aa9db3364db2665ef62d58a1a5eab22720f51"
   }
 }
