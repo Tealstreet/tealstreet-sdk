@@ -952,4 +952,39 @@ mod js_sockets {
         dispose.call(socket.clone(), vec![]).unwrap();
         assert!(!socket.get("isConnected").unwrap().truthy());
     }
+
+    #[test]
+    fn retry_failed_connect_drives_the_close_path_backoff_into_a_fresh_dial() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = JsSocketContext::new(runtime.clone());
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let connects = Rc::new(Cell::new(0));
+        {
+            // The venue's own connect, which the core's reconnect path calls back into.
+            let (connects, this) = (connects.clone(), socket.clone());
+            socket
+                .define(
+                    "connectAndSubscribe",
+                    Js::function("connectAndSubscribe", move |_, _| {
+                        connects.set(connects.get() + 1);
+                        this.call_method("createWebsocket", vec![Js::str("wss://venue")])
+                    }),
+                )
+                .unwrap();
+        }
+        socket
+            .call_method(
+                "retryFailedConnect",
+                vec![Js::str("listen key fetch failed")],
+            )
+            .unwrap();
+        for _ in 0..10 {
+            runtime.advance(10_000.0);
+        }
+        assert!(
+            connects.get() >= 1,
+            "a failed connect is retried through connectAndSubscribe"
+        );
+    }
 }

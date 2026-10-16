@@ -422,6 +422,19 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
     {
         let core = core.clone();
         def(
+            "retryFailedConnect",
+            Js::function("retryFailedConnect", move |_, a| {
+                let message = arg(&a, 0).to_js_string()?;
+                core.base()?
+                    .retry_failed_connect(&String::from_utf16_lossy(&message))
+                    .map_err(ex)?;
+                Ok(Js::Undefined)
+            }),
+        );
+    }
+    {
+        let core = core.clone();
+        def(
             "recordCloseDiagnostics",
             Js::function("recordCloseDiagnostics", move |_, a| {
                 let code = arg(&a, 0);
