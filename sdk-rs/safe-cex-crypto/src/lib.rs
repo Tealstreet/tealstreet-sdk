@@ -296,6 +296,7 @@ pub(crate) fn hmac_sha512(key: &[u8], payload: &[u8], encoding: Encoding) -> Str
 // P5a primitives only: callers own venue preimages and transport.
 pub mod ed25519;
 pub mod eip712;
+pub mod es256;
 pub mod lighter;
 pub mod msgpack;
 pub mod poseidon_types;
