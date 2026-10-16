@@ -493,3 +493,17 @@ value instead of the source's empty continuation (CHOSEN, divergent row).
 tests/primary_startup.rs compares 22 scenarios with the executed source member;
 that report is the only native-only effect it removes before comparison.
 Concrete binding to the Exchange trait is pending, as for every SnapshotHost body.
+
+The production binding now constructs linear and demo exchanges through
+`BybitExchange::create` and runs startup, snapshots and order writes through the
+shared js_runtime receiver. The Exchange trait's three inherited unsupported
+methods preserve the source BaseExchange rejection. Amend handles virtual
+brackets through the parent, free conditional orders through amend, and
+position stops through trading-stop or cancel-and-replace. Cancels filter virtual
+rows before category batching and retire already-gone orders. Demo reconciliation
+reads executions to exhaustion and fails closed at the page limit.
+`tests/exchange_binding.rs` drives the concrete trait over a scripted transport;
+its live-source order-write comparison covers 92 amend/cancel cases. The numeric
+typed-to-receiver boundary remains under audit: shared from_typed/to_typed project
+through JSON, so native nonfinite values require a separate repair before this
+binding can claim unrestricted number parity.

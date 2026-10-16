@@ -122,3 +122,88 @@ pub(crate) fn record_recently_placed_order(rt: &Rt, order: &Js) -> Result<(), Th
         |order| schedule_reconciliation(rt, order.borrow().clone()),
     )
 }
+
+// ts: BybitExchange#shouldReconcileLocalReduceOnlyLimitOrder
+pub(crate) fn should_reconcile(rt: &Rt, order: &Js) -> Result<bool, Thrown> {
+    let order: Order = to_typed(order)?;
+    lifecycle::should_reconcile_local_reduce_only_limit_order(&Rc::new(RefCell::new(order)), || {
+        should_use_local_fallback(rt)
+    })
+}
+
+// ts: BybitExchange#getFilledOrderReconciliationTarget
+pub(crate) fn filled_order_reconciliation_target(order: &Js) -> Result<f64, Thrown> {
+    let order: Order = to_typed(order)?;
+    Ok(lifecycle::get_filled_order_reconciliation_target(&Rc::new(
+        RefCell::new(order),
+    )))
+}
+
+/// `this.recentlyPlacedOrders`: the typed map, read through `get(id)`.
+pub(crate) fn recently_placed_orders(rt: &Rt) -> Js {
+    let (get_rt, set_rt) = (rt.clone(), rt.clone());
+    let view = Js::object_with_class("Map", vec![]);
+    let _ = view.define(
+        "get",
+        Js::function("get", move |_, a| {
+            let id = crate::binding::host::text(&a.first().cloned().unwrap_or(Js::Undefined))?;
+            let venue = venue(&get_rt)?;
+            let Some((_, entry)) = venue
+                .order_state
+                .recent()
+                .into_iter()
+                .find(|(k, _)| *k == id)
+            else {
+                return Ok(Js::Undefined);
+            };
+            let entry = entry.borrow();
+            let order = from_typed(&*entry.order.borrow())?;
+            Ok(Js::object(vec![
+                ("placedAt", Js::Number(entry.placed_at)),
+                ("order", order),
+            ]))
+        }),
+    );
+    let _ = view.define(
+        "set",
+        Js::function("set", move |this, a| {
+            let arg = |i: usize| a.get(i).cloned().unwrap_or(Js::Undefined);
+            let id = crate::binding::host::text(&arg(0))?;
+            let entry = arg(1);
+            let order: Order = to_typed(&entry.get("order")?)?;
+            venue(&set_rt)?.order_state.put_recent(
+                id,
+                lifecycle::RecentEntry {
+                    placed_at: entry.get("placedAt")?.to_number()?,
+                    order: Rc::new(RefCell::new(order)),
+                },
+            );
+            Ok(this)
+        }),
+    );
+    view
+}
+
+// ts: BybitExchange#retireCancelledOrders
+pub(crate) fn retire_cancelled_orders(rt: &Rt, orders: &Js) -> Result<(), Thrown> {
+    let venue = venue(rt)?;
+    let orders: Vec<Order> = to_typed(orders)?;
+    lifecycle::retire_cancelled_orders(
+        &venue.order_state,
+        order_list(orders),
+        || now(rt),
+        |id| mark_order_seen(rt, id),
+        || should_use_local_fallback(rt),
+        |ids| {
+            let ids = ids
+                .borrow()
+                .iter()
+                .map(|r| Js::object(vec![("id", Js::str(&r.borrow().id))]))
+                .collect();
+            rt.this
+                .get("store")?
+                .call_method("removeOrders", vec![Js::array(ids)])?;
+            Ok(())
+        },
+    )
+}

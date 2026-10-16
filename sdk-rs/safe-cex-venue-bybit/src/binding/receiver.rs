@@ -378,6 +378,58 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         "shouldUseLocalRestOrderLifecycleFallback",
         |rt, _| Ok(Js::Bool(members::lifecycle::should_use_local_fallback(rt)?)),
     );
+    let recent_rt = rt.clone();
+    this.define_accessor(
+        "recentlyPlacedOrders",
+        Some(Rc::new(move |_| {
+            Ok(members::lifecycle::recently_placed_orders(&recent_rt))
+        })),
+        None,
+    );
+    method(
+        &this,
+        rt,
+        "shouldReconcileLocalReduceOnlyLimitOrder",
+        |rt, a| {
+            Ok(Js::Bool(members::lifecycle::should_reconcile(
+                rt,
+                &arg(&a, 0),
+            )?))
+        },
+    );
+    method(&this, rt, "getFilledOrderReconciliationTarget", |_, a| {
+        Ok(Js::Number(
+            members::lifecycle::filled_order_reconciliation_target(&arg(&a, 0))?,
+        ))
+    });
+    method(&this, rt, "reconcileLocalReduceOnlyLimitOrder", |rt, a| {
+        Ok(
+            crate::local_order_reconciliation::reconcile_local_reduce_only_limit_order(
+                h(rt),
+                rt.this.clone(),
+                arg(&a, 0),
+            ),
+        )
+    });
+    method(&this, rt, "resolveOrderSymbolForFills", |rt, a| {
+        Ok(
+            members::fills::resolve_order_symbol_for_fills(rt, &text(&arg(&a, 0))?)?
+                .map_or(Js::Undefined, |s| Js::str(&s)),
+        )
+    });
+    method(&this, rt, "fetchFillsForOrderIds", |rt, a| {
+        members::fills::fetch_fills_for_order_ids(rt, arg(&a, 0))
+    });
+    method(&this, rt, "retireCancelledOrders", |rt, a| {
+        members::lifecycle::retire_cancelled_orders(rt, &arg(&a, 0))?;
+        Ok(Js::Undefined)
+    });
+    method(&this, rt, "updateOrder", |rt, a| {
+        members::amend::update_order(rt, arg(&a, 0))
+    });
+    method(&this, rt, "cancelOrders", |rt, a| {
+        members::cancel::cancel_orders(rt, arg(&a, 0))
+    });
     method(
         &this,
         rt,

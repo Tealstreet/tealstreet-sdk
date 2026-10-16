@@ -144,6 +144,14 @@ fn dispatch_callback(
     if code.starts_with("start_") {
         return crate::primary_startup::start_callback(h, owner, code, args);
     }
+    if code == "reconciliation_order_matches" {
+        let arg = |v: &[Js]| v.first().cloned().unwrap_or(Js::Undefined);
+        return crate::local_order_reconciliation::reconciliation_order_matches(
+            h.as_ref(),
+            &arg(&captures),
+            &arg(&args),
+        );
+    }
     crate::core_snapshot_readers::dispatch(h, owner, code, captures, args)
 }
 

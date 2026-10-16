@@ -374,6 +374,18 @@ pub fn options() -> ExchangeOptions {
     reason = "browser-local adapters, as in production"
 )]
 pub fn harness(options: ExchangeOptions, script: impl FnOnce(&Wire)) -> Harness {
+    harness_as(ExchangeName::Bybit, options, script)
+}
+
+#[allow(
+    clippy::arc_with_non_send_sync,
+    reason = "browser-local adapters, as in production"
+)]
+pub fn harness_as(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    script: impl FnOnce(&Wire),
+) -> Harness {
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(START_MS);
     let wire = Arc::new(Wire::default());
@@ -383,7 +395,7 @@ pub fn harness(options: ExchangeOptions, script: impl FnOnce(&Wire)) -> Harness 
     let mut clock = VirtualClock::default();
     clock.now = Arc::new(move || epoch.load(Ordering::SeqCst) as f64);
     let exchange = BybitExchange::create(
-        ExchangeName::Bybit,
+        name,
         options,
         store.clone(),
         BybitDependencies {
@@ -421,6 +433,14 @@ impl Harness {
             self.runtime.now.set(self.runtime.now.get() + 50.0);
         }
         panic!("venue future did not settle")
+    }
+    /// Advance virtual time in 50ms steps, running due timers and jobs.
+    pub fn advance(&self, milliseconds: f64) {
+        let steps = (milliseconds / 50.).ceil() as usize;
+        for _ in 0..steps {
+            self.runtime.now.set(self.runtime.now.get() + 50.0);
+            self.runtime.pump();
+        }
     }
     pub fn venue(&self) -> &dyn Exchange {
         self.exchange.as_ref()
