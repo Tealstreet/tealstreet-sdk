@@ -227,6 +227,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             venue(rt)?.get_category_for_symbol(&text(&arg(&a, 0))?),
         ))
     });
+    method(&this, rt, "tradesCategoryOf", |rt, a| {
+        crate::ws_private::messages::trades_category_of(rt, arg(&a, 0))
+    });
     method(&this, rt, "inverseEnabled", |rt, _| {
         Ok(Js::Bool(venue(rt)?.inverse_enabled()))
     });

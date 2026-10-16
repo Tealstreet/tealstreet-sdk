@@ -469,11 +469,11 @@ impl BybitExchange {
             create_api,
             public_protocol,
             move |parent| {
-                Rc::new(crate::ws_private::protocol::PrivateProtocol {
+                Rc::new(crate::ws_private::protocol::PrivateProtocol::new(
                     parent,
-                    runtime: private_runtime,
-                    config: private,
-                })
+                    private_runtime,
+                    private,
+                ))
             },
         )
     }

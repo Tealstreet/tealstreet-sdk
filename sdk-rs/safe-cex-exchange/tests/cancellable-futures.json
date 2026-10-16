@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "208 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "209 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1981,7 +1981,7 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "bf669ae5b4b3f13e8c2acf00edff9e0cf3cf62a91ea3fb3c37b73b14ee7af24b",
+      "producer_sha256": "40f4fcc8c396e4eafd92603be9f85e1e3aeab2f20eb9570a9a6be882a51a8d5e",
       "classification": "no-owned-latch",
       "reason": "The handshake is owned by the dial future: a drop before it completes abandons the attempt. connect_websocket spawns its reader/writer only after its last await and returns at once, and NativeSocket Drop aborts the reader, so a dropped dial never strands a task."
     },
@@ -2723,6 +2723,16 @@
       "producer_sha256": "61374ff945a2efa34769dd0250f4407506f6883502772d697671095d8f4791eb",
       "classification": "no-owned-latch",
       "reason": "Installs a source request interceptor whose eager Promise owns the local config and provider authorizer future. Only settled provider changes reach the same JS config/headers; no in-flight reservation, listener, timer or RefCell borrow spans the await. Proxy rejection propagates through the existing client chain before signing or wire send."
+    },
+    {
+      "owner": "src/js_runtime/sockets.rs::create_websocket",
+      "boundaries": [
+        "async-block"
+      ],
+      "producer_sha256": "737dba9702a507f78ec48ca97f2c8f44d647d9602f03a85c2e291a4a55d61fe1",
+      "classification": "delegated",
+      "delegate": "src/websocket.rs::BaseWebSocket::start_prepared_websocket",
+      "reason": "The retained header provider executes inside the existing core-owned dial preparation. A thrown auth error prevents dial; generation/disposal guards and cancellation remain owned by start_prepared_websocket/spawn_owned_kind. ws_options witnesses source dial inputs, rejected preparation and real native upgrade headers."
     }
   ]
 }

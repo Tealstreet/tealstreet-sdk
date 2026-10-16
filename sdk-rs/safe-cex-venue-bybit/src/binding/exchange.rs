@@ -250,10 +250,10 @@ impl BybitExchange {
                 }
             },
             move |parent| {
-                Rc::new(crate::ws_private::protocol::PrivateProtocol {
+                Rc::new(crate::ws_private::protocol::PrivateProtocol::new(
                     parent,
-                    runtime: runtime.clone(),
-                    config: crate::ws_private::protocol::PrivateProtocolConfig {
+                    runtime.clone(),
+                    crate::ws_private::protocol::PrivateProtocolConfig {
                         sync_clock: Rc::new(move || {
                             let clock = private_clock.clone();
                             Box::pin(async move {
@@ -265,7 +265,7 @@ impl BybitExchange {
                         account_name,
                         relay_enabled,
                     },
-                })
+                ))
             },
         )
         .map_err(|error| ExchangeError::new(error.to_string()))?;
