@@ -1,7 +1,11 @@
 //! Leaf JS host traits: operators, bindings, iteration and callback captures.
 //! Every capture becomes a native function whose body is the venue's mapped
 //! `run_*` algorithm; no algorithm lives here.
-use super::{Realm, host_core::js, value::*};
+use super::{
+    Realm,
+    host_core::js,
+    value::{IterSource, PropKey, Value},
+};
 use crate::{
     account_position_leaves::{self, AccountPositionHost, OppositePredicate},
     balance_state::{self, BalanceHost, BalanceOperator, SpotMarketPredicate},

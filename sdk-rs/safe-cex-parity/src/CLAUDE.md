@@ -46,6 +46,14 @@ share an ID with a production struct, so name membership alone is insufficient.
 and decoded manifests. Its disjoint structural groups are candidate repair
 families, not automatic rename, split or provenance authorizations.
 
+`parity-check --invention-crate <package>` requires explicit `--manifest` and
+`--exempt` inputs. It builds the complete maintained workspace index, preserving
+canonical local/shared reexport resolution and every mapping target, then narrows
+only public invention obligations to that package. Status, target resolution and
+source-provenance checks still apply to every supplied row. Global/default gates
+are unchanged; report/progress do not accept this scope. The split-mapping CLI
+fixture also requires unmapped-item and missing-provenance failures and restoration.
+
 **Progress shares report counters.** `parity:progress` builds the same source
 index and calls validated `report`, then formats its total, phase buckets and
 ten largest pending source files. It does not count symbols itself. Phase
@@ -84,7 +92,14 @@ module-scope `macro_rules!` is accepted only when every same-name definition in
 the target is unconditional and every arm transcribes without a declaration
 keyword or `item` fragment; each invocation's arguments get the same check. Macro binding guards still
 reject local shadowing of trusted expression/derive/attribute names and
-namespaces. A separate
+namespaces. A target-wide token proof permits module-level `core` declarations only when
+every `core` identifier in every supplied source is another such declaration
+or an AST-proven value binding/reference, and the actual compiler `core` origin
+is authenticated. Only authenticated std `vec!` operands are parsed as expressions;
+other macro tokens remain opaque. Paths, imports, aliases,
+extern declarations, block-local modules, macro tokens and inactive cfg tokens
+revoke that proof. Every other source finding remains enforced.
+A separate
 source module walk rejects doc-dependent cfg predicates before rustdoc, including
 external-module inner attributes and raw identifiers; block-local external modules
 fail closed. The control runner pins test files, named tests and executed mutation

@@ -1,3 +1,89 @@
+# Four string-enum contract reviews
+
+The contract shard adds individual reviews for `Tif`, `Tpsl`, `Grouping` and
+`ScheduleCancelActionType`, matching the maintained TS literal declarations and
+concrete native enum variants. Each decoder retains its String admission before
+its private remote metadata; no production source changes are proposed.
+
+`tests/accepted_literal_contracts.rs`: **4/4 native tests pass**, checking all nine
+valid tags, exact native enum identity and serialization, JSON whitespace, every
+valid externally tagged map rejection, and seven other forbidden values. Each
+input runs through direct text, qualified owned and borrowed Value deserialization
+and the three shared numeric ingress functions. The contract expressions also
+execute directly: **4/4 pass, 50 authored cases across six native routes (300
+observations)**, comparing native variant/ordinal fields before serialization.
+The temporary direct-witness file is removed after execution.
+
+`scripts/accepted-literal-controls.py`: **4 compiled named tagged-shape failures /
+4 restored passes; final 4/4 pass**. Each control independently removes only one
+public decoder's String admission and calls its existing remote decoder directly.
+The named native test fails on the newly admitted tagged object. Every control
+restores `types.rs` byte-for-byte; no compiler error counts as negative evidence.
+
+The original 37-owner witness script now names its exact cohort, so new contract
+rows cannot accidentally expand or break that historical reproduction: its
+37/37 native tests pass again, covering the unchanged 248 cases and formatter. All
+existing master contracts are retained. This batch reviews four more obligations:
+41 owner contracts plus two Clone reviews, 43 of the original 570 census keys.
+Fresh compiler discovery retains every original key and additionally indexes
+`realm::host_spot::class_pair` and `spot_binding::HyperliquidSpotExchange`.
+The current total is 572 (534 owners, 36 aliases, two construction obligations):
+529 remain unreviewed, including both additional owners. The six associated-type
+projections remain a separate batch.
+Strict native all-targets clippy and formatting pass. `parity:check` passes with
+7459 rows, 17206 public items and zero findings. All four contracts match
+fresh compiler API inventory and static eligibility. The ordinary package gate
+still stops at the exact unreviewed PrivateValue associated projection; it emits
+no native acceptance receipts. No package, dependency, local-scope or target-matrix
+acceptance is claimed.
+
+# First Hyperliquid accepted-contract cohort
+
+The per-crate contract shard classifies 37 selected owners: cloid and raw-JSON
+helpers, response interpretation, cancellation records, raw/retained JSON values,
+and the placement record. Direct native tests execute actual production-module
+receivers, including private helpers: **37/37 owner tests pass**, covering 248
+independently authored cases plus the typed formatter witness. Temporary test
+modules are restored byte-for-byte. An initial adapter shadowing compile error
+was corrected before execution and is not counted as native failure evidence.
+The field observations read native variants, values, presence, UTF-16 units and
+float bits before serialization. JsonObject's witness fixes T to JsString; it
+makes no claim about arbitrary generic arguments.
+
+Fresh native/default compiler discovery retains 532 owners, 36 aliases and two
+construction obligations. The 37 installed contracts match the actual compiler
+API lists and pass static contract eligibility. Two additional construction reviews classify only the derived Clone of
+`HelperObserver<V,E>` and `SigningPayload`; their owner APIs remain independent.
+The other 531 census obligations remain unreviewed. No package, dependency, feature or wasm acceptance is claimed.
+
+The two construction witnesses pass against actual native owners. HelperObserver
+clones share pending state and preserve fulfillment/rejection object identity,
+registered wakers and late-clone completion. SigningPayload clones retain both
+independent wire and encoding snapshots, including native infinity, omitted JSON
+fields and signing nil members. Changing either clone implementation independently
+compiles and fails its named assertion; exact restoration passes both witnesses.
+Run `scripts/accepted-construction-controls.py` for the two mutation controls, or
+`scripts/accepted-leaf-native.py` for the 37 direct owner witnesses. These scripts
+restore every temporarily edited source byte in `finally`. Neither script grants
+compiler, local, namespace, alias, dependency or target-matrix acceptance. Strict
+native all-targets clippy passes with both permanent Clone witnesses installed.
+
+Production imports in 25 files now name their actual dependencies explicitly.
+After removing use declarations, each file is byte-identical to its prior body;
+module/API declarations are unchanged. Strict native all-targets clippy passes.
+Existing native tests pass 63/63: 24 library tests, 18 production binding E2Es
+and 21 Spot binding E2Es. No extra tests were added for the import-only change.
+A fresh source scan removes all import/attribute-scope refusals, while retaining
+305 events: both actual core namespace refusals, 146 local OnlyMap types, 146
+visitor implementations, ten nested functions and one Step type. Both core
+modules remain intact. Compiler artifacts, verified macro origins, source hashes
+and the complete scan were preserved for the shared namespace review. The focused
+preflight still refuses those unresolved scopes. The ordinary package gate stops
+earlier at `private_class::PrivateValue<H>`: the actual associated-type projection
+`<H as WsPingHost>::Value` is unsupported by the direct-identity generic alias
+probe. It produces no native acceptance receipts. The exact alias remains public
+and unclassified; no scanner or alias-policy exemption was introduced.
+
 # Placement-record decoder boundary proof
 
 The actual `HyperliquidPlacementRecord` decoder initially failed three named

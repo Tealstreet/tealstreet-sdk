@@ -1439,3 +1439,186 @@ compiling controls from sdk-rs. Omitting the native signer fails the HTTP tests;
 reading a missing live signer property fails the WS witness. Each restored tree
 passes all three native witnesses. The controls ran sequentially with one Cargo
 job. Read-only sub-agent review reported no blocking findings.
+
+
+## Accepted base-URL string union (2026-10-17)
+
+Source `kraken.types.ts::KrakenBaseUrl` declares exactly `derivatives | history`
+as strings. The original derived Rust decoder compiled and passed its valid
+native-variant witness, but failed the new named tagged-shape test by admitting
+`{"derivatives":null}`. The production fix uses existing `String::deserialize`
+and a private remote Serde schema. Serialize spellings and numeric-output
+registration remain unchanged.
+
+The two new native tests pass alongside all four existing actual-source `types`
+tests, with zero ignored. Both hardcoded native variants are checked before
+Serialize through five ingress paths. Each of the two valid tagged-null maps,
+five other non-string shapes and four invalid tags is refused through the same
+five paths (55 refusal assertions). Existing `types` independently checks the
+complete two-literal source union, as well as tables and normalization.
+
+`scripts/base-url-string-control.py` ran successfully: baseline six tests pass;
+remove only String admission and the compiled named
+`tagged_base_url_shapes_are_rejected_on_every_ingress_path` fails on the native
+owned tagged-map assertion; restore exact source bytes and all six pass again.
+A compiler error cannot satisfy this control.
+
+`scripts/base-url-contracts.mjs` ran fresh native/default private/hidden rustdoc,
+then the maintained selected-owner production probe: **one actual runtime
+result, zero classification-only receipts, zero failed owners**. Its hand-authored
+observation matches actual native enum variants without serializing the enum,
+and records all 11 refusals independently. Compiler identity confirms the private
+remote schema has no independent Deserialize or public inherent API. The new
+per-crate contract contains this owner only; no shared policy row is exempted.
+
+The full inventory attempt still refused **25 unsupported Kraken receiver
+methods**. This is open review work, not a passing gate. The selected owner does
+not discharge other owners, aliases, local functions, construction or feature/
+wasm accepted coverage. The old seven-file `types-parity-check.py` wrapper crashed on list-valued
+mappings before indexing. It now preserves complete split targets and notes,
+uses every committed Kraken manifest, and intersects only existing provenance
+declarations. All Kraken declarations, including unused ones that must fail,
+remain present. A mixed-crate split retains its already-declared external file;
+a missing declaration is never manufactured.
+
+The maintained checker builds the complete workspace index for canonical shared
+reexport resolution. Its explicit `--invention-crate` scope narrows only public
+invention obligations, with explicit manifest/exemption inputs and every target
+resolution record intact. Global/default behavior is unchanged; report/progress
+refuse this scope. **73 existing Rust gates and three new CLI regressions pass**,
+with zero ignored. The new fixture proves list-valued cross-crate resolution,
+shared reexports, default global rejection, scoped unmapped-item rejection,
+missing-provenance rejection, exact restoration and invalid-scope refusal.
+
+Two Python regressions pass. Reverting only scalar/list selection reproduces the
+original AttributeError in the named split regression; exact restoration passes
+both again. `scripts/manifest-controls.py` also ran against the actual Kraken API
+manifest: baseline passes, removing its committed rust_files declaration fails
+the named source-provenance gate, and exact restoration passes. No permanent
+manifest mapping or exemption changed.
+
+The maintained global gate previously passed **7459 rows / 17204 public Rust
+items**; the seven-file source extractor independently passed **83 symbols**.
+After integrating master f3691e05a6, the repaired Kraken wrapper passes
+**134 rows / 539 public Rust items** with no exemptions, and the freshly built
+global checker passes **7459 rows / 17204 public Rust items**. These gates
+validate metadata claims, not behavioral parity.
+
+Read-only independent review found no actionable issue in the production fix,
+native fixture, selected probe, contract or mutation/restoration controller.
+
+
+Full scoped Kraken Cargo tests passed **141 tests, zero failures and zero ignored**
+across 28 target receipts including the empty doctest target. Separate native and
+wasm32-unknown-unknown all-targets Clippy runs passed with warnings denied. The
+changed parity tooling also passed native all-targets Clippy with warnings denied.
+These compile checks do not extend the one-owner native/default accepted proof
+to wasm behavior or other accepted owners.
+
+
+Integration `354acaa8b28435d975b2051303581a21198dc9cc` preserves the exact
+validated Kraken source/tests, parity CLI source/tests, Cargo manifests/lock,
+shared native dependencies and Kraken TypeScript oracle inputs. The full native
+and host/wasm Clippy receipts therefore remain applicable without repeating
+unchanged tests. Frozen installation and all-workspace formatting pass after
+integration; the selected production probe is rerun independently.
+
+
+### Master conflict refresh
+
+Master `f9b0ba6ec662c5c2ae084305751ec91a2c702ae3` integrated in
+`7e4ca5c5490fea969a872576653fdefac13f731d`. The sole conflict joined two appended
+parity-tool documentation sections: the complete master GRVT borrowed-map recipe
+and the scoped-checker guidance are both retained. The latter now sits beside
+structural-gate documentation, preserving the master append point. The CLI Rust
+source and its test fixture are byte-identical to the reviewed `2333c92883`.
+
+Master also changed the candle-cache dependency. Fresh full scoped Kraken tests
+pass **141/0 failures/0 ignored**, and fresh native plus wasm all-targets Clippy
+pass with warnings denied. Fresh scoped/global structural checks pass
+**134/539** and **7459/17204** respectively. Frozen installation and all-workspace
+formatting pass. The base-URL decoder, witness and guard-removal control remain
+unchanged; their source/dependency inputs for string admission are preserved.
+
+The fresh integrated production enum probe also passes: one actual runtime
+result, zero classification-only receipts, zero failed owners.
+
+## Four accepted module-helper bodies (2026-10-17)
+
+Each complete body was reviewed against the actual TS declarations and the
+existing module-utility host profile in MANIFEST-SPEC. `parse_trigger_signal`
+decodes JSON-domain values to native trigger variants/absence or a coercion error.
+The other three functions have distinct non-decoder roles: typed literal string
+comparison through the shared root collator; shared Error construction with
+literal message and separate optional metadata snapshots; and a module-owned ID
+generator factory driven by fallible host entropy. The factory's mutable byte
+slice belongs to the host fill callback, rather than an inbound wire schema.
+The binding factory and SpotIds alias remain separately reviewable owners.
+
+Four new direct native witnesses pass with all five existing actual-source helper
+tests: **nine passed, zero failures/ignored**. Observations include all three
+trigger variants and absence/error before Serialize; actual Ordering; literal
+message/name, separate nested response/cause fields, negative-zero bits, explicit
+null versus absence and snapshot behavior; and an entropy failure followed by
+native 32-character IDs and the independent source refill schedule. The installed
+nanoid 6.0.1 source was reviewed directly: growth advances before entropy filling,
+and constant 0xaf maps to hexadecimal f. The existing live source witness compares
+2640 generated results and callback schedules with the pinned dependency.
+
+The selected native/default production gate reports **one runtime result, three
+explicit classifications, zero failed owners**. Its 21 trigger input/output cases
+were authored independently of the Rust decoder. The call observes actual native
+enum variants/absence/error rather than serializing the enum or observing is_ok.
+A classification receipt does not execute the comparator, error constructor or
+factory; their separate native witnesses provide that execution evidence.
+
+`scripts/helper-contract-controls.py` completed four sequential compiled controls:
+reverse comparator operands, swap response/cause metadata, change the hexadecimal
+mask from 15 to 7, and map spot to the wrong trigger variant. The first three each
+fail their named native witness after compilation, then pass that same witness
+after exact source restoration. The trigger mutation fails only its own actual
+production output probe with native output mismatches; restored production1 plus
+classifications3 pass again. Exact final helpers.rs bytes match the original,
+and all nine native/source tests pass again with zero ignored. Compiler failures
+cannot count as control success. No production code or protocol boundary changed.
+
+These four contracts leave other Kraken owners, aliases, local functions,
+construction, the 25 receiver refusals and feature/wasm accepted coverage open.
+
+
+Helper readiness at integration `44c962414960992337f5c745f762edf35281686a`:
+full scoped Kraken tests passed **143**, with zero failures or ignored tests;
+separate native and wasm32 all-targets Clippy passed with warnings denied.
+Fresh production helper verification passed **one runtime result, three explicit
+classifications, zero failed owners**. Global structural verification passed
+**7459 rows / 17206 public Rust items**; the maintained TS extractor checked
+**83 symbols across seven slice files**. Workspace format and frozen install
+passed. Independent read-only review found no actionable issues; CodeRabbit's
+manual review was rate-limited. No unresolved review conversations were present
+at this checkpoint.
+
+The final master integration changed only other packages' accepted contracts and
+their review docs. Kraken source/tests/controls/contracts, all Cargo inputs and
+the maintained probe/indexer sources are byte-identical to the tested checkpoint.
+At this original checkpoint the base-URL/scoped-wrapper repair was separate in
+PR #327. The later master integration below includes it without duplicating its
+implementation. These are selected native/default accepted-contract
+receipts; the successful wasm Clippy check does not establish wasm behavioral
+coverage or clear any remaining accepted-set obligation.
+
+
+Helper master refresh at `63f666e668` integrates master `cda5584612`, including
+#327 and the shared cancellation review from #342. The three merge conflicts
+were resolved by retaining every master contract/documentation section, then
+appending only the four unchanged helper contracts and their guidance/evidence.
+All five Kraken rows equal their original branch/master values exactly.
+Fresh full scoped Kraken tests pass **145 / zero failures / zero ignored**;
+separate native and wasm32 all-targets Clippy, frozen install and format pass.
+The checker was rebuilt from this integrated source. The repaired scoped wrapper
+passes **134 rows / 539 public items / zero exemptions**, and the global checker
+passes **7459 rows / 17206 public items**. Fresh production helper verification
+passes **one runtime result / three explicit classifications / zero failed owners**.
+Helper production bodies, native fixtures, controller and runner are byte-identical
+to the checkpoint that executed all four compiled controls and exact restorations.
+Independent merge-preservation review is clean; the obsolete #327-pending wording
+has been corrected. Other accepted-set obligations remain open as listed above.

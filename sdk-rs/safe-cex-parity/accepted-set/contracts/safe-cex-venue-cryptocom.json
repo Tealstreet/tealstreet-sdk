@@ -12231,5 +12231,1442 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_cryptocom::runtime::get": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::runtime::RuntimeOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Forwards an existing native value and a property key to the supplied host get operation and returns that same host result/error. It performs no string/JSON parsing, record admission, field validation or conversion to a decoded DTO; property access semantics and errors belong to the explicitly supplied host.",
+    "evidence": "Individually reviewed the actual runtime.rs get body and its callees against its supplied host-operation role. Executed runtime::accepted_runtime_helpers::get_native_contract directly with shared Js/Thrown values: getter/result and thrown-value identity. Its body-specific control compiled, failed the named runtime-helper assertion with exit 101 and passed after exact byte restoration. Fresh native/default compiler classification receipts match this exact API. Compiler metadata is separate from these actual runtime witnesses. This does not classify downstream decoders or claim arbitrary host/Clone behavior, aliases, locals, full-crate or target-matrix closure."
+  },
+  "safe_cex_venue_cryptocom::runtime::optional": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::runtime::RuntimeOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Checks the host nullish predicate, returns its undefined carrier for that branch, otherwise forwards property access through get. This is optional-chain control flow over existing native carriers, without a declared decoded output schema or validation token. It is not a private-helper exemption for downstream parsers.",
+    "evidence": "Individually reviewed the actual runtime.rs optional body and its callees against its supplied host-operation role. Executed runtime::accepted_runtime_helpers::optional_native_contract directly with shared Js/Thrown values: null/undefined short circuit, existing-object lookup and error propagation. Its body-specific control compiled, failed the named runtime-helper assertion with exit 101 and passed after exact byte restoration. Fresh native/default compiler classification receipts match this exact API. Compiler metadata is separate from these actual runtime witnesses. This does not classify downstream decoders or claim arbitrary host/Clone behavior, aliases, locals, full-crate or target-matrix closure."
+  },
+  "safe_cex_venue_cryptocom::runtime::method": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "method",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::runtime::RuntimeOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Reads a callee from the given receiver before evaluating the argument thunk, then invokes that callee with the original supplied receiver and resulting arguments. The returned generic carrier is the host invocation result, not a parsed record; this entry classifies call dispatch, not every invoked method.",
+    "evidence": "Individually reviewed the actual runtime.rs method body and its callees against its supplied host-operation role. Executed runtime::accepted_runtime_helpers::method_native_contract directly with shared Js/Thrown values: lookup/argument/invoke order, original receiver/argument/result identity and abrupt completion. Its body-specific control compiled, failed the named runtime-helper assertion with exit 101 and passed after exact byte restoration. Fresh native/default compiler classification receipts match this exact API. Compiler metadata is separate from these actual runtime witnesses. This does not classify downstream decoders or claim arbitrary host/Clone behavior, aliases, locals, full-crate or target-matrix closure."
+  },
+  "safe_cex_venue_cryptocom::runtime::own": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "own",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::runtime::RuntimeOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Clones the supplied generic receiver carrier and delegates to method with the same key and argument thunk. It supplies receiver/call plumbing, adds no admission predicate or decoded schema, and does not grant decoder permission to the callee or arbitrary Clone implementations.",
+    "evidence": "Individually reviewed the actual runtime.rs own body and its callees against its supplied host-operation role. Executed runtime::accepted_runtime_helpers::own_native_contract directly with shared Js/Thrown values: actual Js receiver clone/dispatch identity, argument order and abrupt completion. Its body-specific control compiled, failed the named runtime-helper assertion with exit 101 and passed after exact byte restoration. Fresh native/default compiler classification receipts match this exact API. Compiler metadata is separate from these actual runtime witnesses. This does not classify downstream decoders or claim arbitrary host/Clone behavior, aliases, locals, full-crate or target-matrix closure."
+  },
+  "safe_cex_venue_cryptocom::runtime::global": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "global",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::runtime::RuntimeOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "generic": "V"
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<V>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Looks up the named native global, obtains the undefined receiver carrier and invokes it after evaluating the argument thunk. This is global-call dispatch; the source-selected global function and any raw decoder it invokes keep separate obligations.",
+    "evidence": "Individually reviewed the actual runtime.rs global body and its callees against its supplied host-operation role. Executed runtime::accepted_runtime_helpers::global_native_contract directly with shared Js/Thrown values: global lookup order, undefined receiver and argument/result/error identity. Its body-specific control compiled, failed the named runtime-helper assertion with exit 101 and passed after exact byte restoration. Fresh native/default compiler classification receipts match this exact API. Compiler metadata is separate from these actual runtime witnesses. This does not classify downstream decoders or claim arbitrary host/Clone behavior, aliases, locals, full-crate or target-matrix closure."
+  },
+  "safe_cex_venue_cryptocom::runtime::text": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "text",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::runtime::RuntimeOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "prefix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "suffix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Encodes the supplied prefix/suffix as UTF16, inserts the host String/template coercion units for the existing native value, and constructs a native string carrier. It is message rendering/output construction, with host coercion errors preserved, rather than admission of a wire record or finite literal input.",
+    "evidence": "Individually reviewed the actual runtime.rs text body and its callees against its supplied host-operation role. Executed runtime::accepted_runtime_helpers::text_native_contract directly with shared Js/Thrown values: prefix/coercion/suffix UTF16 including lone-surrogate units and coercion errors. Its body-specific control compiled, failed the named runtime-helper assertion with exit 101 and passed after exact byte restoration. Fresh native/default compiler classification receipts match this exact API. Compiler metadata is separate from these actual runtime witnesses. This does not classify downstream decoders or claim arbitrary host/Clone behavior, aliases, locals, full-crate or target-matrix closure."
+  },
+  "safe_cex_venue_cryptocom::runtime::loaded": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "loaded",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::runtime::RuntimeOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "flags",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Reads receiver.store.loaded, delegates native object spreading, appends the supplied flag names with native true carriers and constructs a new property bag. This renders a Store loaded-flag patch from existing state; it neither validates incoming wire fields nor decodes that state into a typed DTO. Spread/getter semantics and downstream Store update remain separate.",
+    "evidence": "Individually reviewed the actual runtime.rs loaded body and its callees against its supplied host-operation role. Executed runtime::accepted_runtime_helpers::loaded_native_contract directly with shared Js/Thrown values: retained existing references, true selected flags and original-bag isolation. Its body-specific control compiled, failed the named runtime-helper assertion with exit 101 and passed after exact byte restoration. Fresh native/default compiler classification receipts match this exact API. Compiler metadata is separate from these actual runtime witnesses. This does not classify downstream decoders or claim arbitrary host/Clone behavior, aliases, locals, full-crate or target-matrix closure."
+  },
+  "safe_cex_venue_cryptocom::runtime::update": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "update",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_cryptocom::runtime::RuntimeOps",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "fields",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "alloc::vec::Vec",
+                                          "args": {
+                                            "angle_bracketed": {
+                                              "args": [
+                                                {
+                                                  "type": {
+                                                    "tuple": [
+                                                      {
+                                                        "borrowed_ref": {
+                                                          "lifetime": "'static",
+                                                          "is_mutable": false,
+                                                          "type": {
+                                                            "primitive": "str"
+                                                          }
+                                                        }
+                                                      },
+                                                      {
+                                                        "generic": "V"
+                                                      }
+                                                    ]
+                                                  }
+                                                }
+                                              ],
+                                              "constraints": []
+                                            }
+                                          }
+                                        }
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Result<Vec<(&'static str, V)>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::vec::Vec",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "tuple": [
+                                                        {
+                                                          "borrowed_ref": {
+                                                            "lifetime": "'static",
+                                                            "is_mutable": false,
+                                                            "type": {
+                                                              "primitive": "str"
+                                                            }
+                                                          }
+                                                        },
+                                                        {
+                                                          "generic": "V"
+                                                        }
+                                                      ]
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Finds receiver.store and its update method, evaluates the field thunk inside the method argument thunk, constructs one native property bag and dispatches update, returning unit after success. This is an outbound state-write adapter, not an incoming raw-record parser; source lookup/argument/error order is part of existing runtime behavior, without a decoder-domain claim.",
+    "evidence": "Individually reviewed the actual runtime.rs update body and its callees against its supplied host-operation role. Executed runtime::accepted_runtime_helpers::update_native_contract directly with shared Js/Thrown values: getter/fields/object/invoke order, original Store receiver/field identity and abrupt completion. Its body-specific control compiled, failed the named runtime-helper assertion with exit 101 and passed after exact byte restoration. Fresh native/default compiler classification receipts match this exact API. Compiler metadata is separate from these actual runtime witnesses. This does not classify downstream decoders or claim arbitrary host/Clone behavior, aliases, locals, full-crate or target-matrix closure."
   }
 }

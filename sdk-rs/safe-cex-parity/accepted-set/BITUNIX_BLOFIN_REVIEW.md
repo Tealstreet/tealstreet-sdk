@@ -332,3 +332,38 @@ unexecuted 100-page/50-page warning caps are not inferred from these receipts.
 Together with the separate six read/write contracts, this leaves 27 original
 Bitunix owners and the previously measured 49 Blofin owners. Complete-package,
 local-owner and feature/WASM matrices remain separate obligations.
+
+## Socket callbacks and login signing
+
+Eleven additional Bitunix owners execute native/default witnesses. Debounce and
+all three wrappers retain fresh timer rereads before clear, literal field/handler
+identity and native 1000ms bits. Three asynchronous reconciliation functions
+retain timeout reset before disposal, complete two-row payloads, existing loaded
+entries, exact new flags and fetch/loaded-read failure boundaries.
+
+Futures open preserves three subscription frames, both active topics and their
+order, fresh timer tokens and the second disposal check before heartbeat setup.
+Ping-loop scheduling retains exact 15000ms bits. Message ingress checks count
+increment bits, blob success versus report-and-original-data fallback, disposal
+after the await, complete sparse handler traversal and the same parsed Rc
+allocation delivered to both handlers.
+
+Login expectations independently compute double SHA256 from explicit fixture
+plaintext with hashlib. Explicit native timestamp bits preserve signed zero
+while signing text remains zero. Native property order, string/numeric remote
+signature variants and signer Rc identity remain observable. A truthy remote
+error suppresses even a present signature; sync, sleep, sign, report and send
+failures retain separate boundaries. Review found the missing precedence case
+and it now has an actual condition-removal control.
+
+All eleven native owners pass, with no classification-only receipts. Eight
+compiled copied-production edits cover delay values, reconciliation flags,
+handler truncation, secret trimming and remote-error precedence. They produce
+twelve negative owner receipts (login has two distinct controls); every restored
+owner passes. Real production source bytes remain unchanged. Ready callbacks
+bound these profiles; real transport, timer ownership, browser Blob behavior,
+concrete Store integration and cancellation are not inferred from these probes.
+
+Together with the three position/history contracts, this leaves 16 original
+Bitunix owners and the previously measured 49 Blofin owners. Complete-package,
+local-owner and feature/WASM matrices remain separate obligations.
