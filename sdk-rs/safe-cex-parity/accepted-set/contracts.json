@@ -127470,7 +127470,7 @@
         ]
       }
     },
-    "reason": "The all-symbol wrapper obtains symbols from the shared Store then delegates to fetch_tickers_for_symbols. It synchronously collects owned symbols and returns the exact future produced by the caller-supplied fetch hook, without awaiting it; the delegated function owns TickerResponse decoding and native ticker construction.",
+    "reason": "The all-symbol wrapper obtains symbols from the shared Store then passes them to the supplied fetch hook. It synchronously collects owned symbols and returns the exact future produced by the caller-supplied fetch hook, without awaiting it; the delegated function owns TickerResponse decoding and native ticker construction.",
     "evidence": "Reviewed production body and corresponding breakoutprop.exchange.ts method; quotes tests execute selected store symbols, deferred mutation, None-versus-empty and fallback timing. The scoped accepted runner emits the exact native compiler classification receipt; behavioral test execution is recorded separately in GATE_EVIDENCE.md."
   },
   "safe_cex_venue_breakoutprop::runtime::prepare_order": {
