@@ -8,6 +8,7 @@ pub(crate) mod http;
 pub(crate) mod members;
 pub(crate) mod receiver;
 pub(crate) mod rt;
+pub(crate) mod session;
 
 pub use exchange::BybitDependencies;
 pub(crate) use safe_cex_exchange::js_runtime::{promise, value};
