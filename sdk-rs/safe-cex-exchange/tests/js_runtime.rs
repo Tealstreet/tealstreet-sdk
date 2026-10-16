@@ -20,6 +20,7 @@ use std::{
 struct Runtime {
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
     clock: std::cell::Cell<f64>,
+    consoled: RefCell<Vec<(String, String)>>,
 }
 struct Task;
 impl ExchangeTask for Task {
@@ -40,7 +41,11 @@ impl ExchangeRuntime for Runtime {
         self.jobs.borrow_mut().push(future);
         Box::new(Task)
     }
-    fn console(&self, _: &str, _: &str) {}
+    fn console(&self, severity: &str, message: &str) {
+        self.consoled
+            .borrow_mut()
+            .push((severity.into(), message.into()));
+    }
     fn unique_id(&self) -> String {
         "id".into()
     }
@@ -614,14 +619,25 @@ impl safe_cex_exchange::websocket::WsRuntime for Runtime {
     }
 }
 
+struct Assembled {
+    this: Js,
+    base: Rc<safe_cex_exchange::exchange::BaseExchange>,
+    runtime: Rc<Runtime>,
+    context: Rc<safe_cex_exchange::js_runtime::sockets::JsSocketContext>,
+}
+
 fn base_exchange(options: Value) -> Result<Js, Thrown> {
+    Ok(assemble(options)?.this)
+}
+
+fn assemble(options: Value) -> Result<Assembled, Thrown> {
     use safe_cex_exchange::{
         client_order_id::pattern_client_order_id_rule,
         exchange::ExchangeSettings,
         js_runtime::{base_exchange, sockets::JsSocketContext, value::from_json},
     };
     let runtime = Rc::new(Runtime::default());
-    let context = JsSocketContext::new(runtime);
+    let context = JsSocketContext::new(runtime.clone());
     let settings = ExchangeSettings {
         client_order_id_rule: Some(pattern_client_order_id_rule(
             "OKX".into(),
@@ -640,14 +656,19 @@ fn base_exchange(options: Value) -> Result<Js, Thrown> {
         settings,
         external_public_data: None,
     };
-    let (this, _) = base_exchange::create(
+    let (this, base) = base_exchange::create(
         &context,
         parts,
         Js::str("okx"),
         from_json(&options),
         Js::object(vec![]),
     )?;
-    Ok(this)
+    Ok(Assembled {
+        this,
+        base,
+        runtime,
+        context,
+    })
 }
 
 #[test]
@@ -979,4 +1000,757 @@ fn rest_http_host_lets_the_venue_serialize_its_query() {
     let seen = terminal.seen.lock().unwrap();
     assert_eq!(seen[0].url, "/ok?a=1&b=2");
     assert_eq!(seen[0].params, None);
+}
+
+#[test]
+fn store_facade_mutators_key_on_the_entity_id() {
+    use safe_cex_store::{Store, StoreUpdate, store::DefaultStore};
+    let store = Rc::new(DefaultStore::new());
+    Store::update(
+        &*store,
+        StoreUpdate {
+            tickers: Some(vec![
+                serde_json::from_value(json!({
+                    "id": "BTCUSDT", "symbol": "BTCUSDT", "bid": 1, "ask": 2, "last": 3,
+                    "mark": 4, "index": 5, "percentage": 0, "openInterest": 0,
+                    "fundingRate": 0, "fundingTime": 0, "volume": 0, "quoteVolume": 0
+                }))
+                .unwrap(),
+            ]),
+            ..StoreUpdate::default()
+        },
+        false,
+    )
+    .unwrap();
+    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone());
+    // ts: store.updateTicker(ticker, changes) receives the ticker object.
+    let ticker = Js::object(vec![("id", Js::str("BTCUSDT"))]);
+    facade
+        .call_method(
+            "updateTicker",
+            vec![ticker, Js::object(vec![("fundingRate", Js::Number(0.25))])],
+        )
+        .unwrap();
+    assert_eq!(store.tickers()[0].funding_rate, 0.25);
+}
+
+/// Builtins installed over a live scope, so runtime-backed members reach `runtime`.
+fn scoped_globals() -> (
+    Rc<Runtime>,
+    Rc<safe_cex_exchange::js_runtime::scope::ScopeShared<()>>,
+) {
+    use safe_cex_exchange::js_runtime::{globals, library, scope::ScopeShared};
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let shared = Rc::new(ScopeShared::new(
+        runtime.clone(),
+        http,
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        Js::object(vec![]),
+        (),
+    ));
+    globals::install_builtins(&shared.globals, Rc::downgrade(&shared));
+    library::install_library(&shared.globals, Rc::downgrade(&shared));
+    (runtime, shared)
+}
+
+fn json_of(g: &Js, v: Js) -> String {
+    stringify(g, v)
+}
+
+fn thrown_message(result: Result<Js, Thrown>) -> String {
+    result.unwrap_err().message()
+}
+
+#[test]
+fn array_flat_skips_holes_and_honours_depth() {
+    let g = library();
+    let n = Js::Number;
+    let nested = || {
+        Js::holey_array(vec![
+            Some(n(1.0)),
+            Some(Js::array(vec![
+                n(2.0),
+                Js::array(vec![n(3.0), Js::array(vec![n(4.0)])]),
+            ])),
+            None,
+            Some(n(5.0)),
+        ])
+    };
+    let flat = |v: Js, args: Vec<Js>| json_of(&g, v.call_method("flat", args).unwrap());
+    assert_eq!(flat(nested(), vec![]), "[1,2,[3,[4]],5]");
+    assert_eq!(flat(nested(), vec![n(f64::INFINITY)]), "[1,2,3,4,5]");
+    assert_eq!(flat(nested(), vec![Js::str("2")]), "[1,2,3,[4],5]");
+    // Depth 0 and negative depths flatten nothing but still drop holes.
+    assert_eq!(flat(nested(), vec![n(0.0)]), "[1,[2,[3,[4]]],5]");
+    assert_eq!(flat(nested(), vec![n(-1.0)]), "[1,[2,[3,[4]]],5]");
+    let inner_hole = Js::array(vec![Js::holey_array(vec![
+        Some(n(1.0)),
+        None,
+        Some(n(2.0)),
+    ])]);
+    assert_eq!(flat(inner_hole, vec![]), "[1,2]");
+    // Non-array elements, array-likes included, are never spread.
+    let like = Js::object(vec![("length", n(1.0)), ("0", n(9.0))]);
+    assert_eq!(
+        flat(Js::array(vec![like, Js::str("ab")]), vec![]),
+        r#"[{"0":9,"length":1},"ab"]"#
+    );
+}
+
+#[test]
+fn number_statics_and_parse_float_identity() {
+    let g = library();
+    let number = g.get("Number").unwrap();
+    let is_finite = |v: Js| run(&g, "Number.isFinite", vec![v]).truthy();
+    assert!(is_finite(Js::Number(1.5)));
+    assert!(!is_finite(Js::str("1")));
+    assert!(!is_finite(Js::Number(f64::INFINITY)));
+    assert!(!is_finite(Js::Number(f64::NAN)));
+    assert!(!is_finite(Js::Undefined));
+    assert_eq!(
+        number.get("MAX_SAFE_INTEGER").unwrap().as_f64(),
+        Some(9_007_199_254_740_991.0)
+    );
+    assert!(number.get("NaN").unwrap().as_f64().unwrap().is_nan());
+    let parse_float = g.get("parseFloat").unwrap();
+    assert!(
+        number
+            .get("parseFloat")
+            .unwrap()
+            .same_reference(&parse_float)
+    );
+    assert_eq!(
+        run(&g, "Number.parseFloat", vec![Js::str(" 1.5e2x")]).as_f64(),
+        Some(150.0)
+    );
+}
+
+#[test]
+fn performance_now_and_math_random_read_the_runtime() {
+    let (runtime, shared) = scoped_globals();
+    let g = &shared.globals;
+    runtime.clock.set(1234.5);
+    assert_eq!(run(g, "performance.now", vec![]).as_f64(), Some(1234.5));
+    runtime.clock.set(2000.25);
+    assert_eq!(run(g, "performance.now", vec![]).as_f64(), Some(2000.25));
+    assert_eq!(run(g, "Math.random", vec![]).as_f64(), Some(0.5));
+}
+
+#[test]
+fn map_constructor_adds_entries_from_iterables() {
+    let g = library();
+    let new_map = |v: Vec<Js>| g.get("Map").unwrap().call(Js::Undefined, v);
+    let entry = |k: &str, v: f64| Js::array(vec![Js::str(k), Js::Number(v)]);
+    let map = new_map(vec![Js::array(vec![
+        entry("a", 1.0),
+        entry("b", 2.0),
+        entry("a", 3.0),
+    ])])
+    .unwrap();
+    assert_eq!(map.get("size").unwrap().as_f64(), Some(2.0));
+    assert_eq!(
+        json_of(&g, map.call_method("entries", vec![]).unwrap()),
+        r#"[["a",3],["b",2]]"#
+    );
+    // A Map source copies its entries; a Set of entry arrays works too.
+    let copy = new_map(vec![map.clone()]).unwrap();
+    assert!(!copy.same_reference(&map));
+    assert_eq!(
+        json_of(&g, copy.call_method("entries", vec![]).unwrap()),
+        r#"[["a",3],["b",2]]"#
+    );
+    let set = g
+        .get("Set")
+        .unwrap()
+        .call(Js::Undefined, vec![Js::array(vec![entry("s", 1.0)])])
+        .unwrap();
+    let from_set = new_map(vec![set]).unwrap();
+    assert_eq!(
+        from_set
+            .call_method("get", vec![Js::str("s")])
+            .unwrap()
+            .as_f64(),
+        Some(1.0)
+    );
+    // Array-like objects with "0"/"1" are entry objects; -0 keys normalise to +0.
+    let like = Js::object(vec![("0", Js::Number(-0.0)), ("1", Js::str("z"))]);
+    let zero = new_map(vec![Js::array(vec![like])]).unwrap();
+    let key = zero.call_method("keys", vec![]).unwrap().get("0").unwrap();
+    assert!(key.as_f64().unwrap().is_sign_positive());
+    for empty in [vec![], vec![Js::Undefined], vec![Js::Null]] {
+        assert_eq!(
+            new_map(empty).unwrap().get("size").unwrap().as_f64(),
+            Some(0.0)
+        );
+    }
+    assert_eq!(
+        thrown_message(new_map(vec![Js::array(vec![Js::Number(1.0)])])),
+        "Iterator value 1 is not an entry object"
+    );
+    assert_eq!(
+        thrown_message(new_map(vec![Js::str("ab")])),
+        "Iterator value a is not an entry object"
+    );
+    assert_eq!(
+        thrown_message(new_map(vec![Js::holey_array(vec![None])])),
+        "Iterator value undefined is not an entry object"
+    );
+    assert_eq!(
+        thrown_message(new_map(vec![Js::object(vec![])])),
+        "object is not iterable (cannot read property Symbol(Symbol.iterator))"
+    );
+    assert_eq!(
+        thrown_message(new_map(vec![Js::Number(5.0)])),
+        "number 5 is not iterable (cannot read property Symbol(Symbol.iterator))"
+    );
+}
+
+#[test]
+fn array_from_reads_iterables_and_array_likes() {
+    let g = library();
+    let from = |v: Vec<Js>| g.get("Array").unwrap().call_method("from", v);
+    let holey = Js::holey_array(vec![Some(Js::Number(1.0)), None, Some(Js::Number(3.0))]);
+    let copied = from(vec![holey.clone()]).unwrap();
+    assert!(!copied.same_reference(&holey));
+    assert!(copied.has_own("1"), "a hole becomes an own undefined");
+    assert_eq!(json_of(&g, copied), "[1,null,3]");
+    // Strings iterate by code point: a surrogate pair is one element.
+    let text = Js::String("a\u{1F600}b".encode_utf16().collect::<Vec<_>>().into());
+    let chars = from(vec![text]).unwrap();
+    assert_eq!(chars.get("length").unwrap().as_f64(), Some(3.0));
+    assert_eq!(json_of(&g, chars), "[\"a\",\"\u{1F600}\",\"b\"]");
+    let map = run(
+        &g,
+        "Map",
+        vec![Js::array(vec![Js::array(vec![
+            Js::str("k"),
+            Js::Number(1.0),
+        ])])],
+    );
+    assert_eq!(json_of(&g, from(vec![map]).unwrap()), r#"[["k",1]]"#);
+    let set = run(
+        &g,
+        "Set",
+        vec![Js::array(vec![Js::str("x"), Js::str("x"), Js::str("y")])],
+    );
+    assert_eq!(json_of(&g, from(vec![set]).unwrap()), r#"["x","y"]"#);
+    let like = Js::object(vec![("length", Js::str("2.9")), ("0", Js::str("x"))]);
+    let like = from(vec![like]).unwrap();
+    assert_eq!(like.get("length").unwrap().as_f64(), Some(2.0));
+    assert!(like.get("1").unwrap().is_undefined() && like.has_own("1"));
+    assert_eq!(json_of(&g, from(vec![Js::Number(5.0)]).unwrap()), "[]");
+    let indexed = Js::function("", |_, a| {
+        Ok(Js::str(&format!(
+            "{}{}",
+            arg(&a, 0).to_display(),
+            arg(&a, 1).to_display()
+        )))
+    });
+    assert_eq!(
+        json_of(&g, from(vec![holey, indexed]).unwrap()),
+        r#"["10","undefined1","32"]"#
+    );
+    assert_eq!(
+        thrown_message(from(vec![Js::array(vec![]), Js::Number(3.0)])),
+        "number 3 is not a function"
+    );
+    assert_eq!(
+        thrown_message(from(vec![Js::array(vec![]), Js::str("x")])),
+        "string \"x\" is not a function"
+    );
+    assert_eq!(
+        thrown_message(from(vec![Js::Null])),
+        "object null is not iterable (cannot read property Symbol(Symbol.iterator))"
+    );
+    assert_eq!(
+        thrown_message(from(vec![Js::Undefined])),
+        "undefined is not iterable (cannot read property Symbol(Symbol.iterator))"
+    );
+}
+
+#[test]
+fn console_error_and_warn_join_string_conversions_with_spaces() {
+    let (runtime, shared) = scoped_globals();
+    let g = &shared.globals;
+    run(
+        g,
+        "console.error",
+        vec![
+            Js::str("reject in updatePositionsInWebworker"),
+            Js::Number(1.0),
+            Js::object(vec![("a", Js::Number(1.0))]),
+            Js::array(vec![Js::Number(1.0), Js::Null, Js::Number(2.0)]),
+            Js::Undefined,
+        ],
+    );
+    run(
+        g,
+        "console.warn",
+        vec![Js::str("No positions found for BTC")],
+    );
+    run(g, "console.warn", vec![]);
+    assert_eq!(
+        *runtime.consoled.borrow(),
+        [
+            (
+                "error".to_owned(),
+                "reject in updatePositionsInWebworker 1 [object Object] 1,,2 undefined".to_owned()
+            ),
+            ("warn".to_owned(), "No positions found for BTC".to_owned()),
+            ("warn".to_owned(), String::new()),
+        ]
+    );
+}
+
+#[test]
+fn date_parse_reads_the_date_time_string_format() {
+    let g = library();
+    let parse = |text: &str| run(&g, "Date.parse", vec![Js::str(text)]).as_f64().unwrap();
+    assert_eq!(parse("2024-01-31"), 1_706_659_200_000.0);
+    assert_eq!(parse("2024-01"), 1_704_067_200_000.0);
+    assert_eq!(parse("2024"), 1_704_067_200_000.0);
+    assert_eq!(parse("2024-01-31T10:20:30.456Z"), 1_706_696_430_456.0);
+    assert_eq!(parse("2024-01-31T10:20:30Z"), 1_706_696_430_000.0);
+    assert_eq!(parse("2024-01-31T10:20+05:30"), 1_706_676_600_000.0);
+    assert_eq!(parse("+002024-01-31T00:00:00Z"), 1_706_659_200_000.0);
+    // No host timezone hook: an offset-less date-time is read on a UTC host.
+    assert_eq!(parse("2024-01-31T10:20"), 1_706_696_400_000.0);
+    for invalid in ["2024-13-01", "2024-01-31T25:00Z", "garbage", ""] {
+        assert!(parse(invalid).is_nan(), "{invalid}");
+    }
+}
+
+fn order(id: &str, symbol: &str) -> safe_cex_types::Order {
+    serde_json::from_value(
+        json!({"id": id, "status": "open", "symbol": symbol, "type": "limit",
+        "side": "buy", "price": 1, "amount": 1, "filled": 0, "remaining": 1,
+        "reduceOnly": false, "lastUpdate": 0}),
+    )
+    .unwrap()
+}
+
+#[test]
+fn store_facade_reads_fetched_leverage_and_writes_settings_and_statuses() {
+    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone());
+    let g = library();
+    assert_eq!(json_of(&g, facade.get("fetchedLeverage").unwrap()), "{}");
+    facade
+        .call_method(
+            "update",
+            vec![safe_cex_exchange::js_runtime::value::from_json(&json!({
+                "fetchedLeverage": {"BTC": {"buyLeverage": 5, "sellLeverage": 3}}
+            }))],
+        )
+        .unwrap();
+    assert_eq!(
+        to_json(&facade.get("fetchedLeverage").unwrap()).unwrap()["BTC"]["sellLeverage"],
+        json!(3.0)
+    );
+
+    facade
+        .call_method("setSetting", vec![Js::str("isHedged"), Js::Bool(true)])
+        .unwrap();
+    assert!(store.options().is_hedged);
+    assert!(
+        facade
+            .call_method("setSetting", vec![Js::str("other"), Js::Bool(true)])
+            .is_err()
+    );
+
+    store.add_order(order("one", "BTC")).unwrap();
+    store.add_order(order("two", "BTC")).unwrap();
+    let ids = |ids: Vec<Js>| Js::array(ids);
+    let by_id = |id: &str| Js::object(vec![("id", Js::str(id))]);
+    facade
+        .call_method(
+            "updateOrdersStatus",
+            vec![ids(vec![by_id("one")]), Js::str("canceled")],
+        )
+        .unwrap();
+    // ts keys on `item.id`: a bare string id names the key "undefined" and matches nothing.
+    facade
+        .call_method(
+            "updateOrdersStatus",
+            vec![ids(vec![Js::str("two")]), Js::str("closed")],
+        )
+        .unwrap();
+    let statuses: Vec<_> = store
+        .orders()
+        .iter()
+        .map(|o| serde_json::to_value(o.status).unwrap())
+        .collect();
+    assert_eq!(statuses, [json!("canceled"), json!("open")]);
+    // An empty list returns before the status is read, as the ts early return does.
+    facade
+        .call_method("updateOrdersStatus", vec![ids(vec![]), Js::str("bogus")])
+        .unwrap();
+}
+
+struct SnapshotVenue {
+    base: Rc<safe_cex_exchange::exchange::BaseExchange>,
+    capabilities: safe_cex_exchange::capabilities::ExchangeCapabilities,
+    orders: RefCell<Result<Vec<safe_cex_types::Order>, String>>,
+    calls: RefCell<Vec<Option<Vec<String>>>>,
+}
+
+impl safe_cex_exchange::exchange::Exchange for SnapshotVenue {
+    type PlaceOpts = safe_cex_types::PlaceOrderOpts;
+    fn base(&self) -> &safe_cex_exchange::exchange::BaseExchange {
+        &self.base
+    }
+    fn capabilities(&self) -> &safe_cex_exchange::capabilities::ExchangeCapabilities {
+        &self.capabilities
+    }
+    fn fetch_orders(
+        &self,
+        symbols: Option<Vec<String>>,
+    ) -> ExchangeFuture<'_, Vec<safe_cex_types::Order>> {
+        self.calls.borrow_mut().push(symbols);
+        let result = self.orders.borrow().clone().map_err(ExchangeError::new);
+        Box::pin(async move { result })
+    }
+}
+
+fn assembled_venue(
+    orders: Result<Vec<safe_cex_types::Order>, String>,
+) -> (Assembled, Rc<SnapshotVenue>) {
+    let assembled = assemble(json!({"key": "k", "secret": "s"})).unwrap();
+    let venue = Rc::new(SnapshotVenue {
+        base: assembled.base.clone(),
+        capabilities: Default::default(),
+        orders: RefCell::new(orders),
+        calls: RefCell::default(),
+    });
+    let dynamic: Rc<dyn safe_cex_exchange::exchange::Exchange> = venue.clone();
+    *assembled.context.venue.borrow_mut() = Some(Rc::downgrade(&dynamic));
+    (assembled, venue)
+}
+
+#[test]
+fn fetch_and_set_private_snapshot_retries_and_stops_once_disposed() {
+    let (a, venue) = assembled_venue(Ok(vec![order("one", "BTC")]));
+    settle(
+        &a.runtime,
+        a.this
+            .call_method("fetchAndSetPrivateSnapshot", vec![])
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(*venue.calls.borrow(), [None]);
+    assert_eq!(a.base.store.orders().len(), 1);
+    assert!(a.base.store.loaded().orders);
+
+    // `while (count < tries)`: 2.5 tries is three attempts; null and 0 are none.
+    let (a, venue) = assembled_venue(Err("down".into()));
+    settle(
+        &a.runtime,
+        a.this
+            .call_method("fetchAndSetPrivateSnapshot", vec![Js::Number(2.5)])
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(venue.calls.borrow().len(), 3);
+    assert_eq!(a.runtime.clock.get(), 2000.0, "one second between attempts");
+    for none in [Js::Null, Js::Number(0.0)] {
+        settle(
+            &a.runtime,
+            a.this
+                .call_method("fetchAndSetPrivateSnapshot", vec![none])
+                .unwrap(),
+        )
+        .unwrap();
+    }
+    assert_eq!(venue.calls.borrow().len(), 3);
+    a.base.dispose().unwrap();
+    settle(
+        &a.runtime,
+        a.this
+            .call_method("fetchAndSetPrivateSnapshot", vec![Js::Number(10.0)])
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        venue.calls.borrow().len(),
+        3,
+        "a disposed exchange never fetches"
+    );
+}
+
+#[test]
+fn fetch_and_set_orders_scopes_by_symbol_or_replaces_all() {
+    let (a, venue) = assembled_venue(Ok(vec![order("one", "BTC"), order("two", "ETH")]));
+    let scoped = settle(
+        &a.runtime,
+        a.this
+            .call_method("fetchAndSetOrders", vec![Js::array(vec![Js::str("BTC")])])
+            .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(scoped.get("length").unwrap().as_f64(), Some(2.0));
+    let ids: Vec<_> = a.base.store.orders().iter().map(|o| o.id.clone()).collect();
+    assert_eq!(ids, ["one"]);
+    assert!(!a.base.store.loaded().orders);
+    settle(
+        &a.runtime,
+        a.this.call_method("fetchAndSetOrders", vec![]).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(a.base.store.orders().len(), 2);
+    assert!(a.base.store.loaded().orders);
+    assert_eq!(*venue.calls.borrow(), [Some(vec!["BTC".to_owned()]), None]);
+}
+
+#[derive(Default)]
+struct FakeProvider {
+    candles: RefCell<Vec<Rc<dyn Fn(safe_cex_types::Candle)>>>,
+    books: RefCell<Vec<String>>,
+    cleanups: Rc<std::cell::Cell<u32>>,
+}
+
+impl safe_cex_exchange::external::ExternalPublicData for FakeProvider {
+    fn connect(&self) {}
+    fn dispose(&self) {}
+    fn is_initialized(&self) -> bool {
+        true
+    }
+    fn is_healthy(&self) -> bool {
+        true
+    }
+    fn last_message_timestamp(&self) -> Option<f64> {
+        None
+    }
+    fn listen_ohlcv(
+        &self,
+        _: safe_cex_types::OHLCVOptions,
+        callback: Rc<dyn Fn(safe_cex_types::Candle)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        self.candles.borrow_mut().push(callback);
+        let cleanups = self.cleanups.clone();
+        Ok(Box::new(move || {
+            cleanups.set(cleanups.get() + 1);
+            Ok(())
+        }))
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        _: Rc<dyn Fn(safe_cex_types::OrderBook)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        self.books.borrow_mut().push(symbol);
+        Ok(Box::new(|| Ok(())))
+    }
+}
+
+#[test]
+fn external_public_data_provider_binds_subscriptions_to_the_rust_provider() {
+    let a = assemble(json!({"key": "k", "secret": "s"})).unwrap();
+    assert!(
+        a.this
+            .get("externalPublicDataProvider")
+            .unwrap()
+            .is_undefined()
+    );
+    let provider = Rc::new(FakeProvider::default());
+    *a.base.external_public_data_provider.borrow_mut() = Some(provider.clone());
+    let object = a.this.get("externalPublicDataProvider").unwrap();
+    assert!(
+        object.same_reference(&a.this.get("externalPublicDataProvider").unwrap()),
+        "the field keeps its identity across reads"
+    );
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    let unsubscribe = object
+        .call_method(
+            "subscribeCandle",
+            vec![
+                safe_cex_exchange::js_runtime::value::from_json(
+                    &json!({"symbol": "BTCUSDT", "interval": "1m"}),
+                ),
+                Js::function("", move |_, a| {
+                    sink.borrow_mut().push(to_json(&arg(&a, 0)).unwrap());
+                    Ok(Js::Undefined)
+                }),
+            ],
+        )
+        .unwrap();
+    let candle: safe_cex_types::Candle = serde_json::from_value(json!({"timestamp": 60,
+        "open": 1, "high": 2, "low": 0.5, "close": 1.5, "volume": 10}))
+    .unwrap();
+    (provider.candles.borrow()[0])(candle);
+    assert_eq!(seen.borrow()[0]["close"], json!(1.5));
+    unsubscribe.call(Js::Undefined, vec![]).unwrap();
+    unsubscribe.call(Js::Undefined, vec![]).unwrap();
+    assert_eq!(provider.cleanups.get(), 1, "cleanup runs once");
+    object
+        .call_method(
+            "subscribeOrderbook",
+            vec![
+                Js::str("ETHUSDT"),
+                Js::function("", |_, _| Ok(Js::Undefined)),
+            ],
+        )
+        .unwrap();
+    assert_eq!(*provider.books.borrow(), ["ETHUSDT"]);
+    a.base.dispose().unwrap();
+    assert!(
+        a.this
+            .get("externalPublicDataProvider")
+            .unwrap()
+            .is_undefined()
+    );
+}
+
+/// A createApi that records the options each client was built with.
+fn recording_create_api(built: Rc<RefCell<Vec<Value>>>) -> Js {
+    Js::function("createApi", move |_, a| {
+        let options = arg(&a, 0);
+        let mut seen = to_json(&options)?;
+        seen["overrideProxyUrlPresent"] = json!(options.has_own("overrideProxyUrl"));
+        built.borrow_mut().push(seen);
+        let tag = format!("client{}", built.borrow().len());
+        let get_tag = tag.clone();
+        Ok(Js::object(vec![
+            ("tag", Js::str(&tag)),
+            (
+                "get",
+                Js::function("get", move |_, a| {
+                    Ok(Js::str(&format!(
+                        "{get_tag} get {}",
+                        arg(&a, 0).to_display()
+                    )))
+                }),
+            ),
+            (
+                "post",
+                Js::function("post", move |_, a| {
+                    Ok(Js::str(&format!("{tag} post {}", arg(&a, 0).to_display())))
+                }),
+            ),
+        ]))
+    })
+}
+
+fn limiter(name: &'static str) -> Js {
+    Js::function(name, move |_, a| {
+        let inner = arg(&a, 0);
+        let tag = format!("{}+{name}", inner.get("tag")?.to_display());
+        let get_inner = inner.clone();
+        Ok(Js::object(vec![
+            ("tag", Js::str(&tag)),
+            (
+                "get",
+                Js::function("get", move |_, a| get_inner.call_method("get", a)),
+            ),
+            (
+                "post",
+                Js::function("post", move |_, a| inner.call_method("post", a)),
+            ),
+        ]))
+    })
+}
+
+#[test]
+fn create_xhr_with_secondary_key_is_one_client_without_a_secondary_key() {
+    let a = assemble(json!({"key": "k", "secret": "s"})).unwrap();
+    let built = Rc::new(RefCell::new(vec![]));
+    let xhr = a
+        .this
+        .call_method(
+            "createXhrWithSecondaryKey",
+            vec![
+                a.this.get("options").unwrap(),
+                recording_create_api(built.clone()),
+                Js::object(vec![("rateLimit", limiter("limit"))]),
+            ],
+        )
+        .unwrap();
+    assert_eq!(built.borrow().len(), 1);
+    assert_eq!(xhr.get("tag").unwrap().to_display(), "client1+limit");
+    assert!(xhr.same_reference(&a.this.get("_primaryXhr").unwrap()));
+    assert!(xhr.same_reference(&a.this.get("_secondaryXhr").unwrap()));
+}
+
+#[test]
+fn create_xhr_with_secondary_key_routes_gets_to_the_secondary_client() {
+    let options = json!({"key": "k", "secret": "s", "secondary_key": "rk",
+        "secondary_secret": "rs", "secondaryProxyUrl": "https://reads"});
+    let a = assemble(options).unwrap();
+    let built = Rc::new(RefCell::new(vec![]));
+    let xhr = a
+        .this
+        .call_method(
+            "createXhrWithSecondaryKey",
+            vec![
+                a.this.get("options").unwrap(),
+                recording_create_api(built.clone()),
+                Js::object(vec![
+                    ("proxyUrl", Js::str("https://other")),
+                    ("rateLimit", limiter("limit")),
+                    ("secondaryRateLimit", limiter("readLimit")),
+                ]),
+            ],
+        )
+        .unwrap();
+    let built = built.borrow();
+    assert_eq!(built.len(), 2);
+    assert_eq!(built[0]["key"], json!("k"));
+    assert!(!built[0]["overrideProxyUrlPresent"].as_bool().unwrap());
+    assert_eq!(built[1]["key"], json!("rk"));
+    assert_eq!(built[1]["secret"], json!("rs"));
+    assert_eq!(built[1]["overrideProxyUrl"], json!("https://reads"));
+    let primary = a.this.get("_primaryXhr").unwrap();
+    let secondary = a.this.get("_secondaryXhr").unwrap();
+    assert_eq!(primary.get("tag").unwrap().to_display(), "client1+limit");
+    assert_eq!(
+        secondary.get("tag").unwrap().to_display(),
+        "client2+readLimit"
+    );
+    let call = |name: &str| {
+        xhr.call_method(name, vec![Js::str("/x")])
+            .unwrap()
+            .to_display()
+    };
+    assert_eq!(call("get"), "client2 get /x");
+    assert_eq!(call("post"), "client1 post /x");
+    assert_eq!(xhr.get("tag").unwrap().to_display(), "client1+limit");
+}
+
+#[test]
+fn create_xhr_with_secondary_key_proxy_precedence() {
+    let overrides = |options: Value, other: Js| {
+        let a = assemble(options).unwrap();
+        let built = Rc::new(RefCell::new(vec![]));
+        a.this
+            .call_method(
+                "createXhrWithSecondaryKey",
+                vec![
+                    a.this.get("options").unwrap(),
+                    recording_create_api(built.clone()),
+                    other,
+                ],
+            )
+            .unwrap();
+        let secondary = built.borrow()[1].clone();
+        (
+            secondary["overrideProxyUrl"].clone(),
+            secondary["overrideProxyUrlPresent"].clone(),
+        )
+    };
+    let keys = json!({"key": "k", "secret": "s", "secondary_key": "rk"});
+    let mut empty_secondary_proxy = keys.clone();
+    empty_secondary_proxy["secondaryProxyUrl"] = json!("");
+    assert_eq!(
+        overrides(
+            empty_secondary_proxy,
+            Js::object(vec![("proxyUrl", Js::str("https://other"))])
+        ),
+        (json!("https://other"), json!(true))
+    );
+    // Direct transport has no public CORS proxy: the key is set to undefined.
+    assert_eq!(overrides(keys, Js::Undefined), (Value::Null, json!(true)));
 }

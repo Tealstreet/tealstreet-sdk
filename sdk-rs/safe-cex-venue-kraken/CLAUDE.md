@@ -2,9 +2,28 @@
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/kraken/CLAUDE.md).
 Both variants remain in this family crate. `types.rs` maps `kraken.types.ts`;
-`spot_types.rs` maps `krakenspot.types.ts`. REST and websocket runtime hooks
-remain pending and must compose the [shared exchange core](../safe-cex-exchange/CLAUDE.md).
-The inherited `signWsAuth` manifest row belongs to shared crypto.
+`spot_types.rs` maps `krakenspot.types.ts`. `binding/` composes them with the
+[shared exchange core](../safe-cex-exchange/CLAUDE.md) into the production
+`KrakenExchange` (both names). The inherited `signWsAuth` row belongs to shared crypto.
+
+## Exchange binding
+
+`KrakenExchange::new` assembles `classes.rs` over the shared
+`safe-cex-exchange/src/js_runtime` host: every class member target dispatches,
+in `binding/members.rs`, to its ported body; the host traits are implemented
+over `Js` in `binding/host*.rs` (REST family on the receiver scope) and
+`binding/sockets.rs` (one `SocketHost` per socket object, owning the slots the
+traits borrow). The Exchange trait's sixteen methods call the assembled members;
+the five members Kraken inherits from base.ts reject with its `Not implemented`.
+The host supplies two module-scoped values, never per instance: the Futures nonce
+counter (`api::FuturesModule`) and the Spot client-ID generator (`spot_client_ids`).
+The binding never owns transport: `JsHttpHost` sends, so `installTransportAdapter`
+is a no-op here. Axios's rejected response handler is reproduced by wrapping the
+client verbs, because the shared client runs fulfilled interceptors only.
+
+Gates: `--test exchange_binding` (scripted transport, every trait method, start
+through private-socket auth), and `scripts/binding-controls.py` from `sdk-rs/`,
+which requires one named failure per trait method and a restored pass.
 
 Tables retain source own-key order as slices. Use `safe_cex_num::js_table_lookup`
 when reproducing ordinary-object reads: `.find()` alone loses inherited values.
