@@ -1,13 +1,20 @@
 # Rust venue construction through the registry
 
-Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, `breakoutprop`, Coinbase (`coinbase`, `coinbasespot`),
-the Kraken family (`kraken`, `krakenspot`), `hyperliquid`, the Binance family (`binance`, `binancepm`,
+Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, `breakoutprop`, Bybit (`bybit`, `bybitdemo`, `bybitspot`),
+Coinbase (`coinbase`, `coinbasespot`), `cryptocom`, `phemex`,
+the Kraken family (`kraken`, `krakenspot`),
+`hyperliquid` and `hyperliquidspot`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
-`okxeu`, `okxeudemo`) and `polymarket`, 2026-10-16 (`src/rust_venues.rs`,
+`okxeu`, `okxeudemo`), `polymarket`, `woo` and `weex`, 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
 (crate layout, "Constructors and loaders live in `safe-cex-registry`"; P4 exit,
 "a tier-1 account on the Rust path behind a flag").
+
+TxFlow (`txflow`) is also constructible as its existing **Phase-0 scaffold**.
+Its `start` emits and returns the exact source refusal before any IO; this entry
+does not enable REST, WebSocket or trading support. `native_host_txflow` verifies
+the production constructor and both network guards.
 
 ## Today
 
@@ -21,6 +28,8 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 `ExchangeName -> fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor`.
 
 - **Initial members:**
+  - `lighter` and `lighter-robinhood`, built with the existing `LighterNativeExchange::new`; the name selects deployment URLs and quote currency. The host retains the runtime transport and local signer entropy.
+  - `grvt`, built with `GrvtExchange::new` over shared js_runtime; its host supplies fresh HTTP and the common external-public-data factory. The shared hosted signer is installed on its HTTP clients; active SDK order signing still requires a local wallet.
   - `asterdex`, built with `native_exchange::AsterDEXExchange::new` on the shared
     js_runtime. Its HTTP factory receives each lane's options, including secondary
     credentials and proxy override. The native host routes signed requests through
@@ -31,12 +40,21 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around
     `BitgetExchange::new`; `BitgetDependencies` carries the runtime and a
     `JsHttpHost` built with js_runtime `rest_http_host`.
+  - `bitrue`, built with `BitrueExchange::new` on the shared js_runtime; the
+    native host supplies signed HTTP and the external-data gateway factory.
+    `tests/native_host_bitrue.rs` independently verifies the request HMAC.
   - `bitunix`, built with `BitunixVenue::new` from a registry-built `BaseExchange`
     and `BitunixDependencies` (runtime, per-lane client builder and transport
     install, optional externalPublicData provider).
   - `blofin`, built with `BlofinNativeExchange::new` from a registry-built
     `BaseExchange` and `BlofinDependencies` (runtime, the common HTTP builder,
     optional externalPublicData provider, remote-signer account name).
+  - `bybit`, `bybitdemo` and `bybitspot`, built with `BybitExchange::create`. The host supplies
+    the wire, HTTP host, runtime clocks and external-data factory. Hosted signing
+    uses the shared signer bridge for both the source receiver and typed API
+    clients; account names and availability follow the same capability. Native
+    sockets start on the direct path. `tests/native_host_bybit.rs` verifies both
+    names over local HTTP, including HMAC bytes with empty local credentials.
   - `coinbase` and `coinbasespot`, one constructor around `CoinbaseExchange::new`.
     `CoinbaseDependencies` carries the shared HTTP/runtime hosts, signing cache,
     external-data factory and local-wall-time conversion. The native host retains
@@ -49,7 +67,8 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     `rest_http_host` over a fresh terminal adapter.
   - `binancepm` and `binancespot`, built with `BinancePMExchange::new` and
     `BinanceSpotExchange::new` on the same `RustVenueHost::binance` inputs.
-- `hyperliquid` calls its existing production constructor with `RustVenueHost::hyperliquid(options)`: the host resolves the API origin through the selected transport, composes hosted HTTP signing and supplies signer metadata plus the shared weight limiter. HyperliquidSpot remains outside this table.
+- `hyperliquid` and `hyperliquidspot` call their respective production constructors with `RustVenueHost::hyperliquid(name, options)`: the host resolves the API origin through the selected transport, composes hosted HTTP signing and supplies signer metadata plus the shared weight limiter. Source Spot order signing retains its local-wallet requirement.
+- `weex` uses `WeexExchange::new` with the shared signed HTTP/runtime hosts, gateway factory and native UTC date profile. `tests/native_host_weex.rs` verifies the actual HMAC at a local server; the native host takes the existing caller-owned Hyperliquid limiter.
 - **Dependencies:** `safe-cex-registry` gains direct dependencies on those venue
   crates. The edges go downward (registry is above venues), but layering alone
   does not allow them: `layers.json` `registryConstructors` lists exactly the
@@ -81,8 +100,8 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bybit`, `kucoin`, `mexc`, `lighter`
-and `woo`.
+follow-up PR. Expected next: `bybitinverse`, `hyrotrader`, `kucoin`, `mexc`, `lighter`
+and `weex`.
 
 Each follow-up does four things:
 - adds one `RUST_VENUES` entry;
@@ -186,6 +205,10 @@ The native Kraken host shares its Futures nonce counter and Spot client-ID gener
 BingX uses `BingxExchange::new` with shared-js_runtime HTTP/socket dependencies.
 Its native-host E2E test verifies signed startup/placement/cancellation; the venue
 crate proves all 16 Exchange methods, retaining source-inherited rejections.
+The native host also supplies its shared hosted signer to both HTTP and
+BaseExchange. Empty-secret startup/placement/cancellation and signer-refusal
+proofs run in native_host_bingx; the API skips local signing whenever that
+capability is present, including when local credentials remain configured.
 
 
 ## Hyperliquid native host
@@ -209,6 +232,91 @@ separate from the venue's local-key signing interceptor.
 trait methods over local reqwest HTTP, verifies signed action/nonce bytes on the
 server, and checks both network origins, proxy preservation, info bypass, repeat
 query encoding and limiter identity across separate account hosts.
+
+## Bybit registry proof
+
+`tests/native_host_bybit.rs` constructs Bybit and Demo through the production
+native host and calls `get_account` over loopback HTTP. Each name is exercised
+with local credentials and with a hosted signer plus account name and empty local
+credentials. The server independently verifies the timestamp, API key, receive
+window and generated `requestId` query bytes against HMAC-SHA256. Dropping either
+table entry makes construction fail; dropping typed signer forwarding makes the
+secretless test fail. All three controls were compiled, observed failing, and
+restored before the passing two-test run. The existing 13 registry membership/
+construction tests and 20 Bybit binding tests also pass (one live oracle ignored).
+
+The untouched-origin witness records the terminal request before any URL rewrite.
+It proves Bybit mainnet selects `api.bybit.com`, Demo mainnet selects
+`api-demo.bybit.com`, and both testnet variants select `api-testnet.bybit.com`.
+The old constructor failed specifically on Demo mainnet. Demo's source receiver
+and socket connection options derive the same subclass flag by name.
+
+KuCoin futures, KuCoin Spot and MEXC use their existing concrete venue bindings.
+The native host supplies KuCoin's per-options HTTP inputs, shared virtual clock
+and runtime-backed retry clock. MEXC receives its existing configured API stack
+and native sockets; private fills forward to the constructed venue's emitter
+through a weak reference. Native date conversion retains the shared UTC-host
+assumption. Hosted remoteSigner is visibly refused until those venue signing
+capabilities are connected. `tests/native_host_kucoin_mexc.rs` constructs all
+three entries and verifies actual signed account reads server-side, including
+KuCoin's signed passphrase and MEXC's stable account identity.
+
+
+KuCoin/MEXC construction validation measured fourteen scoped tests, zero parity
+findings, live-source registry equivalence and all 88 layer assertions. Strict
+host all-target and wasm library clippy passed. Independently removing each of
+the three production table entries compiled and failed its native construction
+test with exit 101; exact source restoration passed both native test functions.
+
+Hyperliquid Spot is independently constructed as `Hyperliquidspot` through
+`hyperliquidspot_constructor`, using the Spot production class and the shared
+Hyperliquid dependency method. That method takes the selected name so native
+transport and hosted-signing metadata retain the correct registry name. Both
+names require the same caller-owned limiter and expose the configured public-data
+factory. `native_host_hyperliquidspot` verifies native local HTTP/WS startup,
+real action signatures, the caller cloid, shifted spot asset IDs and cancellation;
+`native_host_external_data` separately verifies gateway startup.
+
+ApexOmni is assembled through its shared js_runtime binding with a real
+OmniKey-seeded zkLink contract signer. Its native proof observes HTTP/WS startup,
+wire HMAC over the transmitted order form, caller ID, private WS order delivery
+and cancellation. Unsupported hosted signing/wallet-provider operations reject
+visibly. The module-host path remains the default.
+
+Spot uses the same explicit native host and existing registry layer edge to the
+Bybit crate, with its distinct `BybitSpotExchange` receiver. The Bybit native
+HTTP tests include Spot for local HMAC and secretless hosted signing. Its
+category/market/leverage, order writes and order-only private subscriptions are
+covered by `safe-cex-venue-bybit/tests/spot_binding.rs`. Inverse and HyroTrader
+remain separate follow-ups.
+
+Crypto.com is in the Rust constructor table. `tests/native_host_cryptocom.rs`
+constructs the bound venue using production native inputs and the shared host
+limiter argument, then checks its identity, distinct market precision steps,
+real local HTTP dispatch and Store read purity. The registry passes through the
+account's hosted signer and external-public-data provider to the venue binding.
+
+Phemex constructs through `phemex_constructor` and the production shared Js HTTP
+host, including hosted signing and the external-public-data gateway. Native host
+callers supply the shared limiter as for other venues. For `tealstreetTunnel`,
+the native host installs the actual provider-selected default adapter through the
+shared Js HTTP factory. `tests/native_host_phemex.rs` verifies real local HTTP
+market precision/read purity and signed account-query bytes through the registry.
+
+`tests/native_host_tunnel.rs` also reads Phemex public products and a signed
+account query over an authenticated local tradetunnel, with no direct HTTP.
+The independent query HMAC, distinct precision steps and default frame format
+are checked. `scripts/phemex-tunnel-controls.py` proves missing/no-op native
+provider mutations compile and fail this witness, then restores exact bytes.
+
+
+AsterDEX native hosts now share their hosted account with the source receiver
+and signed HTTP clients through the common signer bridge, retaining per-lane
+post-sign routing. V1 and V3 account reads and validation work without local
+secrets; the source's nonempty API-key rule remains. Its raw clock HTTP bypasses
+hosted signing. `native_host_asterdex` covers metadata, exact returned wire
+configuration and the key refusal; its four compiled controls live in
+`scripts/asterdex-hosted-controls.py`.
 
 Breakout Prop is the legacy DXtrade adapter, assembled through its existing
 constructor and ProductionHost rather than another venue's implementation.

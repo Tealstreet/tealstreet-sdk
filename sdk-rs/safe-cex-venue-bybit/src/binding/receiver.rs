@@ -209,7 +209,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         let g = rt.clone();
         this.define_accessor(
             "isDemo",
-            Some(Rc::new(move |_| Ok(Js::Bool(venue(&g)?.base.is_demo)))),
+            Some(Rc::new(move |_| {
+                Ok(Js::Bool(venue(&g)?.uses_bybit_demo_environment()))
+            })),
             None,
         );
     }
@@ -224,6 +226,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(Js::str(
             venue(rt)?.get_category_for_symbol(&text(&arg(&a, 0))?),
         ))
+    });
+    method(&this, rt, "tradesCategoryOf", |rt, a| {
+        crate::ws_private::messages::trades_category_of(rt, arg(&a, 0))
     });
     method(&this, rt, "inverseEnabled", |rt, _| {
         Ok(Js::Bool(venue(rt)?.inverse_enabled()))
@@ -509,5 +514,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         snapshot::sync_balance_upnl_from_positions(rt, &rt.this)?;
         Ok(Js::Undefined)
     });
+    members::batch::install(rt)?;
+    if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitspot {
+        members::spot::install(rt)?;
+    }
     Ok(())
 }

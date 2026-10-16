@@ -104,12 +104,17 @@ impl ApexOmniPrivateWebsocket {
                     owner.positions_timer.set(None);
                     if !owner.host.is_disposed() {
                         match owner.parent.fetch_positions().await {
-                            Ok(positions) => owner
-                                .parent
-                                .base
-                                .store
-                                .add_or_update_positions_full(positions)
-                                .map_err(|e| failure(e.to_string()))?,
+                            Ok(positions) => {
+                                if owner.host.is_disposed() || owner.parent.base.is_disposed() {
+                                    return Ok(());
+                                }
+                                owner
+                                    .parent
+                                    .base
+                                    .store
+                                    .add_or_update_positions_full(positions)
+                                    .map_err(|e| failure(e.to_string()))?;
+                            }
                             Err(error) => owner.parent.base.log(
                                 &format!(
                                     "Error fetching positions: {}",

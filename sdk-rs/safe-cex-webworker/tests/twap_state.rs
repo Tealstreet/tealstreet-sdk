@@ -137,7 +137,7 @@ fn new_state_matches_live_lodash_draws_math_errors_and_alias_witnesses() {
     let data: Value = serde_json::from_slice(&output.stdout).unwrap();
     let identities = data["marketIdentity"].as_array().unwrap();
     // Existing 24 cases plus false/true for the new isPerpetual boolean.
-    assert_eq!(identities.len(), 26, "TWAP-MARKET identity cases execute");
+    assert_eq!(identities.len(), 36, "TWAP-MARKET identity cases execute");
     let mut perpetual_cases = 0;
     for case in identities {
         let mut input = options();

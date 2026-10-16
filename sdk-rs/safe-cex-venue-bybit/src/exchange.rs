@@ -145,7 +145,9 @@ impl BybitExchange {
     /// A shared public data source has no inverse markets, so it cannot size inverse positions.
     pub(crate) fn inverse_enabled(&self) -> bool {
         let options = self.base.options();
-        options.enable_inverse_markets == Some(true) && options.external_public_data.is_none()
+        self.base.name != safe_cex_types::ExchangeName::Bybitspot
+            && options.enable_inverse_markets == Some(true)
+            && options.external_public_data.is_none()
     }
 
     // ts: BybitExchange.getCategoryForSymbol — routed by symbol so a row routes before its market loads.
@@ -418,7 +420,14 @@ impl BybitExchange {
             1,
             parent.clone(),
             runtime.clone(),
-            public_protocol(Rc::downgrade(&venue), "linear"),
+            public_protocol(
+                Rc::downgrade(&venue),
+                if venue.base.name == safe_cex_types::ExchangeName::Bybitspot {
+                    "spot"
+                } else {
+                    "linear"
+                },
+            ),
         );
         venue.base.set_socket(SocketSlot::Public, Some(public));
         if venue.inverse_enabled() {
@@ -460,11 +469,11 @@ impl BybitExchange {
             create_api,
             public_protocol,
             move |parent| {
-                Rc::new(crate::ws_private::protocol::PrivateProtocol {
+                Rc::new(crate::ws_private::protocol::PrivateProtocol::new(
                     parent,
-                    runtime: private_runtime,
-                    config: private,
-                })
+                    private_runtime,
+                    private,
+                ))
             },
         )
     }

@@ -89,13 +89,17 @@ fn text(v: &Js) -> Result<String, Thrown> {
     Ok(String::from_utf16_lossy(&v.to_js_string()?))
 }
 
-/// `new BaseExchange(name, options, store)`; keep the returned core for `Exchange::base()`.
+/// Initializes source identity fields before publishing the immutable typed base.
+/// The callback runs on the receiver before base methods or external providers
+/// exist; it must only initialize fields, without starting work or retaining it.
+/// Later mutable receiver writes do not alter these construction-time flags.
 pub fn create(
     context: &Rc<JsSocketContext>,
     parts: BaseExchangeParts,
     name: Js,
     options: Js,
     store: Js,
+    initialize_fields: impl FnOnce(&Js) -> Result<(), Thrown>,
 ) -> Result<(Js, Rc<BaseExchange>), Thrown> {
     let runtime: Rc<dyn ExchangeRuntime> = context.runtime.clone();
     if parts.options.external_public_data.is_some() && parts.external_public_data.is_none() {
@@ -129,7 +133,6 @@ pub fn create(
             js_remote_signer(signer, account, runtime.clone()),
         )?;
     }
-    let base = Rc::new(core);
     let this = Js::object_with_class(
         "BaseExchange",
         vec![
@@ -137,17 +140,27 @@ pub fn create(
             ("_exchangeName", name),
             ("options", options),
             ("store", store),
+            ("isSpot", Js::Bool(false)),
+            ("isDemo", Js::Bool(false)),
         ],
     );
+    initialize_fields(&this)?;
+    core.is_spot = this.get("isSpot")?.truthy();
+    core.is_demo = this.get("isDemo")?.truthy();
+    let base = Rc::new(core);
     let def = |k: &str, v: Js| {
         let _ = this.define(k, v);
     };
     {
-        let base = base.clone();
+        let getter = base.clone();
+        let setter = base.clone();
         this.define_accessor(
             "isDisposed",
-            Some(Rc::new(move |_| Ok(Js::Bool(base.is_disposed())))),
-            None,
+            Some(Rc::new(move |_| Ok(Js::Bool(getter.is_disposed())))),
+            Some(Rc::new(move |_, value| {
+                setter.set_disposed_flag(value.truthy());
+                Ok(())
+            })),
         );
     }
     {

@@ -58,7 +58,7 @@ test('byte conversion inputs cannot bypass typed constructor classification', ()
   assert.throws(() => contractFor(actual, { [owner.name]: contract }), /raw decoder cannot be classified typed/);
 });
 
-test('multiple observed entrypoints execute independently and cannot claim non-decoder receipts', () => {
+test('multiple observed entrypoints execute independently and cannot claim non-decoder receipts', async () => {
   const methods = [{ name: 'first', signature: {} }, { name: 'second', signature: {} }];
   const actual = { ...owner, deserialize: false, methods, rawEntrypoints: [true, true] };
   const entrypoints = methods.map((api, i) => ({ api: { kind: 'inherent', ...api }, input: 'observed', reason: 'Executed opaque forwarding, not a typed-input claim.', call: `$type::${api.name}($value)`, cases: [{ input: 'left', output: { value: i } }, { input: 'right', output: { value: i + 2 } }] }));
@@ -82,6 +82,31 @@ test('multiple observed entrypoints execute independently and cannot claim non-d
   assert.throws(() => resolve(repeated), /distinct inputs and outputs/);
   const single = { ...contract, entrypoints: entrypoints.slice(0, 1), call: '$value', cases: entrypoints[0].cases, category: 'non-decoder' };
   assert.throws(() => contractFor({ ...actual, methods: methods.slice(0, 1), rawEntrypoints: [true] }, { [owner.name]: single }), /observed API cannot skip executed witnesses/);
+  const constructor = { name: 'new', signature: { inputs: [], output: { generic: 'Self' } } };
+  const mixedOwner = { ...actual, methods: [methods[0], constructor], rawEntrypoints: [true, false] };
+  const mixed = { ...contract, entrypoints: [entrypoints[0], { api: { kind: 'inherent', ...constructor }, input: 'typed', reason: 'Zero-argument construction does not decode a serialized input.' }] };
+  const resolved = contractFor(mixedOwner, { [owner.name]: mixed });
+  assert.deepEqual(resolved.cases, entrypoints[0].cases.map(row => ({ input: { entrypoint: 0, input: row.input }, output: row.output })), 'only the raw entrypoint gets generated runtime dispatch');
+  assert.doesNotMatch(resolved.call, /::new/, 'typed constructors do not receive fabricated varying-input witnesses');
+  assert.throws(() => contractFor({ ...mixedOwner, rawEntrypoints: [true, true] }, { [owner.name]: mixed }), /raw decoder cannot be classified typed/);
+  const rawSignature = structuredClone(mixedOwner);
+  rawSignature.methods[1].signature.inputs = [['raw', { borrowed_ref: { type: { primitive: 'str' } } }]];
+  const disguised = structuredClone(mixed); disguised.entrypoints[1].api.signature = rawSignature.methods[1].signature;
+  assert.throws(() => contractFor(rawSignature, { [owner.name]: disguised }), /raw decoder cannot be classified typed/);
+  const noWitness = { ...mixed, entrypoints: mixed.entrypoints.map(entry => ({ ...entry, input: 'typed' })) };
+  assert.throws(() => contractFor({ ...mixedOwner, rawEntrypoints: [false, false] }, { [owner.name]: noWitness }), /must execute an actual observed method/);
+  const { spawnSync } = await import('node:child_process');
+  const url = new URL('./accepted-contracts.mjs', import.meta.url).href;
+  const anchor = "      if (entry.input === 'typed') validateTypedEntrypoint(type, entry, index);";
+  const execute = mutate => {
+    const hook = mutate ? `import {registerHooks} from 'node:module'; registerHooks({load(url,context,next){const loaded=next(url,context);if(url!==${JSON.stringify(url)})return loaded;const source=String(loaded.source);const anchor=${JSON.stringify(anchor)};assert.equal(source.split(anchor).length,2,'one mixed-observation typed validation site');return {...loaded,source:source.replace(anchor,'')};}});` : '';
+    const program = `import assert from 'node:assert/strict'; ${hook} const {contractFor}=await import(${JSON.stringify(url)}); const owner=${JSON.stringify({ ...mixedOwner, rawEntrypoints: [true, true] })}; const contract=${JSON.stringify(mixed)}; assert.throws(()=>contractFor(owner,{[owner.name]:contract}),/raw decoder cannot be classified typed/,'observed typed raw compiler role must refuse');`;
+    return spawnSync(process.execPath, ['--input-type=module', '--eval', program], { encoding: 'utf8' });
+  };
+  let result = execute(false); assert.equal(result.status, 0, result.stderr);
+  result = execute(true); assert.equal(result.status, 1, result.stderr); assert.match(result.stderr, /observed typed raw compiler role must refuse/);
+  console.log('observed typed entrypoint raw compiler role: named assertion; process exit 1');
+  result = execute(false); assert.equal(result.status, 0, result.stderr);
 });
 
 test('open JSON and supplemental methods require native witnesses without replacing shape checks', () => {
@@ -139,4 +164,53 @@ test('reviewed host operations bind exact compiler bodies and cannot exempt cach
   assert.throws(() => contractFor(loader, { [loader.name]: contract }, context), /unreviewed host non-decoder binding/);
   const changed = structuredClone(contract); changed.entrypoints[0].api.name = 'load_chunks';
   assert.throws(() => contractFor({ ...actual, traitMethods: [{ ...actual.traitMethods[0], name: 'load_chunks' }] }, { [actual.name]: changed }, context), /unreviewed host non-decoder binding/);
+});
+
+test('reviewed serializer constants pin compiler source adapters and witnesses', async () => {
+  const fs = await import('node:fs');
+  const { fileURLToPath } = await import('node:url');
+  const { spawnSync } = await import('node:child_process');
+  const specs = Object.values(JSON.parse(fs.readFileSync(new URL('../accepted-set/constant-outputs.json', import.meta.url), 'utf8')));
+  assert.equal(specs.length, 2, 'only the two reviewed serializer metadata constructors');
+  assert.deepEqual(specs.map(s => s.api.name), ['serialize_unit_struct', 'serialize_tuple_struct']);
+  const actual = { name: specs[0].owner, ident: 'Capture', kind: 'record', deserialize: false, generics: { params: [] }, methods: [], conversions: [], traitMethods: specs.map(({api: {kind, ...api}}) => api), rawEntrypoints: [true, true], entrypointSources: specs.map(s => ({ filename: s.source.file, begin: s.source.begin, end: s.source.end })) };
+  const contract = { shape: 'observed', evidence: 'Bounded serializer metadata constants.', entrypoints: specs.map((s, i) => ({ api: s.api, input: 'observed', constantOutput: true, reason: 'The actual serializer ignores metadata.', call: s.call, cases: ['First', 'Second'].map(input => ({ input, output: i ? { values: 0, variant: null } : null })) })) };
+  const bytes = fs.readFileSync(new URL('../../safe-cex-num/src/numeric_ingress/output.rs', import.meta.url));
+  const packageMetadata = { name: 'safe-cex-num', manifest_path: fileURLToPath(new URL('../../safe-cex-num/Cargo.toml', import.meta.url)) };
+  const context = { packageMetadata, readSource: () => bytes };
+  const resolve = (type = actual, c = contract, ctx = context) => contractFor(type, { [type.name]: c }, ctx);
+  assert.equal(resolve().cases.length, 4, 'both distinct metadata inputs execute for each constant method');
+  const ordinary = structuredClone(contract); delete ordinary.entrypoints[0].constantOutput;
+  assert.throws(() => resolve(actual, ordinary), /distinct inputs and outputs/);
+  assert.throws(() => resolve({ ...actual, name: 'unreviewed::Capture' }), /unreviewed owner or method/);
+  assert.throws(() => resolve(actual, contract, { ...context, packageMetadata: { ...packageMetadata, name: 'other' } }), /actual SDK compiler package/);
+  const changedSpan = structuredClone(actual); changedSpan.entrypointSources[0].end[0]++;
+  assert.throws(() => resolve(changedSpan), /compiler source span changed/);
+  assert.throws(() => resolve(actual, contract, { ...context, readSource: () => Buffer.concat([bytes, Buffer.from(' changed')]) }), /reviewed source changed/);
+  const changedCall = structuredClone(contract); changedCall.entrypoints[0].call = '$type; $value.clone()';
+  assert.throws(() => resolve(actual, changedCall), /reviewed native adapter changed/);
+  const changedCases = structuredClone(contract); changedCases.entrypoints[0].cases[1].output = 'invented echo';
+  assert.throws(() => resolve(actual, changedCases), /reviewed native witnesses changed/);
+  const repeated = structuredClone(contract); repeated.entrypoints[0].cases[1].input = 'First';
+  assert.throws(() => resolve(actual, repeated), /reviewed native witnesses changed/);
+  const changedApi = structuredClone(actual); changedApi.traitMethods[0].signature.output = { primitive: 'bool' };
+  const matching = structuredClone(contract); matching.entrypoints[0].api.signature.output = { primitive: 'bool' };
+  assert.throws(() => resolve(changedApi, matching), /compiler API changed/);
+  for (const [label, anchor, badType, badContract, changedSource, message] of [
+    ['constant serializer source pin', "  assert.equal(createHash('sha256').update(context.readSource(spec.source.file)).digest('hex'), spec.source.sha256, `${label}: reviewed source changed`);", actual, contract, true, 'reviewed source changed'],
+    ['constant serializer compiler API pin', '  assert.deepEqual(entry.api, spec.api, `${label}: compiler API changed`);', changedApi, matching, false, 'compiler API changed'],
+    ['constant serializer adapter pin', '  assert.deepEqual(entry.call, spec.call, `${label}: reviewed native adapter changed`);', actual, changedCall, false, 'reviewed native adapter changed'],
+    ['constant serializer native witness pin', '  assert.deepEqual(entry.cases, spec.cases, `${label}: reviewed native witnesses changed`);', actual, changedCases, false, 'reviewed native witnesses changed'],
+  ]) {
+    const execute = mutate => {
+      const target = new URL('./accepted-constant-output.mjs', import.meta.url).href;
+      const hook = mutate ? `import {registerHooks} from 'node:module'; registerHooks({load(url,ctx,next){const r=next(url,ctx);if(url!==${JSON.stringify(target)})return r;const s=String(r.source),a=${JSON.stringify(anchor)};assert.equal(s.split(a).length,2,'one reviewed constant-output guard');return {...r,source:s.replace(a,'')};}});` : '';
+      const source = `import assert from 'node:assert/strict'; import fs from 'node:fs'; ${hook} const {contractFor}=await import(${JSON.stringify(new URL('./accepted-contracts.mjs', import.meta.url).href)}); const owner=${JSON.stringify(badType)}; const contract=${JSON.stringify(badContract)}; const context={packageMetadata:${JSON.stringify(packageMetadata)},readSource:()=>${changedSource ? 'Buffer.from("unreviewed source")' : `fs.readFileSync(${JSON.stringify(fileURLToPath(new URL('../../safe-cex-num/src/numeric_ingress/output.rs', import.meta.url)))})`}}; assert.throws(()=>contractFor(owner,{[owner.name]:contract},context),new RegExp(${JSON.stringify(message)}),${JSON.stringify(label + ' must refuse')});`;
+      return spawnSync(process.execPath, ['--input-type=module', '--eval', source], { encoding: 'utf8' });
+    };
+    let result = execute(false); assert.equal(result.status, 0, result.stderr);
+    result = execute(true); assert.equal(result.status, 1, result.stderr); assert.match(result.stderr, /must refuse/);
+    console.log(`${label}: named assertion; process exit 1`);
+    result = execute(false); assert.equal(result.status, 0, result.stderr);
+  }
 });

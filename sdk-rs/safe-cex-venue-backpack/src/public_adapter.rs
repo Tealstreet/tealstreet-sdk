@@ -1,4 +1,5 @@
 //! Owned public socket; listener and protocol frames share its native state.
+use crate::native_value::NativeValue;
 use crate::public_control::JsString;
 use crate::{
     adapter::BackpackExchange, native_value::Value, orderbook_state, public_control as control,
@@ -358,22 +359,16 @@ impl BackpackPublicWebSocket {
             })));
     }
     pub fn dispose(&self) -> Result<(), ExchangeError> {
-        self.listeners.handlers.borrow_mut().clear();
-        self.ticker_handler.cancel();
         self.subscriptions
             .borrow_mut()
             .clone_from(&control::Subscriptions::default());
-        self.listeners.topics.borrow_mut().clear();
         self.listeners.states.borrow_mut().clear();
         self.listeners.fetchers.borrow_mut().clear();
         for (_, t) in &*self.listeners.throttles.borrow() {
             t.cancel();
         }
         self.listeners.throttles.borrow_mut().clear();
-        for task in self.tasks.borrow_mut().drain(..) {
-            task.cancel();
-        }
-        self.base.dispose();
+        self.base.close_current_websocket();
         Ok(())
     }
     pub fn on_message(self: &Rc<Self>, frame: &SocketFrame) -> Result<(), ExchangeError> {
@@ -503,7 +498,7 @@ impl listeners::Host for PublicFrame {
                 Value::Undefined => listeners::LastId::Undefined,
                 Value::Null => listeners::LastId::Null,
                 Value::Number(n) => listeners::LastId::Number(n),
-                Value::String(s) => listeners::LastId::Text(s),
+                Value::String(s) => listeners::LastId::Text(s.to_vec()),
                 v => listeners::LastId::Number(v.number()?),
             };
             Ok(listeners::Snapshot { bids, asks, last })
@@ -665,7 +660,7 @@ impl socket_events::MessageValue for Value {
         matches!(self,Value::Number(v)if *v==n)
     }
     fn equals_string(&self, s: &str) -> bool {
-        matches!(self,Value::String(v)if v==&units(s))
+        matches!(self,Value::String(v)if v.as_ref()==units(s))
     }
 }
 impl socket_events::MessageHost<String> for PublicFrame {
@@ -795,7 +790,7 @@ impl socket_events::HandlerHost<Value> for PublicFrame {
         data: &Value,
     ) -> Result<(), ExchangeError> {
         let event = data.field("e")?;
-        let is_kline = matches!(event,Value::String(s)if s==units("kline"));
+        let is_kline = matches!(event,Value::String(s)if s.as_ref()==units("kline"));
         let data = if is_kline {
             let field = |key: &str| -> Result<listeners::Field, ExchangeError> {
                 Ok(match data.field(key)? {

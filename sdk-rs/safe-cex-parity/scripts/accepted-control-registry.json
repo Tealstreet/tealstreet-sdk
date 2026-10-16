@@ -19,7 +19,8 @@
       "callable compiler identity refuses missing registry and absent serde dependencies",
       "synthetic compiler Fn IDs resolve to sysroot along with Rc",
       "compiler-selected same-spelling workspace Fn never inherits sysroot permission",
-      "unresolved selected Fn compiler identity refuses before any path-name approval"
+      "unresolved selected Fn compiler identity refuses before any path-name approval",
+      "hosted signer tuple retains its exact native type and compiler roles"
     ],
     "accepted-construction-chain-native.test.mjs": [
       "selected candle-cache inventory closes every construction owner and rejects both error policy mutations"
@@ -36,7 +37,8 @@
       "multiple observed entrypoints execute independently and cannot claim non-decoder receipts",
       "open JSON and supplemental methods require native witnesses without replacing shape checks",
       "self-only Visitor unit witnesses cannot invent varying input or exempt data methods",
-      "reviewed host operations bind exact compiler bodies and cannot exempt cache decoders"
+      "reviewed host operations bind exact compiler bodies and cannot exempt cache decoders",
+      "reviewed serializer constants pin compiler source adapters and witnesses"
     ],
     "accepted-controls.test.mjs": [
       "private Cargo targets cannot execute a stale default scanner in production or history",
@@ -146,7 +148,9 @@
       "sibling introductions cannot launder delayed debt but genuine new-owner merges pass"
     ],
     "accepted-reviewed-aliases.test.mjs": [
-      "reviewed generic aliases return only their spec-owned fixed instantiation"
+      "reviewed generic aliases return only their spec-owned fixed instantiation",
+      "reviewed function pointers retain exact signatures and every nested compiler role",
+      "reviewed function pointer source signature roots and caller guards are load bearing"
     ],
     "accepted-scanner.test.mjs": [
       "scanner receipts bind the SDK package and actual fresh executable",
@@ -161,6 +165,16 @@
     ],
     "accepted-ws-auth-native.test.mjs": [
       "WS four native families reject field and presence mutations before wire assertions"
+    ],
+    "accepted-constant-output-native.test.mjs": [
+      "reviewed serializer constants execute actual production values and reject native drift"
+    ],
+    "accepted-function-pointer-native.test.mjs": [
+      "reviewed function pointers execute actual SDK alias identity and trait probes"
+    ],
+    "accepted-weex-kline-alias.test.mjs": [
+      "exact Weex kline tuple policy refuses slot root and caller redirects",
+      "Weex kline tuple executes actual native slots identity and trait probes"
     ]
   },
   "mutations": [
@@ -288,6 +302,23 @@
     "metadata ExchangeFeatures positional-array widening",
     "metadata ExchangeMetadata positional-array widening",
     "metadata Snapshot positional-array widening",
-    "alias default substitution removed"
+    "alias default substitution removed",
+    "observed typed entrypoint raw compiler role",
+    "hosted signer tuple expanded target",
+    "constant serializer source pin",
+    "constant serializer compiler API pin",
+    "constant serializer adapter pin",
+    "constant serializer native witness pin",
+    "constant serializer unit native value",
+    "constant serializer tuple native state",
+    "function pointer source identity",
+    "function pointer expanded signature",
+    "function pointer nested root identity",
+    "function pointer caller redirection",
+    "function pointer retry native identity",
+    "function pointer factory native identity",
+    "Weex kline expanded slots",
+    "Weex kline native identity",
+    "Weex kline policy routing"
   ]
 }

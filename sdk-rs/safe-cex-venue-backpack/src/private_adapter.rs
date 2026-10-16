@@ -1,4 +1,5 @@
 //! Owned private socket with bound authentication and reconciliation methods.
+use crate::native_value::NativeValue;
 use crate::{
     adapter::BackpackExchange,
     native_value::Value,
@@ -250,14 +251,7 @@ impl BackpackPrivateWebSocket {
         if let Some(token) = self.state.orders_timeout.borrow_mut().take() {
             token.set(true);
         }
-        self.state.positions.scheduled.set(false);
-        self.state.positions.pending.set(false);
-        self.state.balance.scheduled.set(false);
-        self.state.balance.pending.set(false);
-        for task in self.tasks.borrow_mut().drain(..) {
-            task.cancel();
-        }
-        self.base.dispose();
+        self.base.close_current_websocket();
         Ok(())
     }
     pub fn map_order_type(&self, s: &[u16]) -> OrderType {

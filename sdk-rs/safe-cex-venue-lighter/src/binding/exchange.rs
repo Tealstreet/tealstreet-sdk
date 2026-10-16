@@ -78,8 +78,14 @@ fn base_exchange_class(weak: Weak<Shared>, name: ExchangeName, options: Exchange
             settings: settings(),
             external_public_data: None,
         };
-        let (instance, core) =
-            base_exchange::create(&shared.sockets, parts, arg(&a, 0), arg(&a, 1), arg(&a, 2))?;
+        let (instance, core) = base_exchange::create(
+            &shared.sockets,
+            parts,
+            arg(&a, 0),
+            arg(&a, 1),
+            arg(&a, 2),
+            |_| Ok(()),
+        )?;
         if shared.base.set(core).is_err() {
             return Err(Thrown::error("Error", "BaseExchange constructed twice"));
         }

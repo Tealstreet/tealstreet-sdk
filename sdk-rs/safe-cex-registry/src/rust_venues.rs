@@ -24,9 +24,13 @@ use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
+use safe_cex_venue_grvt::binding::exchange::{GrvtDependencies, GrvtExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
+use safe_cex_venue_lighter::binding::exchange::{LighterDependencies, LighterNativeExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use safe_cex_venue_polymarket::binding::exchange::{PolymarketDependencies, PolymarketExchange};
+use safe_cex_venue_weex::{WeexDependencies, WeexExchange};
+use safe_cex_venue_woo::{WooDependencies, WooExchange};
 use std::rc::Rc;
 
 /// What `BackpackExchange::new` takes besides the BaseExchange the registry builds.
@@ -64,8 +68,33 @@ pub struct BlofinDependencies {
     pub remote_signer_account_name: Option<String>,
 }
 
+/// Native collaborators of the already-bound MEXC exchange.
+pub struct MexcDependencies {
+    pub runtime: Rc<dyn WsRuntime>,
+    pub http: Rc<dyn RestAdapter>,
+    pub local_to_utc: Rc<dyn Fn(f64) -> f64>,
+    pub external_public_data: Option<ExternalPublicDataFactory>,
+}
+
 /// Host inputs for Rust venue construction, requested once per constructed instance.
 pub trait RustVenueHost {
+    fn kucoin_external_public_data(&self) -> Option<ExternalPublicDataFactory> {
+        None
+    }
+    fn kucoin(
+        &self,
+        _: ExchangeName,
+        _: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_kucoin::kucoin_exchange::KucoinDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "KuCoin dependencies were not supplied by this host",
+        ))
+    }
+    fn mexc(&self, _: &ExchangeOptions) -> Result<MexcDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "MEXC dependencies were not supplied by this host",
+        ))
+    }
     /// AsterDEX needs a per-lane HTTP factory to preserve secondary routing.
     fn asterdex(
         &self,
@@ -75,18 +104,78 @@ pub trait RustVenueHost {
         ))
     }
 
+    fn cryptocom(
+        &self,
+    ) -> Result<safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies, ExchangeError>
+    {
+        Err(ExchangeError::new(
+            "cryptocom inputs are unavailable on this host",
+        ))
+    }
+
+    fn phemex(
+        &self,
+    ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "phemex inputs are unavailable on this host",
+        ))
+    }
+
+    /// Native inputs for the source's Phase-0 scaffold; start still refuses support.
+    fn txflow(
+        &self,
+        _: &ExchangeOptions,
+    ) -> Result<safe_cex_exchange::http::HttpClientOptions, ExchangeError> {
+        Err(ExchangeError::new(
+            "TxFlow inputs are unavailable on this host",
+        ))
+    }
+
     /// Optional hosted account capability; no host-local secret is required.
+    fn bitrue(&self) -> Result<safe_cex_venue_bitrue::BitrueDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "bitrue inputs are unavailable on this host",
+        ))
+    }
+
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
+    }
+    fn weex(&self) -> Result<WeexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "WEEX dependencies were not supplied by this RustVenueHost",
+        ))
+    }
+    fn woo(&self) -> Result<WooDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "WOO dependencies were not supplied by this RustVenueHost",
+        ))
+    }
+    /// Bybit linear/options and Demo share the same concrete binding inputs.
+    fn bybit(&self) -> Result<safe_cex_venue_bybit::BybitDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Bybit inputs are unavailable on this host",
+        ))
     }
     fn coinbase(&self) -> Result<CoinbaseDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "Coinbase dependencies were not supplied by this RustVenueHost",
         ))
     }
+    fn apexomni(&self) -> Result<safe_cex_venue_apexomni::ApexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "ApexOmni dependencies are unavailable on this host",
+        ))
+    }
     fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "BingX dependencies are unavailable on this host",
+        ))
+    }
+    /// Lighter and Lighter Robinhood use the same bound class and host services.
+    fn lighter(&self) -> Result<LighterDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Lighter dependencies are unavailable on this host",
         ))
     }
     fn breakoutprop(
@@ -107,8 +196,10 @@ pub trait RustVenueHost {
     fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
     /// Bitget, Bitget USDC and Bitget inverse share one input set.
     fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
+    fn grvt(&self) -> Result<GrvtDependencies, ExchangeError>;
     fn hyperliquid(
         &self,
+        name: ExchangeName,
         options: &ExchangeOptions,
     ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError>;
     fn polymarket(&self) -> Result<PolymarketDependencies, ExchangeError> {
@@ -130,6 +221,7 @@ type RustConstructorEntry = fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor;
 
 /// Bound venues only; each later venue is added by its own follow-up.
 pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
+    (ExchangeName::Apexomni, apexomni_constructor),
     (ExchangeName::Asterdex, asterdex_constructor),
     (ExchangeName::Backpack, backpack_constructor),
     (ExchangeName::Binance, binance_constructor),
@@ -139,27 +231,133 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitget, bitget_constructor),
     (ExchangeName::Bitgetinverse, bitget_constructor),
     (ExchangeName::Bitgetusdc, bitget_constructor),
+    (ExchangeName::Bitrue, bitrue_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Breakoutprop, breakoutprop_constructor),
+    (ExchangeName::Grvt, grvt_constructor),
+    (ExchangeName::Bybit, bybit_constructor),
+    (ExchangeName::Bybitdemo, bybit_constructor),
+    (ExchangeName::Bybitspot, bybit_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
     (ExchangeName::Coinbasespot, coinbase_constructor),
+    (ExchangeName::Cryptocom, cryptocom_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
+    (ExchangeName::Hyperliquidspot, hyperliquidspot_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
+    (ExchangeName::Lighter, lighter_constructor),
+    (ExchangeName::LighterRobinhood, lighter_constructor),
+    (ExchangeName::Kucoin, kucoin_constructor),
+    (ExchangeName::Kucoinspot, kucoin_constructor),
+    (ExchangeName::Mexc, mexc_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Phemex, phemex_constructor),
     (ExchangeName::Polymarket, polymarket_constructor),
+    (ExchangeName::Txflow, txflow_constructor),
+    (ExchangeName::Woo, woo_constructor),
+    (ExchangeName::Weex, weex_constructor),
 ];
+
+pub fn grvt_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(GrvtExchange::new(name, options, store, host.grvt()?)?)
+    })
+}
+
+pub fn hyperliquidspot_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |_, options, store| {
+        let deps = host.hyperliquid(ExchangeName::Hyperliquidspot, &options)?;
+        Ok(
+            safe_cex_venue_hyperliquid::spot_binding::HyperliquidSpotExchange::new(
+                options, store, deps,
+            )?,
+        )
+    })
+}
 
 pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |_, options, store| {
-        let deps = host.hyperliquid(&options)?;
+        let deps = host.hyperliquid(ExchangeName::Hyperliquid, &options)?;
         let exchange =
             safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
         Ok(exchange)
+    })
+}
+
+pub fn kucoin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.kucoin(name.clone(), &options)?;
+        let parts = safe_cex_exchange::js_runtime::base_exchange::BaseExchangeParts {
+            name: name.clone(),
+            options,
+            store,
+            settings: ExchangeSettings {
+                supports_public_only: true,
+                positions_supported: Some(name != ExchangeName::Kucoinspot),
+                ..Default::default()
+            },
+            external_public_data: host.kucoin_external_public_data(),
+        };
+        match name {
+            ExchangeName::Kucoin => Ok(
+                safe_cex_venue_kucoin::kucoin_exchange::KucoinExchange::new(parts, deps)?,
+            ),
+            ExchangeName::Kucoinspot => {
+                Ok(safe_cex_venue_kucoin::kucoin_exchange::KucoinSpotExchange::new(parts, deps)?)
+            }
+            _ => Err(ExchangeError::new(
+                "KuCoin constructor requires a KuCoin family name",
+            )),
+        }
+    })
+}
+
+pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.mexc(&options)?;
+        let external = external_factory("mexc", deps.external_public_data, &options)?;
+        let base = BaseExchange::new(
+            name,
+            options,
+            store,
+            deps.runtime.clone(),
+            ExchangeSettings {
+                supports_public_only: true,
+                tick_interval: Some(2_000.0),
+                ..Default::default()
+            },
+        );
+        let weak: Rc<
+            std::cell::RefCell<std::rc::Weak<safe_cex_venue_mexc::exchange::MexcExchange>>,
+        > = Rc::default();
+        let fill_parent = weak.clone();
+        let venue = safe_cex_venue_mexc::exchange::MexcExchange::new(
+            base,
+            deps.http,
+            deps.local_to_utc,
+            safe_cex_venue_mexc::sockets::MexcSocketDependencies {
+                runtime: deps.runtime,
+                remote_account_name: None,
+                emit_fill: Rc::new(move |fill| {
+                    use safe_cex_exchange::exchange::Exchange;
+                    if let Some(parent) = fill_parent.borrow().upgrade() {
+                        parent.base().emit(
+                            "fill",
+                            serde_json::to_value(fill)
+                                .map_err(|e| ExchangeError::new(e.to_string()))?,
+                        )?;
+                    }
+                    Ok(())
+                }),
+            },
+            external,
+        );
+        *weak.borrow_mut() = Rc::downgrade(&venue);
+        Ok(venue)
     })
 }
 
@@ -171,6 +369,32 @@ pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
                 options,
                 store,
                 host.asterdex()?,
+            )?,
+        )
+    })
+}
+
+pub fn phemex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_phemex::binding::exchange::PhemexExchange::new(
+                name,
+                options,
+                store,
+                host.phemex()?,
+            )?,
+        )
+    })
+}
+
+pub fn cryptocom_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_cryptocom::binding::exchange::CryptocomExchange::new(
+                name,
+                options,
+                store,
+                host.cryptocom()?,
             )?,
         )
     })
@@ -242,6 +466,26 @@ fn external_factory(
     }
 }
 
+pub fn weex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(WeexExchange::new(name, options, store, host.weex()?)?)
+    })
+}
+
+pub fn woo_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(WooExchange::new(name, options, store, host.woo()?)?)
+    })
+}
+
+pub fn bybit_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange =
+            safe_cex_venue_bybit::BybitExchange::create(name, options, store, host.bybit()?)?;
+        Ok(exchange)
+    })
+}
+
 pub fn coinbase_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = CoinbaseExchange::new(name, options, store, host.coinbase()?)?;
@@ -253,6 +497,17 @@ pub fn bitget_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = BitgetExchange::new(name, options, store, host.bitget()?)?;
         Ok(exchange)
+    })
+}
+
+pub fn bitrue_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(safe_cex_venue_bitrue::BitrueExchange::new(
+            name,
+            options,
+            store,
+            host.bitrue()?,
+        )?)
     })
 }
 
@@ -308,6 +563,17 @@ pub fn kraken_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = KrakenExchange::new(name, options, store, host.kraken()?)?;
         Ok(exchange)
+    })
+}
+
+pub fn lighter_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(LighterNativeExchange::new(
+            name,
+            options,
+            store,
+            host.lighter()?,
+        )?)
     })
 }
 
@@ -389,6 +655,31 @@ pub fn bingx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         safe_cex_venue_bingx::BingxExchange::new(name, options, store, host.bingx()?)
             .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
+}
+
+pub fn apexomni_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        safe_cex_venue_apexomni::ApexOmniExchange::new(name, options, store, host.apexomni()?)
+            .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
+}
+
+/// Construct the existing scaffold without widening its Phase-0 capabilities.
+pub fn txflow_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let http = host.txflow(&options)?;
+        let runtime = http.runtime.clone();
+        Ok(Rc::new(
+            safe_cex_venue_txflow::exchange::TxFlowExchange::new(
+                name,
+                options,
+                store,
+                runtime,
+                http,
+                &safe_cex_transport::TransportRegistry::default(),
+            )?,
+        ))
     })
 }
 

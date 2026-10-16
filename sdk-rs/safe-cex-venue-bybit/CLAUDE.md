@@ -511,3 +511,68 @@ flags. The shared native typed-value bridge preserves nonfinite numbers and
 signed zero before request formatting or result projection. Concrete regressions
 cover leverage clamping and ticker results; restoring either former JSON bridge
 makes its corresponding regression fail.
+
+The Spot facade now uses the same explicit dependency carrier while installing
+its own source members in `binding/members/spot.rs`. Startup keeps Spot's
+sequential awaited operands, skips the primary fee overlay and key cache, and
+subscribes the private socket only to orders. Markets are spot/1x, positions
+are empty without a REST query, and unsupported leverage/mode methods keep
+BaseExchange's exact rejection. Native generic host adapters call the shared
+lodash import rather than implementing a venue-local `times` policy.
+`tests/spot_binding.rs` exercises the trait, request category, caller-ID guard,
+public/private startup, Brazil local cancellation and disposal. The compiled
+`spot-binding-controls.py` runner disables 17 trait consumers one at a time;
+every control must fail a runtime assertion and the final six tests must pass. A further identity-field control removes only the early isSpot initializer and must fail the typed Spot flag assertion.
+The registry reuses its existing Bybit dependency/layers edge for Spot.
+
+The concrete private protocol now delivers frames through `WsProtocol::on_message`
+to `ws_private/messages.rs`. It calls the variant's live receiver mappers,
+clears recently-placed snapshot grace on sighting, maintains one canonical
+incremental-fill tracker per protocol, publishes terminal rows, and updates
+positions/balance in source order. Primary/Demo filter categories by the account
+switches. Dedicated Spot omits positions; dedicated Inverse preserves its
+qty/value fill pricing and [position, position] Store update pairs. The Spot constructor is now bound; dedicated Inverse and HyroTrader
+constructor/session bindings remain separately owned work. Execution and wallet
+topics are ignored in maintained TS and remain ignored here.
+`tests/private_event_delivery.rs` feeds the actual core socket pump. Its source
+oracle executes maintained handler, mapper, fill helper, selectors and Store
+bodies for 48 fixed compositions (primary/Spot, four flag modes, six scenes). `scripts/private-delivery-controls.py` proves
+six independent regressions fail and restores exact production bytes.
+
+The Spot constructor now uses the shared factory's source-field initializer, so
+its immutable typed base receives is_spot=true before publication. Its actual
+socket pump delivers only order frames and maintains one incremental-fill cache;
+private_event_delivery compares the actual Spot handler/mapOrder alongside the
+primary source bodies. Valid-array source cases are distinct from malformed-frame
+error coverage. The registry uses its existing Bybit host/dependency edge with the
+caller-owned limiter, including local and secretless hosted HTTP signing.
+
+The concrete public ticker lifecycle now composes the existing topic/recovery
+and lifecycle ports in `ws_public/topics.rs`. Primary linear/inverse sockets
+subscribe every eligible non-option market in their category; active-symbol
+selection belongs to Spot and the separate dedicated Inverse class. Spot calls
+its live receiver selector on each synchronization, retains the union of prior
+and desired subscriptions, registers the active callback before dialing, and
+replaces its own markets callback on each open. Market additions preserve source
+duplicates; removing active symbols does not unsubscribe prior topics.
+The canonical subscribe and Spot market-addition bodies execute the first send
+and sleep factory eagerly, before their remaining Future tail is registered with
+core ownership. Weak socket/venue captures avoid retaining the facade. Source
+OHLCV/order-book methods and recovery-timer class wiring remain separate pending
+rows. `public_topic_binding` has four concrete tests, including 24 maintained
+source constructor/handler compositions with 360 snapshots and pending-tail
+cancellation/weak-reference witnesses. `scripts/public-topic-controls.py` has six
+compiled consumer controls; all must fail runtime assertions and restore exact
+production bytes before the four positive tests pass.
+
+Primary Bybit/Demo batch placement now installs the source `placeOrders`,
+`placeBatchOrders`, `placeBatchOrdersForCategory`, `processBatch` and
+`formatOrderForBatch` members. Validate the entire batch before writes, run
+special orders before regular category groups, preserve TP/SL on every request,
+and keep the original batch for individual fallback. Successful result indices
+refer to the filtered formatter entries. The pure formatter receives the awaited
+canonical 0/1/2 position index; other request numerics are source string fields.
+Spot keeps its own `placeOrders` override. Inverse construction remains pending.
+Native promise tails belong to Scope and stop on disposal. The batch source
+oracle executes the actual five member bodies with maintained helpers; the
+physical transport tests separately cover BBO/options, fallback and disposal.

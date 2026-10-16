@@ -24,3 +24,6 @@ pub mod utils;
 pub mod ws_private;
 pub mod ws_public;
 pub mod zklink_host;
+
+pub mod binding;
+pub use binding::{ApexDependencies, ApexOmniExchange};

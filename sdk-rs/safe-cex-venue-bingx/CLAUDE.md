@@ -142,8 +142,9 @@ and fixed executed-method counts.
 ScopeShared/Store, Axios client with raw-text bigint parsing, common intrinsics,
 and public/private BaseWebSocket facades. `BingxDependencies` supplies the HTTP
 wire host, WsRuntime and optional external-public-data factory. Secondary keys
-route GETs to the secondary client and writes to the primary. Hosted signer
-options fail visibly until the host supplies that capability.
+route GETs to the secondary client and writes to the primary. Hosted HTTP signing uses the shared native host capability; the BaseExchange
+signer view and API skip-local-signing branch receive the same capability.
+Payload-signing options remain unavailable without a host capability.
 
 All 16 Exchange trait methods are bound. The source inherits the base rejection
 for fetchSymbolMaxLeverage, scheduleCancel and fetchPublicTrades; their tests
@@ -181,3 +182,21 @@ That owned-callback boundary is priced on the listenOrderBook manifest row.
 `scripts/binding-precision-controls.py` independently swaps the production amount
 and price precision operands. Fractional wire assertions must fail separately;
 integral placement inputs do not establish this protection.
+
+The HTTP bridge uses shared `client::factory::{create,install_transport_adapter}`
+for fixed20-second timeout, Axios Accept defaults, provider-selected routing and
+proxy authorization. Source createAPI's installTransportAdapter call uses the
+Default variant; raw-text response preservation still protects bigint parsing.
+The selected adapter handles both initial requests and one-shot signature resends.
+`tests/support/binding_factory.rs` checks non-default receive windows, Accept and
+a real custom provider/adapter. `scripts/binding-factory-controls.py` independently
+restores the old timeout, removes Accept and chooses BigInt; each compiled change
+must fail its named E2E and restore to pass. Run this controller serially.
+
+Native hosted-account coverage is in registry tests/native_host_bingx.rs. It starts
+with no local API secret, authenticates its private socket through the remote-signed
+HTTP listen-key flow, places/cancels, and checks the browser signer's HMAC over the
+transmitted order fields. A stray local secret must not trigger local signing.
+A refusing signer sends no HTTP request. hosted-signing-controls.py independently
+removes HTTP forwarding, BaseExchange signer attachment and API local-signing
+bypass; each must compile/fail the named native E2E and restore to pass.

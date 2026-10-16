@@ -241,6 +241,7 @@ impl PatchModel for safe_cex_types::Position {
             "info" => self.info = Some(passthrough_value(field, value)?),
             "extra" => self.extra = Some(decode(field, value)?),
             "lastUpdate" => self.last_update = Some(number(field, value)?),
+            "option" => self.option = Some(decode(field, value)?),
             _ => {}
         }
         Ok(())
@@ -259,6 +260,7 @@ pub(crate) fn merge_position(
     target.info = target.info.take().or(old.info);
     target.extra = target.extra.take().or(old.extra);
     target.last_update = target.last_update.take().or(old.last_update);
+    target.option = target.option.take().or(old.option);
 }
 
 impl PatchModel for safe_cex_types::Market {
@@ -285,6 +287,7 @@ impl PatchModel for safe_cex_types::Market {
             "info" => self.info = Some(passthrough_value(field, value)?),
             "takerFee" => self.taker_fee = Some(number(field, value)?),
             "makerFee" => self.maker_fee = Some(number(field, value)?),
+            "option" => self.option = Some(decode(field, value)?),
             _ => {}
         }
         Ok(())
@@ -302,6 +305,7 @@ pub(crate) fn merge_market(target: &mut safe_cex_types::Market, incoming: safe_c
     target.info = target.info.take().or(old.info);
     target.taker_fee = target.taker_fee.take().or(old.taker_fee);
     target.maker_fee = target.maker_fee.take().or(old.maker_fee);
+    target.option = target.option.take().or(old.option);
 }
 
 impl PatchModel for safe_cex_types::Ticker {

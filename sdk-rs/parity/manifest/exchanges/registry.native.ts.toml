@@ -30,9 +30,9 @@ note = "CHOSEN: this source registry object maps to the ordered descriptor and e
 ts = "exchangeRegistry.apexomni"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_apexomni"
+rs = [ "safe-cex-registry/src/loaders.rs::native_apexomni", "safe-cex-registry/src/rust_venues.rs::apexomni_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::apexomni" ]
 status = "divergent"
-note = "CHOSEN: native_apexomni selects the actual source module ./apexomni/apexomni.exchange and export ApexOmniExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_apexomni. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_apexomni selects the actual source module ./apexomni/apexomni.exchange and export ApexOmniExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_apexomni. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members: `safe-cex-registry/src/rust_venues.rs::apexomni_constructor`, `safe-cex-registry/src/rust_venues.rs::RustVenueHost::apexomni`. The native constructor assembles existing bodies on shared js_runtime with the real zkLink contract signer. native_host_apexomni proves startup and signed placement/cancellation over real loopback transports. Default construction remains module-host."
 
 [[symbol]]
 ts = "exchangeRegistry.asterdex"
@@ -110,9 +110,9 @@ note = "CHOSEN: native_bitgetusdc selects the actual source module ./bitget/bitg
 ts = "exchangeRegistry.bitrue"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_bitrue"
+rs = [ "safe-cex-registry/src/loaders.rs::native_bitrue", "safe-cex-registry/src/rust_venues.rs::bitrue_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::bitrue" ]
 status = "divergent"
-note = "CHOSEN: native_bitrue selects the actual source module ./bitrue/bitrue.exchange and export BitrueExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bitrue. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_bitrue selects the actual source module ./bitrue/bitrue.exchange and export BitrueExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bitrue. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split Rust constructor targets bitrue_constructor and RustVenueHost::bitrue select BitrueExchange::new only on ConstructionPath::Rust; the production native host supplies a fresh signed HTTP adapter and the shared external public-data factory. tests/native_host_bitrue.rs validates the constructed venue and independently verifies the real wire HMAC at the local server. Split targets safe-cex-registry/src/rust_venues.rs::bitrue_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::bitrue."
 
 [[symbol]]
 ts = "exchangeRegistry.bitunix"
@@ -142,17 +142,17 @@ note = "CHOSEN: native_breakoutprop selects the actual source module ./breakoutp
 ts = "exchangeRegistry.bybit"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_bybit"
+rs = [ "safe-cex-registry/src/loaders.rs::native_bybit", "safe-cex-registry/src/rust_venues.rs::bybit_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit" ]
 status = "divergent"
-note = "CHOSEN: native_bybit selects the actual source module ./bybit/bybit.exchange and export BybitExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybit. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::bybit_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit construct the bound Bybit or Demo facade from its per-construction native HTTP, clock, and external-data dependencies. CHOSEN: native_bybit selects the actual source module ./bybit/bybit.exchange and export BybitExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybit. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.bybitdemo"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_bybitdemo"
+rs = [ "safe-cex-registry/src/loaders.rs::native_bybitdemo", "safe-cex-registry/src/rust_venues.rs::bybit_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit" ]
 status = "divergent"
-note = "CHOSEN: native_bybitdemo selects the actual source module ./bybit/bybitdemo.exchange and export BybitDemoExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybitdemo. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::bybit_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit construct the bound Bybit or Demo facade from its per-construction native HTTP, clock, and external-data dependencies. CHOSEN: native_bybitdemo selects the actual source module ./bybit/bybitdemo.exchange and export BybitDemoExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybitdemo. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.hyrotrader"
@@ -174,9 +174,9 @@ note = "CHOSEN: native_bybitinverse selects the actual source module ./bybit/byb
 ts = "exchangeRegistry.bybitspot"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_bybitspot"
+rs = [ "safe-cex-registry/src/loaders.rs::native_bybitspot", "safe-cex-registry/src/rust_venues.rs::bybit_constructor" ]
 status = "divergent"
-note = "CHOSEN: native_bybitspot selects the actual source module ./bybit/bybitspot.exchange and export BybitSpotExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybitspot. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: retains the injectable TypeScript-loader adapter for compatibility and also registers the production Spot facade through safe-cex-registry/src/rust_venues.rs::bybit_constructor. The explicit native host supplies physical wire, clocks, hosted signer and gateway factory. Native registry loopback tests construct Spot with local and secretless hosted signing; venue E2Es cover spot-specific methods, startup and socket disposal. Existing registry dependency/layers edge to safe-cex-venue-bybit is reused. Renamed loader: safe-cex-registry/src/loaders.rs::native_bybitspot."
 
 [[symbol]]
 ts = "exchangeRegistry.coinbase"
@@ -198,17 +198,17 @@ note = "CHOSEN: native_coinbasespot selects the actual source module ./coinbase/
 ts = "exchangeRegistry.cryptocom"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_cryptocom"
+rs = [ "safe-cex-registry/src/loaders.rs::native_cryptocom", "safe-cex-registry/src/rust_venues.rs::cryptocom_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::cryptocom" ]
 status = "divergent"
-note = "CHOSEN: native_cryptocom selects the actual source module ./cryptocom/cryptocom.exchange and export CryptocomExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_cryptocom. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::cryptocom_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::cryptocom construct the bound Crypto.com venue with shared native HTTP/WS runtime, hosted signing and external-public-data provider. CHOSEN: native_cryptocom selects the actual source module ./cryptocom/cryptocom.exchange and export CryptocomExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_cryptocom. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.grvt"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_grvt"
+rs = [ "safe-cex-registry/src/loaders.rs::native_grvt", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::grvt", "safe-cex-registry/src/rust_venues.rs::grvt_constructor" ]
 status = "divergent"
-note = "CHOSEN: native_grvt selects the actual source module ./grvt/grvt.exchange and export GrvtExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_grvt. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "Rust construction split members safe-cex-registry/src/rust_venues.rs::RustVenueHost::grvt and safe-cex-registry/src/rust_venues.rs::grvt_constructor request fresh runtime/HTTP/provider dependencies and construct the production shared-js-runtime venue. NativeVenueHost supplies these inputs; hosted signing refuses visibly because source active SDK signing requires a local wallet. tests/rust_venues.rs::grvt_constructs_through_registry_and_reads_actual_public_gateway checks the selected class and real configured gateway request without module fallback. CHOSEN: native_grvt selects the actual source module ./grvt/grvt.exchange and export GrvtExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_grvt. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.hyperliquid"
@@ -216,15 +216,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-registry/src/loaders.rs::native_hyperliquid", "safe-cex-registry/src/rust_venues.rs::hyperliquid_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::hyperliquid", "safe-cex-registry/src/native_host.rs::hyperliquid_rate_limiter" ]
 status = "divergent"
-note = "CHOSEN: native_hyperliquid selects the actual source module ./hyperliquid/hyperliquid.exchange and export HyperliquidExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. The default module-host route remains separate from the opt-in Rust constructor. Renamed to safe-cex-registry/src/loaders.rs::native_hyperliquid. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members `safe-cex-registry/src/rust_venues.rs::hyperliquid_constructor` and `safe-cex-registry/src/rust_venues.rs::RustVenueHost::hyperliquid` bind the production HyperliquidExchange through ConstructionPath::Rust with options-aware native HTTP, hosted signer metadata and an injected shared limiter. Split member `safe-cex-registry/src/native_host.rs::hyperliquid_rate_limiter` constructs the caller-owned 1200/60000 weight budget once per LocalSet; all native account hosts must receive the same Rc, and the FFI command host supplies one for every account. The raw API source baseURL is resolved through the selected transport before requests; its info skip-signing tag and repeat query serializer survive the composed remote adapter. tests/native_host_hyperliquid.rs proves registry trait calls over local reqwest HTTP, both network baseURLs, remote action signing, info bypass and shared limiter identity. HyperliquidSpot remains unbound. See sdk-rs/safe-cex-registry/CONSTRUCTION.md and sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice."
+note = "CHOSEN: native_hyperliquid selects the actual source module ./hyperliquid/hyperliquid.exchange and export HyperliquidExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. The default module-host route remains separate from the opt-in Rust constructor. Renamed to safe-cex-registry/src/loaders.rs::native_hyperliquid. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members `safe-cex-registry/src/rust_venues.rs::hyperliquid_constructor` and `safe-cex-registry/src/rust_venues.rs::RustVenueHost::hyperliquid` bind the production HyperliquidExchange through ConstructionPath::Rust with options-aware native HTTP, hosted signer metadata and an injected shared limiter. Split member `safe-cex-registry/src/native_host.rs::hyperliquid_rate_limiter` constructs the caller-owned 1200/60000 weight budget once per LocalSet; all native account hosts must receive the same Rc, and the FFI command host supplies one for every account. The raw API source baseURL is resolved through the selected transport before requests; its info skip-signing tag and repeat query serializer survive the composed remote adapter. tests/native_host_hyperliquid.rs proves registry trait calls over local reqwest HTTP, both network baseURLs, remote action signing, info bypass and shared limiter identity. HyperliquidSpot is constructed separately through its source Spot class and shares these host inputs. See sdk-rs/safe-cex-registry/CONSTRUCTION.md and sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice."
 
 [[symbol]]
 ts = "exchangeRegistry.hyperliquidspot"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_hyperliquidspot"
+rs = [ "safe-cex-registry/src/loaders.rs::native_hyperliquidspot", "safe-cex-registry/src/rust_venues.rs::hyperliquidspot_constructor" ]
 status = "divergent"
-note = "CHOSEN: native_hyperliquidspot selects the actual source module ./hyperliquid/hyperliquidspot.exchange and export HyperliquidSpotExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_hyperliquidspot. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_hyperliquidspot selects the actual source module ./hyperliquid/hyperliquidspot.exchange and export HyperliquidSpotExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Split member `safe-cex-registry/src/rust_venues.rs::hyperliquidspot_constructor` binds the production Spot Exchange through ConstructionPath::Rust. RustVenueHost::hyperliquid takes the selected exchange name so native transport/remote metadata preserve Hyperliquidspot while sharing the same caller-owned weight limiter, options-aware HTTP, required signers and gateway factory. Native native_host_hyperliquidspot proves HTTP/WS startup, action signature and caller cloid, shifted assets and cancellation; native_host_external_data proves real gateway startup. Renamed to safe-cex-registry/src/loaders.rs::native_hyperliquidspot. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.kraken"
@@ -246,25 +246,25 @@ note = "CHOSEN: native_krakenspot selects the actual source module ./kraken/krak
 ts = "exchangeRegistry.kucoin"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_kucoin"
+rs = [ "safe-cex-registry/src/loaders.rs::native_kucoin", "safe-cex-registry/src/rust_venues.rs::kucoin_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin_external_public_data" ]
 status = "divergent"
-note = "CHOSEN: native_kucoin selects the actual source module ./kucoin/kucoin.exchange and export KucoinExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_kucoin. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::kucoin_constructor, safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin, safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin_external_public_data supply KuCoin futures and Spot runtime, per-options signed HTTP inputs and external-public-data provider for the Rust constructor route. Split member `safe-cex-registry/src/rust_venues.rs::kucoin_constructor` supplies that construction capability. Split member `safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin` supplies that construction capability. Split member `safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin_external_public_data` supplies that construction capability. CHOSEN: native_kucoin selects the actual source module ./kucoin/kucoin.exchange and export KucoinExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_kucoin. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.kucoinspot"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_kucoinspot"
+rs = [ "safe-cex-registry/src/loaders.rs::native_kucoinspot", "safe-cex-registry/src/rust_venues.rs::kucoin_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin_external_public_data" ]
 status = "divergent"
-note = "CHOSEN: native_kucoinspot selects the actual source module ./kucoin/kucoinspot.exchange and export KucoinSpotExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_kucoinspot. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::kucoin_constructor, safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin, safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin_external_public_data supply KuCoin Spot runtime, per-options signed HTTP inputs and external-public-data provider for the Rust constructor route. Split member `safe-cex-registry/src/rust_venues.rs::kucoin_constructor` supplies that construction capability. Split member `safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin` supplies that construction capability. Split member `safe-cex-registry/src/rust_venues.rs::RustVenueHost::kucoin_external_public_data` supplies that construction capability. CHOSEN: native_kucoinspot selects the actual source module ./kucoin/kucoinspot.exchange and export KucoinSpotExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_kucoinspot. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.lighter"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_lighter"
+rs = [ "safe-cex-registry/src/loaders.rs::native_lighter", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::lighter", "safe-cex-registry/src/rust_venues.rs::lighter_constructor" ]
 status = "divergent"
-note = "CHOSEN: native_lighter selects the actual source module ./lighter/lighter.exchange and export LighterExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_lighter. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_lighter selects the actual source module ./lighter/lighter.exchange and export LighterExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_lighter. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members `safe-cex-registry/src/rust_venues.rs::RustVenueHost::lighter` and `safe-cex-registry/src/rust_venues.rs::lighter_constructor` bind the existing LighterNativeExchange for lighter and lighter-robinhood. The native host uses the runtime transport registry and OS signing entropy; hosted remote signing refuses visibly. Construction tests read deployment-specific markets through the registry on native HTTP."
 
 [[symbol]]
 ts = "exchangeRegistry.lighter-robinhood"
@@ -278,9 +278,9 @@ note = "CHOSEN: native_lighter_robinhood selects the actual source module ./ligh
 ts = "exchangeRegistry.mexc"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_mexc"
+rs = [ "safe-cex-registry/src/loaders.rs::native_mexc", "safe-cex-registry/src/rust_venues.rs::mexc_constructor", "safe-cex-registry/src/rust_venues.rs::MexcDependencies", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::mexc" ]
 status = "divergent"
-note = "CHOSEN: native_mexc selects the actual source module ./mexc/mexc.exchange and export MexcExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_mexc. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::mexc_constructor, safe-cex-registry/src/rust_venues.rs::MexcDependencies, safe-cex-registry/src/rust_venues.rs::RustVenueHost::mexc supply MEXC runtime, configured native API, date conversion and external-public-data provider for the Rust constructor route. Split member `safe-cex-registry/src/rust_venues.rs::mexc_constructor` supplies that construction capability. Split member `safe-cex-registry/src/rust_venues.rs::MexcDependencies` supplies that construction capability. Split member `safe-cex-registry/src/rust_venues.rs::RustVenueHost::mexc` supplies that construction capability. CHOSEN: native_mexc selects the actual source module ./mexc/mexc.exchange and export MexcExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_mexc. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.okx"
@@ -326,15 +326,15 @@ note = "CHOSEN: native_paradex selects the actual source module ./paradex/parade
 ts = "exchangeRegistry.phemex"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_phemex"
+rs = [ "safe-cex-registry/src/loaders.rs::native_phemex", "safe-cex-registry/src/rust_venues.rs::phemex_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::phemex" ]
 status = "divergent"
-note = "CHOSEN: native_phemex selects the actual source module ./phemex/phemex.exchange and export PhemexExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_phemex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::phemex_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::phemex construct the production Phemex binding using shared native HTTP/WS runtime, hosted signing and external public data. CHOSEN: native_phemex selects the actual source module ./phemex/phemex.exchange and export PhemexExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_phemex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.polymarket"
 kind = "field-fn"
 layer = "adapted"
-rs = ["safe-cex-registry/src/loaders.rs::native_polymarket", "safe-cex-registry/src/rust_venues.rs::polymarket_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::polymarket"]
+rs = [ "safe-cex-registry/src/loaders.rs::native_polymarket", "safe-cex-registry/src/rust_venues.rs::polymarket_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::polymarket" ]
 status = "divergent"
 note = "API split: safe-cex-registry/src/rust_venues.rs::polymarket_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::polymarket supply the concrete runtime, HTTP host, and external-data provider for this Rust constructor. CHOSEN: native_polymarket selects the actual source module ./polymarket/polymarket.exchange and export PolymarketExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. ConstructionPath::Rust constructs the concrete PolymarketExchange using RustVenueHost::polymarket and its production native-host override; the default ModuleHost route is retained. tests/rust_venues.rs exercises live account and leverage calls through this entry. Renamed to safe-cex-registry/src/loaders.rs::native_polymarket. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
@@ -342,17 +342,17 @@ note = "API split: safe-cex-registry/src/rust_venues.rs::polymarket_constructor 
 ts = "exchangeRegistry.weex"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_weex"
+rs = [ "safe-cex-registry/src/loaders.rs::native_weex", "safe-cex-registry/src/rust_venues.rs::weex_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::weex" ]
 status = "divergent"
-note = "CHOSEN: native_weex selects the actual source module ./weex/weex.exchange and export WeexExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_weex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_weex selects the actual source module ./weex/weex.exchange and export WeexExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_weex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. ConstructionPath::Rust now constructs the production WeexExchange with the shared native signed HTTP/runtime hosts, external-provider factory and UTC profile. tests/native_host_weex.rs verifies construction with the common limiter and the actual request HMAC over loopback HTTP. Native split targets: safe-cex-registry/src/rust_venues.rs::weex_constructor, safe-cex-registry/src/rust_venues.rs::RustVenueHost::weex."
 
 [[symbol]]
 ts = "exchangeRegistry.woo"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_woo"
+rs = [ "safe-cex-registry/src/loaders.rs::native_woo", "safe-cex-registry/src/rust_venues.rs::woo_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::woo" ]
 status = "divergent"
-note = "CHOSEN: native_woo selects the actual source module ./woo/woo.exchange and export WOOXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_woo. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_woo selects the actual source module ./woo/woo.exchange and export WOOXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_woo. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. ConstructionPath::Rust now calls the existing production WooExchange::new with caller name/options/Store and RustVenueHost::woo dependencies. NativeVenueHost supplies its shared signed HTTP host, runtime and external-data factory. The native registry test constructs WOO and verifies its account read and exact HMAC at a local HTTP server. Native split targets: safe-cex-registry/src/loaders.rs::native_woo, safe-cex-registry/src/rust_venues.rs::woo_constructor, safe-cex-registry/src/rust_venues.rs::RustVenueHost::woo."
 
 [[symbol]]
 ts = "exchangeRegistry.kodiakfi"
@@ -390,9 +390,9 @@ note = "CHOSEN: native_tealstreet_dex selects the actual source module ./orderly
 ts = "exchangeRegistry.txflow"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_txflow"
+rs = [ "safe-cex-registry/src/loaders.rs::native_txflow", "safe-cex-registry/src/rust_venues.rs::txflow_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::txflow" ]
 status = "divergent"
-note = "CHOSEN: native_txflow selects the actual source module ./txflow/txflow.exchange and export TxFlowExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_txflow. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::txflow_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::txflow supply the source scaffold and its native HTTP inputs. CHOSEN: native_txflow selects the actual source module ./txflow/txflow.exchange and export TxFlowExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. ConstructionPath::Rust constructs the existing Phase-0 TxFlowExchange with native HTTP inputs; start retains the exact source refusal and no REST, WebSocket, or trading support is enabled. tests/native_host_txflow.rs witnesses eager error emission and no IO. Renamed to safe-cex-registry/src/loaders.rs::native_txflow. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.what"

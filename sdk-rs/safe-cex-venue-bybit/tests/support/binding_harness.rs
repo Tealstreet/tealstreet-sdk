@@ -36,6 +36,7 @@ type Job = (Pin<Box<dyn Future<Output = ()>>>, Rc<Cell<bool>>);
 
 #[derive(Default)]
 pub struct Runtime {
+    next_id: Cell<u64>,
     pub now: Rc<Cell<f64>>,
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
@@ -103,7 +104,9 @@ impl ExchangeRuntime for Runtime {
         self.logs.borrow_mut().push(format!("{level}: {message}"));
     }
     fn unique_id(&self) -> String {
-        "req-1".into()
+        let id = self.next_id.get() + 1;
+        self.next_id.set(id);
+        format!("req-{id}")
     }
     fn is_worker(&self) -> bool {
         false
@@ -423,6 +426,7 @@ fn configured_harness(
         store.clone(),
         BybitDependencies {
             runtime: runtime.clone(),
+            remote_signer: None,
             wire: wire.clone(),
             http_host: Rc::new(Host),
             rate_limit_clock: Arc::new(Clock(runtime.now.clone())),

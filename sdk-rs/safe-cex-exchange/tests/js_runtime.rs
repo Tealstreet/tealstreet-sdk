@@ -22,7 +22,17 @@ struct Runtime {
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
+    exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
+    headers_capable: std::cell::Cell<bool>,
+    dial_socket: RefCell<Option<Rc<dyn safe_cex_exchange::websocket::WsSocket>>>,
+    dials: RefCell<
+        Vec<(
+            String,
+            Vec<String>,
+            safe_cex_exchange::websocket::WebSocketConnectionOptions,
+        )>,
+    >,
 }
 struct Task;
 impl ExchangeTask for Task {
@@ -60,7 +70,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, _: &ExchangeError, _: &Value) {}
+    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+        self.exceptions
+            .borrow_mut()
+            .push((error.to_string(), context.clone()));
+    }
     fn report_raw_exception(&self, _: &Value, _: &Value) {}
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
@@ -1210,15 +1224,17 @@ impl safe_cex_exchange::websocket::WsRuntime for Runtime {
     }
     fn dial(
         &self,
-        _: String,
-        _: Vec<String>,
-        _: safe_cex_exchange::websocket::WebSocketConnectionOptions,
+        url: String,
+        protocols: Vec<String>,
+        options: safe_cex_exchange::websocket::WebSocketConnectionOptions,
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn safe_cex_exchange::websocket::WsSocket>> {
-        panic!("no sockets in js_runtime tests")
+        self.dials.borrow_mut().push((url, protocols, options));
+        let socket = self.dial_socket.borrow().clone();
+        Box::pin(async move { socket.ok_or_else(|| ExchangeError::new("recorded dial")) })
     }
     fn headers_capable(&self) -> bool {
-        false
+        self.headers_capable.get()
     }
     fn enable_reconnecting(&self) -> bool {
         false
@@ -1249,6 +1265,13 @@ fn base_exchange(options: Value) -> Result<Js, Thrown> {
 }
 
 fn assemble(options: Value) -> Result<Assembled, Thrown> {
+    assemble_with_fields(options, |_| Ok(()))
+}
+
+fn assemble_with_fields(
+    options: Value,
+    initialize_fields: impl FnOnce(&Js) -> Result<(), Thrown>,
+) -> Result<Assembled, Thrown> {
     use safe_cex_exchange::{
         client_order_id::pattern_client_order_id_rule,
         exchange::ExchangeSettings,
@@ -1280,6 +1303,7 @@ fn assemble(options: Value) -> Result<Assembled, Thrown> {
         Js::str("okx"),
         from_json(&options),
         Js::object(vec![]),
+        initialize_fields,
     )?;
     Ok(Assembled {
         this,
@@ -1362,6 +1386,7 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
             method: method.into(),
             url: url.into(),
             params: Some(json!({"instId": "BTC-USDT-SWAP"})),
+            config_extensions: [("grvtCookie".into(), json!("gravity=bridge"))].into(),
             ..Default::default()
         };
         settle(
@@ -1389,6 +1414,11 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
     assert_eq!(
         http.sent.borrow()[0]["params"],
         json!({"instId": "BTC-USDT-SWAP"})
+    );
+    assert_eq!(
+        http.sent.borrow()[0]["grvtCookie"],
+        json!("gravity=bridge"),
+        "REST CONFIG native-to-JS bridge"
     );
     let upper =
         to_json(&run("GET", "/ok").expect("an uppercase verb dispatches like Axios")).unwrap();
@@ -3250,3 +3280,324 @@ mod http_factory {
         );
     }
 }
+
+#[test]
+#[ignore = "requires Node and maintained TypeScript"]
+fn disposed_assignment_matches_actual_venue_cleanup_sequence() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js-runtime-disposal-oracle.cjs"
+        ))
+        .output()
+        .expect("source oracle");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(rows.len(), 6);
+    for row in rows {
+        let assembled = assemble(json!({"key":"k","secret":"s"})).unwrap();
+        let this = assembled.this;
+        let base = assembled.base;
+        let events = Rc::new(RefCell::new(vec![]));
+        let observed = Rc::new(std::cell::Cell::new(0));
+        let observed_in_listener = observed.clone();
+        base.on(
+            "update",
+            Rc::new(move |_, _| {
+                observed_in_listener.set(observed_in_listener.get() + 1);
+                Ok(())
+            }),
+        );
+        for side in ["public", "private"] {
+            let events = events.clone();
+            let base = base.clone();
+            let fail = row["fail"] == side;
+            this.define(
+                &format!("{side}Websocket"),
+                Js::object(vec![(
+                    "dispose",
+                    Js::function("dispose", move |_, _| {
+                        events.borrow_mut().push(json!([side, base.is_disposed()]));
+                        if fail {
+                            Err(Thrown::new(Js::str(&format!("{side}-cleanup"))))
+                        } else {
+                            Ok(Js::Undefined)
+                        }
+                    }),
+                )]),
+            )
+            .unwrap();
+        }
+        let result = (|| -> Result<(), Thrown> {
+            this.set("isDisposed", Js::Bool(true))?;
+            this.get("publicWebsocket")?
+                .call_method("dispose", vec![])?;
+            this.get("privateWebsocket")?
+                .call_method("dispose", vec![])?;
+            Ok(())
+        })();
+        assert_eq!(
+            json!(events.borrow().clone()),
+            row["events"],
+            "{} {} callback sequence",
+            row["venue"],
+            row["fail"]
+        );
+        assert_eq!(
+            base.is_disposed(),
+            row["disposed"].as_bool().unwrap(),
+            "shared core observes source assignment"
+        );
+        assert!(
+            this.get("isDisposed")
+                .unwrap()
+                .strict_equals(&Js::Bool(true)),
+            "facade reads the same cell"
+        );
+        assert_eq!(
+            result
+                .err()
+                .map(|e| to_json(&e.value).unwrap())
+                .unwrap_or(Value::Null),
+            row["error"],
+            "cleanup throw identity"
+        );
+        base.emit("update", json!({})).unwrap();
+        assert_eq!(
+            observed.get(),
+            1,
+            "flag assignment must not run superclass listener cleanup"
+        );
+        this.set("isDisposed", Js::Bool(false)).unwrap();
+        assert!(
+            !base.is_disposed(),
+            "the source field is writable in either direction"
+        );
+    }
+}
+
+#[test]
+fn rest_http_host_retains_adapter_config_without_inventing_direct_cookie_headers() {
+    let runtime = Rc::new(Runtime::default());
+    let terminal = std::sync::Arc::new(Terminal::default());
+    let xhr = client::create(
+        client::rest_http_host(runtime.clone(), terminal.clone()),
+        Js::object(vec![("baseURL", Js::str("https://trades.grvt.io"))]),
+    );
+    let response = settle(
+        &runtime,
+        xhr.call_method(
+            "post",
+            vec![
+                Js::str("/ok"),
+                Js::Null,
+                Js::object(vec![
+                    ("grvtCookie", Js::str("rm=true; gravity=session-42")),
+                    ("grvtAccountId", Js::str("42")),
+                    (
+                        "customTrace",
+                        Js::object(vec![("attempt", Js::Number(2.0))]),
+                    ),
+                    (
+                        "headers",
+                        Js::object(vec![("X-Ts-Grvt-Session", Js::str("session-42"))]),
+                    ),
+                ]),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let seen = terminal.seen.lock().unwrap();
+    assert_eq!(
+        seen[0].config_extensions["grvtCookie"],
+        json!("rm=true; gravity=session-42"),
+        "REST ADAPTER CONFIG lost GRVT cookie before terminal transport"
+    );
+    assert_eq!(seen[0].config_extensions["grvtAccountId"], json!("42"));
+    assert_eq!(
+        seen[0].config_extensions["customTrace"],
+        json!({"attempt":2.0})
+    );
+    assert!(
+        !seen[0].headers.contains_key("Cookie"),
+        "DIRECT source cookie behavior"
+    );
+    assert_eq!(seen[0].headers["X-Ts-Grvt-Session"], "session-42");
+    assert_eq!(
+        to_json(&response.get("config").unwrap().get("customTrace").unwrap()).unwrap(),
+        json!({"attempt":2.0})
+    );
+}
+
+#[path = "support/js_websocket_options.rs"]
+mod ws_options;
+
+#[path = "support/js_socket_dispose.rs"]
+mod socket_dispose;
+
+#[test]
+fn source_identity_fields_are_read_before_the_typed_base_is_published() {
+    for (spot, demo, expected_spot, expected_demo) in [
+        (Js::Bool(true), Js::Bool(false), true, false),
+        (Js::Bool(false), Js::Bool(true), false, true),
+        (Js::str("source truthy"), Js::Number(0.0), true, false),
+        (Js::Null, Js::object(vec![]), false, true),
+    ] {
+        let assembled = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
+            receiver.define_accessor("isSpot", Some(Rc::new(move |_| Ok(spot.clone()))), None);
+            receiver.define("isDemo", demo)
+        })
+        .unwrap();
+        assert_eq!(
+            assembled.base.is_spot, expected_spot,
+            "source isSpot projection"
+        );
+        assert_eq!(
+            assembled.base.is_demo, expected_demo,
+            "source isDemo projection"
+        );
+        assert_eq!(
+            assembled.this.get("isSpot").unwrap().truthy(),
+            expected_spot
+        );
+        assert_eq!(
+            assembled.this.get("isDemo").unwrap().truthy(),
+            expected_demo
+        );
+    }
+    let inherited = assemble(json!({"key":"k","secret":"s"})).unwrap();
+    assert!(!inherited.base.is_spot && !inherited.base.is_demo);
+    let cause = Thrown::error("RangeError", "source flag getter");
+    let expected = cause.value.clone();
+    let result = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
+        receiver.define_accessor("isDemo", Some(Rc::new(move |_| Err(cause.clone()))), None);
+        Ok(())
+    });
+    assert!(result.err().unwrap().value.strict_equals(&expected));
+}
+
+#[test]
+#[allow(clippy::arc_with_non_send_sync)]
+fn hosted_signing_accepts_source_string_data_before_wire_encoding() {
+    use safe_cex_transport::signing::*;
+    use safe_cex_types::ExchangeName;
+    struct EchoSigner(Rc<RefCell<Vec<Option<Value>>>>);
+    impl RemoteSigner for EchoSigner {
+        fn sign(
+            &self,
+            request: RemoteSignerRequest,
+        ) -> safe_cex_transport::TransportFuture<'_, RemoteSignerResponse> {
+            let RemoteSignerRequest::Http(request) = request else {
+                panic!("HTTP expected")
+            };
+            self.0.borrow_mut().push(request.config.data.clone());
+            let data = request.config.data.map(|value| {
+                if value.is_object() || value.is_array() {
+                    Value::String(
+                        safe_cex_num::js_json_stringify(&value.into())
+                            .unwrap()
+                            .unwrap(),
+                    )
+                } else {
+                    value
+                }
+            });
+            Box::pin(async move {
+                Ok(RemoteSignerResponse::Http(HttpSigningResponse {
+                    id: request.id,
+                    error: None,
+                    config: Some(SignedConfig {
+                        headers: request.config.headers,
+                        data,
+                        ..Default::default()
+                    }),
+                }))
+            })
+        }
+    }
+    impl safe_cex_exchange::runtime::RemoteSigner for EchoSigner {
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn on_availability_change(
+            &self,
+            _: Rc<dyn Fn(bool)>,
+        ) -> safe_cex_exchange::runtime::Cleanup {
+            Box::new(|| {})
+        }
+    }
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_hosted_string_source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(rows.len(), 4, "source string-data corpus count");
+    for row in rows {
+        let runtime = Rc::new(Runtime::default());
+        let terminal = std::sync::Arc::new(Terminal::default());
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let host = client::rest_http_host_signed(
+            runtime.clone(),
+            terminal.clone(),
+            Some((Rc::new(EchoSigner(calls.clone())), Some("hosted".into()))),
+        );
+        host.configure_exchange(ExchangeName::Apexomni).unwrap();
+        let xhr = client::create(host, Js::object(vec![]));
+        let response = xhr
+            .call_method(
+                "post",
+                vec![
+                    Js::str("/order"),
+                    Js::str(row["data"].as_str().unwrap()),
+                    safe_cex_exchange::js_runtime::value::from_json(
+                        &json!({"headers":{"Content-Type":row["contentType"]}}),
+                    ),
+                ],
+            )
+            .unwrap();
+        settle(&runtime, response).expect("hosted signing accepts a source JS string");
+        assert_eq!(
+            &*calls.borrow(),
+            &[Some(row["requestData"].clone())],
+            "remote signer sees source transform/tryParseJson data"
+        );
+        let seen = terminal.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        let request = &seen[0];
+        let content_type = request
+            .headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case("content-type"))
+            .map(|(_, value)| value.as_str());
+        let bytes = request
+            .body
+            .as_ref()
+            .unwrap()
+            .wire_bytes_for_content_type(content_type)
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(bytes).unwrap(),
+            row["wireData"].as_str().unwrap(),
+            "signed source string reaches terminal unchanged"
+        );
+    }
+}
+
+#[path = "support/js_string_coercion.rs"]
+mod string_coercion;
+
+#[path = "support/js_raw_socket_close.rs"]
+mod raw_socket_close;

@@ -15,7 +15,7 @@ use safe_cex_exchange::{
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedBatch, ValidatedOrder},
     http::{HttpClientOptions, HttpHost},
     js_runtime::{
-        base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory},
+        base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory, HostedSigner},
         client::JsHttpHost,
         promise::JsFuture,
         scope::ScopeShared,
@@ -36,6 +36,8 @@ use std::{
 /// Host capabilities the venue cannot construct itself.
 pub struct BybitDependencies {
     pub runtime: Rc<dyn WsRuntime>,
+    /// Account capability shared with the source receiver, HTTP clients and core.
+    pub remote_signer: Option<HostedSigner>,
     /// The physical wire under every signed client the venue creates.
     pub wire: Arc<dyn RestAdapter>,
     pub http_host: Rc<dyn HttpHost>,
@@ -80,8 +82,11 @@ pub(crate) fn capabilities() -> ExchangeCapabilities {
 }
 
 /// ScopeShared requires a generic client host; Bybit's bodies send through `this.xhr`.
-struct NoGenericClient(Rc<dyn ExchangeRuntime>);
+struct NoGenericClient(Rc<dyn ExchangeRuntime>, Option<HostedSigner>);
 impl JsHttpHost for NoGenericClient {
+    fn hosted_signer(&self) -> Option<HostedSigner> {
+        self.1.clone()
+    }
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.0.clone()
     }
@@ -107,7 +112,10 @@ impl BybitExchange {
         store: Rc<dyn Store>,
         deps: BybitDependencies,
     ) -> Result<Rc<Self>, ExchangeError> {
-        if !matches!(name, ExchangeName::Bybit | ExchangeName::Bybitdemo) {
+        if !matches!(
+            name,
+            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Bybitspot
+        ) {
             return Err(ExchangeError::new(format!(
                 "BybitExchange cannot construct {}",
                 serde_json::to_value(&name)
@@ -122,7 +130,10 @@ impl BybitExchange {
         let shared = Rc::new_cyclic(|weak: &Weak<super::rt::Shared>| {
             ScopeShared::new(
                 runtime.clone(),
-                Rc::new(NoGenericClient(exchange_runtime.clone())),
+                Rc::new(NoGenericClient(
+                    exchange_runtime.clone(),
+                    deps.remote_signer.clone(),
+                )),
                 store.clone(),
                 globals::build(weak.clone(), clock.clone()),
                 BybitExtra {
@@ -130,18 +141,38 @@ impl BybitExchange {
                 },
             )
         });
+        let mut class_settings = settings();
+        if name == ExchangeName::Bybitspot {
+            class_settings.positions_supported = Some(false);
+            class_settings
+                .client_order_id_rule
+                .as_mut()
+                .expect("Bybit rule")
+                .label = "Bybit spot".into();
+        }
         let (receiver, core) = base_exchange::create(
             &shared.sockets,
             BaseExchangeParts {
                 name: name.clone(),
                 options: options.clone(),
                 store: store.clone(),
-                settings: settings(),
+                settings: class_settings,
                 external_public_data: deps.external_public_data.clone(),
             },
             from_typed(&name).map_err(err)?,
             from_typed(&options).map_err(err)?,
             store::facade(store.clone()),
+            |this| {
+                // bybitdemo.exchange.ts initializes this field after super().
+                if name == ExchangeName::Bybitdemo {
+                    this.define("isDemo", Js::Bool(true))?;
+                }
+                // bybitspot.exchange.ts initializes its own isSpot field.
+                if name == ExchangeName::Bybitspot {
+                    this.define("isSpot", Js::Bool(true))?;
+                }
+                Ok(())
+            },
         )
         .map_err(err)?;
         let _ = shared.base.set(core.clone());
@@ -155,8 +186,16 @@ impl BybitExchange {
         let private_clock = deps.clock.clone();
         let now_clock = deps.clock.clone();
         // The remote signer names the account; local signing has none.
-        let account_name: Option<String> = None;
+        let account_name = deps
+            .remote_signer
+            .as_ref()
+            .and_then(|(_, name)| name.clone());
+        let api_signer = deps.remote_signer.as_ref().map(|(signer, _)| {
+            safe_cex_exchange::js_runtime::client::transport_signer(signer.clone())
+        });
+        let api_account_name = account_name.clone();
         let relay_enabled = deps.relay_enabled;
+        let public_base = core.clone();
         let venue = BybitExchange::new(
             core,
             runtime.clone(),
@@ -173,8 +212,8 @@ impl BybitExchange {
                             options: options.clone(),
                             request: Default::default(),
                             provider: Some(ws_runtime.transport()),
-                            signer: None,
-                            account_name: None,
+                            signer: api_signer.clone(),
+                            account_name: api_account_name.clone(),
                             adapter: wire.clone(),
                             host: http_host.clone(),
                             runtime: api_runtime.clone(),
@@ -193,7 +232,7 @@ impl BybitExchange {
                             }),
                         },
                         owner,
-                        is_demo: base.is_demo,
+                        is_demo: base.name == ExchangeName::Bybitdemo || base.is_demo,
                         rest_base_url: None,
                         clock: api_clock.clone(),
                         retry_clock: retry_clock.clone(),
@@ -211,22 +250,23 @@ impl BybitExchange {
             {
                 let runtime = runtime.clone();
                 move |parent, category| {
-                    Rc::new(crate::ws_public::PublicProtocol {
+                    Rc::new(crate::ws_public::PublicProtocol::new(
                         parent,
-                        runtime: runtime.clone(),
-                        category: if category == "inverse" {
-                            "inverse"
-                        } else {
-                            "linear"
+                        runtime.clone(),
+                        match category {
+                            "inverse" => "inverse",
+                            "spot" => "spot",
+                            _ => "linear",
                         },
-                    })
+                        &public_base,
+                    ))
                 }
             },
             move |parent| {
-                Rc::new(crate::ws_private::protocol::PrivateProtocol {
+                Rc::new(crate::ws_private::protocol::PrivateProtocol::new(
                     parent,
-                    runtime: runtime.clone(),
-                    config: crate::ws_private::protocol::PrivateProtocolConfig {
+                    runtime.clone(),
+                    crate::ws_private::protocol::PrivateProtocolConfig {
                         sync_clock: Rc::new(move || {
                             let clock = private_clock.clone();
                             Box::pin(async move {
@@ -238,7 +278,7 @@ impl BybitExchange {
                         account_name,
                         relay_enabled,
                     },
-                })
+                ))
             },
         )
         .map_err(|error| ExchangeError::new(error.to_string()))?;
@@ -334,7 +374,11 @@ impl Exchange for BybitExchange {
         &self.capabilities
     }
     fn class_name(&self) -> &'static str {
-        "BybitExchange"
+        if self.base.name == ExchangeName::Bybitspot {
+            "BybitSpotExchange"
+        } else {
+            "BybitExchange"
+        }
     }
     // ts: BybitExchange.dispose
     fn dispose(&self) -> Result<(), ExchangeError> {

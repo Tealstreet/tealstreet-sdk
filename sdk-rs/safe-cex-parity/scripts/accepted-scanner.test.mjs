@@ -53,8 +53,11 @@ test('scanner receipt ambiguity missing files and foreign identities fail closed
 test('module alias local and birth scans reuse artifact-selected scanners', () => {
   const runner = fs.readFileSync(new URL('./accepted-set.mjs', import.meta.url), 'utf8');
   const births = fs.readFileSync(new URL('./accepted-births.mjs', import.meta.url), 'utf8');
-  assert.equal((runner.match(/const scanner = buildScanner\(\);/g) ?? []).length, 1);
-  assert.equal((runner.match(/spawnSync\(scanner,/g) ?? []).length, 3);
+  assert.equal((runner.match(/const scanner = buildScanner\(jobs\);/g) ?? []).length, 1);
+  assert.equal((runner.match(/spawnSync\(scanner,/g) ?? []).length, 4);
+  for (const mode of ['--doc-guards', '--binary-entry-json', '--alias-claims-json', '--macro-origins-json']) {
+    assert.equal(runner.split(`spawnSync(scanner, ['${mode}'`).length - 1, 1, `${mode}: one artifact-selected scanner call`);
+  }
   assert.match(births, /scanner \?\?= buildScanner\(\);/);
   for (const source of [runner, births]) assert.doesNotMatch(source, /target\/debug\/accepted-source/);
 });

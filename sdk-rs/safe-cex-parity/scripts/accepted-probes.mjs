@@ -23,9 +23,9 @@ function aliasBody(type, targetType, contract) {
       ? `let _: std::marker::PhantomData<fn(*mut (${contract.aliasProbeExpected}))->*mut (${contract.aliasProbeExpected})> = std::marker::PhantomData::<fn(*mut ${targetType})->*mut ${targetType}>;`
       : `let _: std::marker::PhantomData<fn(${contract.aliasProbeExpected})->${contract.aliasProbeExpected}> = std::marker::PhantomData::<fn(${targetType})->${targetType}>;`
     : '';
-  // A dyn FnMut type name includes its signature before the first '<'. Obtain
+  // Dyn, tuple and function-pointer type names include nested signatures. Obtain
   // the compared prefix from the independently authored expected compiler type.
-  const canonical = unsized
+  const canonical = unsized || ['reviewed-hosted-signer-tuple', 'reviewed-function-pointer', 'reviewed-weex-kline-tuple'].includes(contract.aliasProbeKind)
     ? `std::any::type_name::<${contract.aliasProbeExpected}>().split('<').next().expect("reviewed unsized alias identity")`
     : literal(contract.canonical);
   const alternate = `|value| { let alternate = crate::__accepted_set_runtime::AliasAlternate::<${targetType}>(std::marker::PhantomData); let mut paths: Vec<_> = [${aliasTraitMethods.map(([, method, name]) => `(${literal(name)}, (&&alternate).${method}(value))`).join(',')}].into_iter().filter_map(|(name, accepted)| accepted.map(|accepted| (name, accepted))).collect(); if (&&alternate).has_static_from() && (&&alternate).probe_from_str_ref(value).is_none() { paths.push(("unsupported From<&'static str>", false)); } if (&&alternate).has_static_try() && (&&alternate).probe_try_str_ref(value).is_none() { paths.push(("unsupported TryFrom<&'static str>", false)); } paths }`;
@@ -38,6 +38,8 @@ function offset(source, [line, column]) {
   return Buffer.byteLength(lines.slice(0, line - 1).join('\n')) + (line > 1 ? 1 : 0) + column - 1;
 }
 export function runProbes(root, metadata, packages, contracts, configuration = { target: 'native', features: [] }) {
+  const jobs = String(configuration.jobs ?? 2);
+  assert.match(jobs, /^[12]$/, 'accepted-set: probe jobs must be 1 or 2');
   const repo = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../../..');
   const workspaceRelative = path.relative(repo, root);
   assert.ok(!workspaceRelative.startsWith('..'), 'accepted-set: workspace must be inside this repository');
@@ -187,10 +189,10 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
     }
     fs.writeFileSync(manifest, text);
     const features = configuration.features.length ? ['--features', configuration.features.join(',')] : [];
-    const command = wasm ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', '2', ...targetArgs, '--target', configuration.target, ...features] : ['run', '--color', 'never', '-p', pkg.package, '--jobs', '2', '--bin', nativeBinary ? target.name : 'accepted-set-production-runner', ...features];
+    const command = wasm ? ['build', '--color', 'never', '-p', pkg.package, '--jobs', jobs, ...targetArgs, '--target', configuration.target, ...features] : ['run', '--color', 'never', '-p', pkg.package, '--jobs', jobs, '--bin', nativeBinary ? target.name : 'accepted-set-production-runner', ...features];
     const result = spawnSync('cargo', command, {
       cwd: path.join(sandbox, workspaceRelative), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-      env: { ...process.env, CARGO_BUILD_JOBS: '2', CARGO_TARGET_DIR: path.join(metadata.target_directory, 'accepted-set-build') },
+      env: { ...process.env, CARGO_BUILD_JOBS: jobs, CARGO_TARGET_DIR: path.join(metadata.target_directory, 'accepted-set-build') },
     });
     const log = `${result.stdout}\n${result.stderr}`;
     fs.writeFileSync(path.join(metadata.target_directory, `accepted-set-${pkg.package}.log`), log);

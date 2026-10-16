@@ -3,6 +3,7 @@ import './parity-toolchain.test.mjs';
 import './check-layers.test.mjs';
 import '../safe-cex-types/tests/ci-deps.test.cjs';
 import '../safe-cex-venue-binance/scripts/types-toolchain.test.mjs';
+import '../safe-cex-parity/scripts/review-contract-proposals.test.mjs';
 import assert from 'node:assert/strict';
 import fs, { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
@@ -914,7 +915,7 @@ test('accepted-set control registry pins files and executed mutations', async ()
   // a68c3d9e05 added pure/native callable-alias controls in PR 7951; keep
   // both files load-bearing here alongside the registry runner. 40e183a874
   // also added its renamed-registry-artifact test; no old control is retired.
-  assert.deepEqual(Object.keys(registry.tests).sort(), ['accepted-aliases.test.mjs', 'accepted-callable-alias-native.test.mjs', 'accepted-callable-alias.test.mjs', 'accepted-construction-chain-native.test.mjs', 'accepted-contracts.test.mjs', 'accepted-controls.test.mjs', 'accepted-defaults.test.mjs', 'accepted-exchange-future.test.mjs', 'accepted-future-alias-native.test.mjs', 'accepted-future-alias.test.mjs', 'accepted-identity-alias.test.mjs', 'accepted-inventory.test.mjs', 'accepted-loader-future-native.test.mjs', 'accepted-loader-future.test.mjs', 'accepted-local-helpers.test.mjs', 'accepted-macro-origins.test.mjs', 'accepted-number-output-native.test.mjs', 'accepted-number-output.test.mjs', 'accepted-object-map-construction-native.test.mjs', 'accepted-ratchet.test.mjs', 'accepted-scanner.test.mjs', 'accepted-telemetry-defaults.test.mjs', 'accepted-ws-auth-helper.test.mjs', 'accepted-ws-auth-native.test.mjs']);
+  assert.deepEqual(Object.keys(registry.tests).sort(), ['accepted-aliases.test.mjs', 'accepted-callable-alias-native.test.mjs', 'accepted-callable-alias.test.mjs', 'accepted-constant-output-native.test.mjs', 'accepted-construction-chain-native.test.mjs', 'accepted-contracts.test.mjs', 'accepted-controls.test.mjs', 'accepted-defaults.test.mjs', 'accepted-exchange-future.test.mjs', 'accepted-function-pointer-native.test.mjs', 'accepted-future-alias-native.test.mjs', 'accepted-future-alias.test.mjs', 'accepted-identity-alias.test.mjs', 'accepted-inventory.test.mjs', 'accepted-loader-future-native.test.mjs', 'accepted-loader-future.test.mjs', 'accepted-local-helpers.test.mjs', 'accepted-macro-origins.test.mjs', 'accepted-number-output-native.test.mjs', 'accepted-number-output.test.mjs', 'accepted-object-map-construction-native.test.mjs', 'accepted-ratchet.test.mjs', 'accepted-reviewed-aliases.test.mjs', 'accepted-scanner.test.mjs', 'accepted-telemetry-defaults.test.mjs', 'accepted-weex-kline-alias.test.mjs', 'accepted-ws-auth-helper.test.mjs', 'accepted-ws-auth-native.test.mjs']);
   // 19b18f40d0 adds LocalFuture pure/native controls; retain both files and
   // their named root-identity mutation alongside all existing controls.
   // Numeric registration adds source/compiler identity controls and four real
@@ -943,10 +944,13 @@ test('accepted-set control registry pins files and executed mutations', async ()
   // all prior named tests and executed mutation receipts remain required.
   // Alias-default expansion adds one lexical-scope test and a concrete-type
   // removed-default control; every preceding test and mutation stays pinned.
-  assert.equal(Object.values(registry.tests).flat().length, 110, 'registered accepted-set test count');
+  // Reviewed aliases and exchange runtime coverage retain every earlier control.
+  // Two exact serializer metadata constants add policy and production-native
+  // controls plus six refusal mutations; all prior controls remain required.
+  assert.equal(Object.values(registry.tests).flat().length, 120, 'registered accepted-set test count');
   // Provider self coverage adds a same-file nested-definition refusal control;
   // consumer recipe/route controls and every earlier mutation remain required.
-  assert.equal(registry.mutations.length, 125, 'registered accepted-set mutation count');
+  assert.equal(registry.mutations.length, 142, 'registered accepted-set mutation count');
   const output = [...Object.values(registry.tests).flat().map((name, i) => `ok ${i + 1} - ${name}`), ...registry.mutations.map(name => `# ${name}: named assertion; process exit 1`), '# fail 0', '# skipped 0', '# todo 0'].join('\n');
   verifyControls(output, registry);
   for (const name of registry.mutations) assert.throws(() => verifyControls(output.replace(`# ${name}: named assertion; process exit 1`, ''), registry), /mutation inventory/);

@@ -51,6 +51,9 @@ pub enum Js {
     Bool(bool),
     Number(f64),
     BigInt(Rc<num_bigint::BigInt>),
+    /// Retained native intrinsic referent shared with core socket statistics.
+    /// This is a data/reference capability, not an executable JS function body.
+    Builtin(safe_cex_num::BuiltinReference),
     String(Str),
     Array(Rc<RefCell<Vec<Option<Js>>>>),
     Object(Rc<ObjectData>),
@@ -127,6 +130,15 @@ impl From<JsCoercionError> for Thrown {
     }
 }
 
+impl From<Thrown> for Rc<ExchangeError> {
+    fn from(thrown: Thrown) -> Self {
+        thrown
+            .native
+            .clone()
+            .unwrap_or_else(|| Rc::new(thrown.to_exchange_error()))
+    }
+}
+
 impl From<Thrown> for ExchangeError {
     fn from(thrown: Thrown) -> Self {
         thrown.to_exchange_error()
@@ -148,6 +160,7 @@ impl fmt::Debug for Js {
             Js::Bool(b) => write!(f, "{b}"),
             Js::Number(n) => write!(f, "{}", js_number_string(*n)),
             Js::BigInt(n) => write!(f, "{n}n"),
+            Js::Builtin(reference) => write!(f, "{}", reference.js_string()),
             Js::String(s) => write!(f, "{:?}", String::from_utf16_lossy(s)),
             Js::Array(a) => f.debug_list().entries(a.borrow().iter()).finish(),
             Js::Object(o) => {
@@ -174,6 +187,18 @@ impl fmt::Debug for Js {
 }
 
 impl Js {
+    /// Preserve a live intrinsic referent instead of copying its current fields.
+    pub fn from_prototype(value: safe_cex_num::PrototypeValue) -> Js {
+        use safe_cex_num::PrototypeValue as P;
+        match value {
+            P::Undefined => Js::Undefined,
+            P::Null => Js::Null,
+            P::Boolean(value) => Js::Bool(value),
+            P::Number(value) => Js::Number(value),
+            P::String(value) => Js::str(&value),
+            P::Reference(reference) => Js::Builtin(reference),
+        }
+    }
     pub fn str(text: &str) -> Js {
         Js::String(utf16(text))
     }
@@ -245,6 +270,7 @@ impl Js {
     }
     pub fn is_callable(&self) -> bool {
         matches!(self, Js::Function(_))
+            || matches!(self, Js::Builtin(reference) if reference.is_callable())
     }
     pub fn type_of(&self) -> &'static str {
         match self {
@@ -255,6 +281,7 @@ impl Js {
             Js::BigInt(_) => "bigint",
             Js::String(_) => "string",
             Js::Function(_) => "function",
+            Js::Builtin(reference) if reference.is_callable() => "function",
             _ => "object",
         }
     }
@@ -289,6 +316,7 @@ impl Js {
         match (self, other) {
             (Js::Array(a), Js::Array(b)) => Rc::ptr_eq(a, b),
             (Js::Object(a), Js::Object(b)) => Rc::ptr_eq(a, b),
+            (Js::Builtin(a), Js::Builtin(b)) => a == b,
             (Js::Function(a), Js::Function(b)) => Rc::ptr_eq(a, b),
             (Js::Promise(a), Js::Promise(b)) => a.ptr_eq(b),
             (Js::Map(a), Js::Map(b)) => Rc::ptr_eq(a, b),
@@ -297,14 +325,99 @@ impl Js {
         }
     }
 
-    /// ToString for primitives; objects use their default `[object X]` text.
+    /// ToString, with OrdinaryToPrimitive's string hint for live objects.
     pub fn to_js_string(&self) -> Result<Str, Thrown> {
+        if matches!(self, Js::Object(_) | Js::Function(_)) {
+            for name in ["toString", "valueOf"] {
+                let declared = self.has_property(&utf16(name));
+                // None is the value model's implicit stock prototype. An
+                // explicit null prototype contributes no inherited methods.
+                let method = if !declared && self.string_prototype_is_null() {
+                    Js::Undefined
+                } else {
+                    self.get(name)?
+                };
+                if name == "toString"
+                    && !declared
+                    && method.is_undefined()
+                    && self.has_implicit_string_prototype()
+                {
+                    return self.intrinsic_string();
+                }
+                if !method.is_callable() {
+                    continue;
+                }
+                let primitive = match &method {
+                    Js::Builtin(reference)
+                        if reference.member()
+                            == safe_cex_num::BuiltinIdentity::Object(
+                                safe_cex_num::ProtoMember::ToString,
+                            ) =>
+                    {
+                        let tag = match self {
+                            Js::Function(_) => "Function",
+                            Js::Object(object) if object.class == "Buffer" => "Uint8Array",
+                            Js::Object(object)
+                                if matches!(object.class, "Error" | "Blob" | "ArrayBuffer") =>
+                            {
+                                object.class
+                            }
+                            Js::Object(_) => "Object",
+                            _ => unreachable!(),
+                        };
+                        Js::str(&format!("[object {tag}]"))
+                    }
+                    Js::Builtin(reference)
+                        if reference.member()
+                            == safe_cex_num::BuiltinIdentity::Object(
+                                safe_cex_num::ProtoMember::ValueOf,
+                            ) =>
+                    {
+                        self.clone()
+                    }
+                    _ => method.call(self.clone(), vec![])?,
+                };
+                if !primitive.is_object() {
+                    return primitive.to_js_string();
+                }
+            }
+            return Err(Thrown::type_error(
+                "Cannot convert object to primitive value",
+            ));
+        }
+        self.intrinsic_string()
+    }
+    fn has_implicit_string_prototype(&self) -> bool {
+        match self {
+            Js::Object(object) => object
+                .proto
+                .borrow()
+                .as_ref()
+                .is_none_or(Js::has_implicit_string_prototype),
+            Js::Function(_) => true,
+            _ => false,
+        }
+    }
+    fn string_prototype_is_null(&self) -> bool {
+        match self {
+            Js::Object(object) => object
+                .proto
+                .borrow()
+                .as_ref()
+                .is_some_and(Js::string_prototype_is_null),
+            Js::Null => true,
+            _ => false,
+        }
+    }
+    /// Stock intrinsic conversion after primitive coercion dispatch.
+    fn intrinsic_string(&self) -> Result<Str, Thrown> {
         Ok(match self {
             Js::Undefined => utf16("undefined"),
             Js::Null => utf16("null"),
             Js::Bool(b) => utf16(if *b { "true" } else { "false" }),
             Js::Number(n) => utf16(&js_number_string(*n)),
             Js::BigInt(n) => utf16(&n.to_string()),
+            Js::Builtin(reference) => utf16(&reference.js_string()),
             Js::String(s) => s.clone(),
             Js::Array(items) => {
                 let items = items.borrow().clone();
@@ -322,9 +435,7 @@ impl Js {
                 out.into()
             }
             Js::Object(o) => {
-                if o.class == "Buffer" && self.get("toString")?.is_callable() {
-                    self.call_method("toString", vec![])?.to_js_string()?
-                } else if o.class == "Blob" || o.class == "ArrayBuffer" {
+                if o.class == "Blob" || o.class == "ArrayBuffer" {
                     utf16(&format!("[object {}]", o.class))
                 } else if o.class == "Error" {
                     let name = self.get("name")?;
@@ -380,6 +491,7 @@ impl Js {
                 ));
             }
             Js::String(s) => string_to_number(&String::from_utf16_lossy(s)),
+            Js::Builtin(reference) => string_to_number(&reference.js_string()),
             Js::Array(_) | Js::Object(_) => {
                 string_to_number(&String::from_utf16_lossy(&self.to_js_string()?))
             }
@@ -409,6 +521,23 @@ impl Js {
     }
     fn get_key_receiver(&self, key: &[u16], receiver: &Js) -> Result<Js, Thrown> {
         match self {
+            Js::Builtin(reference) => {
+                let key = String::from_utf16(key).map_err(|_| {
+                    Thrown::type_error("lone UTF-16 surrogate at an intrinsic boundary")
+                })?;
+                // Object.prototype's legacy accessor observes the original receiver.
+                if key == "__proto__"
+                    && !self.same_reference(receiver)
+                    && reference.member()
+                        == safe_cex_num::BuiltinIdentity::Object(
+                            safe_cex_num::ProtoMember::Prototype,
+                        )
+                    && let Js::Object(object) = receiver
+                {
+                    return Ok(object.proto.borrow().clone().unwrap_or(Js::Null));
+                }
+                return Ok(Js::from_prototype(reference.get(&key)));
+            }
             Js::Undefined | Js::Null => {
                 return Err(Thrown::type_error(&format!(
                     "Cannot read properties of {} (reading '{}')",
@@ -485,6 +614,9 @@ impl Js {
         }
     }
     pub fn has_own(&self, key: &str) -> bool {
+        if let Js::Builtin(reference) = self {
+            return reference.own_fields().contains_key(key);
+        }
         match self {
             Js::Array(items) => array_index(&utf16(key))
                 .is_some_and(|i| matches!(items.borrow().get(i), Some(Some(_)))),
@@ -498,6 +630,29 @@ impl Js {
         self.set_key(&utf16(key), value)
     }
     pub fn set_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
+        if let Js::Builtin(reference) = self {
+            let key = String::from_utf16(key).map_err(|_| {
+                Thrown::type_error("lone UTF-16 surrogate at an intrinsic boundary")
+            })?;
+            let value = match value {
+                Js::Undefined => safe_cex_num::PrototypeScalar::Undefined,
+                Js::Null => safe_cex_num::PrototypeScalar::Null,
+                Js::Bool(value) => safe_cex_num::PrototypeScalar::Boolean(value),
+                Js::Number(value) => safe_cex_num::PrototypeScalar::Number(value),
+                Js::String(value) => {
+                    safe_cex_num::PrototypeScalar::String(String::from_utf16(&value).map_err(
+                        |_| Thrown::type_error("lone UTF-16 surrogate at an intrinsic boundary"),
+                    )?)
+                }
+                _ => {
+                    return Err(Thrown::type_error(
+                        "intrinsic referent fields require native primitive data",
+                    ));
+                }
+            };
+            reference.set(&key, value);
+            return Ok(());
+        }
         if let Js::Array(items) = self {
             if let Some(i) = array_index(key) {
                 let mut items = items.borrow_mut();
@@ -534,6 +689,21 @@ impl Js {
             )));
         };
         let existing = props.borrow().get(key).cloned();
+        if existing.is_none()
+            && key == utf16("__proto__").as_ref()
+            && let Js::Object(object) = self
+            && matches!(&*object.proto.borrow(), Some(Js::Builtin(reference))
+                if reference.member() == safe_cex_num::BuiltinIdentity::Object(safe_cex_num::ProtoMember::Prototype))
+        {
+            if value.is_object() || matches!(value, Js::Null) {
+                *object.proto.borrow_mut() = if matches!(value, Js::Null) {
+                    None
+                } else {
+                    Some(value)
+                };
+            }
+            return Ok(());
+        }
         // Inherited setters receive the original receiver; inherited read-only data
         // properties refuse an own shadow, as ordinary strict-mode [[Set]] does.
         if existing.is_none() {
@@ -734,6 +904,13 @@ impl Js {
     /// Enumerable own string keys in OrdinaryOwnPropertyKeys order.
     pub fn own_keys(&self) -> Vec<Str> {
         match self {
+            Js::Builtin(reference) => {
+                let fields = reference.own_fields();
+                safe_cex_num::js_own_keys(fields.keys().map(String::as_str))
+                    .into_iter()
+                    .map(utf16)
+                    .collect()
+            }
             Js::Array(items) => items
                 .borrow()
                 .iter()
@@ -944,10 +1121,11 @@ pub fn to_json(value: &Js) -> Result<serde_json::Value, Thrown> {
                 })
                 .collect::<Result<_, _>>()?,
         ),
-        Js::Object(_) => {
+        Js::Builtin(reference) if reference.is_callable() => serde_json::Value::Null,
+        Js::Object(_) | Js::Builtin(_) => {
             let mut out = serde_json::Map::new();
             for (k, v) in value.own_entries()? {
-                if matches!(v, Js::Undefined | Js::Function(_)) {
+                if matches!(v, Js::Undefined | Js::Function(_)) || v.is_callable() {
                     continue;
                 }
                 out.insert(String::from_utf16_lossy(&k), to_json(&v)?);
@@ -961,7 +1139,14 @@ pub fn to_json(value: &Js) -> Result<serde_json::Value, Thrown> {
 
 /// Typed boundary helpers retain native numbers; JSON wire projection is separate.
 pub fn to_typed<T: serde::de::DeserializeOwned>(value: &Js) -> Result<T, Thrown> {
-    typed::decode(value)
+    typed::decode(value, false)
+}
+/// Declared DTO profile: retain own undefined fields as native unit values.
+/// Unlike the JSON-shaped profile, callable fields are refused rather than omitted.
+pub fn to_typed_preserving_undefined<T: serde::de::DeserializeOwned>(
+    value: &Js,
+) -> Result<T, Thrown> {
+    typed::decode(value, true)
 }
 pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown> {
     typed::encode(value)
@@ -971,6 +1156,7 @@ pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown>
 pub fn to_js_json(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown> {
     use safe_cex_num::JsJsonValue as J;
     Ok(match value {
+        Js::Builtin(reference) if reference.is_callable() => J::Undefined,
         Js::Undefined | Js::Function(_) => J::Undefined,
         Js::Null => J::Null,
         Js::Bool(b) => J::Bool(*b),

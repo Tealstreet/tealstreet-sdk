@@ -60,7 +60,7 @@ pub trait ConstructorBindings {
     fn child(&self, v: Venue, kind: Child, owner: EventValue) -> Result<EventValue, Failure>;
 }
 fn array(v: Vec<EventValue>) -> EventValue {
-    EventValue::Array(Rc::new(RefCell::new(v)))
+    EventValue::array(v)
 }
 fn construct(
     v: Venue,
@@ -85,13 +85,13 @@ fn construct(
     let (primary, secondary) = if v == Venue::Spot {
         (EventValue::Undefined, EventValue::Undefined)
     } else {
-        (split.get("1")?, split.get("2")?)
+        (split.read("1")?, split.read("2")?)
     };
     if v == Venue::Spot {
         owner.assign("xhr", split.clone());
     } else {
         let field = if v == Venue::PM { "papiXhr" } else { "xhr" };
-        owner.assign(field, split.get("0")?);
+        owner.assign(field, split.read("0")?);
         owner.assign("_primaryXhr", primary.clone());
         owner.assign("_secondaryXhr", secondary.clone());
     }
@@ -108,8 +108,8 @@ fn construct(
             let clients = array(vec![
                 primary,
                 secondary,
-                owner.get("publicXhr")?,
-                owner.get("unlimitedXHR")?,
+                owner.read("publicXhr")?,
+                owner.read("unlimitedXHR")?,
             ]);
             b.guards(owner.clone(), clients)?;
         }
@@ -244,7 +244,7 @@ fn install(b: &dyn ConnectBindings, url: String) -> Result<(), Failure> {
     Ok(())
 }
 async fn connect_legacy(v: Venue, b: Rc<dyn ConnectBindings>) -> Result<(), Failure> {
-    if b.options()?.get("payloadSigner")?.truthy() {
+    if b.options()?.read("payloadSigner")?.truthy() {
         return Ok(());
     }
     if b.state().disposed.get() || b.state().connecting.get() {
@@ -298,7 +298,7 @@ async fn connect_legacy(v: Venue, b: Rc<dyn ConnectBindings>) -> Result<(), Fail
     if b.state().disposed.get() || b.state().force_closed.get() {
         return Ok(());
     }
-    let base = base_url(v, b.options()?.get("testnet")?.truthy());
+    let base = base_url(v, b.options()?.read("testnet")?.truthy());
     let key = key.text()?;
     let url = if v == Venue::Futures {
         format!("{base}?listenKey={}", component(&key))
@@ -318,21 +318,21 @@ pub async fn connect_pm(b: Rc<dyn ConnectBindings>) -> Result<(), Failure> {
 }
 // ts: BinancePrivateWebsocket.connectAndSubscribe (Spot)
 pub async fn connect_spot(b: Rc<dyn ConnectBindings>) -> Result<(), Failure> {
-    if b.options()?.get("payloadSigner")?.truthy() {
+    if b.options()?.read("payloadSigner")?.truthy() {
         return Ok(());
     }
     if b.state().disposed.get() {
         return Ok(());
     }
     let opts = b.options()?;
-    let key = opts.get("key")?;
-    let secret = opts.get("secret")?;
-    let remote = opts.get("remoteSigner")?;
+    let key = opts.read("key")?;
+    let secret = opts.read("secret")?;
+    let remote = opts.read("remoteSigner")?;
     if !key.truthy() || (!secret.truthy() && !remote.truthy()) {
         b.emit("Binance Spot private WebSocket requires an API key and signing secret".into())?;
         return Ok(());
     }
-    let url = base_url(Venue::Spot, b.options()?.get("testnet")?.truthy());
+    let url = base_url(Venue::Spot, b.options()?.read("testnet")?.truthy());
     install(b.as_ref(), url.into())
 }
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -352,15 +352,8 @@ pub trait SpotMessageBindings {
     fn disposed(&self) -> bool;
     fn call(&self, op: MessageOp, args: Vec<EventValue>) -> Result<(), Failure>;
 }
-pub(crate) fn native(v: serde_json::Value) -> EventValue {
-    match v {
-        serde_json::Value::Number(n) => number(n.to_string().parse().unwrap()),
-        serde_json::Value::Array(a) => array(a.into_iter().map(native).collect()),
-        serde_json::Value::Object(o) => {
-            EventValue::object(o.into_iter().map(|(k, v)| (k, native(v))).collect())
-        }
-        v => EventValue::from_json(v),
-    }
+pub(crate) fn native(value: serde_json::Value) -> EventValue {
+    EventValue::from_json(value)
 }
 pub(crate) fn parse_data(data: EventValue) -> EventValue {
     data.text()
@@ -380,7 +373,7 @@ fn optional(v: EventValue, k: &str) -> Result<EventValue, Failure> {
     if v.nullish() {
         Ok(EventValue::Undefined)
     } else {
-        v.get(k)
+        v.read(k)
     }
 }
 // ts: BinancePrivateWebsocket.onMessage (Spot)
@@ -398,20 +391,20 @@ pub fn on_spot_message(
     if !json.truthy() {
         return Ok(());
     }
-    if json.get("id")?.same(&string(
+    if json.read("id")?.same(&string(
         crate::spot_protocol::BINANCE_SPOT_USER_DATA_REQUEST_ID,
     )) {
-        if !json.get("status")?.same(&number(200.0))
+        if !json.read("status")?.same(&number(200.0))
             || !matches!(
-                optional(json.get("result")?, "subscriptionId")?,
+                optional(json.read("result")?, "subscriptionId")?,
                 EventValue::Number(_)
             )
         {
-            let msg = optional(json.get("error")?, "msg")?;
+            let msg = optional(json.read("error")?, "msg")?;
             let reason = if msg.truthy() {
                 msg.text()?
             } else {
-                let status = json.get("status")?;
+                let status = json.read("status")?;
                 format!(
                     "subscription rejected with status {}",
                     if status.nullish() {
@@ -433,25 +426,25 @@ pub fn on_spot_message(
         b.call(MessageOp::Ping, vec![])?;
         return Ok(());
     }
-    let wrapped = json.get("event")?;
+    let wrapped = json.read("event")?;
     let event = if wrapped.truthy() {
         wrapped
     } else {
         json.clone()
     };
-    if event.get("e")?.same(&string("outboundAccountPosition")) {
+    if event.read("e")?.same(&string("outboundAccountPosition")) {
         b.call(MessageOp::Stats, vec![string("position")])?;
         b.call(MessageOp::Account, vec![array(vec![event.clone()])])?;
     }
-    if event.get("e")?.same(&string("executionReport")) {
+    if event.read("e")?.same(&string("executionReport")) {
         b.call(MessageOp::Stats, vec![string("order")])?;
         b.call(MessageOp::Order, vec![array(vec![event])])?;
     }
-    if json.get("id")?.same(&number(
+    if json.read("id")?.same(&number(
         crate::spot_protocol::BINANCE_SPOT_HEARTBEAT_REQUEST_ID,
     )) {
-        if json.get("status")?.same(&number(200.0))
-            && optional(json.get("result")?, "userDataStream")?.same(&EventValue::Bool(true))
+        if json.read("status")?.same(&number(200.0))
+            && optional(json.read("result")?, "userDataStream")?.same(&EventValue::Bool(true))
         {
             b.call(MessageOp::Pong, vec![])?;
         } else {
@@ -509,11 +502,11 @@ pub fn apply_confirmed_mode(
         let n = dense(&markets, "this.store.markets")?;
         let mut out = vec![];
         for i in 0..n {
-            out.push(markets.get(&i.to_string())?.get("symbol")?);
+            out.push(markets.get(&i.to_string())?.read("symbol")?);
         }
         out
     };
-    let fetched = EventValue::object(b.leverage()?.spread());
+    let fetched = EventValue::record_object(b.leverage()?.spread());
     for symbol in &symbols {
         let key = symbol.text()?;
         let old = fetched.get(&key)?;
@@ -524,30 +517,30 @@ pub fn apply_confirmed_mode(
         }
         fields.insert(
             "positionMode".into(),
-            EventValue::Enum(PrivateEnum::PositionMode(mode)),
+            EventValue::enum_value(PrivateEnum::PositionMode(mode)),
         );
-        fetched.assign(&key, EventValue::object(fields));
+        fetched.assign(&key, EventValue::record_object(fields));
     }
     let rows = b.positions()?;
     let n = dense(&rows, "this.store.positions")?;
     let mut positions = vec![];
     for i in 0..n {
         let p = rows.get(&i.to_string())?;
-        let s = p.get("symbol")?;
-        if !symbols.iter().any(|v| v.same(&s)) || p.get("contracts")?.number()? != 0.0 {
+        let s = p.read("symbol")?;
+        if !symbols.iter().any(|v| v.same(&s)) || p.read("contracts")?.number()? != 0.0 {
             positions.push(p);
             continue;
         }
         let mut fields = p.spread();
-        fields.insert("id".into(), b.id(p.get("symbol")?, p.get("side")?, mode)?);
+        fields.insert("id".into(), b.id(p.read("symbol")?, p.read("side")?, mode)?);
         fields.insert(
             "positionMode".into(),
-            EventValue::Enum(PrivateEnum::PositionMode(mode)),
+            EventValue::enum_value(PrivateEnum::PositionMode(mode)),
         );
-        positions.push(EventValue::object(fields));
+        positions.push(EventValue::record_object(fields));
     }
     b.setting(hedged)?;
-    b.update(EventValue::object(
+    b.update(EventValue::record_object(
         [
             ("fetchedLeverage".into(), fetched),
             ("positions".into(), array(positions)),
@@ -592,7 +585,10 @@ fn protect_big_integer_tokens(text: &str) -> String {
 
 pub(crate) fn parse_big_data(data: EventValue) -> EventValue {
     match data {
-        EventValue::String(text) => parse_data(string(protect_big_integer_tokens(&text))),
+        EventValue::String(text) => match String::from_utf16(&text) {
+            Ok(value) => parse_data(string(protect_big_integer_tokens(&value))),
+            Err(_) => EventValue::Null,
+        },
         data => data,
     }
 }

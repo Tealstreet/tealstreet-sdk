@@ -1290,3 +1290,178 @@ Historical survivor status made explicit: **3 resolved /0 current survivors** wi
 The earlier tests missed, respectively, the fixed-to-user composition edge because topics were empty on fixed calls; the native dispose edge because only its descriptor was inspected; and own interval:undefined because Get and JSON text cannot distinguish it from absence. The current native test invokes installed fixed with populated topics, invokes installed prototype dispose with original receiver/effect observations, and compares exact own key/descriptors before wire. FINDINGS_11_REVALIDATION.json records each cause, named assertion and broken/restored exit. This is a finite three-recipe repeat; the other twenty unique recipes are not re-run in this unit. No discarded-duplicate capture file is edited.
 
 Pinned read-only sub-agent closure review is appended to FINDINGS_11_REVIEWS.md. Final local gates remain only workspace fmt --check and locked workspace build at the delivered commit, with exits bound in the local receipt. Clippy, wasm, wiring, layers and routing are centrally owned and not run locally; full suites/static/extractor/live/CI checks also are not run. No push.
+
+
+### Production journal fold binding (ddi2il-20)
+
+`Exchange::fetch_historical_positions` now dispatches the existing source arrow,
+whose superclass helper uses the shared `build_records` engine. The engine reads
+the same realm instance's source income-range and historical-fill methods; income
+mapper/pager imports bind to `income.rs`, and asynchronous REST callbacks use the
+existing owned task dispatcher. The shared typed output boundary still applies.
+
+Compiled negative controls used the new round-trip production test: the original
+trait default failed with `no journal records path declared`; enabling only trait
+dispatch failed with `fetchHistoricalPositions is not bound by this realm`. Both
+are runtime failures after successful compilation. The restored implementation
+returns a real closed round trip (PnL1000, fees3) with requested account, bounds
+and market settlement currency. A separate default-window test pins integer
+Date.now, the source30-day range and the shared14-day straddle lookback. A native
+registry test obtains the same closed record through real reqwest HTTP without
+starting sockets. Empty results or bypassing symbol-scoped execution reads fail
+the nonempty-record assertion. The source `deriveClosedPositions` axis remains
+separate from this shared journal fold.
+
+Scoped gates: production binding16/16; native Hyperliquid HTTP2/2; registry
+construction13/13; actual-source core snapshots/core REST/rest helpers11/11;
+Hyperliquid venue-oracle39/39; parity:check0; registry48 names and control1/1;
+layers88/88. Native all-target and wasm library strict clippy plus fmt pass for
+the venue and registry. No fixture or manifest regeneration.
+### Native external public data binding (ddi2il-20)
+
+`HyperliquidDependencies.external_public_data` accepts the shared provider factory.
+The realm superclass delegates initialization to the existing native BaseExchange:
+provider creation receives the same Store owner, startup waits for both loaded
+flags, and BaseExchange disposes the retained provider. The registry supplies its
+existing gateway factory. An embedding with configured external data and no
+factory gets the shared explicit diagnostic before network activity.
+
+A new production registry test,
+`native_host_external_data::hyperliquid_starts_on_a_public_data_gateway_over_websocket`,
+was compiled against the old binding and failed at startup with the old explicit
+Hyperliquid refusal (0 passed, 1 failed). After wiring the factory it passes over
+real native websocket IO, receives gateway markets/tickers and makes no venue
+REST request. `binding::external_startup_waits_for_both_loaded_flags_and_disposes_its_provider`
+keeps startup pending with markets alone, completes after ticker hydration,
+checks the exact Store owner, makes no direct public request/socket and observes
+provider disposal once. The companion missing-factory test refuses visibly.
+
+Scoped validation: production binding 16/16; native gateway suite 4/4; native
+Hyperliquid signed HTTP 1/1; registry construction 13/13; Hyperliquid venue-oracle
+39 passing tests across its 11 selected binaries; registry source equivalence
+48 names plus mutation-control test 1/1; layers 88/88; parity:check zero findings.
+Native all-target and wasm library strict clippy cover the venue and registry.
+No manifests or fixture corpora were regenerated. The inherited seed oracle
+hash failure was resolved by merging landed #198, including its one-row
+provenance check, before the passing oracle run.
+
+### Override inventory review after external-data and journal assembly
+
+Reviewed the two `realm/facade_exchange.rs::base_exchange_class` inventory rows.
+`b.dispose()` is the inherited BaseExchange implementation reached by the source
+class's explicit super-dispose path; source override dispatch happens in the
+realm first. `b.name()` serves the inherited name getter over the native account
+name. Neither call newly bypasses a venue override. The external-data hydration/
+disposal test observes the provider released exactly once, and construction/
+native registry tests retain the venue name.
+
+The stale inventory compiled and failed
+`production_callers_do_not_bypass_exchange_override_hooks` before the repair.
+After reviewing the final combined journal/external-data body, only those two
+fingerprints changed to `f16535160061e222`; the same test passes (1/1). No inventory
+regeneration or blanket delegation was used. This final body differs from the
+external-data-only master body's fingerprint because it also binds journal folding.
+
+## 2026-10-17 — raw socket close preserves forceClosed
+
+The production family BaseWebSocket facade now forwards source `ws.close()` to
+shared `BaseWebSocket::close_current_websocket()` from merged #227. It previously
+called `force_close()`, incorrectly changing the superclass forceClosed flag.
+The source private perpetual socket's `dispose` calls stopPingLoop and raw close,
+without super.dispose or forceClose (`hyperliquid.ws-private.ts`).
+
+`realm::socket_tests::private_no_super_dispose_closes_wire_without_force_closing_base`
+constructs the production Hyperliquid exchange and invokes its actual private
+socket methods through the family realm. The compiled old bridge closed the wire
+but failed the direct native forceClosed assertion. After the transport-only
+cutover, the wire closes once and native forceClosed/parent-disposal stay false.
+The independent `tests/private-close-source.cjs` executes the actual source class,
+checks those same observations, and rejects a source forceClose mutation. Its
+control runs inside the maintained native test. No test transport flags stand in
+for the production BaseWebSocket state.
+
+The existing `base_websocket_class` inventory pin is reviewed and updated from
+98b2e6c011ff88a4 to4a6e54ae7b9b544a. The inventoried h.socket.dispose call is
+unchanged and remains the explicit superclass socket path; only raw close changes.
+The inventory is reconciled manually, with other lanes' rows retained.
+
+Measured close-fix validation: production realm test1/1 (with actual-source
+mutation control), core binding18/18, native/private-class source target1/1 with
+60 source cases, strict native all-target Clippy and wasm32 library Clippy pass,
+scoped formatting passes, parity0 (7459 rows,17146 public items). The full global
+override guard's inherited eight Binance pins are repaired by author PR#235;
+that repair is inherited separately before marking this change ready.
+
+## 2026-10-17 — Hyperliquid Spot production binding
+
+`spot_binding::HyperliquidSpotExchange::new` constructs the existing Spot class
+inside the production family realm, with the shared BaseExchange, Store, socket,
+HTTP, signer and caller-owned limiter inputs. The native BaseExchange also records
+`is_spot = true`. `RustVenueHost::hyperliquid` now takes the selected exchange name;
+all callers are updated. The native registry constructs both names independently.
+The source constructor's imported perpetual API factory and default-mainnet local
+signing calls are preserved.
+
+Observed gates on the integrated branch:
+
+- `cargo +1.99.0 test --locked --manifest-path sdk-rs/Cargo.toml -p
+  safe-cex-venue-hyperliquid --test binding --test spot_binding --test
+  spot_runtime --test spot_account_reads --test spot_ws_dispatch`: 18 + 21 + 11 +
+  10 + 9 passing tests. Every required Spot method is invoked; seven absent
+  source overrides retain the exact BaseExchange rejection. Additional tests
+  exercise real source OHLCV, book/candle message dispatch and cleanup, preflight
+  caller/batch IDs, the native spot flag, and source numeric-key result handling.
+- `python3 scripts/spot-binding-controls.py`: 19/19 independent method mutations
+  compiled and failed their named test; restored 21/21 pass. Sixteen required
+  methods and the three candle/book operations are controlled individually.
+- `scripts/spot-boundary-controls.py`: the three old-bridge/oracle controls and
+  separately selected `native-spot-flag` each compiled and failed their named
+  assertion; exact byte restoration passed Spot21 + source-runtime11. The wrong
+  omitUndefined stub still reads the actual source utility, keeping its source
+  count at9; it fails the native result assertion, not a hash/count guard.
+- Registry tests `native_host_external_data`, `native_host_hyperliquid`,
+  `native_host_hyperliquidspot`, `rust_venues`: 5 + 2 + 1 + 14 pass. The new Spot
+  test constructs through the real table, boots via loopback reqwest/tungstenite,
+  verifies source action/nonce signatures server-side, preserves caller cloid,
+  uses asset10000 and cancels oid777. The gateway test proves configured Spot
+  external-data startup without direct venue public REST/socket. Earlier table
+  removal compiled and failed that gateway construction witness. Hyperliquid's
+  native host test also proves the same limiter Rc across Spot/perpetual hosts
+  and selected Spot exchange-name metadata at the remote HTTP adapter.
+- Scoped strict Clippy passes for native all-targets and wasm32 library targets;
+  scoped formatting passes. `layers:check`:88/88. Registry equivalence:48 ordered
+  names plus its corrupt-claim control pass. `parity:check`:0 invention/status
+  findings (7459 rows,17127 public items on this observed tree).
+
+The real utility `utils/omitUndefined.ts` delegates to lodash/omitBy: source Spot
+placement returns a numeric-key object. The old source-runtime stub incorrectly
+used Array.filter. The corrected oracle executes the actual utility; the test host
+now reproduces its object result. The production realm already retained the right
+shape. Native order IDs use the explicit conversion documented on the place/update
+manifest rows and README under MANIFEST-SPEC#closed-typed-output-boundary; source
+objects are not rewritten to arrays. Batch preflight/mapSeries ordering is retained
+while combining lowered IDs at the native ABI.
+
+Realistic Spot asset contexts omit oraclePx/funding, producing source NaN. The
+Store/DTO bridge now uses the shared js_runtime typed codec instead of JSON and
+preserves f64 values through native snapshots/lookups; wire JSON is unchanged.
+The candle body also exposed an old production host error: object fields t/o/h/l/c/v
+were destructured as an array. The actual object pattern is now bound, with a
+compiling old-code control. Calendar arithmetic is the existing shared dayjs
+implementation, exposed through the two operations this source consumes.
+
+Override inventory updates are reviewed manually, without regeneration: the common
+Binding extraction preserves core dynamic dispose and its unbound fallback; the
+family base getter binds inherited BaseExchange isPublicDataOnly. Neither source
+Hyperliquid class overrides canSign. The new Spot start capability calls the
+concrete venue hook. Only affected existing pins and these two new calls are
+reconciled; other lanes' rows are retained.
+
+Spot integration follow-up: inherited merged #229's GRVT delegate review and
+current master, retaining both Spot and ApexOmni construction docs. Core18 and
+Spot21 production tests pass again; live TS override inventory passes1/1. The
+full guard reached the final inventory comparison: manually reviewed Spot/base
+class/core-dispose rows match. A further Store facade enclosing-body pin is
+updated for the typed Store.update bridge; its native Store.update_order call
+is unchanged. Remaining stale Binance rows on that master tree were reported
+to their author lane for review; they are not regenerated or edited here.

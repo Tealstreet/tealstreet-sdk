@@ -9,7 +9,12 @@ const source = fs.readFileSync(sourceFile, 'utf8');
 require('./interface-heritage.cjs')(ts, ts.createSourceFile(sourceFile, source, ts.ScriptTarget.Latest, true));
 const original = fs.readFileSync(path.join(__dirname, '../tests/fixtures/types.json'));
 const originalHash = crypto.createHash('sha256').update(original).digest('hex');
-assert.equal(originalHash, '899f437bf387c27f151db7235ab566242e89aab91ca335591450a5ca1986575a', 'original shared feeder must remain byte-identical');
+// The seed repairs only the excluded WsUserEvent's fabricated user-only row.
+// Pin its current bytes and prove every other byte still matches the old feeder.
+assert.equal(originalHash, 'b8fea841419d24c4bf20174498df30d3e94796b84edaf1c498377be9c4b25be8', 'reviewed shared feeder must remain byte-identical');
+const userEventRaw = JSON.parse(original).cases.find(row => row.name === 'WsUserEvent').raw;
+const legacy = original.toString().replace(JSON.stringify(userEventRaw), JSON.stringify('{"user":"wallet"}'));
+assert.equal(crypto.createHash('sha256').update(legacy).digest('hex'), '899f437bf387c27f151db7235ab566242e89aab91ca335591450a5ca1986575a', 'only the separately covered intersection fixture changed');
 const bases = JSON.parse(original).cases;
 const bindings = fs.readFileSync(path.join(__dirname, '../tests/fixtures/field-identity-bindings.rs'), 'utf8');
 const supported = new Set([...bindings.matchAll(/"([^"]+)"\s*=>/g)].map(match => match[1]));

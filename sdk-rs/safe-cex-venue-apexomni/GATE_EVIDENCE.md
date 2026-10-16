@@ -656,3 +656,105 @@ At a09c018f263e0b296920a65a453678625f798e2d the complete scoped supplement and c
 The original67-row finding cohort is now classified:10 behavior /57 rationale; this continuation closes53 original finding notes (1 behavior repair,52 rationale), leaving0 original FINDING notes. The73 original CHOSEN-text rows remain outside this audit. Manifest status movement is0; the independently expected census remains28 ported /140 divergent /0 pending,168 rows in16 files, stopped file index15. Static sub-agent verification at a09c018f26 returned MERGE after the taxonomy correction.
 
 After those measurements, origin0286f63437e4320e8c12886d5fef8fc6dfa2eac3 was merged at996e91123279d7b20b9bc738fb2f418a2a46fd06. The ApexOmni source/test/script and manifest trees are unchanged by that merge; shared/integration changes are not assumed behavior-equivalent. The93-test and120-control-attempt exits above cover a09c018f26 only and are NOT rerun or claimed as measured at the post-merge delivery SHA. Per the latest coordinator instruction, post-merge delivery measures ONLY cargo fmt --check and cargo build --workspace --locked --jobs2 at the exact handoff SHA; its separate receipt records both exits. Host clippy, wasm, wiring, layers and routing are centrally owned and NOT RUN by this lane at that SHA. No other runtime, historical, extractor-check, FFI, live-network or CI claim is added. No push, PR or self-merge.
+
+## Assembled Exchange/registry binding
+
+Measured after master dd0e266704 integration:
+
+-27 assembled tests pass:16 mandatory methods,2 listeners, caller ID, private
+  login/subscription/Pong, one legacy resend, repeated refusal, HTTP400 metadata,
+  write503 non-replay and two disposal continuations.
+- `binding-signature.cjs` executes actual source placeOrder and signContract with
+  the pinned real npm zkLink SDK. Its full URL-encoded body equals native: amount
+  1.2345/price100.127 at distinct0.001/0.01 steps become1.235/100.13, with exact
+  signature5212a2f9ea21406e5f25c046c509388bb7b25469400905119ba807a186ed93a2fc89f328a8883dcd3d1c8c6107158554c319bd784d5b7d9b26bebc7dfd610c01.
+  The harness reuses trading.cjs's source/compiler setup and substitutes real
+  SDK imports; it does not generate a native expected signature.
+-18 independent wrong Exchange/listener bodies each compile and fail their
+  named E2E; restored18 bound_ tests pass. Two precision operand swaps compile
+  and fail wire size/price assertions independently; restoration passes.
+- Native registry proof starts real HTTP/WS, signs/places, receives the placed
+  order through private WS and cancels it. A subscriber records the WS update
+  immediately so later REST snapshots cannot erase proof of delivery. HMAC uses
+  the source's base64-spelled UTF8 key and authenticates actual transmitted form
+  bytes. Native proof plus13 registry tests pass.
+- Removing the actual Apex table entry compiles and fails native construction
+  naming the missing Rust-constructed venue; restored native proof passes.
+- Global parity passes with0 findings (7459rows/17119public items). All new
+  binding helpers map to actual class/constructor assembly; imported SDK crypto
+  retains its separate primitive witnesses. No regenerated manifests.
+
+Controls are reproducible through the four scripts named in CLAUDE.md. Logs
+for this execution are /tmp/apex-{binding-controls,precision-controls,registry-controls,capability-controls}.txt.
+The source bodies' existing divergences remain; late-disposal refusal and owned
+book snapshots are explicitly priced. Six inherited methods genuinely reject in
+TypeScript; those are exact source behavior, not newly implemented endpoints.
+
+Final full-venue/oracle, host/wasm lint and post-master integration results are
+recorded in the PR validation text. No live credentials or external venue orders
+were used; P4 live verification remains separately parked on Sam.
+
+The shared-factory regression adds a real custom adapter to the test transport
+provider. Both initial signing and legacy resend preserve the callable adapter
+and serializer; the fixed20-second factory timeout remains independent of the
+venue receive window. Two compiled substitutions each lose one of these
+capabilities and fail the named adapter witness; restoration passes.
+
+Post-integration gates: full source oracle161 tests (72 exchange,7 protocol,9 pure,
+28 record,6 signer,7 signing,21 transaction,11 utility);27 assembled binding E2Es;
+native registry1+13; host all-targets Clippy for venue and registry; wasm library
+Clippy for venue; fmt; registry equivalence; layers88; global parity0. The source
+oracle retains the actual four-position late-disposal observation while asserting
+the chosen P4 native guard leaves the initial positions unchanged; other state
+axes still compare directly. Read-only extractor reports no ApexOmni drift; only
+Polymarket and registry.native metadata were stale at this integration base.
+The dispatch inventory updates only reviewed ApexOmni calls; public_data_only's
+base can_sign delegation is guarded against a future source canSign override.
+
+Final master refresh c537b291d4 (merge f10b86b3ec): source oracle161,
+assembled E2Es27, native HTTP/WS proof1 plus registry13, registry equivalence1,
+layers88, global parity0 (7459rows/17126public items), host/wasm strict Clippy and
+workspace fmt all pass. The live source override inventory passes1 and the
+cancellation inventory passes6 with its explicit exporter ignored. The full
+shared dispatch guard stops at AsterDEX base_dispose's unreviewed dispose
+call, so no full-workspace dispatch pass is claimed. Apex-only discovery was
+reviewed against its36 committed call sites and its sole guarded delegation;
+all other lanes' inventory rows remain unchanged. The compiled negative-control
+receipts precede this final master refresh; the positive suites above were rerun
+against the resulting shared dependencies.
+
+
+## Native hosted signing
+
+Source audit: generic Base signHttpRequest and Apex private auth support the
+shared browser relay; WS uses apexomni-base64 (base64-spelled secret as HMAC key).
+Source validate/place still initialize the L2 signer from omniKeySeed. Native
+HTTP/WS signing now shares the account capability; the API secret stays remote
+while the source-required Omni seed remains local for contract signing.
+
+The original compiled hosted native E2E fails the not-wired refusal, then passes.
+Five native loopback tests cover local and remote lifecycles, actual transmitted
+HTTP/WS HMAC, fractional placement/caller ID, account-name presence/absence,
+delayed auth-before-subscribe, HTTP refusal without unsigned requests and WS
+refusal/throw without private frames or an auth-invalid diagnostic.
+
+Four independent capability/ownership substitutions each compile and fail the
+named native assertion, then restore to pass (hosted-signing-controls.py). A
+stronger disposal witness retains the wrapper and disposes synchronously inside
+the signer's first poll. It compiled and failed before the post-poll disposal
+guard; after repair both ordinary and reentrant disposal close the signing
+future without private frames. Source detached Promises continue; this native
+P4 cancellation choice is explicit in the onOpen row.
+
+On master263d9a8c81 plus the hosted implementation, source oracle161, assembled27,
+native5 + registry14, layers88/registry equivalence, cancellation6 (one explicit
+exporter ignored), host/wasm strict Clippy, fmt, live TS override1 and global
+parity0 (7459 rows/17146 public items) pass. After the final disposal guard,
+native5, assembled27, host/wasm Clippy, fmt and parity0 pass again. The full
+shared dispatch guard remains blocked by Backpack's stale disposal evidence,
+owned by #213; none of that lane's rows are edited. Own36 call sites retain
+exact discovery after reviewing just the two constructor fingerprints.
+
+The shared form-string prerequisite is landed #232. Its actual-source remote
+adapter/Axios witness covers four string representations; original bridge fails
+and repaired bridge passes. Opaque encoded bytes still refuse before signing.

@@ -41,8 +41,7 @@ type Interceptor = (Js, Js);
 struct ClientState {
     requests: Vec<Interceptor>,
     responses: Vec<Interceptor>,
-    retries: u32,
-    retry_condition: Option<Js>,
+    retry_options: Option<Js>,
     /// axios-rate-limit windows `(maxRequests, perMilliseconds, sent)`; a chained
     /// limiter adds a window and a request waits until every window has room.
     windows: Vec<(f64, f64, Vec<f64>)>,
@@ -120,14 +119,23 @@ pub fn create(host: Host, defaults: Js) -> Js {
         }),
     );
     let retry_state = state.clone();
+    let retry_runtime = host.runtime();
     let _ = client.define(
         "__configureRetry",
         Js::function("__configureRetry", move |_, a| {
             let opts = arg(&a, 0);
+            let options = opts.clone();
+            let runtime = retry_runtime.clone();
+            let interceptor = Js::function("axiosRetryState", move |_, a| {
+                let config = arg(&a, 0);
+                current_retry_state(&config, &options, runtime.as_ref(), true)?;
+                Ok(config)
+            });
             let mut s = retry_state.borrow_mut();
-            s.retries = opts.get("retries")?.to_number()? as u32;
-            let condition = opts.get("retryCondition")?;
-            s.retry_condition = condition.is_callable().then_some(condition);
+            s.retry_options = Some(opts);
+            // axios-retry installs this request interceptor before the venue's
+            // signing interceptor. LIFO dispatch retains that source ordering.
+            s.requests.push((interceptor, Js::Undefined));
             Ok(Js::Undefined)
         }),
     );
@@ -313,6 +321,35 @@ fn axios_error(response: &Js, config: &Js) -> Result<Thrown, Thrown> {
     Ok(Thrown::new(error))
 }
 
+/// axios-retry's namespace is source-visible state on the effective config.
+/// Replays retain per-request overrides and counter stamps; each request resets
+/// its wall-clock start after the earlier LIFO request interceptors complete.
+fn current_retry_state(
+    config: &Js,
+    options: &Js,
+    runtime: &dyn ExchangeRuntime,
+    reset_start: bool,
+) -> Result<Js, Thrown> {
+    let current = Js::object(vec![
+        ("retries", Js::Number(3.0)),
+        ("shouldResetTimeout", Js::Bool(false)),
+    ]);
+    for source in [options.clone(), config.get("axios-retry")?] {
+        for (key, value) in source.own_entries()? {
+            current.define_key(&key, value)?;
+        }
+    }
+    let count = current.get("retryCount")?;
+    if !count.truthy() {
+        current.define("retryCount", Js::Number(0.0))?;
+    }
+    if reset_start || !current.get("lastRequestTime")?.truthy() {
+        current.define("lastRequestTime", Js::Number(runtime.now_ms()))?;
+    }
+    config.set("axios-retry", current.clone())?;
+    Ok(current)
+}
+
 fn dispatch(
     host: Host,
     state: Rc<RefCell<ClientState>>,
@@ -320,33 +357,79 @@ fn dispatch(
     mut request: Js,
 ) -> JsFuture<'static> {
     Box::pin(async move {
-        let mut attempt = 0;
         loop {
             match send_once(&host, &state, &defaults, request.clone()).await {
                 Ok(response) => return Ok(response),
                 Err(error) => {
-                    let (retries, condition) = {
-                        let s = state.borrow();
-                        (s.retries, s.retry_condition.clone())
+                    let options = state.borrow().retry_options.clone();
+                    let Some(options) = options else {
+                        return Err(error);
                     };
-                    let retry = attempt < retries
-                        && match &condition {
-                            Some(condition) => condition
-                                .call(Js::Undefined, vec![error.value.clone()])?
-                                .truthy(),
-                            None => false,
-                        };
+                    let config = error.value.get("config")?;
+                    if !config.is_object() {
+                        return Err(error);
+                    }
+                    let runtime = host.runtime();
+                    let retry_state =
+                        current_retry_state(&config, &options, runtime.as_ref(), false)?;
+                    let condition = retry_state.get("retryCondition")?;
+                    let within_budget = super::ops::less_than(
+                        &retry_state.get("retryCount")?,
+                        &retry_state.get("retries")?,
+                    )?;
+                    let retry = if within_budget && condition.is_callable() {
+                        let decision = condition.call(Js::Undefined, vec![error.value.clone()])?;
+                        if matches!(decision, Js::Null | Js::Object(_) | Js::Promise(_)) {
+                            // axios-retry treats a resolved non-false result as
+                            // approval, while a rejected async predicate refuses.
+                            await_js(decision)
+                                .await
+                                .is_ok_and(|value| !value.strict_equals(&Js::Bool(false)))
+                        } else {
+                            decision.truthy()
+                        }
+                    } else {
+                        false
+                    };
                     if !retry {
                         return Err(error);
                     }
                     // axios-retry resubmits the effective failed config. This
                     // retains interceptor changes and the predicate's one-shot
                     // signature-retry stamp across request re-signing.
-                    let failed_config = error.value.get("config")?;
-                    if failed_config.is_object() {
-                        request = failed_config;
+                    let count = super::ops::add(&retry_state.get("retryCount")?, &Js::Number(1.0))?;
+                    retry_state.set("retryCount", count.clone())?;
+                    let delay = retry_state.get("retryDelay")?;
+                    let delay = if delay.is_undefined() {
+                        0.0
+                    } else {
+                        delay
+                            .call(Js::Undefined, vec![count, error.value.clone()])?
+                            .to_number()?
+                    };
+                    let timeout = config.get("timeout")?;
+                    let started = retry_state.get("lastRequestTime")?;
+                    if !retry_state.get("shouldResetTimeout")?.truthy()
+                        && timeout.truthy()
+                        && started.truthy()
+                    {
+                        let remaining = timeout.to_number()?
+                            - (runtime.now_ms() - started.to_number()?)
+                            - delay;
+                        if remaining <= 0.0 {
+                            return Err(error);
+                        }
+                        config.set("timeout", Js::Number(remaining))?;
                     }
-                    attempt += 1;
+                    // The runtime owns this sleep through the already-spawned
+                    // request Promise; losing an observer does not cancel replay.
+                    let delay_ms = if delay.is_finite() && delay > 0.0 {
+                        delay as u64
+                    } else {
+                        0
+                    };
+                    runtime.sleep(delay_ms).await?;
+                    request = config;
                 }
             }
         }
@@ -480,13 +563,14 @@ impl JsRestAdapter {
         }
     }
     async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
-        let config = Js::object(
-            request
-                .params
-                .iter()
-                .map(|params| ("params", from_json(params)))
-                .collect(),
-        );
+        let config = Js::object(vec![]);
+        for (name, value) in &request.config_extensions {
+            config.define(name, from_json(value))?;
+        }
+        // Typed parameters remain authoritative over an extension of that name.
+        if let Some(params) = &request.params {
+            config.define("params", from_json(params))?;
+        }
         let url = Js::str(&request.url);
         // Axios normalizes the verb; RestRequest callers send "GET" as often as "get".
         let method = request.method.to_lowercase();
@@ -660,6 +744,14 @@ fn hosted_params_serializer(config: &Js) -> Result<Option<crate::http::ParamsSer
 }
 
 fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Thrown> {
+    rest_request_data(config, serialize_query, false)
+}
+
+fn rest_request_data(
+    config: &Js,
+    serialize_query: bool,
+    before_signing: bool,
+) -> Result<RestRequest, Thrown> {
     let mut headers = indexmap::IndexMap::new();
     let config_headers = config.get("headers")?;
     if !config_headers.is_nullish() {
@@ -675,6 +767,9 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
     let data = config.get("data")?;
     let body = match &data {
         Js::Undefined | Js::Null => None,
+        // A JS string is still typed adapter data at hosted-signing ingress.
+        // Only the direct terminal path has finished with that provenance.
+        Js::String(_) if before_signing => Some(RestBody::Untransformed(to_json(&data)?)),
         Js::String(text) => Some(RestBody::Encoded(
             String::from_utf16_lossy(text).into_bytes(),
         )),
@@ -695,6 +790,33 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
             url.push_str(&query);
         }
         params = Js::Undefined;
+    }
+    // Keep adapter-owned data properties without serializing executable Axios
+    // capabilities. The source config itself stays live for response hooks.
+    let mut config_extensions = indexmap::IndexMap::new();
+    for (key, value) in config.own_entries()? {
+        let key = String::from_utf16(&key)
+            .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at a typed boundary"))?;
+        if matches!(
+            key.as_str(),
+            "method"
+                | "url"
+                | "baseURL"
+                | "headers"
+                | "data"
+                | "params"
+                | "timeout"
+                | "adapter"
+                | "paramsSerializer"
+                | "transformRequest"
+                | "transformResponse"
+                | "safeCexSkipRemoteSigning"
+        ) || value.is_undefined()
+            || value.is_callable()
+        {
+            continue;
+        }
+        config_extensions.insert(key, to_json(&value)?);
     }
     let timeout = config.get("timeout")?;
     // ts: markSkipRemoteSigning tags a public request a hosted signer need not see.
@@ -717,6 +839,7 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
             Some(to_json(&params)?)
         },
         skip_remote_signing,
+        config_extensions,
         ..Default::default()
     })
 }
@@ -736,6 +859,9 @@ fn response_data(body: RestResponseBody) -> Js {
 
 fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
     let result = config.spread_object()?;
+    for (name, value) in &request.config_extensions {
+        result.set(name, from_json(value))?;
+    }
     result.set("method", Js::str(&request.method))?;
     result.set("url", Js::str(&request.url))?;
     result.set(
@@ -830,7 +956,11 @@ impl JsHttpHost for RestHttpHost {
             } else {
                 adapter
             };
-            let request = rest_request(&config, remote.is_none() && adapter.query_in_url())?;
+            let request = rest_request_data(
+                &config,
+                remote.is_none() && adapter.query_in_url(),
+                remote.is_some(),
+            )?;
             match adapter.execute_with_receipt(request).await {
                 Ok(execution) => {
                     let config = if remote.is_some() {

@@ -1,5 +1,14 @@
 # Bitget venue family
 
+The concrete binding connects both signature-rejection retry imports to the
+shared client replay path and shared request-stamp key. Non-2xx refusals stamp
+the live config; resolved refusals copy and stamp it before re-entering request
+interceptors. Tests cover all three families, writes, fresh signing timestamps,
+the single-resend limit and unrelated failures. The signature predicate uses
+shared string-hint coercion; its source witness compares all 22 outcomes, including
+custom hooks and getter throws. Older pending notes below describe standalone
+extraction stages.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/bitget/CLAUDE.md).
 Variants remain modules inside this crate. The source variants are USDT, USDC,
 and inverse; the disabled inverse variant is still part of the parity scope.

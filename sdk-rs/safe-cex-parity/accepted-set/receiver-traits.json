@@ -38,19 +38,67 @@
   "safe_cex_venue_binance::private_classes::PrivateBase::send_with_log": {
     "category": "non-decoder",
     "file": "safe-cex-venue-binance/src/private_classes.rs",
-    "reason": "Reviewed private_classes.rs: the default sends the outgoing payload string through send, then passes the same text to diagnostic_send. It serializes nothing and decodes nothing; the String is outbound wire text, not raw input to a decoder.",
-    "sourceSha256": "61104717bf10bed636386434cd3c953d91bc5932d914410caf6b4ad7a4c6ff08"
+    "reason": "Reviewed private_classes.rs against seed 91a50c7a2c: the complete file delta adds weak socket hooks/core access and migrates EventValue reads/construction to the shared value graph; this default body is unchanged. It sends the outgoing payload string through send, then passes the same text to diagnostic_send, with no parsing, serialization or decoded output. Native evidence: tests/private_classes.rs::private_base_send_with_log_forwards_outbound_text_and_failures invokes the actual default through &dyn PrivateBase, observes verbatim malformed/JSON-looking/empty/NUL-plus-astral text, send-before-diagnostic failure ordering and Rc error identity. Concrete overrides retain independent inventory obligations.",
+    "sourceSha256": "da6540bdbaa83e1dcf1d307d3c8aa27d348162a98ea8090e9d2268c01013b6c5"
+  },
+  "safe_cex_venue_binance::private_event_value::EventOps::from_json for safe_cex_exchange::js_runtime::value::Js": {
+    "category": "delegated",
+    "file": "safe-cex-venue-binance/src/private_event_value.rs",
+    "reason": "Reviewed this exact external-Js receiver: JSON decoding is delegated to safe_cex_exchange::js_runtime::value::from_json, whose own compiler-discovered decoder contract remains required. The subsequent in_current_realm traversal attaches the current PrototypeRealm to decoded objects recursively without decoding fields or replacing scalar payloads. Native evidence: tests/accepted_receivers.rs::event_from_json_retains_native_fields_bits_and_captured_prototype calls this actual trait method on two independently authored nested objects and null, observing native UTF-16 units, distinct boolean fields, signed-zero/finite bits, array occupancy and captured prototype identity before serialization. This classification covers only this forwarding receiver.",
+    "sourceSha256": "62630c22d706d822fa4a46a038acf5fc279b627bb82a5690625f604894e92996"
+  },
+  "safe_cex_venue_binance::private_event_value::EventOps::text_value for safe_cex_exchange::js_runtime::value::Js": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-binance/src/private_event_value.rs",
+    "reason": "Reviewed text_value: it calls Js::str on an existing Rust String, allocating the corresponding UTF-16 string primitive without parsing text or constructing a record. Native evidence: tests/accepted_receivers.rs::event_text_value_wraps_literal_utf16_without_parsing invokes the qualified trait method and independently compares native units for malformed/JSON-looking/empty/NUL-plus-astral strings.",
+    "sourceSha256": "62630c22d706d822fa4a46a038acf5fc279b627bb82a5690625f604894e92996"
+  },
+  "safe_cex_venue_binance::private_event_value::EventOps::read for safe_cex_exchange::js_runtime::value::Js": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-binance/src/private_event_value.rs",
+    "reason": "Reviewed read: key is a property name on an existing native value. Array/string/number/boolean branches select existing stock prototype members; the remaining branch calls Js::get and converts its error. No property payload is deserialized or projected to a DTO. Native evidence: tests/accepted_receivers.rs::event_read_forwards_existing_properties_and_missingness observes retained object identity, literal malformed-JSON keys, own undefined versus absent presence, array length and null TypeError through this actual receiver.",
+    "sourceSha256": "62630c22d706d822fa4a46a038acf5fc279b627bb82a5690625f604894e92996"
+  },
+  "safe_cex_venue_binance::private_event_value::EventOps::write for safe_cex_exchange::js_runtime::value::Js": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-binance/src/private_event_value.rs",
+    "reason": "Reviewed write: key names an own data property and value is already a Js handle. It calls Js::define and requires success; it does not parse the key or decode/copy the value graph. Native evidence: tests/accepted_receivers.rs::event_write_defines_the_existing_handle_without_decoding executes the qualified trait receiver, retains child identity and later mutation with negative-zero bits, then observes replacement by own undefined.",
+    "sourceSha256": "62630c22d706d822fa4a46a038acf5fc279b627bb82a5690625f604894e92996"
+  },
+  "safe_cex_venue_binance::private_event_value::EventOps::assign for safe_cex_exchange::js_runtime::value::Js": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-binance/src/private_event_value.rs",
+    "reason": "Reviewed assign: it invokes Js::set on an existing receiver, with a property-name key and an already-native Js value. This is assignment, including the shared setter behavior, not an input-to-record decoder. Native evidence: tests/accepted_receivers.rs::event_assign_sets_the_existing_handle_without_decoding invokes the qualified trait receiver, independently checks reference identity and a later child boolean mutation, then replacement by native null.",
+    "sourceSha256": "62630c22d706d822fa4a46a038acf5fc279b627bb82a5690625f604894e92996"
+  },
+  "safe_cex_venue_binance::private_event_value::EventOps::optional_id for safe_cex_exchange::js_runtime::value::Js": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-binance/src/private_event_value.rs",
+    "reason": "Reviewed optional_id: the receiver is an existing Js value, and expression is used solely to label a TypeError. It implements the source optional toString coercion: nullish produces undefined, own object toString refuses, otherwise the existing decoded-data text operation produces a string primitive. It parses no input text or record. Native evidence: tests/accepted_receivers.rs::event_optional_id_coerces_existing_values_with_expression_only_in_errors independently observes nullish, boolean, negative-zero and literal-text results plus both expression-specific errors.",
+    "sourceSha256": "62630c22d706d822fa4a46a038acf5fc279b627bb82a5690625f604894e92996"
+  },
+  "safe_cex_venue_binance::exchange_classes::ExchangeImports::weight_response_property": {
+    "category": "non-decoder",
+    "file": "safe-cex-venue-binance/src/exchange_classes.rs",
+    "reason": "Reviewed this default only: it returns value.read(key) on an existing EventValue response/header handle. The string is a property name; this method neither parses it nor decodes the returned value. Concrete overrides remain independently inventoried. Native evidence: tests/private_classes.rs::native_import_default_weight_property_returns_existing_values constructs the production native dependencies, invokes the inherited default through &dyn ExchangeImports, and observes header reference identity, numeric status, missing undefined and null TypeError; the injected transport refuses any I/O.",
+    "sourceSha256": "fa707e05e230e0f39f294d16fadbfa0f278346c22675ba78f387e450dfacc7b9"
   },
   "safe_cex_venue_blofin::exchange::BlofinPublicListeners::listen_book for alloc::rc::Rc<safe_cex_venue_blofin::public_stream_data::BlofinPublicWebsocket<H>>": {
     "category": "delegated",
     "file": "safe-cex-venue-blofin/src/exchange.rs",
-    "reason": "Reviewed exchange.rs: listen_book on the Rc<BlofinPublicWebsocket<H>> receiver forwards the symbol and callback to BlofinPublicWebsocket::listen_order_book unchanged. Book message decoding belongs to that websocket owner; this impl adds no parsing.",
-    "sourceSha256": "771e626c56e2c66bfd9cf2292de47d91fc0ac969e7934bcf953504598792efb7"
+    "reason": "Reviewed exchange.rs: listen_book on the Rc<BlofinPublicWebsocket<H>> receiver forwards the symbol and callback to BlofinPublicWebsocket::listen_order_book unchanged. Book message decoding belongs to that websocket owner; this impl adds no parsing. Re-reviewed against seed 91a50c7a2c: the only whole-file change passes account_modes into change_margin_type; this listener impl is unchanged. Native evidence: tests/complete.rs::exchange_class_native constructs the actual Rc receiver, registers a book listener and executes its cleanup; forwarding_book_native independently checks symbol, callback and cleanup identity.",
+    "sourceSha256": "5407b8dc70eb63fd27b77897f6b39d7976680436cd3f9b871e6c5d591c768595"
   },
   "safe_cex_venue_coinbase::portfolios_balances::PortfolioHost::get for alloc::rc::Rc<H>": {
     "category": "delegated",
     "file": "safe-cex-venue-coinbase/src/portfolios_balances.rs",
     "reason": "Reviewed portfolios_balances.rs: the Rc<H> impl forwards every PortfolioHost method to (**self) unchanged, so a retained class host is the same capability rather than a copy. Decoding of PortfolioReply belongs to the concrete H implementation, not this forwarding receiver.",
     "sourceSha256": "774fa7229b512ec22517c3a85a6d1089981cea82ae43821e42bddac9735762bc"
+  },
+  "safe_cex_exchange::exchange::Exchange::fetch_option_expiries": {
+    "category": "non-decoder",
+    "file": "safe-cex-exchange/src/exchange.rs",
+    "reason": "Reviewed the default fetch_option_expiries body: it ignores its underlying String, constructs options_unsupported(self.name(), \"Option expiries\"), and returns that venue-named error without parsing input or constructing an expiry. This matches packages/safe-cex/src/exchanges/base.ts::fetchOptionExpiries. Concrete overrides retain their own compiler inventory and decoder contracts; this entry does not classify fetch_option_chain, fetch_account_greeks, or the rest of Exchange. See sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Re-reviewed 08e1c1ef3a^..eb2949866a: only SocketRegistration lookup support before Exchange and BaseExchange disposal/socket methods after it changed; the entire Exchange trait, including this default body and API, is byte-identical. This pin refresh grants no new receiver role.",
+    "sourceSha256": "5a9f1df2a0f8887e8385a451e743aafd70ee2e2a775dee0c5ee6b088cf31f587"
   }
 }

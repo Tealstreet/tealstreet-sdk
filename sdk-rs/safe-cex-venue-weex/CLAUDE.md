@@ -1,8 +1,49 @@
 # WEEX Rust venue
 
+`WeexExchange` and `WeexDependencies` expose the production composition. The
+concrete binding supplies every class member through the existing native bodies,
+shared js_runtime services, native-number bridges, Store facade, HTTP factory,
+retry engine and BaseWebSocket lifecycle. The generic class interface retains
+its separately declared host contract; older extraction-stage notes below refer
+to those standalone components.
+
+The host supplies HTTP/WS runtime, an optional external-data factory and local
+wall-time conversion. The native registry supplies the common signed HTTP host,
+gateway factory and UTC date profile, with its existing caller-owned limiter.
+The source's inherited scheduleCancel rejection remains `Not implemented`.
+Typed placement enters the shared ValidatedOrder/ValidatedBatch path before the
+native body; batch capability registration invokes the source batch algorithm.
+
+The explicit Weex bigint response parser consumes original wire tokens on both
+success and HTTP failure before venue status/error handling. Private WS uses the
+shared prepared dial operation with required headers and a retained auth provider
+for every attempt. The inherited exchange dispose reaches source socket overrides
+through the shared JsProtocol hook: public cleanup removes its symbol listener,
+and private cleanup cancels all three refresh timers before core disposal.
+Source-own methods retain weak receivers; externally returned unsubscribe closures
+and pending snapshot observers retain their host until cleanup or settlement.
+
+`tests/exchange_binding.rs` drives production methods through scripted native HTTP
+and WS hosts. `tests/native_host_weex.rs` in the registry verifies the actual
+request HMAC over loopback HTTP. `scripts/binding-controls.py` independently
+disables each of the sixteen required bindings, requires its compiled native
+witness to fail and restores the complete target. Standalone algorithm/source
+oracles and their existing mutation runners remain independent evidence.
+Error reporting and async ownership choices remain priced at
+[weex-async-observation-choice](../parity/MANIFEST-SPEC.md#weex-async-observation-choice);
+normalizer record boundaries keep their existing declarations.
+
+
 The frozen 35-row divergent audit is in `DIVERGENCE_AUDIT.md`. Class assembly and
 async observation choices cite their explicit MANIFEST-SPEC anchors; ready
 private-refresh reactions suspend before disposal checks, updates and reports.
+
+The API request callback signs an already serialized string body verbatim on
+replay, matching the bytes Axios sends. Other truthy values still use JSON
+stringification. `tests/replay-signing-oracle.cjs` executes the source interceptor
+for eight body cases, independently comparing signatures through the native
+callback in `tests/runtime.rs`. Removing the native string guard compiles and
+fails the serialized-body signature assertion.
 
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/weex/CLAUDE.md).
 

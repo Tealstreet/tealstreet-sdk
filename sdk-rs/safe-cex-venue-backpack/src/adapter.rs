@@ -1,4 +1,5 @@
 //! Owned exchange composition and concrete state-backed method frames.
+use crate::native_value::NativeValue;
 use crate::{
     native_http::Client, native_value::Value, order_actions as actions, public_control::JsString,
     rest_reads as reads,
@@ -169,10 +170,7 @@ impl BackpackExchange {
         crate::account_reads::get_position_mode()
     }
     pub fn dispose(&self) -> Result<(), ExchangeError> {
-        for task in self.tasks.borrow_mut().drain(..) {
-            task.cancel();
-        }
-        self.base.dispose()?;
+        self.base.set_disposed_flag(true);
         self.public_websocket
             .get()
             .expect("constructed public socket")
@@ -270,7 +268,7 @@ impl reads::Host for Frame {
         a.same(b)
     }
     fn is_text(&mut self, v: &Value, s: &str) -> bool {
-        matches!(v,Value::String(t)if t==&units(s))
+        matches!(v,Value::String(t)if t.as_ref()==units(s))
     }
     fn is_false(&mut self, v: &Value) -> bool {
         matches!(v, Value::Bool(false))
@@ -279,7 +277,7 @@ impl reads::Host for Frame {
         v.string()
     }
     fn parse_float(&mut self, v: &Value) -> Result<f64, ExchangeError> {
-        v.parse_float()
+        v.float()
     }
     fn number(&mut self, v: &Value) -> Result<f64, ExchangeError> {
         v.number()

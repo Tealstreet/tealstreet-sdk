@@ -95,6 +95,18 @@ outcome rather than that preparation failed. Doing the fetch in the venue and
 then calling `start_websocket` reopens exactly the disposal and stale-generation
 races this operation exists to own.
 
+JS-backed sockets dispatch typed disposal through the live receiver's `dispose`
+member. The facade guards both that dispatch and the base prototype's
+`super.dispose()` path against reentry. A source throw is reported through the
+runtime; the infallible protocol hook still permits core transport cleanup.
+The Weex source-member witness covers timer/listener cleanup, superclass order,
+direct and typed calls, repeated disposal and guard reset after errors.
+
+The returned JS websocket handle uses `close_current_websocket()` for `ws.close()`.
+This closes only the current transport and preserves the superclass force-closed
+flag and retained handles. The raw-close source witness executes both Crypto.com
+no-super disposal overrides and contrasts them with the source `forceClose()`.
+
 Socket options use `None` for omitted SDK tuning and `Some(options)` for explicit
 RWS options, including an empty object. Make absence a distinct representable
 state rather than a default value. Header presence does not select tuning.
@@ -931,10 +943,20 @@ than the venue allows. Request interceptors still run again to refresh signing.
 
 ## Native host (`native` feature)
 
+The JS socket constructor forwards protocols and connection tuning. Required
+upgrade headers refuse unsupported hosts before a dial. A retained header
+provider runs in each core-owned dial preparation; a thrown auth error prevents
+that attempt. Native reconnects call the venue's constructor path again, so the
+next attempt regenerates headers. The native host accepts the source's header
+wrapper selection as a plain authenticated socket; the core owns reconnects.
+Header-less requests for a host-managed reconnecting wrapper still refuse.
+`ws_options` tests compare actual source constructor inputs and verify two fresh
+upgrade headers at a real loopback server, failed preparation and host refusal.
+
 `native::native_runtime()` is the production `ExchangeRuntime` + `WsRuntime` on a
 tokio `LocalSet` over the direct transport; `NativeHttpHost` drives the adapter
 once. Sockets are plain (`enable_reconnecting` false): the core owns
-reconnection, and a `reconnecting` dial is refused rather than faked. The
+reconnection, and a header-less `reconnecting` dial is refused. The
 feature's dependencies are target-gated, so `--all-features` wasm builds stay
 I/O-free. Inherent `impl` blocks inside cfg-gated modules fail the parity
 indexer closed; native modules use free functions and trait impls only.
@@ -960,6 +982,12 @@ Blob.text perform UTF-8 replacement only when the venue explicitly asks for text
 compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
 checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
+
+Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
+JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
+`dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
+cases cover successful cleanup and each throwing socket, shared-cell visibility,
+retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
 
 The js_runtime Object.defineProperty binding retains ordinary-object/function data
 attributes, following ToPropertyDescriptor and ValidateAndApplyPropertyDescriptor
@@ -989,3 +1017,122 @@ Installed adapters retain the same hosted signer, and HOW keeps frame params
 rather than calling a URL serializer. `http_factory` tests compare actual source
 Axios behavior and observe proxy-auth/sign/query/send ordering through the native
 terminal bridge. Existing source bindings continue to own telemetry callbacks.
+
+Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
+JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
+`dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
+cases cover successful cleanup and each throwing socket, shared-cell visibility,
+retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
+
+The JS HTTP bridge retains JSON-data adapter config in RestRequest.config_extensions,
+including GRVT's browser cookie/account fields. It leaves executable Axios hooks
+on the source config. Hosted effective config still spreads that source object,
+then overlays actual adapter fields; terminal extension updates survive too.
+Cookie promotion belongs exclusively to HOW, not the direct HTTP bridge.
+
+
+The common `Js::Builtin` variant retains an existing native `PrototypeRealm`
+intrinsic referent when decoded-data venue bodies interact with core socket
+statistics. `Js::from_prototype` preserves reference/realm identity and live
+primitive fields instead of copying a snapshot. This is the native data-reference
+profile: type/text/arity, scalar field access, enumerable assigned fields and
+identity; it does not supply intrinsic function execution or full descriptors.
+Unsupported intrinsic field writes are refused. Original-receiver prototype
+access and native error identity are covered by `tests/prototype_js_values.rs`.
+Binance's `EventValue` is now an alias to this graph, with its existing decoded
+coercion profile expressed as operations rather than another heap.
+`to_typed_preserving_undefined` is the declared-DTO mode of the same native
+visitor: own undefined fields enter as unit values, while callable fields are
+refused. Binance uses this existing DTO policy for nested `info`; the ordinary
+`to_typed` JSON-shaped omission policy is unchanged. The two modes have independent
+presence/null, native numeric-bit and callable-refusal tests in `typed_js_values`.
+
+The shared lodash import table supplies `times` for source order splitting.
+It truncates the coerced count, returns an empty array for invalid/nonpositive
+counts, and treats non-callable iteratees as identity (not a property shorthand).
+Callbacks receive only their index with undefined `this`; results retain their
+values, and a thrown callback stops further calls without replacing its error.
+`js_runtime::library::tests::lodash_times_*` compares 68 installed-lodash cases
+and independently checks native callback/error behavior. The callback-arity
+mutation compiles and fails both tests, then passes after restoration.
+
+Configured js_runtime retries retain `config["axios-retry"]` through the effective
+failed-config replay. The source condition sees the current retryCount; retryDelay
+sees its incremented value. The shared runtime owns the delay, and request start
+time resets in the installed request interceptor. Unless shouldResetTimeout is
+truthy, elapsed wall time and the chosen delay consume the remaining timeout;
+an exhausted budget rejects the original error before sleeping or sending.
+`tests/client_retry.rs` compares native traces against installed Axios/axios-retry,
+including request overrides, async predicate results, timer failure and loss of
+an observer during a pending delay. This covers configured callbacks within the
+runtime's existing HTTP and timer profiles.
+
+Dispose delegation reviews name the actual TypeScript class and method span in
+`tests/override-base-delegations.json`. The live `dispose-source.cjs` gate resolves
+inheritance and AST super calls: a socket receiver type alone cannot justify base
+cleanup, and an own no-super override cannot use chosen-base to pass this gate.
+The shared BaseExchange bridge cites its actual base implementation separately.
+See `../parity/DISPOSE_AUDIT.md` for the complete venue sweep and routed mismatches.
+
+Venue overrides whose source calls only `this.ws.close()` use
+`BaseWebSocket::close_current_websocket`. It forwards current native/relay close
+without superclass disposal or force-close metadata/task changes, and releases
+state borrows before invoking host close callbacks. Native and managed-relay
+state-retention witnesses cover this primitive; Backpack's bound disposal tests
+compare the source-specific cleanup and order independently.
+
+The shared utility import table also installs Lodash `throttle`. Its scheduler
+uses the existing Scope clock and cancellable timers, preserving leading and
+trailing options, the latest receiver/arguments, maxWait, cached returns and
+callback errors. The returned function exposes cancel and flush. Polymarket
+consumes this shared factory directly; it has no venue-local scheduler.
+`tests/js_throttle.rs` compares 294 installed-Lodash traces in one Node capture,
+including sustained bursts, stalled timers and clock rollback, then checks
+native error identity separately. Host timer precision remains Scope's existing
+millisecond profile. The sequential `tests/js_throttle_controls.py` faults each
+of leading, trailing and maxWait; all three must compile and fail the source
+comparison, then pass after exact restoration. A fourth fault removes the shared
+import and must fail Polymarket construction, then restore all 15 concrete tests.
+
+The hosted HTTP bridge retains a JavaScript string as typed data until the
+remote signing adapter applies Axios transformation and tryParseJson. A form
+string cannot become opaque Encoded bytes before signing: that loses its origin
+and the transport correctly refuses it. Direct terminal requests keep their
+existing byte representation. `hosted_signing_accepts_source_string_data_before_wire_encoding`
+compares four form/empty/JSON-looking/scalar strings against the actual source
+remote adapter with installed Axios on both sides of the relay, including
+signer inputs and final transmitted text.
+
+Shared `Js::to_js_string` converts ordinary live objects with a string hint:
+`toString` precedes `valueOf`, each method is looked up when reached, and a
+primitive result ends conversion. Non-callable properties are skipped; failure
+to produce a primitive throws. The 31-case Node witness compares native UTF-16
+units and getter/callback order, including inherited methods and null prototypes.
+Stock intrinsic string forms remain the value model's default prototype methods.
+
+The single `js_runtime::base_exchange::create` factory takes a synchronous source
+field initializer as its sixth argument. It initializes the JS receiver, reads
+`isSpot` and `isDemo` using shared property access/truthiness, then publishes the
+immutable typed base and installs its callbacks. Venue adapters own subclass
+field values; core contains no venue-name classification. Empty initializers keep
+the source base defaults. The hook must only initialize fields, without starting
+work or retaining the unpublished receiver. Typed flags are construction snapshots;
+later JS field changes do not rewrite them.
+Kraken/KuCoin Spot and Bybit/OKX Demo construction tests exercise actual facades.
+`tests/source_identity_controls.py` removes each projection, requires compiled
+assertion failures in both affected families, restores exact factory bytes and
+requires all four witnesses to pass. The runtime test also covers source getters,
+truthiness, inherited false defaults and original getter-error identity.
+
+The shared BigInt `toString` member honors radix 2 through 36, defaults omitted
+or undefined radix to decimal, truncates numeric radix arguments, and rejects
+out-of-range values with RangeError. Radix conversion uses the existing shared
+ToNumber profile; BigInt radix arguments retain its TypeError. Extracted methods
+read the actual call receiver and refuse non-BigInt values. Native arbitrary
+precision conversion supplies lowercase digits without losing integer bits.
+`tests/js_bigint_radix.rs` compares 472 engine cases against Node across every
+valid base, signed/large integers, defaults and scalar/array coercion boundaries.
+`tests/js_bigint_radix_controls.py` sequentially injects decimal-only output,
+incorrect rounding and base-two refusal; each must compile, fail the named source
+comparison and pass again after exact restoration. No venue-local radix shim is
+required.

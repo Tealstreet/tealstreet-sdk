@@ -83,8 +83,12 @@ Binance and OKX on a local gateway socket.
 (exchange-server's browser relay) and its accountName; no secret is held. Binance
 installs the remote signing adapter on every client and signs Spot ws-auth
 through it. OKX-family, BloFin and Bitunix also share that hosted account for
-HTTP and private websocket auth. Coinbase and Coinbase Spot use the same shared
-hosted signer for HTTP and native JWT websocket subscriptions. The JS host binds its exchange name during
+HTTP and private websocket auth. Bybit and Bybitdemo use the same hosted signer
+through their typed API factory and source receiver; the native HTTP witness is
+`tests/native_host_bybit.rs`, with no local credentials. Coinbase and Coinbase Spot use the same shared
+hosted signer for HTTP and native JWT websocket subscriptions. WOO is registered
+through its existing production binding and the same signed HTTP host; its local
+account-read test verifies the actual HMAC preimage. The JS host binds its exchange name during
 BaseExchange construction and injects the same signer into options and core
 availability; it refuses reuse for a different exchange. Bitunix retains the
 account name in its private auth request. Backpack still refuses hosted signing.
@@ -98,12 +102,24 @@ The native JSON account surface forwards journal reads (`fetchHistoricalPosition
 to the venue's declared fold/reported path, preserving account and time bounds.
 It must not inherit a TS wrapper's default rejection for a supported venue method.
 
+GRVT is constructed by the Rust table through `RustVenueHost::grvt`, with a fresh
+terminal HTTP host and the common public-data provider. Its HTTP clients receive
+the shared hosted signer, including untagged public requests. Active GRVT SDK
+order signing still requires its local wallet; the hosted HTTP capability does
+not replace it. The hosted signer witness compares live source request inputs,
+real HTTP headers, callback refusal and the pre-HTTP SDK wallet guard.
+The registry construction test reads actual GRVT public-gateway market data.
 BingX is constructed by `rust_constructor` through its shared-js_runtime binding.
 The native host supplies a fresh HTTP host and the common gateway factory; remote
 signer hosts fail visibly until BingX signing is connected.
 `tests/native_host_bingx.rs` starts it on loopback HTTP/WS, verifies a signed order
 payload and caller client ID, and cancels the resulting order.
 
+Lighter and Lighter Robinhood construct `LighterNativeExchange` through the Rust
+table. The native host gives each instance a transport registry seeded from its
+runtime, fresh terminal HTTP and OS signing entropy. Hosted remote signing is
+refused because this binding uses the local SDK signer. Construction tests cover
+both names and their deployment-specific REST origins and quote currencies.
 
 Hyperliquid is constructed through the native Rust table with options-aware
 transport composition. All native host constructors require the same caller-owned
@@ -112,6 +128,62 @@ via `hyperliquid_rate_limiter()` and forwards it through `NativeAccountSpec`;
 never create a fresh budget per hosted account. The Hyperliquid adapter preserves
 the transport-resolved baseURL, repeat query serialization, hosted action signing
 and info skip-signing. Its local HTTP proof is `tests/native_host_hyperliquid.rs`.
+
+KuCoin futures/Spot and MEXC registry entries reuse their concrete constructors.
+Their native host inputs retain each API's signing/transport/retry middleware.
+Private MEXC fills must reach the venue emitter; retain the weak callback when
+adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
+native request signatures against a local server.
+
+Crypto.com constructs through `cryptocom_constructor` using its bound Js runtime.
+Native HTTP inputs carry the account's hosted signer and supply the existing
+external-public-data gateway factory. The native host
+constructor still takes the caller-owned Hyperliquid limiter introduced by the
+shared host API. `tests/native_host_cryptocom.rs` constructs through the registry
+and production native host, then reads markets over real local HTTP and checks
+read purity. The module-host construction path remains the default.
+
+Phemex's Rust constructor receives the shared Js HTTP host and external-data
+factory. Its local HTTP witness checks amount/price precision independently and
+verifies the account-query HMAC against the bytes observed by the server. Native
+Phemex tunnel construction supplies the shared default transport installer.
+The tunnel witness observes authenticated rpc.http, signed account bytes and zero
+direct-origin traffic; absent and no-op provider controls must both fail.
+
+Kraken Futures/Spot native inputs use the shared hosted signer bridge for private
+HTTP and Futures websocket challenges. Both retain the hosted account name with
+empty local secrets. The native witness verifies signed HTTP bytes and challenge
+subscription fields; the account metadata comes from live injected options.
+
+ApexOmni now has its own Rust table entry and native host factory. It uses the
+shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
+`tests/native_host_apexomni.rs` covers signed startup, placement, private WS order
+delivery and cancellation over local native transports; its constructor-removal
+control lives in the venue's scripts/registry-control.py.
+
+The Bybit host also constructs `Bybitspot` after its distinct Spot receiver is
+bound. Native Bybit loopback HTTP coverage includes Spot for local and hosted
+signing; its existing registry dependency edge and caller-owned limiter API
+remain shared across these constructors. Inverse/HyroTrader await their bindings.
+
+ApexOmni's signed native host shares the account capability with HTTP and private
+WS auth, retaining remote accountName while keeping the API secret in the browser.
+`native_host_apexomni` verifies both signed wire paths and pending-signature
+cancellation; the Omni seed remains necessary for source L2 contract signing.
+
+Bitget, Bitget USDC and Bitget Inverse native constructors supply the common
+gateway factory through their existing `external_public_data` dependency. The
+loopback `native_host_bitget_external_data` test covers all three names: gateway
+market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
+with no venue REST or private/public venue sockets in public-only mode.
+
+WEEX is registered through its concrete native binding and the shared signed HTTP
+host, gateway factory and UTC host date profile. `tests/native_host_weex.rs` checks
+its account read and exact request HMAC over loopback HTTP.
+
+TxFlow is constructible only as the source Phase-0 scaffold. Native inputs build
+its HTTP client, while start emits the exact refusal before IO. Keep its existing
+source start boundary and test both mainnet/testnet construction without network.
 
 Breakout Prop constructs its DXtrade API/session/polling lifecycle through shared
 js_runtime. The native host preserves the selected transport and source session
