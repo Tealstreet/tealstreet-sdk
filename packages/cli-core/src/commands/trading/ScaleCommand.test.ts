@@ -95,9 +95,7 @@ describe('ScaleCommand — preconditions', () => {
   it('errors when ticker price is unavailable', async () => {
     const ex = makeExchange();
     ex.store!.tickers = [];
-    // notionalToSize throws when the ticker is missing. ScaleCommand
-    // catches that into a CommandResult so the user sees a clean
-    // error and not a stack trace.
+    // Price resolution reports a clean command error when no ticker is loaded.
     const r = await cmd.execute(ctx(['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000'], ex));
     expect(r.success).toBe(false);
     expect(r.error).toMatch(/[Pp]rice/);
@@ -225,12 +223,39 @@ describe('ScaleCommand — order distribution', () => {
     expect(placedOrders(ex)).toHaveLength(5);
   });
 
-  it('splits total notional evenly across slices (size = total / N)', async () => {
+  it('sizes $2400 at 40k and 80k as $1200 per rung', async () => {
     const ex = makeExchange();
-    await cmd.execute(ctx(['scale', 'buy', '$1000', 'into', '5', 'from', '49000', 'to', '50000'], ex));
-    const orders = placedOrders(ex);
-    // $1000 total / 50000 last-price = 0.02 BTC total. /5 slices = 0.004 each.
-    expect(orders.every((o) => o.amount === 0.004)).toBe(true);
+    ex.store!.tickers![0].last = 82_000;
+
+    const result = await cmd.execute(ctx(['scale', 'buy', '$2400', 'into', '2', 'from', '40000', 'to', '80000'], ex));
+
+    expect(result.success).toBe(true);
+    expect(placedOrders(ex)).toMatchObject([
+      { price: 40_000, amount: 0.03 },
+      { price: 80_000, amount: 0.015 },
+    ]);
+  });
+
+  it('converts DOGE rung shares to native 1000-DOGE contracts', async () => {
+    const ex = makeExchange();
+    const market = ex.store!.markets![0];
+    market.symbol = 'DOGEUSDT';
+    market.base = 'DOGE';
+    market.contractSize = 1_000;
+    market.precision = { amount: 0.01, price: 0.0001 };
+    ex.store!.tickers![0].symbol = 'DOGEUSDT';
+    ex.store!.tickers![0].last = 0.1;
+
+    const result = await cmd.execute(
+      ctx(['scale', 'buy', '$30', 'into', '2', 'from', '0.05', 'to', '0.1'], ex, 'DOGEUSDT'),
+    );
+
+    expect(result.success).toBe(true);
+    // $15 per rung: 300 DOGE at 0.05 and 150 DOGE at 0.1.
+    expect(placedOrders(ex)).toMatchObject([
+      { price: 0.05, amount: 0.3 },
+      { price: 0.1, amount: 0.15 },
+    ]);
   });
 
   it('spaces prices evenly between from and to', async () => {
@@ -293,7 +318,7 @@ describe('ScaleCommand — order distribution', () => {
     await cmd.execute(ctx(['scale', 'buy', '$300', 'into', '3', 'from', '2900', 'to', '3000', 'ETHUSDT'], ex));
     const orders = placedOrders(ex);
     expect(orders.every((o) => o.symbol === 'ETHUSDT')).toBe(true);
-    // $300 / 3000 last = 0.1 ETH total. /3 = 0.0333 → adjusted to 0.01 precision = 0.03.
+    // $100 per rung at 2900–3000 is about 0.034 ETH, rounded to the 0.01 lot step.
     expect(orders.every((o) => o.amount === 0.03)).toBe(true);
   });
 });
@@ -321,21 +346,21 @@ describe('ScaleCommand — boundary cases', () => {
     expect(r.success).toBe(false);
   });
 
-  it('percent-of-balance entry: 50% scales across N orders', async () => {
-    // 50% of $1000 free balance @ 1x leverage = $500 notional. /5
-    // slices = $100/slice. /50000 last = 0.002 BTC, adjusted to
-    // 0.001 precision → 0.002 each.
+  it('sizes a balance percentage at the rung prices', async () => {
+    // 50% of $4800 free at 1x = $2400, so $1200 per rung.
     const ex = makeExchange();
-    ex.store!.balance = { used: 0, free: 1000, total: 1000, upnl: 0 } as never;
-    await cmd.execute(ctx(['scale', 'buy', '50%', 'into', '5', 'from', '49000', 'to', '50000'], ex));
-    const orders = placedOrders(ex);
-    expect(orders).toHaveLength(5);
-    expect(orders.every((o) => o.amount === 0.002)).toBe(true);
+    ex.store!.tickers![0].last = 82_000;
+    ex.store!.balance = { used: 0, free: 4800, total: 4800, upnl: 0 } as never;
+    await cmd.execute(ctx(['scale', 'buy', '50%', 'into', '2', 'from', '40000', 'to', '80000'], ex));
+    expect(placedOrders(ex)).toMatchObject([
+      { price: 40_000, amount: 0.03 },
+      { price: 80_000, amount: 0.015 },
+    ]);
   });
 
   it('percent-of-position exit: 50% reduce scales out', async () => {
-    // 50% of a 1 BTC position = 0.5 BTC. /5 = 0.1/slice. The reduce
-    // flag flips the percent-default to position scope.
+    // 50% of a 1 BTC position = 0.5 BTC. /5 = 0.1/slice at every price.
+    // The reduce flag flips the percent-default to position scope.
     const ex = makeExchange();
     ex.store!.positions = [
       {
@@ -350,7 +375,7 @@ describe('ScaleCommand — boundary cases', () => {
         liquidationPrice: 0,
       } as never,
     ];
-    await cmd.execute(ctx(['scale', 'sell', '50%', 'into', '5', 'from', '50000', 'to', '51000', 'reduce'], ex));
+    await cmd.execute(ctx(['scale', 'sell', '50%', 'into', '5', 'from', '40000', 'to', '80000', 'reduce'], ex));
     const orders = placedOrders(ex);
     expect(orders).toHaveLength(5);
     expect(orders.every((o) => o.amount === 0.1)).toBe(true);
@@ -403,7 +428,7 @@ describe('ScaleCommand — suffix-USD size regression', () => {
     const orders = placedOrders(ex);
     expect(orders).toHaveLength(5);
     expect(orders.every((o) => o.symbol === 'BTCUSDT')).toBe(true);
-    // $1000 / 50000 = 0.02 BTC total / 5 slices = 0.004 each
+    // $200 per rung at 49000–50000 is about 0.004 BTC at the 0.001 lot step.
     expect(orders.every((o) => o.amount === 0.004)).toBe(true);
   });
 
@@ -493,7 +518,8 @@ describe('ScaleCommand — budget', () => {
       ctx(['scale', 'buy', '$1000', 'into', '10', 'from', '50000', 'to', '48500'], ex, 'BTCUSDT', store),
     );
     expect(r.success).toBe(true);
-    // ~$1000 of notional charged (rounding per rung keeps it close).
-    expect(store.getBudgetSpent()).toBeCloseTo(1000, 0);
+    // Budget marks the ladder's coin at last (50000). Rungs below last buy
+    // more coin than $1000 / last, so the charge is 0.0202 BTC = $1010.
+    expect(store.getBudgetSpent()).toBeCloseTo(1010, 0);
   });
 });
