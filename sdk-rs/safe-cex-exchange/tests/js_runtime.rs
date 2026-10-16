@@ -2501,3 +2501,68 @@ fn client_rejection_handlers_follow_the_axios_promise_chain() {
         "Request failed with status code 500"
     );
 }
+
+#[test]
+fn source_socket_fields_reach_typed_groups_and_track_replacement_and_removal() {
+    use safe_cex_exchange::{
+        js_runtime::sockets::{base_websocket, core_of},
+        socket_lifecycle::SocketSlot,
+    };
+    let (a, _venue) = assembled_venue(Ok(vec![]));
+    assert!(a.base.get_all_sockets().is_empty());
+    // Exact order from source BaseExchange.getAllSockets/getPublicSockets.
+    let fields = [
+        "privateWebsocket",
+        "publicWebsocket",
+        "publicWebsocketSecondary",
+        "publicInverseWebsocket",
+        "futuresWebsocket",
+        "businessWebsocket",
+        "secondsTickersWebsocket",
+        "thirdTickersWebsocket",
+    ];
+    let sockets: Vec<_> = fields
+        .iter()
+        .map(|field| {
+            let socket = base_websocket(&a.context, a.this.clone());
+            a.this.set(field, socket.clone()).unwrap();
+            socket
+        })
+        .collect();
+    let expected: Vec<_> = sockets
+        .iter()
+        .map(|socket| core_of(&a.context, socket).unwrap().base().unwrap())
+        .collect();
+    let actual = a.base.get_all_sockets();
+    assert_eq!(
+        actual.len(),
+        8,
+        "typed lifecycle sees every source-owned socket"
+    );
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert!(Rc::ptr_eq(actual, expected));
+    }
+    assert!(Rc::ptr_eq(&a.base.get_private_sockets()[0], &expected[0]));
+    assert_eq!(
+        a.base
+            .get_public_sockets()
+            .iter()
+            .map(|s| s.id)
+            .collect::<Vec<_>>(),
+        expected[1..].iter().map(|s| s.id).collect::<Vec<_>>()
+    );
+    let replacement = base_websocket(&a.context, a.this.clone());
+    a.this.set("privateWebsocket", replacement.clone()).unwrap();
+    let replacement_core = core_of(&a.context, &replacement).unwrap().base().unwrap();
+    assert!(Rc::ptr_eq(
+        &a.base.get_socket(SocketSlot::Private).unwrap(),
+        &replacement_core
+    ));
+    a.this.delete(&utf16("publicWebsocket"));
+    assert!(a.base.get_socket(SocketSlot::Public).is_none());
+    assert_eq!(a.base.get_all_sockets().len(), 7);
+    assert_eq!(a.base.get_public_sockets().len(), 6);
+    a.base.dispose().unwrap();
+    assert!(replacement_core.is_disposed());
+    assert!(expected[1..].iter().all(|socket| socket.is_disposed()));
+}

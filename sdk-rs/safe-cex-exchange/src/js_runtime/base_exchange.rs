@@ -528,6 +528,44 @@ pub fn create(
             }),
         );
     }
+    // Source BaseExchange.getAllSockets reads these properties on every call.
+    // Defer core creation until the venue is assembled and retain weak owners.
+    if let Js::Object(receiver) = &this {
+        use crate::socket_lifecycle::SocketSlot;
+        for (name, slot) in [
+            ("privateWebsocket", SocketSlot::Private),
+            ("publicWebsocket", SocketSlot::Public),
+            ("publicWebsocketSecondary", SocketSlot::PublicSecondary),
+            ("publicInverseWebsocket", SocketSlot::PublicInverse),
+            ("futuresWebsocket", SocketSlot::Futures),
+            ("businessWebsocket", SocketSlot::Business),
+            ("secondsTickersWebsocket", SocketSlot::SecondsTickers),
+            ("thirdTickersWebsocket", SocketSlot::ThirdTickers),
+        ] {
+            let receiver = Rc::downgrade(receiver);
+            let context = Rc::downgrade(context);
+            base.set_socket_lookup(
+                slot,
+                Rc::new(move || {
+                    let context = context.upgrade()?;
+                    let receiver = Js::Object(receiver.upgrade()?);
+                    let read = || -> Result<Option<Rc<crate::websocket::BaseWebSocket>>, Thrown> {
+                        let socket = receiver.get(name)?;
+                        super::sockets::core_of(&context, &socket)
+                            .map(|core| core.base())
+                            .transpose()
+                    };
+                    read().unwrap_or_else(|error| {
+                        context.runtime.report_exception(
+                            &error.to_exchange_error(),
+                            &serde_json::json!({"operation":"getAllSockets", "slot":name}),
+                        );
+                        None
+                    })
+                }),
+            );
+        }
+    }
     Ok((this, base))
 }
 
