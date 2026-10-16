@@ -1868,11 +1868,12 @@
         "opaque-macro-review",
         "opaque-macro-review",
         "opaque-macro-review",
+        "opaque-macro-review",
         "opaque-macro-review"
       ],
-      "producer_sha256": "45732140d3e7a32d79fa0febf3c2f9690a24aad9f3040e9d5e6473f74b7450be",
+      "producer_sha256": "542a891214b85f33c698db044dd22e14b8682fc1be2d725603fc1739bd390c2d",
       "classification": "immediate",
-      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed retained Builtin referent arm: reference.js_string() returns an owned string and write! formats it synchronously. Existing DataDescriptor debug-map formatting remains synchronous. No task, waiter, future or cancellation latch is added."
+      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed retained Builtin referent arm: reference.js_string() returns an owned string and write! formats it synchronously. Existing DataDescriptor debug-map formatting remains synchronous. No task, waiter, future or cancellation latch is added. Reviewed well-known SymbolIterator arm: the additional write! only formats the fixed Symbol(Symbol.iterator) text synchronously; no task, waiter, future or cancellation latch is constructed."
     },
     {
       "owner": "src/js_runtime/value.rs::Thrown as fmt :: Debug::fmt",

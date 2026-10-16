@@ -7,10 +7,7 @@ use safe_cex_exchange::js_runtime::{
     scope::scope_of,
     value::{Js, Thrown, arg, from_json, from_typed, to_json},
 };
-use std::{
-    cell::RefCell,
-    rc::{Rc, Weak},
-};
+use std::rc::{Rc, Weak};
 
 pub(super) fn super_member(rt: &Rt, receiver: &Js, name: &str) -> Result<Js, Thrown> {
     rt.shared
@@ -173,10 +170,10 @@ impl CompositionHost for Rt {
         r.define(key, v)
     }
     fn new_set(&self) -> Result<Js, Thrown> {
-        Ok(Js::Set(Rc::new(RefCell::new(vec![]))))
+        Ok(Js::new_set())
     }
     fn new_map(&self) -> Result<Js, Thrown> {
-        Ok(Js::Map(Rc::new(RefCell::new(vec![]))))
+        Ok(Js::new_map())
     }
     fn rule(&self, label: &str, pattern: &str) -> Result<Js, Thrown> {
         let regex = safe_cex_exchange::js_runtime::regexp::regexp(
@@ -610,7 +607,7 @@ async fn metadata(h: &Rt, r: &Js, symbols: Js, mut supplied: Js) -> Result<Js, T
         )
         .await
         .map_err(exchange_error)?;
-        let map = Js::Map(Rc::new(RefCell::new(vec![])));
+        let map = Js::new_map();
         for (key, row) in h.shared.extra.metadata.borrow().iter() {
             let v = row.borrow();
             let value = Js::object(vec![

@@ -24,9 +24,10 @@ impl RuntimeInitializationHost for Bound {
     }
     fn second_binding(&self, value: AccountValue) -> SigningResult<AccountValue> {
         let iterator = JsIterator::open(&to_js(&value)).map_err(to_signing)?;
-        let _elided = iterator.step();
+        let _elided = iterator.step().map_err(to_signing)?;
         Ok(iterator
             .step()
+            .map_err(to_signing)?
             .map_or(AccountValue::Undefined, |v| to_account(&v)))
     }
     fn add(&self, a: AccountValue, b: AccountValue) -> SigningResult<AccountValue> {

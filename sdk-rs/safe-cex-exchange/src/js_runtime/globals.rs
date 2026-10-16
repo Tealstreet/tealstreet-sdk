@@ -64,7 +64,7 @@ fn json_stringify(
     }
     let lit = |t: &str| Ok(Some(t.encode_utf16().collect()));
     let result = match &value {
-        Js::Undefined | Js::Function(_) => Ok(None),
+        Js::Undefined | Js::SymbolIterator | Js::Function(_) => Ok(None),
         Js::Null => lit("null"),
         Js::Bool(b) => lit(if *b { "true" } else { "false" }),
         Js::Number(n) if n.is_finite() => lit(&safe_cex_num::js_number_string(*n)),
@@ -120,31 +120,49 @@ fn json_stringify(
     result
 }
 
-/// GetIterator's values over the iterables the runtime models; `None` has no @@iterator.
-fn iterate(value: &Js) -> Option<Vec<Js>> {
-    match value {
-        Js::Array(_) => value.array_values(),
-        Js::Map(entries) => Some(
-            entries
-                .borrow()
-                .iter()
-                .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-                .collect(),
-        ),
-        Js::Set(values) => Some(values.borrow().clone()),
-        Js::String(units) => {
-            let mut out = vec![];
-            let mut i = 0;
-            while i < units.len() {
-                let pair = (0xD800..=0xDBFF).contains(&units[i])
-                    && matches!(units.get(i + 1), Some(0xDC00..=0xDFFF));
-                let width = if pair { 2 } else { 1 };
-                out.push(Js::utf16(&units[i..i + width]));
-                i += width;
-            }
-            Some(out)
+/// GetIterator once, preserving live iteration and abrupt completion.
+fn iterate(value: &Js) -> Result<Option<Js>, Thrown> {
+    if value.is_nullish() {
+        return Ok(None);
+    }
+    let method = value.get_property(&Js::SymbolIterator)?;
+    if method.is_nullish() {
+        return Ok(None);
+    }
+    let iterator = method.call(value.clone(), vec![])?;
+    if !iterator.is_object() {
+        return Err(Thrown::type_error("Iterator result is not an object"));
+    }
+    Ok(Some(iterator))
+}
+
+fn consume_iterator(
+    iterator: Js,
+    mut visit: impl FnMut(Js, usize) -> Result<(), Thrown>,
+) -> Result<(), Thrown> {
+    let next = iterator.get("next")?;
+    let mut index = 0;
+    loop {
+        let step = next.call(iterator.clone(), vec![])?;
+        if !step.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
         }
-        _ => None,
+        if step.get("done")?.truthy() {
+            return Ok(());
+        }
+        let result = step.get("value").and_then(|value| visit(value, index));
+        if let Err(error) = result {
+            // IteratorClose with a throwing completion preserves that error.
+            let _ = iterator.get("return").and_then(|method| {
+                if method.is_nullish() {
+                    Ok(Js::Undefined)
+                } else {
+                    method.call(iterator.clone(), vec![])
+                }
+            });
+            return Err(error);
+        }
+        index += 1;
     }
 }
 
@@ -174,30 +192,20 @@ fn map_from_entries(iterable: &Js) -> Result<Js, Thrown> {
     if iterable.is_nullish() {
         return Ok(map);
     }
-    let entries = iterate(iterable).ok_or_else(|| not_iterable(iterable))?;
-    if let Js::Map(slots) = &map {
-        for entry in entries {
-            if !entry.is_object() {
-                return Err(Thrown::type_error(&format!(
-                    "Iterator value {} is not an entry object",
-                    entry.to_display()
-                )));
-            }
-            // Map.prototype.set stores a -0 key as +0.
-            let key = entry.get("0")?;
-            let key = if key.as_f64() == Some(0.0) {
-                Js::Number(0.0)
-            } else {
-                key
-            };
-            let value = entry.get("1")?;
-            let mut slots = slots.borrow_mut();
-            match slots.iter_mut().find(|(k, _)| k.same_value_zero(&key)) {
-                Some(slot) => slot.1 = value,
-                None => slots.push((key, value)),
-            }
+    let iterator = iterate(iterable)?.ok_or_else(|| not_iterable(iterable))?;
+    let set = map.get("set")?;
+    consume_iterator(iterator, |entry, _| {
+        if !entry.is_object() {
+            return Err(Thrown::type_error(&format!(
+                "Iterator value {} is not an entry object",
+                entry.to_display()
+            )));
         }
-    }
+        let key = entry.get("0")?;
+        let value = entry.get("1")?;
+        set.call(map.clone(), vec![key, value])?;
+        Ok(())
+    })?;
     Ok(map)
 }
 
@@ -212,31 +220,34 @@ fn array_from(a: &[Js]) -> Result<Js, Thrown> {
             v8_operand(&map_fn)
         )));
     }
-    let values = match iterate(&items) {
-        Some(values) => values,
-        None if items.is_nullish() => return Err(not_iterable(&items)),
-        None => {
-            let length = items.get("length")?.to_number()?;
-            let length = if length.is_nan() || length <= 0.0 {
-                0.0
-            } else {
-                length.trunc().min(9_007_199_254_740_991.0)
-            };
-            if length > f64::from(u32::MAX) {
-                return Err(Thrown::error("RangeError", "Invalid array length"));
-            }
-            (0..length as usize)
-                .map(|k| items.get(&k.to_string()))
-                .collect::<Result<_, _>>()?
-        }
-    };
-    if !mapping {
-        return Ok(Js::array(values));
-    }
     let this = arg(a, 2);
-    let mut out = Vec::with_capacity(values.len());
-    for (k, value) in values.into_iter().enumerate() {
-        out.push(map_fn.call(this.clone(), vec![value, Js::Number(k as f64)])?);
+    let mut out = vec![];
+    let mut visit = |value: Js, index: usize| {
+        out.push(if mapping {
+            map_fn.call(this.clone(), vec![value, Js::Number(index as f64)])?
+        } else {
+            value
+        });
+        Ok(())
+    };
+    if let Some(iterator) = iterate(&items)? {
+        consume_iterator(iterator, &mut visit)?;
+    } else {
+        if items.is_nullish() {
+            return Err(not_iterable(&items));
+        }
+        let length = items.get("length")?.to_number()?;
+        let length = if length.is_nan() || length <= 0.0 {
+            0.0
+        } else {
+            length.trunc().min(9_007_199_254_740_991.0)
+        };
+        if length > f64::from(u32::MAX) {
+            return Err(Thrown::error("RangeError", "Invalid array length"));
+        }
+        for index in 0..length as usize {
+            visit(items.get(&index.to_string())?, index)?;
+        }
     }
     Ok(Js::array(out))
 }
@@ -355,11 +366,25 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             Ok(Js::Number(safe_cex_num::parse_int(&text, radix)))
         }),
     );
+    let symbol = Js::function("Symbol", |_, _| {
+        Err(Thrown::type_error(
+            "Creating arbitrary Symbols is not supported",
+        ))
+    });
+    symbol
+        .define_property(
+            &"iterator".encode_utf16().collect::<Vec<_>>(),
+            &Js::object(vec![("value", Js::SymbolIterator)]),
+        )
+        .expect("well-known iterator symbol data descriptor");
+    def("Symbol", symbol);
     def(
         "String",
         Js::function("String", |_, a| {
             Ok(if a.is_empty() {
                 Js::str("")
+            } else if matches!(a[0], Js::SymbolIterator) {
+                Js::str("Symbol(Symbol.iterator)")
             } else {
                 Js::String(a[0].to_js_string()?)
             })
@@ -850,13 +875,14 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "Set",
         Js::constructor("Set", |_, a| {
             let set = Js::new_set();
-            if let (Js::Set(s), Some(values)) = (&set, arg(&a, 0).array_values()) {
-                let mut s = s.borrow_mut();
-                for v in values {
-                    if !s.iter().any(|x| x.same_value_zero(&v)) {
-                        s.push(v);
-                    }
-                }
+            let values = arg(&a, 0);
+            if !values.is_nullish() {
+                let iterator = iterate(&values)?.ok_or_else(|| not_iterable(&values))?;
+                let add = set.get("add")?;
+                consume_iterator(iterator, |value, _| {
+                    add.call(set.clone(), vec![value])?;
+                    Ok(())
+                })?;
             }
             Ok(set)
         }),

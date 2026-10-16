@@ -1963,14 +1963,30 @@ fn map_constructor_adds_entries_from_iterables() {
     .unwrap();
     assert_eq!(map.get("size").unwrap().as_f64(), Some(2.0));
     assert_eq!(
-        json_of(&g, map.call_method("entries", vec![]).unwrap()),
+        json_of(
+            &g,
+            Js::array(
+                map.call_method("entries", vec![])
+                    .unwrap()
+                    .iterable_values()
+                    .unwrap()
+            )
+        ),
         r#"[["a",3],["b",2]]"#
     );
     // A Map source copies its entries; a Set of entry arrays works too.
     let copy = new_map(vec![map.clone()]).unwrap();
     assert!(!copy.same_reference(&map));
     assert_eq!(
-        json_of(&g, copy.call_method("entries", vec![]).unwrap()),
+        json_of(
+            &g,
+            Js::array(
+                copy.call_method("entries", vec![])
+                    .unwrap()
+                    .iterable_values()
+                    .unwrap()
+            )
+        ),
         r#"[["a",3],["b",2]]"#
     );
     let set = g
@@ -1989,7 +2005,13 @@ fn map_constructor_adds_entries_from_iterables() {
     // Array-like objects with "0"/"1" are entry objects; -0 keys normalise to +0.
     let like = Js::object(vec![("0", Js::Number(-0.0)), ("1", Js::str("z"))]);
     let zero = new_map(vec![Js::array(vec![like])]).unwrap();
-    let key = zero.call_method("keys", vec![]).unwrap().get("0").unwrap();
+    let key = zero
+        .call_method("keys", vec![])
+        .unwrap()
+        .call_method("next", vec![])
+        .unwrap()
+        .get("value")
+        .unwrap();
     assert!(key.as_f64().unwrap().is_sign_positive());
     for empty in [vec![], vec![Js::Undefined], vec![Js::Null]] {
         assert_eq!(

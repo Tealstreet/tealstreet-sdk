@@ -10,7 +10,7 @@ use std::rc::Rc;
 
 fn for_each(value: &Js, mut f: impl FnMut(Js) -> Result<bool, Thrown>) -> Result<(), Thrown> {
     let iterator = JsIterator::open(value)?;
-    while let Some(item) = iterator.step() {
+    while let Some(item) = iterator.step()? {
         if !f(item)? {
             break;
         }

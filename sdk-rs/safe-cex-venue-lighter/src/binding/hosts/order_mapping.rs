@@ -23,7 +23,7 @@ pub(super) fn account(result: Result<Js, Thrown>) -> SigningResult<AccountValue>
 
 impl OrderMapIterator for JsIterator {
     fn next(&mut self) -> SigningResult<Option<AccountValue>> {
-        Ok(self.step().map(|v| to_account(&v)))
+        Ok(self.step().map_err(to_signing)?.map(|v| to_account(&v)))
     }
     fn close_return(&mut self) -> SigningResult<()> {
         Ok(())
