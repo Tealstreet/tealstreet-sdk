@@ -9,7 +9,7 @@ pub mod positions;
 pub mod private;
 pub mod public;
 
-pub fn register_all(globals: &Js, weak: Weak<Shared>) {
+pub(crate) fn register_all(globals: &Js, weak: Weak<Shared>) {
     assembly::register(globals, weak.clone());
     positions::register(globals, weak.clone());
     orders::register(globals, weak.clone());

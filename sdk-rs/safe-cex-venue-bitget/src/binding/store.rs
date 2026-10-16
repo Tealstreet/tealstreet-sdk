@@ -29,7 +29,7 @@ fn patch(value: &Js) -> Result<serde_json::Map<String, serde_json::Value>, Throw
     }
 }
 
-pub fn facade(store: Rc<dyn Store>) -> Js {
+pub(crate) fn facade(store: Rc<dyn Store>) -> Js {
     let s = Js::object_with_class("Store", vec![]);
     let getter = |name: &str, read: Rc<dyn Fn(&dyn Store) -> Result<Js, Thrown>>| {
         let store = store.clone();

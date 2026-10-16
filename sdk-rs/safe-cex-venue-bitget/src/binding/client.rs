@@ -19,7 +19,7 @@ struct ClientState {
 }
 
 /// safeCexAxiosCreate(config): a client object whose verbs run the full pipeline.
-pub fn create(rt: &Rt, defaults: Js) -> Js {
+pub(crate) fn create(rt: &Rt, defaults: Js) -> Js {
     let state = Rc::new(RefCell::new(ClientState::default()));
     let client = Js::object_with_class("Axios", vec![("defaults", defaults.clone())]);
     let use_fn = |list: fn(&mut ClientState) -> &mut Vec<Js>| {
@@ -197,15 +197,4 @@ async fn throttle(rt: &Rt, state: &Rc<RefCell<ClientState>>) {
             }
         }
     }
-}
-
-/// xhr.get(endpoint, { params }) and return `response.data`.
-pub async fn read(client: Js, endpoint: &str, params: Js) -> Result<Js, Thrown> {
-    let get = client.get("get")?;
-    let response = await_js(get.call(
-        client.clone(),
-        vec![Js::str(endpoint), Js::object(vec![("params", params)])],
-    )?)
-    .await?;
-    response.get("data")
 }

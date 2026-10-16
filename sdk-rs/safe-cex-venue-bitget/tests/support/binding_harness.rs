@@ -9,7 +9,7 @@ use safe_cex_types::{ExchangeName, ExchangeOptions};
 use safe_cex_venue_bitget::{
     BitgetDependencies, BitgetExchange, BitgetImports,
     binding::{
-        promise::{JsFuture, Promise},
+        promise::JsFuture,
         value::{Js, Thrown, from_json, to_json},
     },
 };
@@ -212,9 +212,6 @@ impl Http {
 impl BitgetImports for Http {
     fn send(&self, config: Js) -> JsFuture<'static> {
         let read = |k: &str| config.get(k).ok().map(|v| to_json(&v).unwrap_or(Value::Null)).unwrap_or(Value::Null);
-        if std::env::var("BITGET_DEBUG_HTTP").is_ok() {
-            eprintln!("CONFIG {:?}", config);
-        }
         let method = read("method").as_str().unwrap_or("get").to_uppercase();
         let url = read("url").as_str().unwrap_or_default().to_owned();
         self.requests.borrow_mut().push(Request {
@@ -285,13 +282,5 @@ impl Harness {
     }
     pub fn venue(&self) -> &dyn Exchange {
         self.exchange.as_ref()
-    }
-}
-
-#[allow(dead_code)]
-pub fn settled(p: &Js) -> Option<Result<Js, Thrown>> {
-    match p {
-        Js::Promise(p) => Promise::result(p),
-        other => Some(Ok(other.clone())),
     }
 }

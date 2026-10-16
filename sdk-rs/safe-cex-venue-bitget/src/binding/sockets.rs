@@ -3,7 +3,6 @@
 //! JS object's ported members (connectAndSubscribe, onOpen, onMessage, ping).
 use super::{
     globals::arg,
-    promise::await_js,
     rt::Rt,
     value::{Getter, Js, Thrown},
 };
@@ -18,7 +17,7 @@ use std::{
     rc::{Rc, Weak},
 };
 
-pub struct SocketCore {
+pub(crate) struct SocketCore {
     pub rt: Rt,
     pub this: RefCell<Js>,
     pub base: OnceCell<Rc<BaseWebSocket>>,
@@ -101,7 +100,7 @@ impl WsProtocol for JsProtocol {
 
 impl SocketCore {
     /// The core is created on first use, once the venue exists as `dyn Exchange`.
-    pub fn base(self: &Rc<Self>) -> Result<Rc<BaseWebSocket>, Thrown> {
+    pub(crate) fn base(self: &Rc<Self>) -> Result<Rc<BaseWebSocket>, Thrown> {
         if let Some(base) = self.base.get() {
             return Ok(base.clone());
         }
@@ -113,11 +112,9 @@ impl SocketCore {
             .as_ref()
             .and_then(Weak::upgrade)
             .ok_or_else(|| Thrown::error("Error", "Bitget socket used before the exchange was assembled"))?;
-        let id = SOCKET_IDS.with(|n| {
-            let id = n.get() + 1;
-            n.set(id);
-            id
-        });
+        let ids = &self.rt.shared.socket_ids;
+        let id = ids.get() + 1;
+        ids.set(id);
         let base = BaseWebSocket::new(
             id,
             WsExchangeParent::new(&venue),
@@ -129,9 +126,6 @@ impl SocketCore {
     }
 }
 
-thread_local! {
-    static SOCKET_IDS: std::cell::Cell<u64> = const { std::cell::Cell::new(0) };
-}
 
 fn ex(e: ExchangeError) -> Thrown {
     Thrown::from(e)
@@ -139,7 +133,7 @@ fn ex(e: ExchangeError) -> Thrown {
 
 /// `new BaseWebSocket(parent)`: socket object with the base members the ported
 /// socket bodies read. The returned object owns its core.
-pub fn base_websocket(rt: &Rt, parent: Js) -> Js {
+pub(crate) fn base_websocket(rt: &Rt, parent: Js) -> Js {
     let socket = Js::object_with_class("BaseWebSocket", vec![("parent", parent.clone())]);
     let core = Rc::new(SocketCore {
         rt: rt.clone(),
@@ -316,22 +310,19 @@ pub fn base_websocket(rt: &Rt, parent: Js) -> Js {
         let _ = &keep;
         Ok(Js::Undefined)
     }));
-    SOCKET_CORES.with(|c| c.borrow_mut().push((socket.clone(), core)));
+    rt.shared.socket_cores.borrow_mut().push((socket.clone(), core));
     socket
 }
 
-thread_local! {
-    static SOCKET_CORES: RefCell<Vec<(Js, Rc<SocketCore>)>> = const { RefCell::new(vec![]) };
-}
 
 /// Core for a socket object built by `base_websocket`.
-pub fn core_of(socket: &Js) -> Option<Rc<SocketCore>> {
-    SOCKET_CORES.with(|c| {
-        c.borrow()
-            .iter()
-            .find(|(s, _)| s.same_reference(socket))
-            .map(|(_, core)| core.clone())
-    })
+pub(crate) fn core_of(rt: &Rt, socket: &Js) -> Option<Rc<SocketCore>> {
+    rt.shared
+        .socket_cores
+        .borrow()
+        .iter()
+        .find(|(s, _)| s.same_reference(socket))
+        .map(|(_, core)| core.clone())
 }
 
 fn ws_handle(core: &Rc<SocketCore>) -> Js {
@@ -379,9 +370,4 @@ fn ws_handle(core: &Rc<SocketCore>) -> Js {
         );
     }
     ws
-}
-
-/// Await-safe call of a socket member returning possibly a promise.
-pub async fn call_member(socket: Js, name: &'static str, args: Vec<Js>) -> Result<Js, Thrown> {
-    await_js(socket.call_method(name, args)?).await
 }

@@ -1,6 +1,5 @@
 //! Production Bitget venue: the assembled class graph behind the typed Exchange trait.
 use super::{
-    builtins,
     globals,
     promise::await_js,
     rt::{BitgetImports, Rt, Shared, Variant},
@@ -28,7 +27,7 @@ pub struct BitgetDependencies {
     pub external_public_data: Option<super::rt::ExternalPublicDataFactory>,
 }
 
-pub fn settings() -> ExchangeSettings {
+pub(crate) fn settings() -> ExchangeSettings {
     ExchangeSettings {
         tick_interval: None,
         positions_supported: Some(true),
@@ -71,7 +70,6 @@ impl BitgetExchange {
                 "BitgetExchange: externalPublicData is configured but no external public data provider was supplied",
             ));
         }
-        builtins::install_runtime(deps.runtime.clone());
         let shared = Rc::new_cyclic(|weak: &std::rc::Weak<Shared>| {
             let globals = globals::build(weak.clone());
             super::hosts::register_all(&globals, weak.clone());
@@ -87,6 +85,9 @@ impl BitgetExchange {
                 name: name.clone(),
                 options: options.clone(),
                 external_public_data: deps.external_public_data.clone(),
+                timers: RefCell::default(),
+                socket_ids: std::cell::Cell::new(0),
+                socket_cores: RefCell::default(),
             }
         });
         let rt = Rt { shared: shared.clone(), this: Js::Undefined };
@@ -112,11 +113,6 @@ impl BitgetExchange {
         let dyn_venue: Rc<dyn Exchange> = venue.clone();
         *shared.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
         Ok(venue)
-    }
-
-    /// The assembled JS receiver, for diagnostics and tests.
-    pub fn receiver(&self) -> &Js {
-        &self.rt.this
     }
 
     fn invoke<T: serde::de::DeserializeOwned + 'static>(&self, member: &'static str, args: Vec<Js>) -> ExchangeFuture<'_, T> {

@@ -27,7 +27,7 @@ async fn positioning_field(this: Js, symbol: String, field: &'static str) -> Res
     Ok((!value.is_nullish()).then_some(value))
 }
 
-pub fn install(rt: &Rt) {
+pub(crate) fn install(rt: &Rt) {
     let this = rt.this.clone();
     // Own class fields win over prototype members, as in JS lookup.
     let def = |name: &str, f: Js| {

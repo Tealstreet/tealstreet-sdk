@@ -61,7 +61,7 @@ fn not_iterable(value: &Js) -> Thrown {
 }
 
 /// Live for-of iteration: arrays, Sets and Maps re-read their length each step.
-pub enum JsIter {
+pub(crate) enum JsIter {
     Live(Js, usize),
     Items(std::vec::IntoIter<Js>),
 }
@@ -510,7 +510,7 @@ fn resolve_transport_routing(args: &[Js]) -> Result<Js, Thrown> {
     from_typed(&DirectTransport.ws_routing(&name, &RoutingOptions::from(&options)))
 }
 
-pub fn register(globals: &Js, _weak: Weak<Shared>) {
+pub(crate) fn register(globals: &Js, _weak: Weak<Shared>) {
     if !globals.has_own("resolveTransportRouting") {
         let _ = globals.define(
             "resolveTransportRouting",
@@ -592,7 +592,7 @@ fn adapter(owner: &str, name: &str) -> Option<Body> {
 
 /// Every member here is a synchronous TS arrow field bound to the receiver
 /// captured at construction.
-pub fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Result<Option<Js>, Thrown> {
+pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Result<Option<Js>, Thrown> {
     let Some(body) = adapter(owner, name) else {
         return Ok(None);
     };

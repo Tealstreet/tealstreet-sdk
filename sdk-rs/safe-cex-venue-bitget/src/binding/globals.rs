@@ -23,12 +23,12 @@ fn serde_text<T: serde::Serialize>(value: &T) -> String {
         .unwrap_or_default()
 }
 
-pub fn arg(args: &[Js], i: usize) -> Js {
+pub(crate) fn arg(args: &[Js], i: usize) -> Js {
     args.get(i).cloned().unwrap_or(Js::Undefined)
 }
 
 /// Build the module-scope object. `rt` is weak: globals live inside the shared state.
-pub fn build(rt: Weak<super::rt::Shared>) -> Js {
+pub(crate) fn build(rt: Weak<super::rt::Shared>) -> Js {
     let g = Js::object(vec![]);
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
@@ -326,6 +326,8 @@ pub fn build(rt: Weak<super::rt::Shared>) -> Js {
     );
     let promise_rt = rt.clone();
     let settled_rt = rt.clone();
+    let resolve_rt = rt.clone();
+    let reject_rt = rt.clone();
     def(
         "Promise",
         Js::object(vec![
@@ -347,17 +349,19 @@ pub fn build(rt: Weak<super::rt::Shared>) -> Js {
             ),
             (
                 "resolve",
-                Js::function("resolve", |_, a| {
+                Js::function("resolve", move |_, a| {
+                    let rt = shared(&resolve_rt)?;
                     Ok(match arg(&a, 0) {
                         p @ Js::Promise(_) => p,
-                        v => Js::Promise(promise::Promise::settled(Ok(v))),
+                        v => Js::Promise(promise::Promise::settled(&rt.exchange_runtime(), Ok(v))),
                     })
                 }),
             ),
             (
                 "reject",
-                Js::function("reject", |_, a| {
-                    Ok(Js::Promise(promise::Promise::settled(Err(Thrown::new(arg(&a, 0))))))
+                Js::function("reject", move |_, a| {
+                    let rt = shared(&reject_rt)?;
+                    Ok(Js::Promise(promise::Promise::settled(&rt.exchange_runtime(), Err(Thrown::new(arg(&a, 0))))))
                 }),
             ),
         ]),
@@ -413,7 +417,7 @@ pub fn build(rt: Weak<super::rt::Shared>) -> Js {
 }
 
 /// A detached-handle Rt over the exchange receiver, for builtins that spawn work.
-pub fn shared(weak: &Weak<super::rt::Shared>) -> Result<Rt, Thrown> {
+pub(crate) fn shared(weak: &Weak<super::rt::Shared>) -> Result<Rt, Thrown> {
     let shared = weak
         .upgrade()
         .ok_or_else(|| Thrown::error("Error", "Bitget runtime disposed"))?;

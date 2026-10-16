@@ -11,7 +11,7 @@ fn testnet(this: &Js) -> Result<bool, super::value::Thrown> {
 
 // ts: BitgetExchange.apiProductType / apiMarginCoin / apiUtaCategory / usesUtaRouting
 // ts: BitgetUSDCExchange / BitgetInverseExchange override apiProductType and apiMarginCoin
-pub fn install(rt: &Rt) {
+pub(crate) fn install(rt: &Rt) {
     let this = &rt.this;
     let variant = rt.shared.variant;
     let product: Getter = Rc::new(move |this| {

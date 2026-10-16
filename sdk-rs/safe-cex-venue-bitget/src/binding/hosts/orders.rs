@@ -55,7 +55,8 @@ fn settled_future(value: Js) -> JsFuture<'static> {
 /// Invoke the captured Promise combinator over pending handles that the returned
 /// future settles as each operand completes; operand work is already runtime-owned.
 fn combine<'a>(rt: &Rt, function: Js, inputs: Vec<JsFuture<'a>>) -> Result<JsFuture<'a>, Thrown> {
-    let pending: Vec<Promise> = inputs.iter().map(|_| Promise::pending()).collect();
+    let runtime = rt.exchange_runtime();
+    let pending: Vec<Promise> = inputs.iter().map(|_| Promise::pending(&runtime)).collect();
     let handles = Js::array(pending.iter().cloned().map(Js::Promise).collect());
     let combined = function.call(rt.global("Promise")?, vec![handles])?;
     let mut inputs: Vec<Option<JsFuture<'a>>> = inputs.into_iter().map(Some).collect();
@@ -315,7 +316,7 @@ fn delegate<'a>(rt: &'a Rt, path: &str, orders: &CancelOrders<Js>) -> Result<Can
 }
 
 /// Array/string iteration protocol (`...value`, destructuring) over the live value.
-pub enum JsIterator {
+pub(crate) enum JsIterator {
     Array { array: Js, index: usize },
     Chars { units: Str, index: usize },
 }
@@ -485,7 +486,7 @@ impl OrderReadsHost for Rt {
 }
 
 /// bitget.exchange.ts module helpers the order bodies resolve by name.
-pub fn register(globals: &Js, _weak: Weak<Shared>) {
+pub(crate) fn register(globals: &Js, _weak: Weak<Shared>) {
     let _ = globals.define(
         "isBitgetSuccessCode",
         Js::function("isBitgetSuccessCode", |_, a| {
@@ -619,7 +620,7 @@ fn order_id_arg(args: &[Js]) -> Result<String, Thrown> {
     text(&arg(args, 0))
 }
 
-pub fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Result<Option<Js>, Thrown> {
+pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Result<Option<Js>, Thrown> {
     let member = match (owner, name) {
         ("BitgetExchange", "reconcilePrivateStateFromRest") => async_member(rt, name, |rt, _| async move {
             undefined_after(order_reads::reconcile_private_state_from_rest(&rt).await)

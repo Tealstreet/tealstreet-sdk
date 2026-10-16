@@ -5,7 +5,7 @@ use super::{
     value::{Js, Thrown},
 };
 
-pub fn bind(rt: &Rt, owner: &str, name: &str, targets: &[&str]) -> Result<Js, Thrown> {
+pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, targets: &[&str]) -> Result<Js, Thrown> {
     for group in [
         hosts::positions::bind,
         hosts::orders::bind,

@@ -425,9 +425,9 @@ async fn fills_page(rt: &Rt, params: safe_cex_num::JsJsonValue) -> Result<(Vec<V
     Ok((rows, if end_id.is_nullish() { None } else { Some(text(&end_id)?) }))
 }
 
-pub fn register(_globals: &Js, _weak: Weak<Shared>) {}
+pub(crate) fn register(_globals: &Js, _weak: Weak<Shared>) {}
 
-pub fn bind(rt: &Rt, _owner: &str, name: &str, targets: &[&str]) -> Result<Option<Js>, Thrown> {
+pub(crate) fn bind(rt: &Rt, _owner: &str, name: &str, targets: &[&str]) -> Result<Option<Js>, Thrown> {
     let Some(target) = targets.first() else {
         return Ok(None);
     };

@@ -10,31 +10,30 @@ use std::{
 };
 
 pub type Str = Rc<[u16]>;
-pub type NativeFn = Rc<dyn Fn(Js, Vec<Js>) -> Result<Js, Thrown>>;
-pub type Getter = Rc<dyn Fn(&Js) -> Result<Js, Thrown>>;
-pub type Setter = Rc<dyn Fn(&Js, Js) -> Result<(), Thrown>>;
+pub(crate) type NativeFn = Rc<dyn Fn(Js, Vec<Js>) -> Result<Js, Thrown>>;
+pub(crate) type Getter = Rc<dyn Fn(&Js) -> Result<Js, Thrown>>;
+pub(crate) type Setter = Rc<dyn Fn(&Js, Js) -> Result<(), Thrown>>;
 
-pub fn utf16(text: &str) -> Str {
+pub(crate) fn utf16(text: &str) -> Str {
     text.encode_utf16().collect::<Vec<_>>().into()
 }
 
 #[derive(Clone)]
-pub enum Prop {
+pub(crate) enum Prop {
     Data(Js),
     Accessor(Option<Getter>, Option<Setter>),
 }
 
 pub struct ObjectData {
-    pub class: &'static str,
-    pub props: RefCell<IndexMap<Str, Prop>>,
-    pub proto: RefCell<Option<Js>>,
+    pub(crate) class: &'static str,
+    pub(crate) props: RefCell<IndexMap<Str, Prop>>,
+    pub(crate) proto: RefCell<Option<Js>>,
 }
 
 pub struct FunctionData {
-    pub name: Str,
-    pub call: NativeFn,
-    pub props: RefCell<IndexMap<Str, Prop>>,
-    pub constructor: bool,
+    pub(crate) name: Str,
+    pub(crate) call: NativeFn,
+    pub(crate) props: RefCell<IndexMap<Str, Prop>>,
 }
 
 #[derive(Clone)]
@@ -60,7 +59,7 @@ pub struct Thrown {
 }
 
 impl Thrown {
-    pub fn new(value: Js) -> Self {
+    pub(crate) fn new(value: Js) -> Self {
         Self {
             value,
             native: None,
@@ -69,10 +68,10 @@ impl Thrown {
     pub fn error(name: &str, message: &str) -> Self {
         Self::new(error_object(name, message))
     }
-    pub fn type_error(message: &str) -> Self {
+    pub(crate) fn type_error(message: &str) -> Self {
         Self::error("TypeError", message)
     }
-    pub fn message(&self) -> String {
+    pub(crate) fn message(&self) -> String {
         match &self.value {
             Js::Object(_) | Js::Function(_) => self
                 .value
@@ -83,7 +82,7 @@ impl Thrown {
             other => other.to_display(),
         }
     }
-    pub fn to_exchange_error(&self) -> ExchangeError {
+    pub(crate) fn to_exchange_error(&self) -> ExchangeError {
         if let Some(native) = &self.native {
             return (**native).clone();
         }
@@ -125,7 +124,7 @@ impl From<Thrown> for ExchangeError {
     }
 }
 
-pub fn error_object(name: &str, message: &str) -> Js {
+pub(crate) fn error_object(name: &str, message: &str) -> Js {
     let object = Js::object_with_class("Error", vec![]);
     let _ = object.define("message", Js::str(message));
     let _ = object.define("name", Js::str(name));
@@ -161,22 +160,22 @@ impl fmt::Debug for Js {
 }
 
 impl Js {
-    pub fn str(text: &str) -> Js {
+    pub(crate) fn str(text: &str) -> Js {
         Js::String(utf16(text))
     }
-    pub fn utf16(text: &[u16]) -> Js {
+    pub(crate) fn utf16(text: &[u16]) -> Js {
         Js::String(text.into())
     }
-    pub fn array(items: Vec<Js>) -> Js {
+    pub(crate) fn array(items: Vec<Js>) -> Js {
         Js::Array(Rc::new(RefCell::new(items.into_iter().map(Some).collect())))
     }
-    pub fn holey_array(items: Vec<Option<Js>>) -> Js {
+    pub(crate) fn holey_array(items: Vec<Option<Js>>) -> Js {
         Js::Array(Rc::new(RefCell::new(items)))
     }
     pub fn object(fields: Vec<(&str, Js)>) -> Js {
         Js::object_with_class("Object", fields)
     }
-    pub fn object_with_class(class: &'static str, fields: Vec<(&str, Js)>) -> Js {
+    pub(crate) fn object_with_class(class: &'static str, fields: Vec<(&str, Js)>) -> Js {
         Js::Object(Rc::new(ObjectData {
             class,
             props: RefCell::new(
@@ -188,15 +187,14 @@ impl Js {
             proto: RefCell::new(None),
         }))
     }
-    pub fn function(name: &str, call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
+    pub(crate) fn function(name: &str, call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
         Js::Function(Rc::new(FunctionData {
             name: utf16(name),
             call: Rc::new(call),
             props: RefCell::new(IndexMap::new()),
-            constructor: false,
         }))
     }
-    pub fn constructor(
+    pub(crate) fn constructor(
         name: &str,
         call: impl Fn(Js, Vec<Js>) -> Result<Js, Thrown> + 'static,
     ) -> Js {
@@ -204,38 +202,37 @@ impl Js {
             name: utf16(name),
             call: Rc::new(call),
             props: RefCell::new(IndexMap::new()),
-            constructor: true,
         }))
     }
-    pub fn new_map() -> Js {
+    pub(crate) fn new_map() -> Js {
         Js::Map(Rc::new(RefCell::new(vec![])))
     }
-    pub fn new_set() -> Js {
+    pub(crate) fn new_set() -> Js {
         Js::Set(Rc::new(RefCell::new(vec![])))
     }
 
-    pub fn is_undefined(&self) -> bool {
+    pub(crate) fn is_undefined(&self) -> bool {
         matches!(self, Js::Undefined)
     }
-    pub fn is_nullish(&self) -> bool {
+    pub(crate) fn is_nullish(&self) -> bool {
         matches!(self, Js::Undefined | Js::Null)
     }
-    pub fn is_array(&self) -> bool {
+    pub(crate) fn is_array(&self) -> bool {
         matches!(self, Js::Array(_))
     }
-    pub fn is_string(&self) -> bool {
+    pub(crate) fn is_string(&self) -> bool {
         matches!(self, Js::String(_))
     }
-    pub fn is_object(&self) -> bool {
+    pub(crate) fn is_object(&self) -> bool {
         !matches!(
             self,
             Js::Undefined | Js::Null | Js::Bool(_) | Js::Number(_) | Js::String(_)
         )
     }
-    pub fn is_callable(&self) -> bool {
+    pub(crate) fn is_callable(&self) -> bool {
         matches!(self, Js::Function(_))
     }
-    pub fn type_of(&self) -> &'static str {
+    pub(crate) fn type_of(&self) -> &'static str {
         match self {
             Js::Undefined => "undefined",
             Js::Null => "object",
@@ -246,7 +243,7 @@ impl Js {
             _ => "object",
         }
     }
-    pub fn truthy(&self) -> bool {
+    pub(crate) fn truthy(&self) -> bool {
         match self {
             Js::Undefined | Js::Null => false,
             Js::Bool(b) => *b,
@@ -256,7 +253,7 @@ impl Js {
         }
     }
     /// Strict equality (===).
-    pub fn strict_equals(&self, other: &Js) -> bool {
+    pub(crate) fn strict_equals(&self, other: &Js) -> bool {
         match (self, other) {
             (Js::Undefined, Js::Undefined) | (Js::Null, Js::Null) => true,
             (Js::Bool(a), Js::Bool(b)) => a == b,
@@ -265,13 +262,13 @@ impl Js {
             _ => self.same_reference(other),
         }
     }
-    pub fn same_value_zero(&self, other: &Js) -> bool {
+    pub(crate) fn same_value_zero(&self, other: &Js) -> bool {
         match (self, other) {
             (Js::Number(a), Js::Number(b)) if a.is_nan() && b.is_nan() => true,
             _ => self.strict_equals(other),
         }
     }
-    pub fn same_reference(&self, other: &Js) -> bool {
+    pub(crate) fn same_reference(&self, other: &Js) -> bool {
         match (self, other) {
             (Js::Array(a), Js::Array(b)) => Rc::ptr_eq(a, b),
             (Js::Object(a), Js::Object(b)) => Rc::ptr_eq(a, b),
@@ -284,7 +281,7 @@ impl Js {
     }
 
     /// ToString for primitives; objects use their default `[object X]` text.
-    pub fn to_js_string(&self) -> Result<Str, Thrown> {
+    pub(crate) fn to_js_string(&self) -> Result<Str, Thrown> {
         Ok(match self {
             Js::Undefined => utf16("undefined"),
             Js::Null => utf16("null"),
@@ -335,13 +332,13 @@ impl Js {
             Js::Set(_) => utf16("[object Set]"),
         })
     }
-    pub fn to_display(&self) -> String {
+    pub(crate) fn to_display(&self) -> String {
         self.to_js_string()
             .map(|s| String::from_utf16_lossy(&s))
             .unwrap_or_else(|_| "[unprintable]".into())
     }
     /// ToNumber (unary +).
-    pub fn to_number(&self) -> Result<f64, Thrown> {
+    pub(crate) fn to_number(&self) -> Result<f64, Thrown> {
         Ok(match self {
             Js::Undefined => f64::NAN,
             Js::Null => 0.0,
@@ -354,7 +351,7 @@ impl Js {
             _ => f64::NAN,
         })
     }
-    pub fn parse_float(&self) -> Result<f64, Thrown> {
+    pub(crate) fn parse_float(&self) -> Result<f64, Thrown> {
         Ok(parse_float(&String::from_utf16_lossy(&self.to_js_string()?)))
     }
 
@@ -370,7 +367,7 @@ impl Js {
     pub fn get(&self, key: &str) -> Result<Js, Thrown> {
         self.get_key(&utf16(key))
     }
-    pub fn get_key(&self, key: &[u16]) -> Result<Js, Thrown> {
+    pub(crate) fn get_key(&self, key: &[u16]) -> Result<Js, Thrown> {
         match self {
             Js::Undefined | Js::Null => {
                 return Err(Thrown::type_error(&format!(
@@ -426,7 +423,7 @@ impl Js {
             }
         }
     }
-    pub fn has_own(&self, key: &str) -> bool {
+    pub(crate) fn has_own(&self, key: &str) -> bool {
         match self {
             Js::Array(items) => {
                 array_index(&utf16(key)).is_some_and(|i| matches!(items.borrow().get(i), Some(Some(_))))
@@ -437,10 +434,10 @@ impl Js {
         }
     }
     /// Ordinary [[Set]]: runs setters, otherwise writes or appends an own data property.
-    pub fn set(&self, key: &str, value: Js) -> Result<(), Thrown> {
+    pub(crate) fn set(&self, key: &str, value: Js) -> Result<(), Thrown> {
         self.set_key(&utf16(key), value)
     }
-    pub fn set_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
+    pub(crate) fn set_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
         if let Js::Array(items) = self {
             if let Some(i) = array_index(key) {
                 let mut items = items.borrow_mut();
@@ -478,10 +475,10 @@ impl Js {
         }
     }
     /// CreateDataProperty: replaces accessors, keeps an existing key's slot.
-    pub fn define(&self, key: &str, value: Js) -> Result<(), Thrown> {
+    pub(crate) fn define(&self, key: &str, value: Js) -> Result<(), Thrown> {
         self.define_key(&utf16(key), value)
     }
-    pub fn define_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
+    pub(crate) fn define_key(&self, key: &[u16], value: Js) -> Result<(), Thrown> {
         if let Js::Array(_) = self {
             return self.set_key(key, value);
         }
@@ -490,14 +487,14 @@ impl Js {
         }
         Ok(())
     }
-    pub fn define_accessor(&self, key: &str, getter: Option<Getter>, setter: Option<Setter>) {
+    pub(crate) fn define_accessor(&self, key: &str, getter: Option<Getter>, setter: Option<Setter>) {
         if let Some(props) = self.own_props() {
             props
                 .borrow_mut()
                 .insert(utf16(key), Prop::Accessor(getter, setter));
         }
     }
-    pub fn delete(&self, key: &[u16]) {
+    pub(crate) fn delete(&self, key: &[u16]) {
         match self {
             Js::Array(items) => {
                 if let Some(i) = array_index(key)
@@ -514,7 +511,7 @@ impl Js {
         }
     }
     /// Enumerable own string keys in OrdinaryOwnPropertyKeys order.
-    pub fn own_keys(&self) -> Vec<Str> {
+    pub(crate) fn own_keys(&self) -> Vec<Str> {
         match self {
             Js::Array(items) => items
                 .borrow()
@@ -541,7 +538,7 @@ impl Js {
         }
     }
     /// Object spread / Object.assign source read: own enumerable values in key order.
-    pub fn own_entries(&self) -> Result<Vec<(Str, Js)>, Thrown> {
+    pub(crate) fn own_entries(&self) -> Result<Vec<(Str, Js)>, Thrown> {
         self.own_keys()
             .into_iter()
             .map(|k| {
@@ -551,7 +548,7 @@ impl Js {
             .collect()
     }
     /// `{ ...value }`: nullish spreads nothing, strings spread indexed characters.
-    pub fn spread_object(&self) -> Result<Js, Thrown> {
+    pub(crate) fn spread_object(&self) -> Result<Js, Thrown> {
         let out = Js::object(vec![]);
         if !self.is_nullish() {
             for (k, v) in self.own_entries()? {
@@ -560,17 +557,17 @@ impl Js {
         }
         Ok(out)
     }
-    pub fn array_items(&self) -> Option<Vec<Option<Js>>> {
+    pub(crate) fn array_items(&self) -> Option<Vec<Option<Js>>> {
         match self {
             Js::Array(items) => Some(items.borrow().clone()),
             _ => None,
         }
     }
-    pub fn array_values(&self) -> Option<Vec<Js>> {
+    pub(crate) fn array_values(&self) -> Option<Vec<Js>> {
         self.array_items()
             .map(|items| items.into_iter().map(|v| v.unwrap_or(Js::Undefined)).collect())
     }
-    pub fn push(&self, value: Js) -> Result<(), Thrown> {
+    pub(crate) fn push(&self, value: Js) -> Result<(), Thrown> {
         match self {
             Js::Array(items) => {
                 items.borrow_mut().push(Some(value));
@@ -580,18 +577,13 @@ impl Js {
         }
     }
     /// Invoke as a method with `this`; non-callables throw the V8 TypeError.
-    pub fn call(&self, this: Js, args: Vec<Js>) -> Result<Js, Thrown> {
+    pub(crate) fn call(&self, this: Js, args: Vec<Js>) -> Result<Js, Thrown> {
         match self {
             Js::Function(f) => (f.call)(this, args),
-            other => {
-                if std::env::var("BITGET_DEBUG_CALLS").is_ok() {
-                    eprintln!("NONCALL {:?}\n{}", other, std::backtrace::Backtrace::force_capture());
-                }
-                Err(Thrown::type_error(&format!("{} is not a function", other.to_display())))
-            }
+            other => Err(Thrown::type_error(&format!("{} is not a function", other.to_display()))),
         }
     }
-    pub fn call_method(&self, name: &str, args: Vec<Js>) -> Result<Js, Thrown> {
+    pub(crate) fn call_method(&self, name: &str, args: Vec<Js>) -> Result<Js, Thrown> {
         let method = self.get(name)?;
         if !method.is_callable() {
             return Err(Thrown::type_error(&format!(
@@ -601,13 +593,13 @@ impl Js {
         }
         method.call(self.clone(), args)
     }
-    pub fn as_str(&self) -> Option<&Str> {
+    pub(crate) fn as_str(&self) -> Option<&Str> {
         match self {
             Js::String(s) => Some(s),
             _ => None,
         }
     }
-    pub fn as_f64(&self) -> Option<f64> {
+    pub(crate) fn as_f64(&self) -> Option<f64> {
         match self {
             Js::Number(n) => Some(*n),
             _ => None,
@@ -615,7 +607,7 @@ impl Js {
     }
 }
 
-pub fn array_index(key: &[u16]) -> Option<usize> {
+pub(crate) fn array_index(key: &[u16]) -> Option<usize> {
     if key.is_empty() || key.len() > 10 || (key.len() > 1 && key[0] == b'0' as u16) {
         return None;
     }
@@ -630,7 +622,7 @@ pub fn array_index(key: &[u16]) -> Option<usize> {
 }
 
 /// StringToNumber per ECMAScript (whitespace trim, hex/octal/binary, Infinity).
-pub fn string_to_number(text: &str) -> f64 {
+pub(crate) fn string_to_number(text: &str) -> f64 {
     let t = safe_cex_num::js_trim(text);
     if t.is_empty() {
         return 0.0;
@@ -710,10 +702,10 @@ pub fn to_json(value: &Js) -> Result<serde_json::Value, Thrown> {
 }
 
 /// Typed boundary helpers: serde types cross through the JSON projection.
-pub fn to_typed<T: serde::de::DeserializeOwned>(value: &Js) -> Result<T, Thrown> {
+pub(crate) fn to_typed<T: serde::de::DeserializeOwned>(value: &Js) -> Result<T, Thrown> {
     serde_json::from_value(to_json(value)?).map_err(|e| Thrown::type_error(&e.to_string()))
 }
-pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown> {
+pub(crate) fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown> {
     Ok(from_json(
         &serde_json::to_value(value).map_err(|e| Thrown::type_error(&e.to_string()))?,
     ))

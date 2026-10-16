@@ -124,7 +124,7 @@ fn not_iterable(v: &Js) -> Thrown {
 }
 
 /// Live native iterator over the iterable intrinsics.
-pub enum JsIter {
+pub(crate) enum JsIter {
     Array(Js, usize),
     Map(Js, usize),
     Set(Js, usize),
@@ -218,9 +218,6 @@ fn bind_callable(owner: Js, member: Js, name: &str) -> Js {
 
 fn invoke_value(f: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
     if !f.is_callable() {
-        if std::env::var("BITGET_DEBUG_CALLS").is_ok() {
-            eprintln!("NONCALL-A {}", std::backtrace::Backtrace::force_capture());
-        }
         return Err(Thrown::type_error(&format!("{} is not a function", f.to_display())));
     }
     f.call(Js::Undefined, args)
@@ -826,7 +823,7 @@ fn paginate_income_range(rt: Rt, fetch: Js, opts: Js) -> JsFuture<'static> {
     })
 }
 
-pub fn register(globals: &Js, weak: Weak<Shared>) {
+pub(crate) fn register(globals: &Js, weak: Weak<Shared>) {
     let def = |k: &str, v: Js| {
         let _ = globals.define(k, v);
     };
@@ -1054,7 +1051,7 @@ pub fn register(globals: &Js, weak: Weak<Shared>) {
             let callback = arg(&a, 0);
             let min = arg(&a, 1);
             if min.strict_equals(&Js::Number(f64::INFINITY)) {
-                return Ok(Js::Promise(Promise::settled(Ok(Js::Undefined))));
+                return Ok(Js::Promise(Promise::settled(&rt.exchange_runtime(), Ok(Js::Undefined))));
             }
             // The TS fallback also console.warns once per caller; there is no console here.
             let interval = if min.truthy() && less_than(&Js::Number(0.0), &min)? == Some(true) {
@@ -1295,7 +1292,7 @@ macro_rules! sync_member {
     }};
 }
 
-pub fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Result<Option<Js>, Thrown> {
+pub(crate) fn bind(rt: &Rt, owner: &str, name: &str, _targets: &[&str]) -> Result<Option<Js>, Thrown> {
     let f = match (owner, name) {
         ("BitgetExchange", "validateAccount") => {
             async_member!(rt, name, |h, _a| { runtime_orchestration::validate_account(h).await })

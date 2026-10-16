@@ -2,7 +2,7 @@
 //! `this` is the receiver the body runs on (exchange or socket object).
 use super::{
     promise::{JsFuture, Promise},
-    value::{Js, Str, Thrown, utf16},
+    value::{Js, Thrown},
 };
 use safe_cex_exchange::{
     exchange::{BaseExchange, Exchange},
@@ -22,7 +22,7 @@ pub trait BitgetImports {
     fn send(&self, config: Js) -> JsFuture<'static>;
 }
 
-pub struct Shared {
+pub(crate) struct Shared {
     pub runtime: Rc<dyn WsRuntime>,
     pub venue: RefCell<Option<Weak<dyn Exchange>>>,
     pub imports: Rc<dyn BitgetImports>,
@@ -34,6 +34,9 @@ pub struct Shared {
     pub name: safe_cex_types::ExchangeName,
     pub options: safe_cex_types::ExchangeOptions,
     pub external_public_data: Option<ExternalPublicDataFactory>,
+    pub timers: RefCell<Vec<(Js, Box<dyn safe_cex_exchange::runtime::ExchangeTask>)>>,
+    pub socket_ids: std::cell::Cell<u64>,
+    pub socket_cores: RefCell<Vec<(Js, Rc<super::sockets::SocketCore>)>>,
 }
 
 pub type ExternalPublicDataFactory = Rc<
@@ -41,35 +44,32 @@ pub type ExternalPublicDataFactory = Rc<
 >;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub enum Variant {
+pub(crate) enum Variant {
     Classic,
     Inverse,
     Usdc,
 }
 
 #[derive(Clone)]
-pub struct Rt {
+pub(crate) struct Rt {
     pub shared: Rc<Shared>,
     pub this: Js,
 }
 
 impl Rt {
-    pub fn with_this(&self, this: Js) -> Rt {
+    pub(crate) fn with_this(&self, this: Js) -> Rt {
         Rt {
             shared: self.shared.clone(),
             this,
         }
     }
-    pub fn exchange(&self) -> Js {
-        self.shared.exchange.borrow().clone()
-    }
-    pub fn base(&self) -> &Rc<BaseExchange> {
+    pub(crate) fn base(&self) -> &Rc<BaseExchange> {
         self.shared.base.get().expect("BaseExchange is constructed first")
     }
-    pub fn exchange_runtime(&self) -> Rc<dyn ExchangeRuntime> {
+    pub(crate) fn exchange_runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.shared.runtime.clone()
     }
-    pub fn global(&self, name: &str) -> Result<Js, Thrown> {
+    pub(crate) fn global(&self, name: &str) -> Result<Js, Thrown> {
         let globals = &self.shared.globals;
         if globals.has_own(name) {
             return globals.get(name);
@@ -86,7 +86,7 @@ impl Rt {
         Ok(value)
     }
     /// Resolve `a.b.c` from `this`; a first segment `this` lacks resolves from globals.
-    pub fn path(&self, path: &str) -> Result<Js, Thrown> {
+    pub(crate) fn path(&self, path: &str) -> Result<Js, Thrown> {
         let mut parts = path.split('.');
         let first = parts.next().unwrap_or_default();
         let mut value = if self.this.has_own(first) || self.this.get(first).is_ok_and(|v| !v.is_undefined()) {
@@ -102,7 +102,7 @@ impl Rt {
         Ok(value)
     }
     /// Resolve the owner and the member of a dotted path (owner is `this` for one segment).
-    pub fn owner_and_member(&self, path: &str) -> Result<(Js, Js), Thrown> {
+    pub(crate) fn owner_and_member(&self, path: &str) -> Result<(Js, Js), Thrown> {
         match path.rsplit_once('.') {
             Some((owner, member)) => {
                 let owner = self.path(owner)?;
@@ -120,28 +120,28 @@ impl Rt {
             }
         }
     }
-    pub fn set_path(&self, path: &str, value: Js) -> Result<(), Thrown> {
+    pub(crate) fn set_path(&self, path: &str, value: Js) -> Result<(), Thrown> {
         match path.rsplit_once('.') {
             Some((owner, member)) => self.path(owner)?.set(member, value),
             None => self.this.set(path, value),
         }
     }
     /// Call a member of `this` by dotted path with its owner as receiver.
-    pub fn call_path(&self, path: &str, args: Vec<Js>) -> Result<Js, Thrown> {
+    pub(crate) fn call_path(&self, path: &str, args: Vec<Js>) -> Result<Js, Thrown> {
         let (owner, member) = self.owner_and_member(path)?;
         if !member.is_callable() {
             return Err(Thrown::type_error(&format!("this.{path} is not a function")));
         }
         member.call(owner, args)
     }
-    pub fn spawn(&self, body: JsFuture<'static>) -> Js {
+    pub(crate) fn spawn(&self, body: JsFuture<'static>) -> Js {
         Js::Promise(Promise::spawn(&self.exchange_runtime(), body))
     }
-    pub fn now(&self) -> f64 {
+    pub(crate) fn now(&self) -> f64 {
         self.shared.runtime.now_ms()
     }
     /// setTimeout: returns a timer handle object; clearTimeout drops the task.
-    pub fn set_timeout(&self, callback: Rc<dyn Fn() -> Result<(), Thrown>>, delay_ms: f64) -> Js {
+    pub(crate) fn set_timeout(&self, callback: Rc<dyn Fn() -> Result<(), Thrown>>, delay_ms: f64) -> Js {
         let runtime = self.shared.runtime.clone();
         let delay = if delay_ms.is_finite() && delay_ms > 0.0 { delay_ms as u64 } else { 0 };
         let reporter = runtime.clone();
@@ -152,22 +152,16 @@ impl Rt {
             }
         }));
         let handle = Js::object_with_class("Timeout", vec![]);
-        TIMERS.with(|timers| timers.borrow_mut().push((handle.clone(), task)));
+        self.shared.timers.borrow_mut().push((handle.clone(), task));
         handle
     }
-    pub fn clear_timeout(&self, handle: &Js) {
-        TIMERS.with(|timers| timers.borrow_mut().retain(|(h, _)| !h.same_reference(handle)));
+    pub(crate) fn clear_timeout(&self, handle: &Js) {
+        self.shared.timers.borrow_mut().retain(|(h, _)| !h.same_reference(handle));
     }
-    pub fn report(&self, error: &Thrown, source: &str) {
+    pub(crate) fn report(&self, error: &Thrown, source: &str) {
         self.shared
             .runtime
             .report_exception(&error.to_exchange_error(), &serde_json::json!({"source": source}));
     }
-    pub fn str(&self, text: &str) -> Str {
-        utf16(text)
-    }
 }
 
-thread_local! {
-    static TIMERS: RefCell<Vec<(Js, Box<dyn safe_cex_exchange::runtime::ExchangeTask>)>> = RefCell::new(vec![]);
-}

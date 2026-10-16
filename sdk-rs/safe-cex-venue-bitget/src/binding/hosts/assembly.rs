@@ -67,11 +67,12 @@ impl AssemblyHost for Rt {
         Js::function("", move |_, a| body(a))
     }
     fn async_function(&self, body: NativeCallback<Js, Thrown>) -> Js {
+        let runtime = self.exchange_runtime();
         Js::function("", move |_, a| {
             Ok(match body(a) {
                 Ok(p @ Js::Promise(_)) => p,
-                Ok(v) => Js::Promise(Promise::settled(Ok(v))),
-                Err(e) => Js::Promise(Promise::settled(Err(e))),
+                Ok(v) => Js::Promise(Promise::settled(&runtime, Ok(v))),
+                Err(e) => Js::Promise(Promise::settled(&runtime, Err(e))),
             })
         })
     }
@@ -84,7 +85,7 @@ impl AssemblyHost for Rt {
 }
 
 /// `owner.member` read as a callable that keeps `owner` as its receiver.
-pub fn bound_member(owner: &Js, name: &str) -> Result<Js, Thrown> {
+pub(crate) fn bound_member(owner: &Js, name: &str) -> Result<Js, Thrown> {
     let value = owner.get(name)?;
     if !value.is_callable() {
         return Ok(value);
@@ -157,7 +158,7 @@ fn qs_stringify(value: &Js, encode: bool) -> Result<String, Thrown> {
     Ok(out.join("&"))
 }
 
-pub fn to_js_json(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown> {
+pub(crate) fn to_js_json(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown> {
     use safe_cex_num::JsJsonValue as J;
     Ok(match value {
         Js::Undefined | Js::Function(_) => J::Undefined,
@@ -413,7 +414,7 @@ fn secondary_socket(rt: &Rt, index: f64) -> Js {
     socket
 }
 
-pub fn register(g: &Js, weak: Weak<Shared>) {
+pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
@@ -627,7 +628,7 @@ pub fn register(g: &Js, weak: Weak<Shared>) {
     let _ = (error_object, utf16);
 }
 
-pub fn client_order_id_rule() -> safe_cex_exchange::client_order_id::ClientOrderIdRule {
+pub(crate) fn client_order_id_rule() -> safe_cex_exchange::client_order_id::ClientOrderIdRule {
     safe_cex_exchange::client_order_id::pattern_client_order_id_rule(
         "Bitget".into(),
         "/^[.A-Z:/a-z0-9_-]{1,32}$/".into(),

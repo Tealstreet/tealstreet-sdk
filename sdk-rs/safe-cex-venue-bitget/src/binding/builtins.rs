@@ -8,19 +8,7 @@ use super::{
 use safe_cex_exchange::runtime::ExchangeRuntime;
 use std::{cell::RefCell, rc::Rc};
 
-thread_local! {
-    static RUNTIME: RefCell<Option<Rc<dyn ExchangeRuntime>>> = const { RefCell::new(None) };
-}
 
-pub fn install_runtime(runtime: Rc<dyn ExchangeRuntime>) {
-    RUNTIME.with(|r| *r.borrow_mut() = Some(runtime));
-}
-
-fn runtime() -> Result<Rc<dyn ExchangeRuntime>, Thrown> {
-    RUNTIME
-        .with(|r| r.borrow().clone())
-        .ok_or_else(|| Thrown::error("Error", "no Bitget runtime installed"))
-}
 
 fn method(name: &str, f: impl Fn(Vec<Js>) -> Result<Js, Thrown> + 'static) -> Js {
     Js::function(name, move |_, args| f(args))
@@ -37,7 +25,7 @@ fn callback_call(callback: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
     callback.call(Js::Undefined, args)
 }
 
-pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
+pub(crate) fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
     let name = String::from_utf16_lossy(key);
     let this = receiver.clone();
     match receiver {
@@ -441,9 +429,10 @@ fn set_member(this: Js, name: &str) -> Option<Js> {
 }
 
 fn promise_member(p: Promise, name: &str) -> Option<Js> {
+    let finally_runtime = p.runtime();
     let chain = move |on_ok: Js, on_err: Js| -> Result<Js, Thrown> {
         let p = p.clone();
-        let rt = runtime()?;
+        let rt = p.runtime();
         Ok(Js::Promise(Promise::spawn(
             &rt,
             Box::pin(async move {
@@ -460,20 +449,22 @@ fn promise_member(p: Promise, name: &str) -> Option<Js> {
         "then" => method(name, move |a| chain(arg(&a, 0), arg(&a, 1))),
         "catch" => method(name, move |a| chain(Js::Undefined, arg(&a, 0))),
         "finally" => method(name, move |a| {
+            let runtime_ok = finally_runtime.clone();
+            let runtime_err = finally_runtime.clone();
             let f = arg(&a, 0);
             let g = f.clone();
             let on_ok = Js::function("", move |_, v| {
                 if f.is_callable() {
                     let p = f.call(Js::Undefined, vec![])?;
                     let value = arg(&v, 0);
-                    return Ok(chain_value(p, Ok(value)));
+                    return Ok(chain_value(&runtime_ok, p, Ok(value)));
                 }
                 Ok(arg(&v, 0))
             });
             let on_err = Js::function("", move |_, v| {
                 if g.is_callable() {
                     let p = g.call(Js::Undefined, vec![])?;
-                    return Ok(chain_value(p, Err(Thrown::new(arg(&v, 0)))));
+                    return Ok(chain_value(&runtime_err, p, Err(Thrown::new(arg(&v, 0)))));
                 }
                 Err(Thrown::new(arg(&v, 0)))
             });
@@ -484,10 +475,9 @@ fn promise_member(p: Promise, name: &str) -> Option<Js> {
 }
 
 /// Await `p`, then settle with `outcome` (finally keeps the original result).
-fn chain_value(p: Js, outcome: Result<Js, Thrown>) -> Js {
-    let Ok(rt) = runtime() else { return Js::Undefined };
+fn chain_value(rt: &Rc<dyn ExchangeRuntime>, p: Js, outcome: Result<Js, Thrown>) -> Js {
     Js::Promise(Promise::spawn(
-        &rt,
+        rt,
         Box::pin(async move {
             await_js(p).await?;
             outcome
