@@ -141,10 +141,16 @@
     "accepted-number-output.test.mjs": [
       "numeric expression permission requires the canonical SDK compiler binding",
       "numeric provider recipe and unconditional source route reject executed mutations",
-      "numeric source inspection refuses opaque arguments later shadows and every glob"
+      "numeric source inspection refuses opaque arguments later shadows and every glob",
+      "numeric definition coverage retains exact export and declaration positions"
     ],
     "accepted-object-map-construction-native.test.mjs": [
       "object-map Clone classification follows the actual compiler owner and exact traits"
+    ],
+    "accepted-policy-files.test.mjs": [
+      "per-crate policy tables preserve compiler and source records exactly",
+      "policy shards refuse missing malformed misplaced duplicate symlink and obsolete inputs",
+      "policy shard ownership complete merge and direct cutover reject executed mutations"
     ],
     "accepted-ratchet.test.mjs": [
       "outstanding debt exactly matches measured and owned failures",
@@ -326,6 +332,12 @@
     "Weex kline native identity",
     "Weex kline policy routing",
     "contract shard namespace",
-    "contract shard complete merge"
+    "contract shard complete merge",
+    "numeric provider unrelated export attribute",
+    "numeric definition export coverage",
+    "numeric definition export position",
+    "policy shard ownership",
+    "policy shard complete merge",
+    "policy shard direct cutover"
   ]
 }
