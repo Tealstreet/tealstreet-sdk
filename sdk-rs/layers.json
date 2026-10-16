@@ -229,6 +229,7 @@
       "safe-cex-venue-coinbase",
       "safe-cex-venue-okx",
       "safe-cex-venue-kraken",
+      "safe-cex-venue-grvt",
       "safe-cex-venue-hyperliquid",
       "safe-cex-venue-polymarket",
       "safe-cex-venue-kucoin",

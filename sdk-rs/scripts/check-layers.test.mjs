@@ -10,6 +10,15 @@ function addEdge(metadata, from, to, extra = {}) {
   metadata.packages.find(pkg => pkg.name === from).dependencies.push({ name: to, kind: null, optional: false, target: null, ...(member?.manifest_path ? { path: path.dirname(member.manifest_path) } : {}), ...extra });
 }
 
+function addSyntheticVenue(policy, metadata) {
+  const name = 'safe-cex-venue-unbound-control';
+  assert.ok(!metadata.packages.some(pkg => pkg.name === name));
+  metadata.packages.push({ id: name, name, manifest_path: `/synthetic/${name}/Cargo.toml`, dependencies: [] });
+  metadata.workspace_members.push(name);
+  policy.layers.find(layer => layer.name === 'venues').packages.push(name);
+  return name;
+}
+
 // Run every mutation against live declarations and a second graph with all
 // venues populated. Empty scaffolds must not conceal competing failure paths.
 for (const populated of [false, true]) describe(populated ? 'populated venues' : 'live workspace', () => {
@@ -199,8 +208,9 @@ for (const [from, to, reason] of [
 });
 test('registry can construct a listed venue and facade can depend on registry without exceptions', () => {
   const { policy, metadata } = inputs();
-  policy.registryConstructors.venues.push('safe-cex-venue-grvt');
-  addEdge(metadata, 'safe-cex-registry', 'safe-cex-venue-grvt');
+  const venue = addSyntheticVenue(policy, metadata);
+  policy.registryConstructors.venues.push(venue);
+  addEdge(metadata, 'safe-cex-registry', venue);
   addEdge(metadata, 'safe-cex', 'safe-cex-registry');
   assert.equal(validateLayers(policy, metadata), metadata.workspace_members.length);
 });
@@ -216,9 +226,10 @@ test('moving registry back beside venues rejects its constructor dependency', ()
 });
 test('registry constructs only the listed venues', () => {
   const { policy, metadata } = inputs();
-  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitrue', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-bybit', 'safe-cex-venue-coinbase', 'safe-cex-venue-okx', 'safe-cex-venue-kraken', 'safe-cex-venue-hyperliquid', 'safe-cex-venue-polymarket', 'safe-cex-venue-kucoin', 'safe-cex-venue-mexc', 'safe-cex-venue-woo']);
-  addEdge(metadata, 'safe-cex-registry', 'safe-cex-venue-grvt');
-  assert.throws(() => validateLayers(policy, metadata), /^AssertionError \[ERR_ASSERTION\]: unlisted registry constructor: safe-cex-registry -> safe-cex-venue-grvt$/);
+  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitrue', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-bybit', 'safe-cex-venue-coinbase', 'safe-cex-venue-okx', 'safe-cex-venue-kraken', 'safe-cex-venue-grvt', 'safe-cex-venue-hyperliquid', 'safe-cex-venue-polymarket', 'safe-cex-venue-kucoin', 'safe-cex-venue-mexc', 'safe-cex-venue-woo']);
+  const venue = addSyntheticVenue(policy, metadata);
+  addEdge(metadata, 'safe-cex-registry', venue);
+  assert.throws(() => validateLayers(policy, metadata), /^AssertionError \[ERR_ASSERTION\]: unlisted registry constructor: safe-cex-registry -> safe-cex-venue-unbound-control$/);
 });
 test('removing a listed registry constructor rejects its live edge', () => {
   const { policy, metadata } = inputs();

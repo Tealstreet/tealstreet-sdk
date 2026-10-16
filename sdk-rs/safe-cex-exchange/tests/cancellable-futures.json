@@ -1637,9 +1637,9 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "6255e963903f4309b79c9b34c02366557ca67da3fe9e0c51b3ca8712560fbcd4",
+      "producer_sha256": "d45d7aa04cf20562cf4512ba1e8c0868ea437a2a67d177c41675edd99d667362",
       "classification": "no-owned-latch",
-      "reason": "Builds the axios call from the request and awaits its promise; request values are local."
+      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added."
     },
     {
       "owner": "src/js_runtime/client.rs::RestHttpHost as JsHttpHost::send",

@@ -1011,10 +1011,12 @@ JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
 `dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
 cases cover successful cleanup and each throwing socket, shared-cell visibility,
 retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
-The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
-worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
-completion hook and reconstructed error properties. Arguments/results use the
-existing JSON worker boundary; it does not create a parallel worker protocol.
+
+The JS HTTP bridge retains JSON-data adapter config in RestRequest.config_extensions,
+including GRVT's browser cookie/account fields. It leaves executable Axios hooks
+on the source config. Hosted effective config still spreads that source object,
+then overlays actual adapter fields; terminal extension updates survive too.
+Cookie promotion belongs exclusively to HOW, not the direct HTTP bridge.
 
 
 The shared lodash import table supplies `times` for source order splitting.
