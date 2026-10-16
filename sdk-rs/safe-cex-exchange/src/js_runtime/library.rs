@@ -799,15 +799,6 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     };
 
     if let Ok(number) = g.get("Number") {
-        define_on(
-            &number,
-            "isFinite",
-            func("isFinite", |a| {
-                Ok(Js::Bool(
-                    matches!(arg(&a, 0), Js::Number(n) if n.is_finite()),
-                ))
-            }),
-        );
         if let Ok(parse_int) = g.get("parseInt") {
             define_on(&number, "parseInt", parse_int);
         }
