@@ -5,6 +5,7 @@ use crate::api::{create_api, create_kucoin_spot_api};
 use safe_cex_exchange::{
     http::HttpClientOptions,
     js_runtime::{
+        base_exchange::HostedSigner,
         client::JsHttpHost,
         promise::JsFuture,
         value::{Js, Thrown, error_object, from_json, to_json},
@@ -26,6 +27,7 @@ pub(crate) struct ApiHost {
     pub me: Weak<ApiHost>,
     pub runtime: Rc<dyn ExchangeRuntime>,
     pub options: ExchangeOptions,
+    pub hosted_signer: Option<HostedSigner>,
     pub spot: bool,
     pub http: Rc<dyn Fn(&ExchangeOptions) -> HttpClientOptions>,
     pub registry: Rc<TransportRegistry>,
@@ -110,6 +112,7 @@ impl ApiHost {
             me: me.clone(),
             runtime: self.runtime.clone(),
             options,
+            hosted_signer: self.hosted_signer.clone(),
             spot: self.spot,
             http: self.http.clone(),
             registry: self.registry.clone(),
@@ -156,6 +159,9 @@ impl ApiHost {
 }
 
 impl JsHttpHost for ApiHost {
+    fn hosted_signer(&self) -> Option<HostedSigner> {
+        self.hosted_signer.clone()
+    }
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.runtime.clone()
     }
