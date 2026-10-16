@@ -176,6 +176,7 @@ fn base_market(
                 min: 1.0,
                 max: leverage,
             },
+            price: None,
         },
         contract_size: Some(contract),
         is_spot: spot,
@@ -186,6 +187,7 @@ fn base_market(
         info: None,
         taker_fee: None,
         maker_fee: None,
+        option: None,
     }
 }
 pub fn fetch_markets<H: PublicMarketReadHost + 'static>(

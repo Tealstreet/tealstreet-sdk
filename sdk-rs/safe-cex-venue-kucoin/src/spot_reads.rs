@@ -164,6 +164,7 @@ fn decode_markets(data: &Value) -> Result<Vec<safe_cex_types::Market>, String> {
             limits: MarketLimits {
                 amount: MarketLimitsAmount { min, max },
                 leverage: MarketLimitsLeverage { min: 1.0, max: 1.0 },
+                price: None,
             },
             contract_size: Some(1.0),
             is_spot: Some(true),
@@ -174,6 +175,7 @@ fn decode_markets(data: &Value) -> Result<Vec<safe_cex_types::Market>, String> {
             is_read_only: None,
             taker_fee: None,
             maker_fee: None,
+            option: None,
         });
     }
     match output_refusal {

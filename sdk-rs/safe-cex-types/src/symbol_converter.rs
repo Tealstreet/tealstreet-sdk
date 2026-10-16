@@ -43,6 +43,7 @@ fn name(exchange: &ExchangeName) -> &'static str {
         ExchangeName::Mode => "mode",
         ExchangeName::Salsadex => "salsadex",
         ExchangeName::TealstreetDex => "tealstreet-dex",
+        ExchangeName::Txflow => "txflow",
         ExchangeName::What => "what",
         ExchangeName::Weex => "weex",
         ExchangeName::Woo => "woo",
@@ -112,7 +113,7 @@ pub fn to_binance(symbol: &str, exchange: &ExchangeName) -> String {
             .filter(|i| *i > 0)
             .map(|i| format!("{}USDC", &symbol[..i]))
             .unwrap_or_else(|| symbol.replace('-', "")),
-        "coinbasespot" | "kucoinspot" => symbol.replace('-', ""),
+        "coinbasespot" | "kucoinspot" | "txflow" => symbol.replace('-', ""),
         "paradex" => symbol
             .strip_suffix("-PERP")
             .unwrap_or(symbol)
@@ -167,7 +168,7 @@ pub fn from_binance(symbol: &str, exchange: &ExchangeName) -> String {
         "bitgetusdc" => format!("{base}PERP"),
         "bitrue" => format!("E-{base}-{quote}"),
         "coinbase" => format!("{base}-PERP-INTX"),
-        "coinbasespot" | "kucoinspot" => format!("{base}-{quote}"),
+        "coinbasespot" | "kucoinspot" | "txflow" => format!("{base}-{quote}"),
         "paradex" => format!("{base}-{quote}-PERP"),
         "hyperliquid" => format!("{base}-PERP"),
         "hyperliquidspot" | "krakenspot" => format!("{base}/{quote}"),

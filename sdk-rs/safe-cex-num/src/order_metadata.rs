@@ -41,6 +41,7 @@ pub(super) const ORDER_METADATA: &[(&str, bool, bool)] = &[
     ("what", true, false),
     ("hyperliquid", true, true),
     ("hyperliquidspot", true, false),
+    ("txflow", false, false),
     ("apexomni", false, false),
     ("kucoin", true, false),
     ("kucoinspot", true, false),

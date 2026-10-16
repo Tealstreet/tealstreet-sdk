@@ -59,6 +59,7 @@ fn from_order(order: &Order) -> PlaceOrderOpts {
         client_order_id: None,
         max_slippage_pct: None,
         close: None,
+        implied_volatility: None,
     }
 }
 impl ApexOmniExchange {

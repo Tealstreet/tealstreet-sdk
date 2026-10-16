@@ -201,6 +201,22 @@ impl Exchange for BackpackExchange {
         );
         Box::pin(async move { strings(f.await?) })
     }
+    // TS BackpackExchange inherits BaseExchange.fetchSymbolMaxLeverage (base.ts:799): rejects 'Not implemented'.
+    fn fetch_symbol_max_leverage(&self, _: String) -> ExchangeFuture<'_, f64> {
+        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+    }
+    // TS BackpackExchange inherits BaseExchange.scheduleCancel (base.ts:989): rejects 'Not implemented'.
+    fn schedule_cancel(&self, _: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
+        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+    }
+    // TS BackpackExchange inherits BaseExchange.fetchPublicTrades (base.ts:1138): rejects 'Not implemented'.
+    fn fetch_public_trades(
+        &self,
+        _: String,
+        _: Option<f64>,
+    ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
+        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+    }
     fn listen_ohlcv(
         &self,
         o: OHLCVOptions,

@@ -407,6 +407,7 @@ impl<H: ChaserHost> ChaserEngine<H> {
                 client_order_id: None,
                 max_slippage_pct: None,
                 close: None,
+                implied_volatility: None,
             };
             let id = instance.exchange.base().mint_client_order_id(&order);
             if id.as_ref().is_some_and(|id| !id.is_empty()) {
