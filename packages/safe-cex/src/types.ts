@@ -474,6 +474,7 @@ export type Market = {
   readonly isExpiring?: boolean;
   readonly isInverse?: boolean;
   readonly isSpot?: boolean;
+  readonly isPerpetual?: boolean;
   readonly isReadOnly?: boolean;
   readonly info?: any;
   readonly takerFee?: number;

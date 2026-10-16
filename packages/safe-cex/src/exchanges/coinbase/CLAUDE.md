@@ -1000,3 +1000,45 @@ For implementation inspiration and reference, consult the CCXT library's Coinbas
 Contract: `packages/safe-cex/CLAUDE.md` → "Client order ID contract" (honor verbatim on one native order, or reject before any write).
 
 - Sends `client_order_id` (no published limit; the rule refuses empty or whitespace-bearing IDs) in place of the generated `tealstreet-…` ID. Coinbase dedupes on it — a reused ID returns the existing order instead of creating one — which is also why a cancel+replace never reuses an ID.
+
+## Rust numeric ingress parity
+
+Coinbase numeric protocol decoders operate on `serde_json::Value` through
+explicit field validators and mappers. Their parity corpus must compare
+`f64::to_bits()` before any JSON projection: JSON serialization collapses
+negative zero to zero and non-finite values to null. The private Starbase order
+price union is serialize-only; `parseOrderPrice` is the explicit untagged input
+parser. The numeric `Deserialize` records in the Rust model use map-only
+`TryFrom<Map>` front gates; do not add a direct permissive numeric decoder.
+Raw exponent overflow is a special case: JavaScript `JSON.parse("1e400")`
+produces Infinity, while `serde_json::Value` retains the numeric token but has
+no `f64` projection. Each production validator must still match its own
+TypeScript acceptance or rejection at that boundary.
+Wire DTO checks in `tests/oracle.rs` assert decoded native fields and collection
+lengths before their separate serialization comparison. Its cardinality
+control consumes every array element, then tests both empty and shortened
+decoded collections against the native length guard.
+
+The pure `parseCoinbaseCredentialJson`, `normalizeCoinbaseApiCredentials`, `base64UrlEncode`,
+`base64UrlEncodeString`, `asn1Wrap`, and `pemToPkcs8Der` helpers are in
+`safe-cex-venue-coinbase/src/utils.rs`.
+Credential normalization is independent of key import and signing; the latter
+remain pending on a shared crypto operation.
+The pure spot/CFM fake ticker projection is in
+`safe-cex-venue-coinbase/src/rest_reads.rs::format_spot_cfm_tickers`; it uses
+shared JavaScript parseFloat, string coercion, truthiness, and display rounding.
+The Starbase WebSocket session-state and disconnect-reason literal unions use
+strict string-first Serde decoders in `safe-cex-venue-coinbase/src/starbase_session.rs`;
+the optional Cancel-on-Disconnect policy is serialize-only because TypeScript
+declares it as configuration but defines no runtime decoder.
+The public-frame `parsePublicTestError` helper is ported separately in
+`safe-cex-venue-coinbase/src/starbase_public.rs` and retains absent versus null
+error data while enforcing the safe-integer code boundary.
+The public-frame `validateContext` helper is also ported there; it rejects
+duplicate or unsupported channels and request IDs in source evaluation order.
+The JSON-RPC error-response output type is in
+`safe-cex-venue-coinbase/src/starbase.rs`; it keeps the version literal closed
+and omits an absent response ID.
+The string adapter uses Rust UTF-8 scalar strings; its lone-surrogate input
+difference cites `shared-repr:utf8-string`. P-256 key import and signing remain
+pending for a shared crypto operation.

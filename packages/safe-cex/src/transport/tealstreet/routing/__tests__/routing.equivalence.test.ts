@@ -69,12 +69,7 @@ const REST_BASE_URLS: Record<ExchangeName, string> = {
 // (bybit family when tunnelling) rather than auto-detected from the
 // baseURL. Their egress is covered by the region-conditional test above, so they're
 // excluded from the baseURL-vs-name agreement assertion.
-const REGION_PINNED_HOW: ExchangeName[] = [
-  'bybit',
-  'bybitdemo',
-  'bybitinverse',
-  'bybitspot',
-];
+const REGION_PINNED_HOW: ExchangeName[] = ['bybit', 'bybitdemo', 'bybitinverse', 'bybitspot'];
 
 // Frozen copy of the original getPrivateProxy (deleted when REST consumers were cut
 // over to resolveExchangeRouting), including its requiresCors=false -> '' guard. Kept
@@ -281,14 +276,18 @@ describe('routing table / resolver (Epic 1 net)', () => {
     expect(resolveExchangeRouting('bybit', { proxyRegion: 'JA' }).wsPrivate.relay).toBe(
       'wss://fsjnpy143pbz.jp.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fstream.bybit.com%2Fv5%2Fprivate',
     );
-    expect(resolveExchangeRouting('bybitinverse', offProxy).wsPrivate.relay).toContain('stream.bybit.com%2Fv5%2Fprivate');
+    expect(resolveExchangeRouting('bybitinverse', offProxy).wsPrivate.relay).toContain(
+      'stream.bybit.com%2Fv5%2Fprivate',
+    );
     expect(resolveExchangeRouting('bybitspot', offProxy).wsPrivate.relay).toContain('stream.bybit.com%2Fv5%2Fprivate');
     // okx's HOW egress is whatever egressRegion.ts says; the relay follows it.
     const okxTunnelHost = resolveExchangeRouting('okx', offProxy).howEgress === 'jp' ? 'jp' : 'asia';
     expect(resolveExchangeRouting('okx', offProxy).wsPrivate.relay).toBe(
       `wss://fsjnpy143pbz.${okxTunnelHost}.tealstreet.io/tunnel?ts-relay=wss%3A%2F%2Fws.okx.com%3A8443%2Fws%2Fv5%2Fprivate`,
     );
-    expect(resolveExchangeRouting('okx', offProxy).wsBusiness.relay).toContain('ws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness');
+    expect(resolveExchangeRouting('okx', offProxy).wsBusiness.relay).toContain(
+      'ws.okx.com%3A8443%2Fws%2Fv5%2Fbusiness',
+    );
 
     // Public channels never relay (the tunnel refuses public streams anyway).
     expect(resolveExchangeRouting('bybit', offProxy).wsPublic.relay).toBeUndefined();
@@ -342,20 +341,25 @@ describe('routing table / resolver (Epic 1 net)', () => {
   it('resolved packet-path matrix (golden master)', () => {
     const BOOL = [false, true];
     const REGIONS: Array<string | undefined> = [undefined, 'JA', 'SG'];
+    // Pin Brazil routing for every exchange, including venues where it is a no-op.
+    const SITES = [undefined, 'BRA_BTL'] as const;
     const matrix: Record<string, Record<string, unknown>> = {};
     for (const exchange of Object.keys(exchangeMetadata) as ExchangeName[]) {
       const per: Record<string, unknown> = {};
       for (const tealstreetProxy of BOOL) {
         for (const tealstreetWsRoute of BOOL) {
           for (const proxyRegion of REGIONS) {
-            const key = `proxy=${Number(tealstreetProxy)} wsRoute=${Number(tealstreetWsRoute)} region=${
-              proxyRegion ?? 'NONE'
-            }`;
-            per[key] = resolveExchangeRouting(exchange, {
-              tealstreetProxy,
-              tealstreetWsRoute,
-              ...(proxyRegion ? { proxyRegion } : {}),
-            });
+            for (const bybitSiteId of SITES) {
+              const key = `proxy=${Number(tealstreetProxy)} wsRoute=${Number(tealstreetWsRoute)} region=${
+                proxyRegion ?? 'NONE'
+              } site=${bybitSiteId ?? 'NONE'}`;
+              per[key] = resolveExchangeRouting(exchange, {
+                tealstreetProxy,
+                tealstreetWsRoute,
+                ...(proxyRegion ? { proxyRegion } : {}),
+                ...(bybitSiteId ? { bybitSiteId } : {}),
+              });
+            }
           }
         }
       }
