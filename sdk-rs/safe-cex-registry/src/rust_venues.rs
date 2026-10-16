@@ -108,6 +108,10 @@ pub trait RustVenueHost {
     fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
     /// Bitget, Bitget USDC and Bitget inverse share one input set.
     fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
+    fn hyperliquid(
+        &self,
+        options: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError>;
     fn polymarket(&self) -> Result<PolymarketDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "Polymarket host inputs are not configured",
@@ -140,6 +144,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
     (ExchangeName::Coinbasespot, coinbase_constructor),
+    (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
     (ExchangeName::Kodiakfi, orderly_constructor),
@@ -163,6 +168,15 @@ pub fn orderly_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
                 name, options, store, deps,
             )?,
         )
+    })
+}
+
+pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |_, options, store| {
+        let deps = host.hyperliquid(&options)?;
+        let exchange =
+            safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
+        Ok(exchange)
     })
 }
 

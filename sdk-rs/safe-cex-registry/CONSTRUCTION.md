@@ -1,8 +1,8 @@
 # Rust venue construction through the registry
 
 Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
-the Binance family (`binance`, `binancepm`,
+`bitgetusdc`), `bitunix`, `blofin`, Coinbase (`coinbase`, `coinbasespot`),
+the Kraken family (`kraken`, `krakenspot`), `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`) and `polymarket`, 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
@@ -49,6 +49,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     `rest_http_host` over a fresh terminal adapter.
   - `binancepm` and `binancespot`, built with `BinancePMExchange::new` and
     `BinanceSpotExchange::new` on the same `RustVenueHost::binance` inputs.
+- `hyperliquid` calls its existing production constructor with `RustVenueHost::hyperliquid(options)`: the host resolves the API origin through the selected transport, composes hosted HTTP signing and supplies signer metadata plus the shared weight limiter. HyperliquidSpot remains outside this table.
 - **Dependencies:** `safe-cex-registry` gains direct dependencies on those venue
   crates. The edges go downward (registry is above venues), but layering alone
   does not allow them: `layers.json` `registryConstructors` lists exactly the
@@ -193,3 +194,25 @@ retains the selected family name while routing the final signed request through
 the shared transport stack. `tests/native_host_orderly.rs` verifies the actual
 Ed25519 signature server-side for every family entry. Native hosted remoteSigner
 is refused explicitly until that capability is wired.
+
+## Hyperliquid native host
+
+Every native host constructor requires the caller's `Rc<HyperliquidRateLimiter>`.
+Call `native_host::hyperliquid_rate_limiter()` once per LocalSet, then pass clones
+to every direct and hosted account. Creating a limiter per account multiplies the
+1200/60000 weight budget. `NativeAccountSpec` requires the same input; the FFI
+command loop owns one limiter across all accounts and retains it across closes.
+
+The native Hyperliquid host builds safeCexAxiosCreate with the venue's mainnet or
+testnet baseURL and repeat query serializer, then installs the selected adapter
+for private clients. A small adapter uses that resolved client default instead
+of allowing ApiClient's per-request source baseURL to overwrite a proxy origin.
+Hosted signers receive unsigned trading actions and their account name; `/info`
+requests retain the skip-signing tag. The same hosted signer reaches native
+BaseExchange capability and availability waiting. Transport/remote signing is
+separate from the venue's local-key signing interceptor.
+
+`tests/native_host_hyperliquid.rs` constructs through the registry, invokes real
+trait methods over local reqwest HTTP, verifies signed action/nonce bytes on the
+server, and checks both network origins, proxy preservation, info bypass, repeat
+query encoding and limiter identity across separate account hosts.
