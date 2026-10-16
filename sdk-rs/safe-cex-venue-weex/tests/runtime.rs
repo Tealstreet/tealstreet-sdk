@@ -599,6 +599,7 @@ fn api_rt() -> &'static a::WeexApiRuntime<H, V, Error> {
         truthy,
         nullish,
         is_undefined: |v| matches!(v, V::Undefined),
+        is_string: |v| matches!(v, V::String(_)),
         text,
         string_units: V::String,
         number: V::Number,
@@ -1168,4 +1169,83 @@ fn runtime_income_page() {
 #[test]
 fn runtime_income_range() {
     control_fixture("range_short")
+}
+
+#[test]
+fn replay_signing_uses_already_serialized_body_bytes() {
+    let output = Command::new("node")
+        .arg(Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/replay-signing-oracle.cjs"))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<Json> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        rows.iter()
+            .map(|row| row["id"].as_str().unwrap())
+            .collect::<Vec<_>>(),
+        [
+            "object",
+            "serialized",
+            "escaped",
+            "plain",
+            "empty",
+            "null",
+            "false",
+            "zero"
+        ]
+    );
+    let h = RefCell::new(State {
+        input: V::Undefined,
+        instance: object(vec![]),
+        store: object(vec![]),
+        disposed: false,
+        requests: vec![],
+        updates: vec![],
+        logs: vec![],
+        reported: vec![],
+        calls: vec![],
+        sleeps: vec![],
+        registrations: vec![],
+        creates: vec![],
+        callbacks: vec![],
+        page: 0,
+    });
+    let options = object(vec![
+        ("key", text("k")),
+        ("secret", text("s")),
+        ("passphrase", text("p")),
+    ]);
+    for row in rows {
+        let data = from_json(&row["data"]);
+        let config = object(vec![
+            ("url", text("/private")),
+            ("method", text("post")),
+            ("data", data.clone()),
+        ]);
+        let result = a::run_api_callback(
+            &h,
+            api_rt(),
+            a::WeexApiCallback::Request {
+                options: options.clone(),
+            },
+            config,
+        )
+        .unwrap();
+        assert_eq!(
+            raw(&result, "data"),
+            data,
+            "replay_signing::body_identity {}",
+            row["id"]
+        );
+        assert_eq!(
+            raw(&raw(&result, "headers"), "ACCESS-SIGN"),
+            from_json(&row["signature"]),
+            "replay_signing::signature {}",
+            row["id"]
+        );
+    }
 }

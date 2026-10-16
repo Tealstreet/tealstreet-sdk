@@ -39,6 +39,9 @@ function locations(value, steps = [], result = []) {
 const lexemes = ['1e400', '-1e400', '9007199254740993', '-9007199254740993', '-0', '0.000001', '1e20', '5e-324', '1e-400', '-1e-400'];
 const cases = [], covered = [], seen = new Set();
 for (const name of sourceNames) {
+  // This original 53-root corpus excludes the intersection; its repaired core
+  // variant/user/number assertions live in finding_user_event and spot_runtime.
+  if (name === 'WsUserEvent') continue;
   let count = 0;
   for (const base of bases.filter(base => base.name === name)) {
     const input = JSON.parse(base.raw);
@@ -52,8 +55,6 @@ for (const name of sourceNames) {
       cases.push({name, path: '/' + steps.map(escape).join('/'), lexeme, raw, bits: numbers(parsed)}); count++;
     }
   }
-  // Existing independent intersection finding: its old fabricated user-only sample is not evidence.
-  if (name === 'WsUserEvent' && count === 0) continue;
   assert.ok(count > 0, `source numeric type requires actual numeric witnesses: ${name}`); covered.push(name);
 }
 const corpus = JSON.stringify({sourceSha256: crypto.createHash('sha256').update(source).digest('hex'), names: covered, cases}, null, 2) + '\n';
