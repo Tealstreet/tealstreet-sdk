@@ -952,6 +952,8 @@ Hosted JS venues receive the signer through JsHttpHost, shared by Scope and Base
 
 The js_runtime typed-value bridge uses the shared native serialization capture and native Serde visitors, preserving NaN, infinities and signed zero in scalar and nested model fields. `to_json` remains the explicit wire projection; do not route typed values through it. Native nonfinite values aimed at opaque serde_json::Value are refused rather than silently projected to null. Typed input retains the shared UTF-8 and bounded-depth choices. `tests/typed_js_values.rs` checks both directions independently, actual order-option fields, enum shapes and optional values; venue E2E tests own their receiver-level effects.
 
+JS socket properties are the source of truth for typed lifecycle grouping. BaseExchange installs weak, lazy lookups for the eight source fields; these create socket cores after venue assembly and observe property replacement/removal on each lookup. The JS runtime regression checks source order, public/private grouping and disposal.
+
 The js_runtime socket terminal preserves Binary as the host binary object: native
 Buffer and wasm Blob, with exact bytes behind ArrayBuffer. Buffer.toString and
 Blob.text perform UTF-8 replacement only when the venue explicitly asks for text;
