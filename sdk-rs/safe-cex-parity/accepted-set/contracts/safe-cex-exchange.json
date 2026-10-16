@@ -21656,89 +21656,6 @@
     "evidence": "safe-cex-exchange/src/js_runtime/scope.rs::bound_member; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
     "reason": "Looks up an existing member and wraps callables to retain their original receiver. The member name is a selector and no serialized input is decoded."
   },
-  "safe_cex_exchange::js_runtime::store::patch": {
-    "category": "non-decoder",
-    "api": {
-      "kind": "function",
-      "name": "patch",
-      "signature": {
-        "inputs": [
-          [
-            "value",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "resolved_path": {
-                    "path": "safe_cex_exchange::js_runtime::value::Js",
-                    "args": null
-                  }
-                }
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "core::result::Result",
-            "args": {
-              "angle_bracketed": {
-                "args": [
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "serde_json::map::Map",
-                        "args": {
-                          "angle_bracketed": {
-                            "args": [
-                              {
-                                "type": {
-                                  "resolved_path": {
-                                    "path": "alloc::string::String",
-                                    "args": null
-                                  }
-                                }
-                              },
-                              {
-                                "type": {
-                                  "resolved_path": {
-                                    "path": "serde_json::value::Value",
-                                    "args": null
-                                  }
-                                }
-                              }
-                            ],
-                            "constraints": []
-                          }
-                        }
-                      }
-                    }
-                  },
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
-                        "args": null
-                      }
-                    }
-                  }
-                ],
-                "constraints": []
-              }
-            }
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [],
-        "where_predicates": []
-      }
-    },
-    "evidence": "safe-cex-exchange/src/js_runtime/store.rs::patch; sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Exact compiler API and this helper's source role reviewed; not a claim about callbacks invoked later.",
-    "reason": "Projects an existing native value to the raw JSON patch dictionary, using an empty dictionary for non-objects. Typed field admission remains in the Store patch applicators; this helper performs no model-field decoding."
-  },
   "safe_cex_exchange::js_runtime::value::error_object": {
     "category": "non-decoder",
     "api": {
@@ -23321,6 +23238,145 @@
     "shape": "observed",
     "evidence": "safe-cex-exchange/src/js_runtime/value.rs; each raw compiler entrypoint has direct native field/effect observations. Already typed APIs keep separate exact classifications, never fabricated varying-input witnesses. Bounded fixture evidence, not complete JS/host conformance.",
     "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_prototype",
+          "signature": {
+            "inputs": [
+              [
+                "value",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_num::prototype_realm::PrototypeValue",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Converts actual typed PrototypeValue tags to native Js payloads and retains the live builtin referent. Native scalar bits/UTF16 and post-conversion referent mutation are observed directly; no JSON decoder or arbitrary JS execution claim.",
+        "call": "{ use safe_cex_num::{PrototypeValue as P,PrototypeScalar,PrototypeRealm,ProtoMember};use std::rc::Rc;\nif $value[\"kind\"]==\"reference\" { let realm=Rc::<PrototypeRealm>::default();let reference=realm.reference(if $value[\"callable\"].as_bool().unwrap(){ProtoMember::Constructor}else{ProtoMember::Prototype});reference.set(\"acceptedProbe\",PrototypeScalar::Number(-1.0));let decoded=$type::from_prototype(P::Reference(reference.clone()));let number=f64::from_bits(u64::from_str_radix($value[\"bits\"].as_str().unwrap(),16).unwrap());reference.set(\"acceptedProbe\",PrototypeScalar::Number(number));match decoded { $type::Builtin(actual)=>{let bits=match actual.get(\"acceptedProbe\"){P::Number(n)=>format!(\"{:016x}\",n.to_bits()),_=>panic!(\"native referent number\")};serde_json::json!({\"tag\":\"builtin\",\"same_reference\":actual==reference,\"same_realm\":Rc::ptr_eq(actual.realm(),&realm),\"callable\":actual.is_callable(),\"probe_bits\":bits})},_=>serde_json::json!({\"tag\":\"wrong-reference\"}) } }\nelse { let input=match $value[\"kind\"].as_str().unwrap(){\"undefined\"=>P::Undefined,\"null\"=>P::Null,\"bool\"=>P::Boolean($value[\"value\"].as_bool().unwrap()),\"number\"=>P::Number(f64::from_bits(u64::from_str_radix($value[\"bits\"].as_str().unwrap(),16).unwrap())),\"string\"=>P::String($value[\"text\"].as_str().unwrap().to_owned()),_=>unreachable!()};match $type::from_prototype(input){$type::Undefined=>serde_json::json!({\"tag\":\"undefined\"}),$type::Null=>serde_json::json!({\"tag\":\"null\"}),$type::Bool(flag)=>serde_json::json!({\"tag\":\"bool\",\"flag\":flag}),$type::Number(n)=>serde_json::json!({\"tag\":\"number\",\"bits\":format!(\"{:016x}\",n.to_bits())}),$type::String(units)=>serde_json::json!({\"tag\":\"string\",\"units\":units.as_ref()}),_=>serde_json::json!({\"tag\":\"wrong-scalar\"})} } }",
+        "cases": [
+          {
+            "input": {
+              "kind": "undefined"
+            },
+            "output": {
+              "tag": "undefined"
+            }
+          },
+          {
+            "input": {
+              "kind": "null"
+            },
+            "output": {
+              "tag": "null"
+            }
+          },
+          {
+            "input": {
+              "kind": "bool",
+              "value": false
+            },
+            "output": {
+              "tag": "bool",
+              "flag": false
+            }
+          },
+          {
+            "input": {
+              "kind": "bool",
+              "value": true
+            },
+            "output": {
+              "tag": "bool",
+              "flag": true
+            }
+          },
+          {
+            "input": {
+              "kind": "number",
+              "bits": "8000000000000000"
+            },
+            "output": {
+              "tag": "number",
+              "bits": "8000000000000000"
+            }
+          },
+          {
+            "input": {
+              "kind": "number",
+              "bits": "7ff0000000000000"
+            },
+            "output": {
+              "tag": "number",
+              "bits": "7ff0000000000000"
+            }
+          },
+          {
+            "input": {
+              "kind": "number",
+              "bits": "7ff8000000000042"
+            },
+            "output": {
+              "tag": "number",
+              "bits": "7ff8000000000042"
+            }
+          },
+          {
+            "input": {
+              "kind": "string",
+              "text": "雪😀"
+            },
+            "output": {
+              "tag": "string",
+              "units": [
+                38634,
+                55357,
+                56832
+              ]
+            }
+          },
+          {
+            "input": {
+              "kind": "reference",
+              "callable": false,
+              "bits": "400a000000000000"
+            },
+            "output": {
+              "tag": "builtin",
+              "same_reference": true,
+              "same_realm": true,
+              "callable": false,
+              "probe_bits": "400a000000000000"
+            }
+          },
+          {
+            "input": {
+              "kind": "reference",
+              "callable": true,
+              "bits": "8000000000000000"
+            },
+            "output": {
+              "tag": "builtin",
+              "same_reference": true,
+              "same_realm": true,
+              "callable": true,
+              "probe_bits": "8000000000000000"
+            }
+          }
+        ]
+      },
       {
         "api": {
           "kind": "inherent",
@@ -26988,6 +27044,12 @@
                 }
               }
             }
+          ],
+          [
+            "present_fields",
+            {
+              "primitive": "bool"
+            }
           ]
         ],
         "output": {
@@ -27044,8 +27106,8 @@
         "where_predicates": []
       }
     },
-    "evidence": "value/typed.rs::decode; fixed bool instantiation observes the actual deserialized native boolean and rejects number/object inputs. No universal claim for arbitrary T.",
-    "call": "{ let native=crate::js_runtime::value::from_json($value);match super::decode::<bool>(&native){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+    "evidence": "Actual two-argument native typed decoder; existing fixed bool witnesses remain. Fixed BTreeMap<String,Option<f64>> cases additionally distinguish the present_fields profiles, native -0/infinity/NaN bits, own undefined versus absent/null fields, callable omission versus refusal, and non-map refusal. No universal claim for arbitrary T.",
+    "call": "if $value.get(\"profile\").is_some() { { use crate::js_runtime::value::Js;let native=if $value[\"profile\"]==\"array\"{Js::array(vec![])}else{let native=Js::object(vec![(\"missing_value\",Js::Undefined),(\"null_value\",Js::Null),(\"native\",Js::Number(f64::from_bits(u64::from_str_radix($value[\"bits\"].as_str().unwrap(),16).unwrap())))]);match $value[\"callable\"].as_str(){Some(\"function\")=>native.define(\"callable\",Js::function(\"unused\",|_,_|Ok(Js::Undefined))).unwrap(),Some(\"builtin\")=>native.define(\"callable\",Js::Builtin(std::rc::Rc::<safe_cex_num::PrototypeRealm>::default().reference(safe_cex_num::ProtoMember::Constructor))).unwrap(),_=>{}};native};match $type::<std::collections::BTreeMap<String,Option<f64>>>(&native,$value[\"keep\"].as_bool().unwrap()) {Ok(fields)=>{let values:Vec<_>=fields.iter().map(|(key,value)|serde_json::json!([key,value.map(|n|format!(\"{:016x}\",n.to_bits()))])).collect();serde_json::json!({\"ok\":true,\"fields\":values,\"absent\":fields.contains_key(\"absent\")})},Err(error)=>serde_json::json!({\"ok\":false,\"error_name\":error.value.get(\"name\").unwrap().to_display()})} } } else { let native=crate::js_runtime::value::from_json($value);match $type::<bool>(&native,false){Ok(flag)=>serde_json::json!({\"ok\":true,\"flag\":flag}),Err(_)=>serde_json::json!({\"ok\":false})} }",
     "cases": [
       {
         "input": true,
@@ -27071,6 +27133,131 @@
         "input": {},
         "output": {
           "ok": false
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "8000000000000000",
+          "keep": false
+        },
+        "output": {
+          "ok": true,
+          "fields": [
+            [
+              "native",
+              "8000000000000000"
+            ],
+            [
+              "null_value",
+              null
+            ]
+          ],
+          "absent": false
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "7ff0000000000000",
+          "keep": true
+        },
+        "output": {
+          "ok": true,
+          "fields": [
+            [
+              "missing_value",
+              null
+            ],
+            [
+              "native",
+              "7ff0000000000000"
+            ],
+            [
+              "null_value",
+              null
+            ]
+          ],
+          "absent": false
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "400a000000000000",
+          "keep": false,
+          "callable": "function"
+        },
+        "output": {
+          "ok": true,
+          "fields": [
+            [
+              "native",
+              "400a000000000000"
+            ],
+            [
+              "null_value",
+              null
+            ]
+          ],
+          "absent": false
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "7ff8000000000042",
+          "keep": true,
+          "callable": "function"
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "fff0000000000000",
+          "keep": false,
+          "callable": "builtin"
+        },
+        "output": {
+          "ok": true,
+          "fields": [
+            [
+              "native",
+              "fff0000000000000"
+            ],
+            [
+              "null_value",
+              null
+            ]
+          ],
+          "absent": false
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "0000000000000001",
+          "keep": true,
+          "callable": "builtin"
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "profile": "array",
+          "bits": "0000000000000000",
+          "keep": true
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
         }
       }
     ]
@@ -31445,6 +31632,567 @@
             "4638707616191610880"
           ],
           "lengthBits": "4617315517961601024"
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::store::json_patch": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "json_patch",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::map::Map",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              },
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "store.rs::json_patch is the extracted outbound JSON projection. Actual native js_store_patch_numbers tests (numeric_patch_keeps_omission_null_and_other_field_policy and all_model_patch_methods_keep_every_numeric_field) execute its fields through production Store facade updates; typed admission remains in the separate patch applicators. No decoder permission is claimed.",
+    "reason": "Encodes an existing native Js value as the raw JSON patch dictionary, with an empty dictionary for non-object JSON. It neither parses a declared model nor validates model fields; native typed admission is owned by the Store patch applicators."
+  },
+  "safe_cex_exchange::js_runtime::value::to_typed_preserving_undefined": {
+    "api": {
+      "kind": "function",
+      "name": "to_typed_preserving_undefined",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "T"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::DeserializeOwned",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Native declared-DTO profile passes present_fields=true to typed::decode. One fixed BTreeMap<String,Option<f64>> instantiation observes actual field presence and decoded binary64 bits, including undefined/null and callable refusal; tests/typed_js_values.rs::declared_dto_profile_keeps_present_undefined_and_refuses_callables independently exercises the same public production boundary.",
+    "call": "{ use crate::js_runtime::value::Js;let native=if $value[\"profile\"]==\"array\"{Js::array(vec![])}else{let native=Js::object(vec![(\"missing_value\",Js::Undefined),(\"null_value\",Js::Null),(\"native\",Js::Number(f64::from_bits(u64::from_str_radix($value[\"bits\"].as_str().unwrap(),16).unwrap())))]);match $value[\"callable\"].as_str(){Some(\"function\")=>native.define(\"callable\",Js::function(\"unused\",|_,_|Ok(Js::Undefined))).unwrap(),Some(\"builtin\")=>native.define(\"callable\",Js::Builtin(std::rc::Rc::<safe_cex_num::PrototypeRealm>::default().reference(safe_cex_num::ProtoMember::Constructor))).unwrap(),_=>{}};native};match $type::<std::collections::BTreeMap<String,Option<f64>>>(&native) {Ok(fields)=>{let values:Vec<_>=fields.iter().map(|(key,value)|serde_json::json!([key,value.map(|n|format!(\"{:016x}\",n.to_bits()))])).collect();serde_json::json!({\"ok\":true,\"fields\":values,\"absent\":fields.contains_key(\"absent\")})},Err(error)=>serde_json::json!({\"ok\":false,\"error_name\":error.value.get(\"name\").unwrap().to_display()})} }",
+    "cases": [
+      {
+        "input": {
+          "profile": "map",
+          "bits": "8000000000000000"
+        },
+        "output": {
+          "ok": true,
+          "fields": [
+            [
+              "missing_value",
+              null
+            ],
+            [
+              "native",
+              "8000000000000000"
+            ],
+            [
+              "null_value",
+              null
+            ]
+          ],
+          "absent": false
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "7ff0000000000000"
+        },
+        "output": {
+          "ok": true,
+          "fields": [
+            [
+              "missing_value",
+              null
+            ],
+            [
+              "native",
+              "7ff0000000000000"
+            ],
+            [
+              "null_value",
+              null
+            ]
+          ],
+          "absent": false
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "400a000000000000",
+          "callable": "function"
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "7ff8000000000042",
+          "callable": "function"
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "fff0000000000000",
+          "callable": "builtin"
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "profile": "map",
+          "bits": "0000000000000001",
+          "callable": "builtin"
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "profile": "array",
+          "bits": "0000000000000000"
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_exchange::js_runtime::store::option_patch": {
+    "api": {
+      "kind": "function",
+      "name": "option_patch",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_store::model_patch::ModelPatch",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::DeserializeOwned",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  },
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::marker::Send",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  },
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::marker::Sync",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  },
+                  {
+                    "outlives": "'static"
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "store.rs::option_patch actually decodes the nested option through to_typed<T> and constructs native ModelPatch fields. The production OptionTerms instantiation observes every native option field, scalar/expiry/strike bits (including NaN payload and infinities), opaque JSON info and missing/undefined versus null/array option admission. No blanket generic or JSON-roundtrip permission.",
+    "call": "{ use crate::js_runtime::value::{Js,from_json};use safe_cex_store::model_patch::PatchValue;use safe_cex_types::{OptionTerms,OptionRight,OptionTermsStyle,OptionTermsSettlement};let number=|key:&str|f64::from_bits(u64::from_str_radix($value[key].as_str().unwrap(),16).unwrap());let input=Js::object(vec![(\"amount\",Js::Number(number(\"amount\"))),(\"label\",Js::str($value[\"label\"].as_str().unwrap())),(\"info\",from_json(&$value[\"info\"]))]);match $value[\"option\"].as_str().unwrap(){\"missing\"=>{},\"undefined\"=>input.define(\"option\",Js::Undefined).unwrap(),\"null\"=>input.define(\"option\",Js::Null).unwrap(),\"array\"=>input.define(\"option\",Js::array(vec![])).unwrap(),_=>input.define(\"option\",Js::object(vec![(\"underlying\",Js::str($value[\"underlying\"].as_str().unwrap())),(\"expiry\",Js::Number(number(\"expiry\"))),(\"strike\",Js::Number(number(\"strike\"))),(\"right\",Js::str($value[\"right\"].as_str().unwrap())),(\"style\",Js::str(\"european\")),(\"settlement\",Js::str(\"cash\")),(\"premiumAsset\",Js::str(\"USD\")),(\"settleAsset\",Js::str(\"USDC\"))])).unwrap()};match $type::<OptionTerms>(&input){Err(error)=>serde_json::json!({\"ok\":false,\"error_name\":error.value.get(\"name\").unwrap().to_display()}),Ok(patch)=>{let amount=match patch.0.get(\"amount\").unwrap(){PatchValue::Number(n)=>format!(\"{:016x}\",n.to_bits()),_=>panic!(\"native amount field\")};let label=match patch.0.get(\"label\").unwrap(){PatchValue::Json(value)=>value,_=>panic!(\"JSON label\")};let info=match patch.0.get(\"info\").unwrap(){PatchValue::Json(value)=>value,_=>panic!(\"opaque JSON info\")};let option=patch.0.get(\"option\").map(|value|{let terms=match value{PatchValue::Native(value)=>value.downcast_ref::<OptionTerms>().unwrap(),_=>panic!(\"native option field\")};serde_json::json!({\"underlying\":terms.underlying,\"expiry_bits\":format!(\"{:016x}\",terms.expiry.to_bits()),\"strike_bits\":format!(\"{:016x}\",terms.strike.to_bits()),\"right\":match terms.right{OptionRight::Call=>\"call\",OptionRight::Put=>\"put\"},\"style\":match terms.style{OptionTermsStyle::European=>\"european\"},\"settlement\":match terms.settlement{OptionTermsSettlement::Cash=>\"cash\"},\"premium_asset\":terms.premium_asset,\"settle_asset\":terms.settle_asset})});serde_json::json!({\"ok\":true,\"amount_bits\":amount,\"label\":label,\"info\":info,\"option\":option})}} }",
+    "cases": [
+      {
+        "input": {
+          "option": "native",
+          "amount": "400a000000000000",
+          "expiry": "41f941f297c00000",
+          "strike": "8000000000000000",
+          "right": "call",
+          "label": "alpha",
+          "underlying": "BTC",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "amount_bits": "400a000000000000",
+          "label": "alpha",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          },
+          "option": {
+            "underlying": "BTC",
+            "expiry_bits": "41f941f297c00000",
+            "strike_bits": "8000000000000000",
+            "right": "call",
+            "style": "european",
+            "settlement": "cash",
+            "premium_asset": "USD",
+            "settle_asset": "USDC"
+          }
+        }
+      },
+      {
+        "input": {
+          "option": "native",
+          "amount": "7ff8000000000042",
+          "expiry": "7ff0000000000000",
+          "strike": "fff0000000000000",
+          "right": "put",
+          "label": "beta",
+          "underlying": "ETH",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "amount_bits": "7ff8000000000042",
+          "label": "beta",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          },
+          "option": {
+            "underlying": "ETH",
+            "expiry_bits": "7ff0000000000000",
+            "strike_bits": "fff0000000000000",
+            "right": "put",
+            "style": "european",
+            "settlement": "cash",
+            "premium_asset": "USD",
+            "settle_asset": "USDC"
+          }
+        }
+      },
+      {
+        "input": {
+          "option": "missing",
+          "amount": "8000000000000000",
+          "expiry": "0000000000000000",
+          "strike": "0000000000000000",
+          "right": "call",
+          "label": "alpha",
+          "underlying": "BTC",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "amount_bits": "8000000000000000",
+          "label": "alpha",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          },
+          "option": null
+        }
+      },
+      {
+        "input": {
+          "option": "undefined",
+          "amount": "0000000000000001",
+          "expiry": "0000000000000000",
+          "strike": "0000000000000000",
+          "right": "call",
+          "label": "alpha",
+          "underlying": "BTC",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          }
+        },
+        "output": {
+          "ok": true,
+          "amount_bits": "0000000000000001",
+          "label": "alpha",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          },
+          "option": null
+        }
+      },
+      {
+        "input": {
+          "option": "null",
+          "amount": "3ff0000000000000",
+          "expiry": "0000000000000000",
+          "strike": "0000000000000000",
+          "right": "call",
+          "label": "alpha",
+          "underlying": "BTC",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          }
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "option": "array",
+          "amount": "3ff0000000000000",
+          "expiry": "0000000000000000",
+          "strike": "0000000000000000",
+          "right": "call",
+          "label": "alpha",
+          "underlying": "BTC",
+          "info": {
+            "unknown": [
+              null,
+              true,
+              "raw"
+            ]
+          }
+        },
+        "output": {
+          "ok": false,
+          "error_name": "TypeError"
         }
       }
     ]
