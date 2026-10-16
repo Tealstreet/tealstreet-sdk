@@ -8,7 +8,7 @@ use crate::{
         ResponseReturn, ResponseTransform, RetryRead,
     },
     class_jobs::NativeFuture,
-    exchange_classes::{ExchangeDependencies, ExchangeImports, HttpMethod},
+    exchange_classes::{ExchangeDependencies, ExchangeImports, ExchangeState, HttpMethod, Method},
     lifecycle::TickTimer,
     orderbook::*,
     private_classes::{
@@ -24,10 +24,12 @@ use crate::{
     rest_history::PageCall,
 };
 use safe_cex_exchange::{
+    build_records::{BuildRecordsOptions, FoldableExchange, build_folded_position_records},
     http::{
         HttpClient, HttpClientOptions, HttpHost, safe_cex_axios_create,
         safe_cex_axios_create_no_proxy,
     },
+    income_paging::{IncomePageParams, IncomeRangeOptions, paginate_income_range},
     native::{NativeHttpHost, nanoid},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{BaseWebSocket, WsProtocol, WsRuntime},
@@ -37,6 +39,7 @@ use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestRequest, RestResponse, TransportRegistry,
     socket::SocketFrame,
 };
+use safe_cex_types::{Execution, ExecutionsOptions, IncomeRecord};
 use serde_json::{Map, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -83,17 +86,16 @@ struct NativeImports {
     clients: RefCell<Vec<Rc<NativeClient>>>,
     timers: Rc<NativeTimers>,
     /// The exchange's emitAndLogError, bound during construction.
-    emitter: Rc<RefCell<Option<Emitter>>>,
+    owner: Rc<RefCell<Weak<ExchangeState>>>,
     /// publicXhr (Futures/PM) or xhr (Spot): the order-book snapshot client.
     public_client: RefCell<Option<Rc<NativeClient>>>,
     this: Weak<NativeImports>,
 }
-type Emitter = Rc<dyn Fn(EventValue) -> Result<(), Failure>>;
 fn native_imports(runtime: Rc<dyn WsRuntime>, adapter: Arc<dyn RestAdapter>) -> Rc<NativeImports> {
     Rc::new_cyclic(|this| NativeImports {
         timers: native_timers(runtime.clone()),
         runtime,
-        emitter: Rc::new(RefCell::new(None)),
+        owner: Rc::new(RefCell::new(Weak::new())),
         public_client: RefCell::new(None),
         adapter,
         host: Rc::new(NativeHttpHost),
@@ -132,7 +134,7 @@ struct NativeClient {
     retry: RefCell<Option<(u32, RetryRead)>>,
     transform: Cell<ResponseTransform>,
     limit: RefCell<Option<RateWindow>>,
-    emitter: Rc<RefCell<Option<Emitter>>>,
+    owner: Rc<RefCell<Weak<ExchangeState>>>,
 }
 enum ResponseStage {
     Api(ResponseInterceptor, ResponseInterceptor),
@@ -236,9 +238,8 @@ async fn dispatch(
         ..Default::default()
     };
     match (method, &args) {
-        (HttpMethod::Get | HttpMethod::Delete, Some(config)) if !config.nullish() => {
-            let params = config.get("params").ok().filter(|p| !p.nullish());
-            request.params = params.map(|p| to_json(&p)).transpose().ok().flatten();
+        (HttpMethod::Get | HttpMethod::Delete, Some(params)) if !params.nullish() => {
+            request.params = to_json(params).ok();
         }
         (HttpMethod::Post | HttpMethod::Put, Some(data)) if !data.nullish() => {
             request.body = to_json(data).ok().map(RestBody::Untransformed);
@@ -435,7 +436,7 @@ async fn respond(
         })
         .collect();
     let mut bindings = NativeResponseBindings {
-        emitter: client.emitter.clone(),
+        owner: client.owner.clone(),
     };
     for stage in stages {
         state = match (stage, state) {
@@ -533,14 +534,14 @@ impl RequestBindings for NativeRequestBindings {
     }
 }
 struct NativeResponseBindings {
-    emitter: Rc<RefCell<Option<Emitter>>>,
+    owner: Rc<RefCell<Weak<ExchangeState>>>,
 }
 impl ResponseBindings for NativeResponseBindings {
     fn emit(&mut self, message: EventValue) -> Result<(), Failure> {
-        let emit = self.emitter.borrow().clone();
-        let emit =
-            emit.ok_or_else(|| failure("response emitted before the exchange bound its emitter"))?;
-        emit(message)
+        let owner = self.owner.borrow().upgrade();
+        owner
+            .ok_or_else(|| failure("response emitted with no live exchange bound"))?
+            .emit(message)
     }
 }
 
@@ -614,7 +615,7 @@ impl FactoryBindings for Factorizer<'_> {
             retry: RefCell::new(None),
             transform: Cell::new(config.transform),
             limit: RefCell::new(None),
-            emitter: self.imports.emitter.clone(),
+            owner: self.imports.owner.clone(),
         });
         self.handle = record([("pendingClient", EventValue::Bool(true))]);
         Ok(self.handle.clone())
@@ -702,8 +703,8 @@ impl ExchangeImports for NativeImports {
         }
         Ok(handle)
     }
-    fn bind_emitter(&self, emit: Rc<dyn Fn(EventValue) -> Result<(), Failure>>) {
-        *self.emitter.borrow_mut() = Some(emit);
+    fn bind_owner(&self, owner: Weak<ExchangeState>) {
+        *self.owner.borrow_mut() = owner;
     }
     fn split(
         &self,
@@ -750,7 +751,7 @@ impl ExchangeImports for NativeImports {
             retry: RefCell::new(None),
             transform: Cell::new(ResponseTransform::Default),
             limit: RefCell::new(None),
-            emitter: self.emitter.clone(),
+            owner: self.owner.clone(),
         };
         let (route, handle) = register_client(self, Rc::new(route));
         if venue == Venue::Spot {
@@ -852,24 +853,137 @@ impl ExchangeImports for NativeImports {
     }
     fn paginate(
         &self,
-        _fetch: PageCall,
-        _opts: EventValue,
+        fetch: PageCall,
+        opts: EventValue,
     ) -> Result<NativeFuture<EventValue>, Failure> {
-        Err(failure(
-            "income range paging is not wired on the native host yet",
-        ))
+        let required = |key: &str| -> Result<f64, Failure> { opts.get(key)?.number() };
+        let optional = |key: &str| -> Result<Option<f64>, Failure> {
+            let value = opts.get(key)?;
+            if value.nullish() {
+                Ok(None)
+            } else {
+                value.number().map(Some)
+            }
+        };
+        let options = IncomeRangeOptions {
+            start_time: required("startTime")?,
+            end_time: required("endTime")?,
+            chunk_ms: required("chunkMs")?,
+            page_limit: required("pageLimit")?,
+            chunk_delay_ms: optional("chunkDelayMs")?,
+            max_pages_per_chunk: optional("maxPagesPerChunk")?,
+        };
+        let runtime = self.runtime.clone();
+        Ok(Box::pin(async move {
+            // ts: paginateIncomeRange — the shared pager over this venue's rethrowing page fetch.
+            let mut fetch_page =
+                move |page: IncomePageParams| -> ExchangeFuture<'static, Vec<IncomeRecord>> {
+                    let call = fetch(record([
+                        ("startTime", number(page.start_time)),
+                        ("endTime", number(page.end_time)),
+                        ("limit", number(page.limit)),
+                    ]));
+                    Box::pin(async move {
+                        let rows = call.map_err(into_exchange)?.await.map_err(into_exchange)?;
+                        crate::exchange_classes::income_records(&rows).map_err(into_exchange)
+                    })
+                };
+            let mut delay = move |ms: f64| runtime.sleep(ms.max(0.0) as u64);
+            let result = paginate_income_range(&mut fetch_page, options, &mut delay)
+                .await
+                .map_err(Rc::new)?;
+            Ok(record([
+                (
+                    "records",
+                    EventValue::from_json(
+                        serde_json::to_value(&result.records)
+                            .map_err(|e| failure(e.to_string()))?,
+                    ),
+                ),
+                ("truncated", EventValue::Bool(result.truncated)),
+                ("exhaustedChunks", number(result.exhausted_chunks)),
+                ("requests", number(result.requests)),
+            ]))
+        }))
     }
     fn iso(&self, time: EventValue) -> Result<String, Failure> {
         iso_string(time.number()?)
     }
     fn fold_closed_positions(
         &self,
-        _opts: EventValue,
-        _symbol_scoped: bool,
+        opts: EventValue,
+        symbol_scoped: bool,
     ) -> Result<NativeFuture<EventValue>, Failure> {
-        Err(failure(
-            "closed-position folding is not wired on the native host yet",
-        ))
+        // ts: BaseExchange#foldClosedPositionRecords over buildFoldedPositionRecords.
+        let owner = self
+            .owner
+            .borrow()
+            .upgrade()
+            .ok_or_else(|| failure("fold with no live exchange bound"))?;
+        let account = opts.get("account")?.text()?;
+        let bound = |key: &str| -> Result<Option<f64>, Failure> {
+            let value = opts.get(key)?;
+            if value.nullish() {
+                Ok(None)
+            } else {
+                value.number().map(Some)
+            }
+        };
+        let (from, to) = (bound("from")?, bound("to")?);
+        let now = self.runtime.now_ms();
+        Ok(Box::pin(async move {
+            let to = to.unwrap_or(now);
+            let from = from.unwrap_or(to - 30.0 * 24.0 * 60.0 * 60.0 * 1000.0);
+            let (fills_owner, income_owner) = (owner.clone(), owner.clone());
+            let store = owner.base.store.clone();
+            let mut settle = move |symbol: &str| {
+                store
+                    .markets_by_symbol()
+                    .get(symbol)
+                    .map(|market| market.quote.clone())
+                    .filter(|quote| !quote.is_empty())
+                    .unwrap_or_else(|| "USDT".into())
+            };
+            let mut exchange = FoldableExchange {
+                fetch_historical_fills: &mut move |options: ExecutionsOptions| {
+                    let owner = fills_owner.clone();
+                    Box::pin(async move {
+                        let args = vec![to_event(&options).map_err(into_exchange)?];
+                        let rows = crate::class_jobs::reaction(
+                            owner.invoke(Method::HistoricalFills, args),
+                        )
+                        .await
+                        .map_err(into_exchange)?;
+                        crate::class_decode::decode::<Vec<Execution>>(rows)
+                            .map_err(|e| ExchangeError::new(e.to_string()))
+                    })
+                },
+                fetch_income_history_range: Some(&mut move |from: f64, to: f64| {
+                    let owner = income_owner.clone();
+                    Box::pin(async move {
+                        let args = vec![number(from), number(to), EventValue::Undefined];
+                        let rows =
+                            crate::class_jobs::reaction(owner.invoke(Method::IncomeRange, args))
+                                .await
+                                .map_err(into_exchange)?;
+                        crate::exchange_classes::income_records(&rows).map_err(into_exchange)
+                    })
+                }),
+            };
+            let mut options = BuildRecordsOptions {
+                account: &account,
+                from,
+                to,
+                symbol_scoped,
+                resolve_settle_currency: &mut settle,
+            };
+            let result = build_folded_position_records(&mut exchange, &mut options)
+                .await
+                .map_err(|e| Rc::new(e.error))?;
+            serde_json::to_value(&result.records)
+                .map(EventValue::from_json)
+                .map_err(|e| failure(e.to_string()))
+        }))
     }
     fn loop_timer(&self, callback: TickTimer, interval: EventValue) -> Result<(), Failure> {
         let runtime = self.runtime.clone();
@@ -1378,4 +1492,10 @@ impl safe_cex_exchange::external::ExternalPublicData for UnavailableExternalData
     ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
         Err(ExchangeError::new(NO_EXTERNAL))
     }
+}
+
+fn to_event(value: &impl serde::Serialize) -> Result<EventValue, Failure> {
+    serde_json::to_value(value)
+        .map(EventValue::from_json)
+        .map_err(|e| failure(e.to_string()))
 }

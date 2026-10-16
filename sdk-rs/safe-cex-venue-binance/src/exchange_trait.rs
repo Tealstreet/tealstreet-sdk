@@ -42,6 +42,17 @@ async fn call<T: serde::de::DeserializeOwned>(
         .map_err(|e| (*e).clone())?;
     typed(&value).map_err(|e| (*e).clone())
 }
+async fn income_call(
+    owner: &Rc<ExchangeOwner>,
+    method: Method,
+    args: Result<Vec<EventValue>, Failure>,
+) -> Result<Vec<IncomeRecord>, ExchangeError> {
+    let args = args.map_err(|e| (*e).clone())?;
+    let value = class_jobs::reaction(owner.invoke(method, args))
+        .await
+        .map_err(|e| (*e).clone())?;
+    income_records(&value).map_err(|e| (*e).clone())
+}
 async fn unit(
     owner: &Rc<ExchangeOwner>,
     method: Method,
@@ -253,7 +264,7 @@ impl Exchange for BinanceExchange {
         &self,
         opts: Option<IncomeHistoryOptions>,
     ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-        Box::pin(call(
+        Box::pin(income_call(
             &self.0,
             Method::IncomeHistory,
             optional_argument(opts),
@@ -265,7 +276,7 @@ impl Exchange for BinanceExchange {
         to: f64,
         kind: Option<String>,
     ) -> ExchangeFuture<'_, Vec<IncomeRecord>> {
-        Box::pin(call(
+        Box::pin(income_call(
             &self.0,
             Method::IncomeRange,
             Ok(vec![
