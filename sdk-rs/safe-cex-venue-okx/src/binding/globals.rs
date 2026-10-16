@@ -37,7 +37,10 @@ fn region_key(region: OkxRegion) -> &'static str {
 }
 
 fn hosts(urls: [&str; 2]) -> Js {
-    Js::object(vec![("livenet", Js::str(urls[0])), ("testnet", Js::str(urls[1]))])
+    Js::object(vec![
+        ("livenet", Js::str(urls[0])),
+        ("testnet", Js::str(urls[1])),
+    ])
 }
 
 fn record(v: &Js) -> Result<serde_json::Map<String, serde_json::Value>, Thrown> {
@@ -73,7 +76,12 @@ fn tables(g: &Js) {
     def("BROKER_ID", Js::str(types::BROKER_ID));
     def(
         "BASE_URLS",
-        Js::object(types::BASE_URLS.iter().map(|(r, u)| (region_key(*r), hosts(*u))).collect()),
+        Js::object(
+            types::BASE_URLS
+                .iter()
+                .map(|(r, u)| (region_key(*r), hosts(*u)))
+                .collect(),
+        ),
     );
     def(
         "BASE_WS_URLS",
@@ -95,14 +103,30 @@ fn tables(g: &Js) {
     );
     def(
         "ENDPOINTS",
-        Js::object(types::ENDPOINTS.iter().map(|(k, v)| (*k, Js::str(v))).collect()),
+        Js::object(
+            types::ENDPOINTS
+                .iter()
+                .map(|(k, v)| (*k, Js::str(v)))
+                .collect(),
+        ),
     );
     let list = |xs: &[&str]| Js::array(xs.iter().map(|x| Js::str(x)).collect());
-    def("GRAFANA_ENDPOINTS_EVERY", list(&types::GRAFANA_ENDPOINTS_EVERY));
-    def("GRAFANA_ENDPOINTS_PERIODIC", list(&types::GRAFANA_ENDPOINTS_PERIODIC));
+    def(
+        "GRAFANA_ENDPOINTS_EVERY",
+        list(&types::GRAFANA_ENDPOINTS_EVERY),
+    );
+    def(
+        "GRAFANA_ENDPOINTS_PERIODIC",
+        list(&types::GRAFANA_ENDPOINTS_PERIODIC),
+    );
     def(
         "INTERVAL",
-        Js::object(types::INTERVAL.iter().map(|(k, v)| (*k, Js::str(v))).collect()),
+        Js::object(
+            types::INTERVAL
+                .iter()
+                .map(|(k, v)| (*k, Js::str(v)))
+                .collect(),
+        ),
     );
     def("ORDER_STATUS", pairs(&types::ORDER_STATUS));
     def("ORDER_TYPE", pairs(&types::ORDER_TYPE));
@@ -114,7 +138,10 @@ fn tables(g: &Js) {
             types::REVERSE_ORDER_TYPE
                 .iter()
                 .map(|(k, v)| {
-                    let key = from_typed(k).ok().and_then(|k| text(&k).ok()).unwrap_or_default();
+                    let key = from_typed(k)
+                        .ok()
+                        .and_then(|k| text(&k).ok())
+                        .unwrap_or_default();
                     (key, Js::str(v))
                 })
                 .collect::<Vec<_>>()
@@ -125,7 +152,12 @@ fn tables(g: &Js) {
     );
     def(
         "OKX_BILL_TYPE_BY_INCOME_TYPE",
-        Js::object(income::OKX_BILL_TYPE_BY_INCOME_TYPE.iter().map(|(k, v)| (*k, Js::str(v))).collect()),
+        Js::object(
+            income::OKX_BILL_TYPE_BY_INCOME_TYPE
+                .iter()
+                .map(|(k, v)| (*k, Js::str(v)))
+                .collect(),
+        ),
     );
 }
 
@@ -133,12 +165,17 @@ fn mappers(g: &Js) {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
-    let func = |name: &str, f: fn(Vec<Js>) -> Result<Js, Thrown>| Js::function(name, move |_, a| f(a));
+    let func =
+        |name: &str, f: fn(Vec<Js>) -> Result<Js, Thrown>| Js::function(name, move |_, a| f(a));
     def(
         "isPublicEndpoint",
         func("isPublicEndpoint", |a| {
             let url = arg(&a, 0);
-            let url = if url.is_nullish() { None } else { Some(text(&url)?) };
+            let url = if url.is_nullish() {
+                None
+            } else {
+                Some(text(&url)?)
+            };
             Ok(Js::Bool(crate::api::is_public_endpoint(url.as_deref())))
         }),
     );
@@ -146,7 +183,11 @@ fn mappers(g: &Js) {
         "getOKXTriggerPxType",
         func("getOKXTriggerPxType", |a| {
             let t = arg(&a, 0);
-            let t = if t.is_nullish() { None } else { to_typed(&t).ok() };
+            let t = if t.is_nullish() {
+                None
+            } else {
+                to_typed(&t).ok()
+            };
             Ok(Js::str(okx::get_okx_trigger_px_type(t)))
         }),
     );
@@ -154,7 +195,11 @@ fn mappers(g: &Js) {
         "parseOKXTriggerPxType",
         func("parseOKXTriggerPxType", |a| {
             let t = arg(&a, 0);
-            let t = if t.is_nullish() { None } else { Some(text(&t)?) };
+            let t = if t.is_nullish() {
+                None
+            } else {
+                Some(text(&t)?)
+            };
             from_typed(&okx::parse_okx_trigger_px_type(t.as_deref()))
         }),
     );
@@ -162,7 +207,10 @@ fn mappers(g: &Js) {
         "findTickerMarkForCurrency",
         func("findTickerMarkForCurrency", |a| {
             let tickers: Vec<okx::TickerMarkInput> = to_typed(&arg(&a, 0))?;
-            Ok(Js::Number(okx::find_ticker_mark_for_currency(&tickers, &text(&arg(&a, 1))?)))
+            Ok(Js::Number(okx::find_ticker_mark_for_currency(
+                &tickers,
+                &text(&arg(&a, 1))?,
+            )))
         }),
     );
     def(
@@ -176,7 +224,11 @@ fn mappers(g: &Js) {
                 |contracts, _, price| {
                     number_callback(
                         &to_base,
-                        vec![Js::Number(contracts), js_market.clone(), price.map_or(Js::Undefined, Js::Number)],
+                        vec![
+                            Js::Number(contracts),
+                            js_market.clone(),
+                            price.map_or(Js::Undefined, Js::Number),
+                        ],
                     )
                 },
             )
@@ -193,7 +245,10 @@ fn mappers(g: &Js) {
                 &record(&arg(&a, 0))?,
                 market(&js_market)?.as_ref(),
                 |contracts, _, price| {
-                    number_callback(&to_base, vec![Js::Number(contracts), js_market.clone(), Js::Number(price)])
+                    number_callback(
+                        &to_base,
+                        vec![Js::Number(contracts), js_market.clone(), Js::Number(price)],
+                    )
                 },
                 &text(&arg(&a, 3))?,
             )
@@ -216,11 +271,19 @@ fn mappers(g: &Js) {
         "mapOkxPositionHistory",
         func("mapOkxPositionHistory", |a| {
             let deps = arg(&a, 1);
-            let (to_base, symbol, settle) =
-                (deps.get("toBase")?, deps.get("resolveSymbol")?, deps.get("resolveSettleCurrency")?);
+            let (to_base, symbol, settle) = (
+                deps.get("toBase")?,
+                deps.get("resolveSymbol")?,
+                deps.get("resolveSettleCurrency")?,
+            );
             let account = deps.get("account")?;
-            let account = if account.is_nullish() { String::new() } else { text(&account)? };
-            let to_base = |n: f64, inst: &str| number_callback(&to_base, vec![Js::Number(n), Js::str(inst)]);
+            let account = if account.is_nullish() {
+                String::new()
+            } else {
+                text(&account)?
+            };
+            let to_base =
+                |n: f64, inst: &str| number_callback(&to_base, vec![Js::Number(n), Js::str(inst)]);
             let resolve_symbol = |inst: &str| optional_text(&symbol, vec![Js::str(inst)]);
             let resolve_settle = |inst: &str| optional_text(&settle, vec![Js::str(inst)]);
             let record = position_adapter::map_okx_position_history(
@@ -269,12 +332,17 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     def(
         "safeCexAxiosCreate",
         Js::function("safeCexAxiosCreate", move |_, a| {
-            Ok(client::create(scope_of(&w)?.shared.http.clone(), arg(&a, 0)))
+            Ok(client::create(
+                scope_of(&w)?.shared.http.clone(),
+                arg(&a, 0),
+            ))
         }),
     );
     def(
         "retry",
-        Js::function("retry", |_, a| arg(&a, 0).call_method("__configureRetry", vec![arg(&a, 1)])),
+        Js::function("retry", |_, a| {
+            arg(&a, 0).call_method("__configureRetry", vec![arg(&a, 1)])
+        }),
     );
     def(
         "networkErrorOnRead",
@@ -286,13 +354,19 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
                     return Ok(Js::Bool(false));
                 }
                 let method = config.get("method")?;
-                let method = if method.is_nullish() { String::new() } else { text(&method)?.to_lowercase() };
+                let method = if method.is_nullish() {
+                    String::new()
+                } else {
+                    text(&method)?.to_lowercase()
+                };
                 if method != "get" && method != "head" {
                     return Ok(Js::Bool(false));
                 }
                 let code = error.get("code")?;
                 Ok(Js::Bool(
-                    error.get("response")?.is_undefined() && code.truthy() && text(&code)? != "ECONNABORTED",
+                    error.get("response")?.is_undefined()
+                        && code.truthy()
+                        && text(&code)? != "ECONNABORTED",
                 ))
             }))
         }),
@@ -307,10 +381,16 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     def(
         "installTransportAdapter",
         Js::function("installTransportAdapter", |_, _| {
-            Err(Thrown::error("Error", "Tealstreet tunnel transport is not available in the Rust OKX binding"))
+            Err(Thrown::error(
+                "Error",
+                "Tealstreet tunnel transport is not available in the Rust OKX binding",
+            ))
         }),
     );
-    def("AxiosHeaders", Js::constructor("AxiosHeaders", |_, a| arg(&a, 0).spread_object()));
+    def(
+        "AxiosHeaders",
+        Js::constructor("AxiosHeaders", |_, a| arg(&a, 0).spread_object()),
+    );
     let w = weak;
     def(
         "createAPI",

@@ -1,6 +1,9 @@
 //! The named JS expressions the ported OKX bodies delegate to their host
 //! (`intrinsic("name", args)`). Each arm is the TS expression it stands for.
-use safe_cex_exchange::js_runtime::value::{Js, Thrown, arg};
+use safe_cex_exchange::js_runtime::{
+    ops,
+    value::{Js, Thrown, arg},
+};
 
 /// What an intrinsic needs from the running receiver; implemented by the scope.
 pub(crate) trait IntrinsicHost {
@@ -24,23 +27,15 @@ fn store_member(host: &dyn IntrinsicHost, table: &str, key: &Js) -> Result<Js, T
     store.get(table)?.get_key(&key.to_js_string()?)
 }
 
-/// ToPrimitive-free relational comparison: string/string compares UTF-16 units,
-/// everything else compares numbers (NaN is never ordered).
-fn relation(a: &Js, b: &Js) -> Result<Option<std::cmp::Ordering>, Thrown> {
-    if let (Js::String(x), Js::String(y)) = (a, b) {
-        return Ok(Some(x.as_ref().cmp(y.as_ref())));
-    }
-    Ok(a.to_number()?.partial_cmp(&b.to_number()?))
-}
-
 /// Abstract equality (`==`) over the value kinds these bodies compare.
 fn loose_equal(a: &Js, b: &Js) -> Result<bool, Thrown> {
     Ok(match (a, b) {
         (Js::Undefined | Js::Null, Js::Undefined | Js::Null) => true,
         (Js::Undefined | Js::Null, _) | (_, Js::Undefined | Js::Null) => false,
-        (Js::Number(_) | Js::String(_) | Js::Bool(_), Js::Number(_) | Js::String(_) | Js::Bool(_))
-            if std::mem::discriminant(a) != std::mem::discriminant(b) =>
-        {
+        (
+            Js::Number(_) | Js::String(_) | Js::Bool(_),
+            Js::Number(_) | Js::String(_) | Js::Bool(_),
+        ) if std::mem::discriminant(a) != std::mem::discriminant(b) => {
             a.to_number()? == b.to_number()?
         }
         _ => a.strict_equals(b),
@@ -84,15 +79,13 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         // `+x`
         "unary-plus" => Js::Number(x.to_number()?),
         "add-one" => Js::Number(x.to_number()? + 1.0),
-        "subtract" => Js::Number(x.to_number()? - y.to_number()?),
-        "multiply" => Js::Number(x.to_number()? * y.to_number()?),
-        "divide" => Js::Number(x.to_number()? / y.to_number()?),
-        "greater-than" => Js::Bool(relation(&x, &y)? == Some(std::cmp::Ordering::Greater)),
-        "less-than" => Js::Bool(relation(&x, &y)? == Some(std::cmp::Ordering::Less)),
-        "less-or-equal" => Js::Bool(matches!(
-            relation(&x, &y)?,
-            Some(std::cmp::Ordering::Less | std::cmp::Ordering::Equal)
-        )),
+        "subtract" => ops::subtract(&x, &y)?,
+        "multiply" => ops::multiply(&x, &y)?,
+        "divide" => ops::divide(&x, &y)?,
+        "greater-than" => Js::Bool(ops::greater_than(&x, &y)?),
+        "less-than" => Js::Bool(ops::less_than(&x, &y)?),
+        "less-or-equal" => Js::Bool(ops::less_equal(&x, &y)?),
+        "greater-or-equal" => Js::Bool(ops::greater_equal(&x, &y)?),
         "loose-equal" => Js::Bool(loose_equal(&x, &y)?),
         "typeof-string" => Js::Bool(x.is_string()),
         "Number.isFinite" => Js::Bool(matches!(x, Js::Number(n) if n.is_finite())),
@@ -107,9 +100,9 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         // `id.replace(/_[a-zA-Z]+$/, '')`
         "replace-order-id-suffix" => {
             let id = text(&x)?;
-            let cut = id
-                .rfind('_')
-                .filter(|&i| i + 1 < id.len() && id[i + 1..].bytes().all(|b| b.is_ascii_alphabetic()));
+            let cut = id.rfind('_').filter(|&i| {
+                i + 1 < id.len() && id[i + 1..].bytes().all(|b| b.is_ascii_alphabetic())
+            });
             Js::str(cut.map_or(id.as_str(), |i| &id[..i]))
         }
         // `interval.split(/(\d+)/)` -> ['', amount, unit]
@@ -119,19 +112,33 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
             let end = s[start..]
                 .find(|c: char| !c.is_ascii_digit())
                 .map_or(s.len(), |i| start + i);
-            Js::array(vec![Js::str(&s[..start]), Js::str(&s[start..end]), Js::str(&s[end..])])
+            Js::array(vec![
+                Js::str(&s[..start]),
+                Js::str(&s[start..end]),
+                Js::str(&s[end..]),
+            ])
         }
         "join-comma" => {
             let parts: Result<Vec<String>, Thrown> = items(&x)?
                 .iter()
-                .map(|v| if v.is_nullish() { Ok(String::new()) } else { text(v) })
+                .map(|v| {
+                    if v.is_nullish() {
+                        Ok(String::new())
+                    } else {
+                        text(v)
+                    }
+                })
                 .collect();
             Js::str(&parts?.join(","))
         }
         // `${url}${params ? `?${params}` : ''}`
         "signing-url" => {
             let url = text(&x)?;
-            if y.truthy() { Js::str(&format!("{url}?{}", text(&y)?)) } else { Js::str(&url) }
+            if y.truthy() {
+                Js::str(&format!("{url}?{}", text(&y)?))
+            } else {
+                Js::str(&url)
+            }
         }
         "ticker-percentage" => {
             let (last, open) = (x.to_number()?, y.to_number()?);
@@ -163,7 +170,13 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         }
         // `response.data.data`
         "response-data-data" => x.get("data")?.get("data")?,
-        "Array.isArray-or-empty" => if x.is_array() { x } else { Js::array(vec![]) },
+        "Array.isArray-or-empty" => {
+            if x.is_array() {
+                x
+            } else {
+                Js::array(vec![])
+            }
+        }
         "last-index" => {
             let values = items(&x)?;
             values.last().cloned().unwrap_or(Js::Undefined)
@@ -221,7 +234,9 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
             }
             out
         }
-        "Object.values-expression" => Js::array(x.own_entries()?.into_iter().map(|(_, v)| v).collect()),
+        "Object.values-expression" => {
+            Js::array(x.own_entries()?.into_iter().map(|(_, v)| v).collect())
+        }
         "new-Map" => Js::new_map(),
         "new-Set" => Js::new_set(),
         "Map.values-spread" => x.call_method("values", vec![])?,
@@ -235,7 +250,10 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
             ctor.call(Js::Undefined, args)?
         }
         // `opts?.symbol` / `opts?.from` / `opts?.to` / `opts?.limit`, `market?.id`
-        "opts-optional-symbol" | "opts-optional-from" | "opts-optional-to" | "opts-optional-limit"
+        "opts-optional-symbol"
+        | "opts-optional-from"
+        | "opts-optional-to"
+        | "opts-optional-limit"
         | "optional-id" => {
             let key = match name {
                 "opts-optional-symbol" => "symbol",
@@ -244,7 +262,11 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
                 "opts-optional-limit" => "limit",
                 _ => "id",
             };
-            if x.is_nullish() { Js::Undefined } else { x.get(key)? }
+            if x.is_nullish() {
+                Js::Undefined
+            } else {
+                x.get(key)?
+            }
         }
         "market-by-opts-symbol" => store_member(host, "marketsBySymbol", &x.get("symbol")?)?,
         // `this.store.marketsById[String(row.instId ?? '')]`
@@ -256,7 +278,9 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         "contractsToBase-bind" => {
             let this = host.this();
             let method = this.get("contractsToBase")?;
-            Js::function("contractsToBase", move |_, args| method.call(this.clone(), args))
+            Js::function("contractsToBase", move |_, args| {
+                method.call(this.clone(), args)
+            })
         }
         "candle-handler" => Js::str(&format!("candle.{}.{}", text(&x)?, text(&y)?)),
         "initialize-okx-fields" => {
@@ -289,7 +313,11 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         "slice-zero-current-limit" => {
             let values = items(&x)?;
             let limit = y.get("limit")?.to_number()?;
-            let n = if limit.is_nan() { 0 } else { limit.max(0.0).min(values.len() as f64) as usize };
+            let n = if limit.is_nan() {
+                0
+            } else {
+                limit.max(0.0).min(values.len() as f64) as usize
+            };
             Js::array(values.into_iter().take(n).collect())
         }
         _ => return Err(Thrown::type_error(&format!("unknown OKX intrinsic {name}"))),

@@ -72,7 +72,10 @@ impl OkxExchange {
     ) -> Result<Rc<Self>, ExchangeError> {
         if !matches!(
             name,
-            ExchangeName::Okx | ExchangeName::Okxdemo | ExchangeName::Okxeu | ExchangeName::Okxeudemo
+            ExchangeName::Okx
+                | ExchangeName::Okxdemo
+                | ExchangeName::Okxeu
+                | ExchangeName::Okxeudemo
         ) {
             return Err(ExchangeError::new(format!(
                 "OKXExchange cannot construct {}",
@@ -193,9 +196,9 @@ fn capabilities() -> ExchangeCapabilities {
         fetch_income_history: CapabilityBinding::implemented(|venue, opts| {
             venue.fetch_income_history(opts)
         }),
-        fetch_income_history_range: CapabilityBinding::implemented(
-            |venue, (start, end, kind)| venue.fetch_income_history_range(start, end, kind),
-        ),
+        fetch_income_history_range: CapabilityBinding::implemented(|venue, (start, end, kind)| {
+            venue.fetch_income_history_range(start, end, kind)
+        }),
         fetch_closed_pnl: CapabilityBinding::implemented(|venue, opts| {
             venue.fetch_closed_pnl(opts)
         }),
@@ -221,7 +224,10 @@ impl Exchange for OkxExchange {
         symbol: String,
         id: String,
     ) -> ExchangeFuture<'_, ClientOrderLookup> {
-        let pending = self.call("findOrderByClientOrderId", vec![Js::str(&symbol), Js::str(&id)]);
+        let pending = self.call(
+            "findOrderByClientOrderId",
+            vec![Js::str(&symbol), Js::str(&id)],
+        );
         Box::pin(async move {
             // ts: ClientOrderLookup = { found: true, order } | { found: false, definitive }
             let lookup = await_js(pending?).await.map_err(err)?;
@@ -254,14 +260,21 @@ impl Exchange for OkxExchange {
         self.invoke("placeOrder", a)
     }
     fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
-        let list: Vec<PlaceOrderOpts> = orders.orders().iter().map(|o| o.options().clone()).collect();
+        let list: Vec<PlaceOrderOpts> = orders
+            .orders()
+            .iter()
+            .map(|o| o.options().clone())
+            .collect();
         let a = args!(js(&list));
         self.invoke("placeOrders", a)
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         self.invoke_unit("start", vec![])
     }
-    fn fetch_historical_fills(&self, options: ExecutionsOptions) -> ExchangeFuture<'_, Vec<Execution>> {
+    fn fetch_historical_fills(
+        &self,
+        options: ExecutionsOptions,
+    ) -> ExchangeFuture<'_, Vec<Execution>> {
         let a = args!(js(&options));
         self.invoke("fetchHistoricalFills", a)
     }
@@ -281,7 +294,10 @@ impl Exchange for OkxExchange {
         let a = args!(js(&start), js(&end), opt_js(kind));
         self.invoke("fetchIncomeHistoryRange", a)
     }
-    fn fetch_closed_pnl(&self, options: HistoricalTradeOptions) -> ExchangeFuture<'_, Vec<ClosedPnlEntry>> {
+    fn fetch_closed_pnl(
+        &self,
+        options: HistoricalTradeOptions,
+    ) -> ExchangeFuture<'_, Vec<ClosedPnlEntry>> {
         let a = args!(js(&options));
         self.invoke("fetchClosedPnl", a)
     }

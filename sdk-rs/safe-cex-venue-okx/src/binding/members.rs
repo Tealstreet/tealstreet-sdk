@@ -4,8 +4,8 @@ use super::ops::{
     OkxScope, composition_ops, lifecycle_ops, market_ops, mutation_ops, read_ops, runtime_ops,
 };
 use crate::{
-    family_lifecycle, history_stream_api, market_account_reads, order_composition,
-    order_mutations, order_reads,
+    family_lifecycle, history_stream_api, market_account_reads, order_composition, order_mutations,
+    order_reads,
 };
 use safe_cex_exchange::js_runtime::{
     promise::JsFuture,
@@ -62,8 +62,14 @@ pub(crate) fn async_member(
 /// TS class-field initializers of OKXExchange (run inside the constructor).
 pub(crate) fn initialize_fields(scope: &OkxScope) -> Result<(), Thrown> {
     let this = &scope.this;
-    this.define("grafanaEndpointsEvery", scope.global("GRAFANA_ENDPOINTS_EVERY")?)?;
-    this.define("grafanaEndpointsPeriodic", scope.global("GRAFANA_ENDPOINTS_PERIODIC")?)?;
+    this.define(
+        "grafanaEndpointsEvery",
+        scope.global("GRAFANA_ENDPOINTS_EVERY")?,
+    )?;
+    this.define(
+        "grafanaEndpointsPeriodic",
+        scope.global("GRAFANA_ENDPOINTS_PERIODIC")?,
+    )?;
     this.define("_accountPositionMode", Js::Null)?;
     this.define("_accountLevel", Js::Null)?;
     this.define("markPriceMarketIds", Js::new_set())?;
@@ -108,9 +114,9 @@ fn market_members(scope: &OkxScope) {
         })
     });
     async_member(scope, "fetchLeverages", |s, a| {
-        Box::pin(async move {
-            market_account_reads::fetch_leverages(market_ops(&s), arg(&a, 0)).await
-        })
+        Box::pin(
+            async move { market_account_reads::fetch_leverages(market_ops(&s), arg(&a, 0)).await },
+        )
     });
 }
 
@@ -143,14 +149,14 @@ fn history_members(scope: &OkxScope) {
 
 fn composition_members(scope: &OkxScope) {
     async_member(scope, "placeOrder", |s, a| {
-        Box::pin(async move {
-            order_composition::place_order(composition_ops(&s), arg(&a, 0)).await
-        })
+        Box::pin(
+            async move { order_composition::place_order(composition_ops(&s), arg(&a, 0)).await },
+        )
     });
     async_member(scope, "placeOrders", |s, a| {
-        Box::pin(async move {
-            order_composition::place_orders(composition_ops(&s), arg(&a, 0)).await
-        })
+        Box::pin(
+            async move { order_composition::place_orders(composition_ops(&s), arg(&a, 0)).await },
+        )
     });
     sync_member(scope, "getReduceOnlyTriggerOrderType", |s, a| {
         order_composition::get_reduce_only_trigger_order_type(
@@ -184,15 +190,27 @@ fn mutation_members(scope: &OkxScope) {
         Js,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Js, Thrown>>>>;
     let one: [(&'static str, Body); 7] = [
-        ("updateOrder", |h, x| Box::pin(order_mutations::update_order(h, x))),
-        ("updateAlgoOrder", |h, x| Box::pin(order_mutations::update_algo_order(h, x))),
+        ("updateOrder", |h, x| {
+            Box::pin(order_mutations::update_order(h, x))
+        }),
+        ("updateAlgoOrder", |h, x| {
+            Box::pin(order_mutations::update_algo_order(h, x))
+        }),
         ("updateTriggerAlgoOrder", |h, x| {
             Box::pin(order_mutations::update_trigger_algo_order(h, x))
         }),
-        ("cancelOrders", |h, x| Box::pin(order_mutations::cancel_orders(h, x))),
-        ("cancelSymbolOrders", |h, x| Box::pin(order_mutations::cancel_symbol_orders(h, x))),
-        ("cancelNormalOrders", |h, x| Box::pin(order_mutations::cancel_normal_orders(h, x))),
-        ("cancelAlgoOrders", |h, x| Box::pin(order_mutations::cancel_algo_orders(h, x))),
+        ("cancelOrders", |h, x| {
+            Box::pin(order_mutations::cancel_orders(h, x))
+        }),
+        ("cancelSymbolOrders", |h, x| {
+            Box::pin(order_mutations::cancel_symbol_orders(h, x))
+        }),
+        ("cancelNormalOrders", |h, x| {
+            Box::pin(order_mutations::cancel_normal_orders(h, x))
+        }),
+        ("cancelAlgoOrders", |h, x| {
+            Box::pin(order_mutations::cancel_algo_orders(h, x))
+        }),
     ];
     for (name, body) in one {
         async_member(scope, name, move |s, a| body(mutation_ops(&s), arg(&a, 0)));
@@ -217,26 +235,32 @@ fn read_members(scope: &OkxScope) {
         Box::pin(async move { order_reads::fetch_normal_orders(Rc::new(read_ops(&s))).await })
     });
     async_member(scope, "fetchAlgoOrders", |s, a| {
-        Box::pin(async move {
-            order_reads::fetch_algo_orders(Rc::new(read_ops(&s)), arg(&a, 0)).await
-        })
+        Box::pin(
+            async move { order_reads::fetch_algo_orders(Rc::new(read_ops(&s)), arg(&a, 0)).await },
+        )
     });
     type Body = fn(
         Rc<order_reads::OrderReadOps<'static, Js, Thrown>>,
         Js,
     ) -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<Js, Thrown>>>>;
     let one: [(&'static str, Body); 4] = [
-        ("fetchHistoricalOrders", |h, x| Box::pin(order_reads::fetch_historical_orders(h, x))),
+        ("fetchHistoricalOrders", |h, x| {
+            Box::pin(order_reads::fetch_historical_orders(h, x))
+        }),
         ("fetchClosedPositionRows", |h, x| {
             Box::pin(order_reads::fetch_closed_position_rows(h, x))
         }),
         ("fetchHistoricalPositions", |h, x| {
             Box::pin(order_reads::fetch_historical_positions(h, x))
         }),
-        ("fetchClosedPnl", |h, x| Box::pin(order_reads::fetch_closed_pnl(h, x))),
+        ("fetchClosedPnl", |h, x| {
+            Box::pin(order_reads::fetch_closed_pnl(h, x))
+        }),
     ];
     for (name, body) in one {
-        async_member(scope, name, move |s, a| body(Rc::new(read_ops(&s)), arg(&a, 0)));
+        async_member(scope, name, move |s, a| {
+            body(Rc::new(read_ops(&s)), arg(&a, 0))
+        });
     }
     async_member(scope, "fetchIncomeHistoryRange", |s, a| {
         Box::pin(async move {

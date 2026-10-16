@@ -3,6 +3,8 @@
 //! `owner.member:ENDPOINT` is `(...a) => owner.member(ENDPOINTS.ENDPOINT, ...a)`,
 //! `this.member:unbound` reads the member without binding.
 use super::intrinsics::{IntrinsicHost, intrinsic};
+use super::members::Variant;
+use crate::family_lifecycle;
 use crate::{
     family_lifecycle::LifecycleOps,
     history_stream_api::RuntimeOps,
@@ -12,10 +14,10 @@ use crate::{
     order_reads::OrderReadOps,
     websocket_account_events::SocketEventOps,
 };
-use super::members::Variant;
-use crate::family_lifecycle;
 use safe_cex_exchange::{
-    client_order_id::{ClientOrderIdRule, ClientOrderIdRuleOverrides, pattern_client_order_id_rule},
+    client_order_id::{
+        ClientOrderIdRule, ClientOrderIdRuleOverrides, pattern_client_order_id_rule,
+    },
     exchange::ExchangeSettings,
     js_runtime::{
         base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory},
@@ -66,7 +68,9 @@ fn client_order_id_rule(shared: Weak<OkxShared>) -> ClientOrderIdRule {
     pattern_client_order_id_rule(
         "OKX".into(),
         "/^[A-Za-z0-9]{1,32}$/".into(),
-        Rc::new(|id: &str| (1..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric())),
+        Rc::new(|id: &str| {
+            (1..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric())
+        }),
         ClientOrderIdRuleOverrides {
             mint: Some(Rc::new(move || {
                 let uuid = scope_of(&shared)
@@ -74,7 +78,10 @@ fn client_order_id_rule(shared: Weak<OkxShared>) -> ClientOrderIdRule {
                     .and_then(|f| f.call(Js::Undefined, vec![]))
                     .map(|id| id.to_display())
                     .unwrap_or_default();
-                format!("{}{uuid}", crate::types::BROKER_ID).chars().take(32).collect()
+                format!("{}{uuid}", crate::types::BROKER_ID)
+                    .chars()
+                    .take(32)
+                    .collect()
             })),
             ..Default::default()
         },
@@ -138,7 +145,10 @@ fn callable(f: &Js) -> Result<(), Thrown> {
     if f.is_callable() {
         Ok(())
     } else {
-        Err(Thrown::type_error(&format!("{} is not a function", f.to_display())))
+        Err(Thrown::type_error(&format!(
+            "{} is not a function",
+            f.to_display()
+        )))
     }
 }
 
@@ -172,7 +182,11 @@ pub(crate) fn capture(scope: &OkxScope, name: &str) -> Result<Js, Thrown> {
         let path = path.strip_prefix("this.").unwrap_or(path);
         let (owner, member) = scope.owner_and_member(path)?;
         callable(&member)?;
-        let endpoint = if tail.contains('.') { tail.to_owned() } else { format!("ENDPOINTS.{tail}") };
+        let endpoint = if tail.contains('.') {
+            tail.to_owned()
+        } else {
+            format!("ENDPOINTS.{tail}")
+        };
         let endpoint = Scope::global(scope, &endpoint)?;
         return Ok(Js::function(path, move |_, args| {
             let mut full = vec![endpoint.clone()];
@@ -185,7 +199,9 @@ pub(crate) fn capture(scope: &OkxScope, name: &str) -> Result<Js, Thrown> {
         if !member.is_callable() {
             return Ok(member);
         }
-        return Ok(Js::function(path, move |_, args| member.call(owner.clone(), args)));
+        return Ok(Js::function(path, move |_, args| {
+            member.call(owner.clone(), args)
+        }));
     }
     Scope::global(scope, name)
 }
@@ -224,7 +240,14 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
         undefined: Rc::new(|| Js::Undefined),
         array: Rc::new(Js::array),
         object: Rc::new(Js::object),
-        map: Rc::new(|v, f| Ok(Js::array(items(&v)?.into_iter().map(|x| f(x)).collect::<Result<_, _>>()?))),
+        map: Rc::new(|v, f| {
+            Ok(Js::array(
+                items(&v)?
+                    .into_iter()
+                    .map(|x| f(x))
+                    .collect::<Result<_, _>>()?,
+            ))
+        }),
         bind_first: Rc::new(|v, f| f(items(&v)?.into_iter().next().unwrap_or(Js::Undefined))),
         flat_map: Rc::new(|v, f| {
             let mut out = vec![];
@@ -360,34 +383,13 @@ pub(crate) fn mutation_ops(scope: &OkxScope) -> Rc<OrderMutationOps<Js, Thrown>>
 pub(crate) fn composition_ops(scope: &OkxScope) -> Rc<CompositionOps<Js, Thrown>> {
     Rc::new(CompositionOps {
         order: mutation_ops(scope),
-        sort: Rc::new(|v, cmp| {
-            let mut xs = items(&v)?;
-            let mut error = None;
-            xs.sort_by(|a, b| {
-                if error.is_some() {
-                    return std::cmp::Ordering::Equal;
-                }
-                match cmp(a.clone(), b.clone()).and_then(|r| r.to_number()) {
-                    Ok(d) if d > 0.0 => std::cmp::Ordering::Greater,
-                    Ok(d) if d < 0.0 => std::cmp::Ordering::Less,
-                    Ok(_) => std::cmp::Ordering::Equal,
-                    Err(e) => {
-                        error = Some(e);
-                        std::cmp::Ordering::Equal
-                    }
-                }
-            });
-            if let Some(e) = error {
-                return Err(e);
-            }
-            if let Js::Array(cells) = &v {
-                *cells.borrow_mut() = xs.into_iter().map(Some).collect();
-            }
-            Ok(v)
+        // `array.sort(compare)`: the body hands over the bound `sort` member.
+        sort: Rc::new(|sort, cmp| {
+            let compare = Js::function("compare", move |_, a| cmp(arg(&a, 0), arg(&a, 1)));
+            call_js(&sort, vec![compare])
         }),
-        map_bound: Rc::new(|v, f| {
-            Ok(Js::array(items(&v)?.into_iter().map(|x| call_js(&f, vec![x])).collect::<Result<_, _>>()?))
-        }),
+        // `array.map(this.formatAlgoOrder)`: the bound `map` member and its callback.
+        map_bound: Rc::new(|map, f| call_js(&map, vec![f])),
     })
 }
 
@@ -413,12 +415,23 @@ pub(crate) fn read_ops(scope: &OkxScope) -> OrderReadOps<'static, Js, Thrown> {
         // err?.response?.data?.msg || err?.message
         error_message: Rc::new(|e| {
             let v = &e.value;
-            let optional = |v: &Js, k: &str| if v.is_nullish() { Ok(Js::Undefined) } else { v.get(k) };
+            let optional = |v: &Js, k: &str| {
+                if v.is_nullish() {
+                    Ok(Js::Undefined)
+                } else {
+                    v.get(k)
+                }
+            };
             let msg = optional(&optional(&optional(v, "response")?, "data")?, "msg")?;
-            if msg.truthy() { Ok(msg) } else { optional(v, "message") }
+            if msg.truthy() {
+                Ok(msg)
+            } else {
+                optional(v, "message")
+            }
         }),
         parallel_map: Rc::new(|_, v, f| {
-            let started: Result<Vec<_>, Thrown> = items(&v).map(|xs| xs.into_iter().map(|x| f(x)).collect());
+            let started: Result<Vec<_>, Thrown> =
+                items(&v).map(|xs| xs.into_iter().map(|x| f(x)).collect());
             Box::pin(async move {
                 let mut out = vec![];
                 for fut in started? {
@@ -431,7 +444,9 @@ pub(crate) fn read_ops(scope: &OkxScope) -> OrderReadOps<'static, Js, Thrown> {
         map_position: Rc::new(move |mapper, row, market, account| {
             let this = to_base.this.clone();
             fn by_id(this: &Js, id: &Js) -> Result<Js, Thrown> {
-                this.get("store")?.get("marketsById")?.get_key(&id.to_js_string()?)
+                this.get("store")?
+                    .get("marketsById")?
+                    .get_key(&id.to_js_string()?)
             }
             let (t1, t2, t3) = (this.clone(), this.clone(), this);
             let (b1, b2, b3) = (by_id, by_id, by_id);
@@ -450,14 +465,22 @@ pub(crate) fn read_ops(scope: &OkxScope) -> OrderReadOps<'static, Js, Thrown> {
                     "resolveSymbol",
                     Js::function("resolveSymbol", move |_, a| {
                         let m = b2(&t2, &arg(&a, 0))?;
-                        if m.is_nullish() { Ok(Js::Undefined) } else { m.get("symbol") }
+                        if m.is_nullish() {
+                            Ok(Js::Undefined)
+                        } else {
+                            m.get("symbol")
+                        }
                     }),
                 ),
                 (
                     "resolveSettleCurrency",
                     Js::function("resolveSettleCurrency", move |_, a| {
                         let m = b3(&t3, &arg(&a, 0))?;
-                        if m.is_nullish() { Ok(Js::Undefined) } else { m.get("quote") }
+                        if m.is_nullish() {
+                            Ok(Js::Undefined)
+                        } else {
+                            m.get("quote")
+                        }
                     }),
                 ),
             ]);
