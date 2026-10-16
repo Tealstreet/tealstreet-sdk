@@ -271,7 +271,10 @@ fn change_margin_type_reports_cross_only_without_a_request() {
         .expect("changeMarginType resolves");
     assert_eq!(h.http.requests.borrow().len(), before);
     assert!(
-        errors.borrow().iter().any(|e| e.contains("Only cross mode is supported")),
+        errors
+            .borrow()
+            .iter()
+            .any(|e| e.contains("Only cross mode is supported")),
         "{errors:?}"
     );
 }

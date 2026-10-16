@@ -30,7 +30,7 @@ use safe_cex_types::{ExchangeName, ExchangeOptions, exchange_metadata::get_excha
 use std::rc::{Rc, Weak};
 
 /// Venue-only shared state: the typed constructor inputs.
-pub struct OkxExtra {
+pub(crate) struct OkxExtra {
     pub name: ExchangeName,
     pub options: ExchangeOptions,
     pub external_public_data: Option<ExternalPublicDataFactory>,
