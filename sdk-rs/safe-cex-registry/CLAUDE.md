@@ -146,7 +146,7 @@ read purity. The module-host construction path remains the default.
 Phemex's Rust constructor receives the shared Js HTTP host and external-data
 factory. Its local HTTP witness checks amount/price precision independently and
 verifies the account-query HMAC against the bytes observed by the server. Native
-Phemex native tunnel construction supplies the shared default transport installer.
+Phemex tunnel construction supplies the shared default transport installer.
 The tunnel witness observes authenticated rpc.http, signed account bytes and zero
 direct-origin traffic; absent and no-op provider controls must both fail.
 
