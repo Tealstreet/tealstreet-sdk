@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitunix`, `blofin`, Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
 the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
@@ -21,6 +21,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 `ExchangeName -> fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor`.
 
 - **Initial members:**
+  - `lighter` and `lighter-robinhood`, built with the existing `LighterNativeExchange::new`; the name selects deployment URLs and quote currency. The host retains the runtime transport and local signer entropy.
   - `asterdex`, built with `native_exchange::AsterDEXExchange::new` on the shared
     js_runtime. Its HTTP factory receives each lane's options, including secondary
     credentials and proxy override. The native host routes signed requests through

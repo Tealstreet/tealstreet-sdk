@@ -167,6 +167,28 @@ impl RustVenueHost for NativeVenueHost {
         })
     }
 
+    fn lighter(
+        &self,
+    ) -> Result<safe_cex_venue_lighter::binding::exchange::LighterDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for lighter on the native host",
+            ));
+        }
+        let registry = Rc::new(safe_cex_transport::TransportRegistry::default());
+        registry.set_default_transport(self.runtime.transport());
+        Ok(
+            safe_cex_venue_lighter::binding::exchange::LighterDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                ),
+                registry,
+                signing_entropy: None,
+            },
+        )
+    }
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
         if self.remote.is_some() {
             return Err(ExchangeError::new(

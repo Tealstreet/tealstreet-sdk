@@ -103,3 +103,9 @@ The native host supplies a fresh HTTP host and the common gateway factory; remot
 signer hosts fail visibly until BingX signing is connected.
 `tests/native_host_bingx.rs` starts it on loopback HTTP/WS, verifies a signed order
 payload and caller client ID, and cancels the resulting order.
+
+Lighter and Lighter Robinhood construct `LighterNativeExchange` through the Rust
+table. The native host gives each instance a transport registry seeded from its
+runtime, fresh terminal HTTP and OS signing entropy. Hosted remote signing is
+refused because this binding uses the local SDK signer. Construction tests cover
+both names and their deployment-specific REST origins and quote currencies.

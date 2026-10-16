@@ -3969,6 +3969,7 @@ dependencies = [
  "safe-cex-venue-blofin",
  "safe-cex-venue-coinbase",
  "safe-cex-venue-kraken",
+ "safe-cex-venue-lighter",
  "safe-cex-venue-okx",
  "serde",
  "serde_json",
