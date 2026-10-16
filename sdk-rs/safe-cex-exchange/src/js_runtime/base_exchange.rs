@@ -528,7 +528,60 @@ pub fn create(
             }),
         );
     }
+    {
+        let context = Rc::downgrade(context);
+        def(
+            "callMethodInWorker",
+            Js::function("callMethodInWorker", move |_, args| {
+                worker_rpc(&context, args)
+            }),
+        );
+    }
     Ok((this, base))
+}
+
+/// Keep worker RPC ownership in the core: its exact reply listener and timeout
+/// are released by WorkerReplyGuard, and the venue receives the completion hook.
+fn worker_rpc(context: &Weak<JsSocketContext>, args: Vec<Js>) -> Result<Js, Thrown> {
+    let context = context
+        .upgrade()
+        .ok_or_else(|| Thrown::error("Error", "exchange is not assembled"))?;
+    let runtime: Rc<dyn ExchangeRuntime> = context.runtime.clone();
+    Ok(Js::Promise(Promise::spawn(
+        &runtime,
+        Box::pin(async move {
+            let venue = assembled_venue(&Rc::downgrade(&context))?;
+            let method = to_typed(&arg(&args, 0))?;
+            let args = args
+                .iter()
+                .skip(1)
+                .map(to_json)
+                .collect::<Result<Vec<_>, _>>()?;
+            let result = match venue
+                .base()
+                .call_method_in_worker(venue.as_ref(), method, args)
+                .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    // Keep the native metadata and expose the source-reconstructed
+                    // stack/code properties to JS callers as well.
+                    let (stack, code) = (error.stack.clone(), error.code.clone());
+                    let thrown = Thrown::from(error);
+                    if let Some(stack) = stack {
+                        thrown.value.define("stack", Js::str(&stack))?;
+                    }
+                    if let Some(code) = code {
+                        thrown
+                            .value
+                            .define("code", super::value::from_json(&code))?;
+                    }
+                    return Err(thrown);
+                }
+            };
+            Ok(super::value::from_json(&result))
+        }),
+    )))
 }
 
 /// Decode structural options without serializing executable host capabilities.
