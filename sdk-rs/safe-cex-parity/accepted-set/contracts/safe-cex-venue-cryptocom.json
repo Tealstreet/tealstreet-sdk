@@ -1,0 +1,740 @@
+{
+  "safe_cex_venue_cryptocom::wire::CryptocomTradeSide": {
+    "shape": "string",
+    "literals": [
+      "BUY",
+      "SELL"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the actual cryptocom.types.ts inline literal union and wire.rs concrete string-only Deserialize body. Independent native variant matches, exact serialization and all valid-tag externally tagged map refusals are maintained in tests/accepted_string_shapes.rs through direct text, qualified owned/borrowed and numeric ingress paths. String-frontdoor removal controls must compile and fail the named tagged-shape assertion before byte-exact restored pass. This covers this concrete native/default owner only; remote companion/private/local/matrix obligations are not exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored JSON enum text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded { $type::Buy => serde_json::json!({\"ok\":true,\"variant\":\"Buy\",\"ordinal\":0}), $type::Sell => serde_json::json!({\"ok\":true,\"variant\":\"Sell\",\"ordinal\":1}) },Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"BUY\"",
+          "output": {
+            "ok": true,
+            "variant": "Buy",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"SELL\"",
+          "output": {
+            "ok": true,
+            "variant": "Sell",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": " \n\"BUY\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Buy",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"BUY\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"SELL\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomJournalType": {
+    "shape": "string",
+    "literals": [
+      "TRADING"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the actual cryptocom.types.ts inline literal union and wire.rs concrete string-only Deserialize body. Independent native variant matches, exact serialization and all valid-tag externally tagged map refusals are maintained in tests/accepted_string_shapes.rs through direct text, qualified owned/borrowed and numeric ingress paths. String-frontdoor removal controls must compile and fail the named tagged-shape assertion before byte-exact restored pass. This covers this concrete native/default owner only; remote companion/private/local/matrix obligations are not exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored JSON enum text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded { $type::Trading => serde_json::json!({\"ok\":true,\"variant\":\"Trading\",\"ordinal\":0}) },Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"TRADING\"",
+          "output": {
+            "ok": true,
+            "variant": "Trading",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"TRADING\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Trading",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"TRADING\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomLiquidityIndicator": {
+    "shape": "string",
+    "literals": [
+      "MAKER",
+      "TAKER"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the actual cryptocom.types.ts inline literal union and wire.rs concrete string-only Deserialize body. Independent native variant matches, exact serialization and all valid-tag externally tagged map refusals are maintained in tests/accepted_string_shapes.rs through direct text, qualified owned/borrowed and numeric ingress paths. String-frontdoor removal controls must compile and fail the named tagged-shape assertion before byte-exact restored pass. This covers this concrete native/default owner only; remote companion/private/local/matrix obligations are not exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored JSON enum text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded { $type::Maker => serde_json::json!({\"ok\":true,\"variant\":\"Maker\",\"ordinal\":0}), $type::Taker => serde_json::json!({\"ok\":true,\"variant\":\"Taker\",\"ordinal\":1}) },Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"MAKER\"",
+          "output": {
+            "ok": true,
+            "variant": "Maker",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"TAKER\"",
+          "output": {
+            "ok": true,
+            "variant": "Taker",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": " \n\"MAKER\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Maker",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"MAKER\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"TAKER\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomOrderType": {
+    "shape": "string",
+    "literals": [
+      "LIMIT",
+      "MARKET",
+      "STOP_LOSS",
+      "STOP_LIMIT",
+      "TAKE_PROFIT",
+      "TAKE_PROFIT_LIMIT"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the actual cryptocom.types.ts inline literal union and wire.rs concrete string-only Deserialize body. Independent native variant matches, exact serialization and all valid-tag externally tagged map refusals are maintained in tests/accepted_string_shapes.rs through direct text, qualified owned/borrowed and numeric ingress paths. String-frontdoor removal controls must compile and fail the named tagged-shape assertion before byte-exact restored pass. This covers this concrete native/default owner only; remote companion/private/local/matrix obligations are not exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored JSON enum text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded { $type::Limit => serde_json::json!({\"ok\":true,\"variant\":\"Limit\",\"ordinal\":0}), $type::Market => serde_json::json!({\"ok\":true,\"variant\":\"Market\",\"ordinal\":1}), $type::StopLoss => serde_json::json!({\"ok\":true,\"variant\":\"StopLoss\",\"ordinal\":2}), $type::StopLimit => serde_json::json!({\"ok\":true,\"variant\":\"StopLimit\",\"ordinal\":3}), $type::TakeProfit => serde_json::json!({\"ok\":true,\"variant\":\"TakeProfit\",\"ordinal\":4}), $type::TakeProfitLimit => serde_json::json!({\"ok\":true,\"variant\":\"TakeProfitLimit\",\"ordinal\":5}) },Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"LIMIT\"",
+          "output": {
+            "ok": true,
+            "variant": "Limit",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"MARKET\"",
+          "output": {
+            "ok": true,
+            "variant": "Market",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"STOP_LOSS\"",
+          "output": {
+            "ok": true,
+            "variant": "StopLoss",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": "\"STOP_LIMIT\"",
+          "output": {
+            "ok": true,
+            "variant": "StopLimit",
+            "ordinal": 3
+          }
+        },
+        {
+          "input": "\"TAKE_PROFIT\"",
+          "output": {
+            "ok": true,
+            "variant": "TakeProfit",
+            "ordinal": 4
+          }
+        },
+        {
+          "input": "\"TAKE_PROFIT_LIMIT\"",
+          "output": {
+            "ok": true,
+            "variant": "TakeProfitLimit",
+            "ordinal": 5
+          }
+        },
+        {
+          "input": " \n\"LIMIT\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Limit",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"LIMIT\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"MARKET\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"STOP_LOSS\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"STOP_LIMIT\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"TAKE_PROFIT\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"TAKE_PROFIT_LIMIT\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomTimeInForce": {
+    "shape": "string",
+    "literals": [
+      "GOOD_TILL_CANCEL",
+      "FILL_OR_KILL",
+      "IMMEDIATE_OR_CANCEL",
+      "POST_ONLY"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the actual cryptocom.types.ts inline literal union and wire.rs concrete string-only Deserialize body. Independent native variant matches, exact serialization and all valid-tag externally tagged map refusals are maintained in tests/accepted_string_shapes.rs through direct text, qualified owned/borrowed and numeric ingress paths. String-frontdoor removal controls must compile and fail the named tagged-shape assertion before byte-exact restored pass. This covers this concrete native/default owner only; remote companion/private/local/matrix obligations are not exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored JSON enum text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded { $type::GoodTillCancel => serde_json::json!({\"ok\":true,\"variant\":\"GoodTillCancel\",\"ordinal\":0}), $type::FillOrKill => serde_json::json!({\"ok\":true,\"variant\":\"FillOrKill\",\"ordinal\":1}), $type::ImmediateOrCancel => serde_json::json!({\"ok\":true,\"variant\":\"ImmediateOrCancel\",\"ordinal\":2}), $type::PostOnly => serde_json::json!({\"ok\":true,\"variant\":\"PostOnly\",\"ordinal\":3}) },Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"GOOD_TILL_CANCEL\"",
+          "output": {
+            "ok": true,
+            "variant": "GoodTillCancel",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"FILL_OR_KILL\"",
+          "output": {
+            "ok": true,
+            "variant": "FillOrKill",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"IMMEDIATE_OR_CANCEL\"",
+          "output": {
+            "ok": true,
+            "variant": "ImmediateOrCancel",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": "\"POST_ONLY\"",
+          "output": {
+            "ok": true,
+            "variant": "PostOnly",
+            "ordinal": 3
+          }
+        },
+        {
+          "input": " \n\"GOOD_TILL_CANCEL\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "GoodTillCancel",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"GOOD_TILL_CANCEL\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"FILL_OR_KILL\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"IMMEDIATE_OR_CANCEL\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"POST_ONLY\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomRefPriceType": {
+    "shape": "string",
+    "literals": [
+      "MARK_PRICE",
+      "INDEX_PRICE",
+      "LAST_PRICE"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the actual cryptocom.types.ts inline literal union and wire.rs concrete string-only Deserialize body. Independent native variant matches, exact serialization and all valid-tag externally tagged map refusals are maintained in tests/accepted_string_shapes.rs through direct text, qualified owned/borrowed and numeric ingress paths. String-frontdoor removal controls must compile and fail the named tagged-shape assertion before byte-exact restored pass. This covers this concrete native/default owner only; remote companion/private/local/matrix obligations are not exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored JSON enum text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded { $type::Mark => serde_json::json!({\"ok\":true,\"variant\":\"Mark\",\"ordinal\":0}), $type::Index => serde_json::json!({\"ok\":true,\"variant\":\"Index\",\"ordinal\":1}), $type::Last => serde_json::json!({\"ok\":true,\"variant\":\"Last\",\"ordinal\":2}) },Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"MARK_PRICE\"",
+          "output": {
+            "ok": true,
+            "variant": "Mark",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"INDEX_PRICE\"",
+          "output": {
+            "ok": true,
+            "variant": "Index",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"LAST_PRICE\"",
+          "output": {
+            "ok": true,
+            "variant": "Last",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": " \n\"MARK_PRICE\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Mark",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"MARK_PRICE\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"INDEX_PRICE\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"LAST_PRICE\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomOrderStatus": {
+    "shape": "string",
+    "literals": [
+      "ACTIVE",
+      "FILLED",
+      "CANCELED",
+      "EXPIRED",
+      "PENDING",
+      "REJECTED"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed the actual cryptocom.types.ts inline literal union and wire.rs concrete string-only Deserialize body. Independent native variant matches, exact serialization and all valid-tag externally tagged map refusals are maintained in tests/accepted_string_shapes.rs through direct text, qualified owned/borrowed and numeric ingress paths. String-frontdoor removal controls must compile and fail the named tagged-shape assertion before byte-exact restored pass. This covers this concrete native/default owner only; remote companion/private/local/matrix obligations are not exempted.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored JSON enum text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded { $type::Active => serde_json::json!({\"ok\":true,\"variant\":\"Active\",\"ordinal\":0}), $type::Filled => serde_json::json!({\"ok\":true,\"variant\":\"Filled\",\"ordinal\":1}), $type::Canceled => serde_json::json!({\"ok\":true,\"variant\":\"Canceled\",\"ordinal\":2}), $type::Expired => serde_json::json!({\"ok\":true,\"variant\":\"Expired\",\"ordinal\":3}), $type::Pending => serde_json::json!({\"ok\":true,\"variant\":\"Pending\",\"ordinal\":4}), $type::Rejected => serde_json::json!({\"ok\":true,\"variant\":\"Rejected\",\"ordinal\":5}) },Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"ACTIVE\"",
+          "output": {
+            "ok": true,
+            "variant": "Active",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"FILLED\"",
+          "output": {
+            "ok": true,
+            "variant": "Filled",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"CANCELED\"",
+          "output": {
+            "ok": true,
+            "variant": "Canceled",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": "\"EXPIRED\"",
+          "output": {
+            "ok": true,
+            "variant": "Expired",
+            "ordinal": 3
+          }
+        },
+        {
+          "input": "\"PENDING\"",
+          "output": {
+            "ok": true,
+            "variant": "Pending",
+            "ordinal": 4
+          }
+        },
+        {
+          "input": "\"REJECTED\"",
+          "output": {
+            "ok": true,
+            "variant": "Rejected",
+            "ordinal": 5
+          }
+        },
+        {
+          "input": " \n\"ACTIVE\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Active",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"ACTIVE\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"FILLED\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"CANCELED\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"EXPIRED\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"PENDING\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"REJECTED\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  }
+}
