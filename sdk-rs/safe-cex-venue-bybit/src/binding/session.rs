@@ -123,7 +123,9 @@ impl SessionHost for Rt {
             "null" => Ok(Js::Null),
             "template" => Ok(Js::String(arg(&args, 0).to_js_string()?)),
             "typeof" => Ok(Js::str(arg(&args, 0).type_of())),
-            "subtract" => safe_cex_exchange::js_runtime::ops::subtract(&arg(&args, 0), &arg(&args, 1)),
+            "subtract" => {
+                safe_cex_exchange::js_runtime::ops::subtract(&arg(&args, 0), &arg(&args, 1))
+            }
             // Object.assign(target, source) over own enumerable data properties.
             "copyOwnDataProperties" => {
                 let target = arg(&args, 0);
@@ -243,15 +245,20 @@ impl SpotOrderHost for Rt {
     where
         F: FnMut(Js) -> Result<(), Thrown>,
     {
-        let items = values
-            .array_values()
-            .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", values.to_display())))?;
+        let items = values.array_values().ok_or_else(|| {
+            Thrown::type_error(&format!("{} is not iterable", values.to_display()))
+        })?;
         for item in items {
             body(item)?;
         }
         Ok(())
     }
-    fn series<'a, F>(&'a self, _callee: Js, values: Js, mut body: F) -> SessionFuture<'a, Js, Thrown>
+    fn series<'a, F>(
+        &'a self,
+        _callee: Js,
+        values: Js,
+        mut body: F,
+    ) -> SessionFuture<'a, Js, Thrown>
     where
         F: FnMut(Js, usize) -> SessionFuture<'a, Js, Thrown> + 'a,
     {

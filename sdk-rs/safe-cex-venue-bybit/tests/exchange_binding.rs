@@ -536,3 +536,96 @@ fn start_loads_public_and_private_state_and_dials_both_sockets() {
         public.sent.borrow()
     );
 }
+
+fn place(
+    h: &support::Harness,
+    opts: serde_json::Value,
+) -> Result<Vec<String>, safe_cex_exchange::runtime::ExchangeError> {
+    let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(opts).unwrap();
+    let venue = h.venue();
+    h.drive(Box::pin(venue.base().place_order(venue, opts)))
+}
+
+#[test]
+fn place_order_formats_a_limit_order_and_records_it() {
+    let h = harness(options(), |w| {
+        w.ok(
+            "GET",
+            "/v5/position/list",
+            json!({"list": [], "nextPageCursor": ""}),
+        );
+        w.ok(
+            "POST",
+            "/v5/order/create",
+            json!({"orderId": "new-1", "orderLinkId": ""}),
+        );
+    });
+    seed_market(&h);
+    let ids = place(
+        &h,
+        json!({"symbol": "BTCUSDT", "type": "limit", "side": "buy", "amount": 0.01,
+               "price": 25000.07, "stopLoss": 24000}),
+    )
+    .expect("placeOrder");
+    assert_eq!(ids, ["new-1"]);
+    let posts = h.wire.calls("/v5/order/create");
+    assert_eq!(posts.len(), 1);
+    let body = &posts[0].body;
+    assert_eq!(body["category"], "linear");
+    assert_eq!(body["side"], "Buy");
+    assert_eq!(body["orderType"], "Limit");
+    assert_eq!(body["qty"], "0.01");
+    assert_eq!(body["price"], "25000.1", "adjusted to the tick");
+    assert_eq!(body["stopLoss"], "24000");
+    assert_eq!(body["slTriggerBy"], "MarkPrice");
+    assert_eq!(body["timeInForce"], "GTC");
+    assert_eq!(body["reduceOnly"], false);
+    assert_eq!(body["closeOnTrigger"], false);
+    assert_eq!(body["positionIdx"], 0, "one-way: index 0");
+    assert!(
+        body.get("orderLinkId").is_none(),
+        "no caller id, no generated id: {body}"
+    );
+
+    let with_id = harness(options(), |w| {
+        w.ok(
+            "GET",
+            "/v5/position/list",
+            json!({"list": [], "nextPageCursor": ""}),
+        );
+        w.ok("POST", "/v5/order/create", json!({"orderId": "new-2"}));
+    });
+    seed_market(&with_id);
+    place(
+        &with_id,
+        json!({"symbol": "BTCUSDT", "type": "limit", "side": "sell", "amount": 0.01,
+               "price": 26000, "clientOrderId": "caller-1"}),
+    )
+    .expect("placeOrder with a caller id");
+    assert_eq!(
+        with_id.wire.calls("/v5/order/create")[0].body["orderLinkId"],
+        "caller-1",
+        "the caller's id goes out verbatim as orderLinkId"
+    );
+
+    let rejected = harness(options(), |w| {
+        w.ok(
+            "GET",
+            "/v5/position/list",
+            json!({"list": [], "nextPageCursor": ""}),
+        );
+        w.route(
+            "POST",
+            "/v5/order/create",
+            200,
+            json!({"retCode": 110007, "retMsg": "ab not enough for new order", "result": {}}),
+        );
+    });
+    seed_market(&rejected);
+    let error = place(
+        &rejected,
+        json!({"symbol": "BTCUSDT", "type": "limit", "side": "buy", "amount": 0.01, "price": 1}),
+    )
+    .expect_err("a non-OK create rejects");
+    assert_eq!(error.message, "ab not enough for new order");
+}

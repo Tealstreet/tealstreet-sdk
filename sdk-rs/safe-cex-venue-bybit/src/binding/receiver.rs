@@ -351,6 +351,54 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         members::markets::parse_tickers(rt, arg(&a, 0))
     });
 
+    // Order placement and the local order lifecycle (members/orders.rs, lifecycle.rs).
+    method(&this, rt, "placeOrder", |rt, a| {
+        members::orders::place_order(rt, arg(&a, 0))
+    });
+    method(&this, rt, "fetchPositionMode", |rt, a| {
+        members::orders::fetch_position_mode(rt, arg(&a, 0))
+    });
+    method(&this, rt, "recordRecentlyPlacedOrder", |rt, a| {
+        members::lifecycle::record_recently_placed_order(rt, &arg(&a, 0))?;
+        Ok(Js::Undefined)
+    });
+    method(&this, rt, "recordRecentlyPlacedOrderFromOpts", |rt, a| {
+        crate::primary_local_order_writes::record_recently_placed_order_from_opts(
+            rt,
+            &rt.this,
+            arg(&a, 0),
+            arg(&a, 1),
+            arg(&a, 2),
+        )?;
+        Ok(Js::Undefined)
+    });
+    method(
+        &this,
+        rt,
+        "shouldUseLocalRestOrderLifecycleFallback",
+        |rt, _| Ok(Js::Bool(members::lifecycle::should_use_local_fallback(rt)?)),
+    );
+    method(
+        &this,
+        rt,
+        "debouncedPrivateSnapshotRefresh",
+        |rt, _| match venue(rt)?.snapshot_refresh.get() {
+            Some(refresh) => refresh.call().map_err(Thrown::from),
+            None => Ok(Js::Undefined),
+        },
+    );
+    method(
+        &this,
+        rt,
+        "scheduleSetTradingStopSnapshotRefresh",
+        |rt, _| {
+            crate::private_snapshot_refresh::schedule_set_trading_stop_snapshot_refresh(
+                rt,
+                rt.this.clone(),
+            )
+        },
+    );
+
     // Snapshot readers (core_snapshot_readers.rs).
     method(&this, rt, "fetchOrders", |rt, _| {
         Ok(snapshot::fetch_orders(h(rt), rt.this.clone()))
