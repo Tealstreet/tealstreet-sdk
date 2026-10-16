@@ -216,7 +216,7 @@ test('moving registry back beside venues rejects its constructor dependency', ()
 });
 test('registry constructs only the listed venues', () => {
   const { policy, metadata } = inputs();
-  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-coinbase', 'safe-cex-venue-okx', 'safe-cex-venue-kraken', 'safe-cex-venue-woo']);
+  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-coinbase', 'safe-cex-venue-okx', 'safe-cex-venue-kraken', 'safe-cex-venue-hyperliquid', 'safe-cex-venue-woo']);
   addEdge(metadata, 'safe-cex-registry', 'safe-cex-venue-bybit');
   assert.throws(() => validateLayers(policy, metadata), /^AssertionError \[ERR_ASSERTION\]: unlisted registry constructor: safe-cex-registry -> safe-cex-venue-bybit$/);
 });

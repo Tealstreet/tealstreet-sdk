@@ -25,7 +25,10 @@ fn woo_constructs_through_native_registry_and_signs_its_account_read() {
         assert_eq!(h.exchange.class_name(), "WooExchange");
         let account = h.exchange.get_account().await.unwrap();
         assert_eq!(account.user_id, "synthetic-app");
-        assert_eq!(account.affiliate_id, Some(Some("synthetic-referrer".into())));
+        assert_eq!(
+            account.affiliate_id,
+            Some(Some("synthetic-referrer".into()))
+        );
         assert_eq!(
             h.seen
                 .borrow()

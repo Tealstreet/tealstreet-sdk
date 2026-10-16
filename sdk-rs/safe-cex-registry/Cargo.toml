@@ -19,6 +19,7 @@ safe-cex-venue-blofin.workspace = true
 safe-cex-venue-coinbase.workspace = true
 safe-cex-venue-okx.workspace = true
 safe-cex-venue-kraken.workspace = true
+safe-cex-venue-hyperliquid.workspace = true
 safe-cex-venue-woo.workspace = true
 serde.workspace = true
 serde_json.workspace = true

@@ -327,6 +327,7 @@ fn spot_websocket_auth_signs_through_the_hosted_signer() {
             }),
             signer.clone(),
             Some("acct-1".into()),
+            safe_cex_registry::native_host::hyperliquid_rate_limiter(),
         );
         let deps = host.binance().expect("binance dependencies");
         let token = deps.remote_signer_token.clone().expect("options token");
