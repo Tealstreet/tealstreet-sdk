@@ -8,7 +8,7 @@ use safe_cex_exchange::{
     js_runtime::{
         client::JsHttpHost,
         promise::JsFuture,
-        value::{Js, from_json, to_json},
+        value::{Js, Thrown, from_json, to_json},
     },
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
@@ -69,6 +69,7 @@ struct Wire {
     runtime: Rc<clock::Runtime>,
     requests: RefCell<Vec<Value>>,
     faults: RefCell<VecDeque<(String, u16, Value)>>,
+    errors: RefCell<VecDeque<(String, Js)>>,
 }
 fn instrument() -> Value {
     json!({"type":"FOREX","symbol":"BTCUSD","version":1,"description":"Bitcoin","priceIncrement":0.1,"pipSize":0.01,"currency":"USD","lotSize":1,"multiplier":1,"firstCurrency":"BTC"})
@@ -92,6 +93,16 @@ impl JsHttpHost for Wire {
             .to_display()
             .to_ascii_uppercase();
         self.requests.borrow_mut().push(observed);
+        if self
+            .errors
+            .borrow()
+            .front()
+            .is_some_and(|(target, _)| target == &url)
+        {
+            let (_, error) = self.errors.borrow_mut().pop_front().unwrap();
+            error.define("config", config).unwrap();
+            return Box::pin(async move { Err(Thrown::new(error)) });
+        }
         let mut status = 200;
         let data = if self
             .faults
@@ -411,4 +422,29 @@ fn session_401_recovers_once_and_status_403_does_not_relogin() {
             .count(),
         2
     );
+}
+
+#[test]
+fn http_failure_preserves_axios_code_and_config() {
+    let f = fixture();
+    let error = safe_cex_exchange::js_runtime::value::error_object("AxiosError", "timeout");
+    error.define("code", Js::str("ECONNABORTED")).unwrap();
+    error.define("isAxiosError", Js::Bool(true)).unwrap();
+    f.wire
+        .errors
+        .borrow_mut()
+        .push_back(("instruments/query".into(), error));
+    f.run(f.exchange.get_session_token()).unwrap();
+    let client = f.exchange.xhr.borrow().clone().unwrap();
+    let failure = f
+        .run(client.request(safe_cex_transport::RestRequest {
+            method: "GET".into(),
+            url: "instruments/query".into(),
+            ..Default::default()
+        }))
+        .unwrap_err();
+    assert_eq!(failure.name, "AxiosError");
+    assert_eq!(failure.code, Some(json!("ECONNABORTED")));
+    assert!(failure.is_axios_error);
+    assert_eq!(failure.config.as_ref().unwrap()["url"], "instruments/query");
 }

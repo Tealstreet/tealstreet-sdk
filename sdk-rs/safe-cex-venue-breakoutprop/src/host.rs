@@ -229,7 +229,7 @@ struct PollingBase {
 }
 impl PollingAncestor for PollingBase {
     fn now_ms(&self) -> f64 {
-        self.runtime.now_ms().floor()
+        safe_cex_num::js_time_clip(self.runtime.now_ms())
     }
     fn cleanup_message_handler_stats(&self, topic: &str) -> Result<(), ExchangeError> {
         // Source callback lists remain owned by the polling container. The core
@@ -410,6 +410,18 @@ impl ApiWire for Wire {
                 if !response.is_undefined() {
                     native.response = to_json(&response).ok();
                 }
+                if let Ok(code) = error.value.get("code")
+                    && !code.is_undefined()
+                    && let Ok(code) = to_json(&code)
+                {
+                    native.code = Some(code);
+                }
+                if has_config
+                    && let Ok(config) = error.value.get("config").and_then(|v| to_json(&v))
+                {
+                    native.config = Some(config);
+                }
+                native.is_axios_error |= error.value.get("isAxiosError").is_ok_and(|v| v.truthy());
                 ApiFailure {
                     error: native,
                     status,
