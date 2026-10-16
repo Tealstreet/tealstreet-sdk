@@ -158,6 +158,14 @@ pub fn create(
                 ),
             ]),
         );
+        // ts: base.ts:454 — `this.on/once/off` are the emitter's members bound to it.
+        if let Ok(emitter) = this.get("emitter") {
+            for name in ["on", "off"] {
+                if let Ok(member) = super::scope::bound_member(&emitter, name) {
+                    def(name, member);
+                }
+            }
+        }
     }
     {
         let base = base.clone();

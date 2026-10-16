@@ -816,8 +816,8 @@ fn emitter_on_and_off_follow_listener_identity() {
         Ok(Js::Undefined)
     });
     let other = Js::function("other", |_, _| Ok(Js::Undefined));
-    emitter
-        .call_method("on", vec![Js::str("markets:changed"), listener.clone()])
+    // `this.on/off` are the emitter's own members bound to it (base.ts:454).
+    this.call_method("on", vec![Js::str("markets:changed"), listener.clone()])
         .unwrap();
     emitter
         .call_method("emit", vec![Js::str("markets:changed"), Js::Number(1.0)])
@@ -828,8 +828,7 @@ fn emitter_on_and_off_follow_listener_identity() {
     emitter
         .call_method("emit", vec![Js::str("markets:changed"), Js::Number(2.0)])
         .unwrap();
-    emitter
-        .call_method("off", vec![Js::str("markets:changed"), listener])
+    this.call_method("off", vec![Js::str("markets:changed"), listener])
         .unwrap();
     emitter
         .call_method("emit", vec![Js::str("markets:changed"), Js::Number(3.0)])
