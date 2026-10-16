@@ -1,5 +1,6 @@
 import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
+import { reviewedHyperliquidProjectionProbe } from './accepted-hyperliquid-projection.mjs';
 
 // One reviewed fixed instantiation per generic alias. The spec owns the
 // expected Rust type; contracts never supply it, and unknown names fall
@@ -23,6 +24,8 @@ export function reviewedGenericAliasProbe(alias, contract, context, specs = prod
   assert.ok(typeof spec.expectedType === 'string' && spec.expectedType.trim(), `${label}: expected compiler type required`);
   assert.ok(/^<.*>$/.test(spec.suffix), `${label}: fixed instantiation suffix required`);
   assert.equal(typeof spec.unsized, 'boolean', `${label}: sizedness must be reviewed`);
+  const projection = reviewedHyperliquidProjectionProbe(alias, contract, context, spec);
+  if (projection) return projection;
   assert.equal(spec.unsized, !rootPath(alias.target), `${label}: only rootless dyn targets are unsized`);
   if (!spec.unsized) assert.equal(spec.canonical, rootPath(alias.target), `${label}: canonical root must be the compiler target root`);
   assert.ok(Array.isArray(context?.macroOrigins) && context.macroOrigins.includes('serde_json'), `${label}: actual serde_json compiler dependency required`);
