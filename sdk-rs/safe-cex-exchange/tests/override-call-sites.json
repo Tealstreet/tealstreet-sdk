@@ -325,25 +325,25 @@
   },
   {
     "function": "create",
-    "body": "85016447f1ac0a9c",
+    "body": "1b60020522b26562",
     "call": "venue . is_public_data_only ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "85016447f1ac0a9c",
+    "body": "1b60020522b26562",
     "call": "venue . fetch_and_set_private_snapshot (tries)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "85016447f1ac0a9c",
+    "body": "1b60020522b26562",
     "call": "venue . fetch_and_set_orders (symbols)",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
   {
     "function": "create",
-    "body": "85016447f1ac0a9c",
+    "body": "1b60020522b26562",
     "call": "base . dispose ()",
     "file": "safe-cex-exchange/src/js_runtime/base_exchange.rs"
   },
@@ -5638,6 +5638,96 @@
     "body": "7f57c48383960f5a",
     "call": "host . fetch_positions (& symbol)",
     "file": "safe-cex-venue-phemex/src/rest_account_control.rs"
+  },
+  {
+    "function": "new",
+    "body": "294f8c99ac24560a",
+    "call": "v . start ()",
+    "file": "safe-cex-venue-polymarket/src/binding/exchange.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: spot_contracts :: name",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "call": "rt . base () . dispose ()",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: account_reads :: get_account",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: account_reads :: validate_account",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: state_sync :: fetch_positions",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: order_adapters :: fetch_orders",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: order_adapters :: cancel_orders",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: order_adapters :: cancel_all_orders",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: order_adapters :: listen_order_book",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: exchange :: listen_ohlcv",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: spot_contracts :: set_leverage",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: spot_contracts :: change_position_mode",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: spot_contracts :: change_margin_type",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
+  },
+  {
+    "function": "exchange",
+    "body": "f737dc80931add4f",
+    "reference": "crate :: spot_contracts :: fetch_symbol_max_leverage",
+    "file": "safe-cex-venue-polymarket/src/binding/members.rs"
   },
   {
     "function": "new",
