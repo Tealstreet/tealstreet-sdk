@@ -100,3 +100,20 @@ where
     let data = crate::ticker_reads::fetch_tickers_raw(read, emit_and_log_error).await?;
     Ok(parse_tickers(Some(&data), store)?)
 }
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn type_error_constructor_preserves_name_and_message() {
+        for text in ["not an object", "雪🚀"] {
+            let error = type_error(text);
+            assert_eq!(error.name, "TypeError");
+            assert_eq!(error.message, text);
+            let owned = type_error(text.to_owned());
+            assert_eq!(owned.name, "TypeError");
+            assert_eq!(owned.message, text);
+        }
+    }
+}
