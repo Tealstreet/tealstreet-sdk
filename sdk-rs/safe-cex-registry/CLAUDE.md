@@ -103,8 +103,11 @@ to the venue's declared fold/reported path, preserving account and time bounds.
 It must not inherit a TS wrapper's default rejection for a supported venue method.
 
 GRVT is constructed by the Rust table through `RustVenueHost::grvt`, with a fresh
-terminal HTTP host and the common public-data provider. Active GRVT SDK signing
-uses its local wallet; the native hosted-signer host refuses this venue visibly.
+terminal HTTP host and the common public-data provider. Its HTTP clients receive
+the shared hosted signer, including untagged public requests. Active GRVT SDK
+order signing still requires its local wallet; the hosted HTTP capability does
+not replace it. The hosted signer witness compares live source request inputs,
+real HTTP headers, callback refusal and the pre-HTTP SDK wallet guard.
 The registry construction test reads actual GRVT public-gateway market data.
 BingX is constructed by `rust_constructor` through its shared-js_runtime binding.
 The native host supplies a fresh HTTP host and the common gateway factory; remote
