@@ -377,7 +377,7 @@ fn stream_delegation_matches_maintained_bodies() {
                         cb,
                         |p| h.websocket(p),
                         || h.secondary(),
-                        |a, b| Rc::ptr_eq(a, b),
+                        Rc::ptr_eq,
                         |symbols| h.with_symbols(symbols),
                         |s, m, o, c| h.invoke(s, m, Arg::Options(o), c, &callback),
                     )
