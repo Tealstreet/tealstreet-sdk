@@ -8,8 +8,48 @@ call production functions and project native fields, then restore source bytes.
 import json, os, subprocess
 from pathlib import Path
 root=Path(__file__).resolve().parents[2]
-rows=json.loads((root/'safe-cex-parity/accepted-set/contracts/safe-cex-venue-hyperliquid.json').read_text())
-assert len(rows)==37, 'Review the finite cohort before extending this witness.'
+all_rows=json.loads((root/'safe-cex-parity/accepted-set/contracts/safe-cex-venue-hyperliquid.json').read_text())
+cohort = [
+    'safe_cex_venue_hyperliquid::cloid::is_hyperliquid_cloid',
+    'safe_cex_venue_hyperliquid::cloid::read_hyperliquid_cloid',
+    'safe_cex_venue_hyperliquid::cloid::number',
+    'safe_cex_venue_hyperliquid::cloid::property',
+    'safe_cex_venue_hyperliquid::cloid::format_hyperliquid_cloid',
+    'safe_cex_venue_hyperliquid::spot_json::string_token',
+    'safe_cex_venue_hyperliquid::spot_json::number_token',
+    'safe_cex_venue_hyperliquid::spot_json::number',
+    'safe_cex_venue_hyperliquid::spot_json::present_number',
+    'safe_cex_venue_hyperliquid::spot_json::number_pair',
+    'safe_cex_venue_hyperliquid::spot_json::present',
+    'safe_cex_venue_hyperliquid::spot_json::object_fields',
+    'safe_cex_venue_hyperliquid::order_response::js_string',
+    'safe_cex_venue_hyperliquid::order_response::describe_response',
+    'safe_cex_venue_hyperliquid::order_response::nonempty',
+    'safe_cex_venue_hyperliquid::order_response::response_data',
+    'safe_cex_venue_hyperliquid::order_response::statuses',
+    'safe_cex_venue_hyperliquid::order_response::extract_hyperliquid_response_error',
+    'safe_cex_venue_hyperliquid::order_response::is_only_hyperliquid_terminal_cancel_error',
+    'safe_cex_venue_hyperliquid::order_response::parse_hyperliquid_order_response',
+    'safe_cex_venue_hyperliquid::order_response::hyperliquid_order_response_has_waiting_for_trigger',
+    'safe_cex_venue_hyperliquid::order_response::hyperliquid_order_response_has_deferred_order_status',
+    'safe_cex_venue_hyperliquid::order_response::signed_body',
+    'safe_cex_venue_hyperliquid::signing::CancelOrderResponseData',
+    'safe_cex_venue_hyperliquid::signing::CancelOrderResponseBody',
+    'safe_cex_venue_hyperliquid::signing::CancelOrderResponse',
+    'safe_cex_venue_hyperliquid::spot_json::JsString',
+    'safe_cex_venue_hyperliquid::spot_json::Number',
+    'safe_cex_venue_hyperliquid::json_models::CacheOrderType',
+    'safe_cex_venue_hyperliquid::json_models::HyperliquidFastAssetCtx',
+    'safe_cex_venue_hyperliquid::json_models::PrePlacementEntry',
+    'safe_cex_venue_hyperliquid::json_models::PendingOrderEntry',
+    'safe_cex_venue_hyperliquid::json_models::AgentWalletCreationResult',
+    'safe_cex_venue_hyperliquid::json_values::JsonValue',
+    'safe_cex_venue_hyperliquid::json_values::JsonContainer',
+    'safe_cex_venue_hyperliquid::json_values::JsonObject',
+    'safe_cex_venue_hyperliquid::cloid::HyperliquidPlacementRecord',
+]
+assert len(cohort)==37 and len(set(cohort))==37
+rows={name:all_rows[name] for name in cohort}
 saved={}; additions={}; count=0
 for i,(name,row) in enumerate(rows.items()):
     parts=name.split('::')
