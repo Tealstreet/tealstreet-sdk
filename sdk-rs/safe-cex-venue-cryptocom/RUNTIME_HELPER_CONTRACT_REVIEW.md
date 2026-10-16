@@ -42,8 +42,11 @@ node safe-cex-venue-cryptocom/scripts/runtime-helper-contracts.mjs
 Selected validation passed: eight direct native unit tests, all eight compiling
 mutation/restoration controls and eight fresh API classification receipts with
 zero failed owners. The receipts are classification-only; actual runtime
-evidence comes from the separate tests and controls. Full integrated readiness
-checks are pending. No production behavior or manifest classification is
-changed. Scope is these eight original native/default owners. Other owners,
+evidence comes from the separate tests and controls. Integrated validation
+against master c442617880 passed: 152 scoped tests, zero failures and two
+existing ignored tests; strict host and WASM all-target Clippy; formatting;
+parity (7459 rows, 17204 public items, zero findings); and the final fresh
+eight-owner classification gate. No production behavior or manifest
+classification is changed. Scope is these eight original native/default owners. Other owners,
 aliases, construction entries, newer discovery, locals, features and WASM
 contract execution remain separate obligations.
