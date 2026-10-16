@@ -8,6 +8,25 @@
   },
   "delegations": [
     {
+      "file": "safe-cex-venue-asterdex/src/binding/host.rs",
+      "finding": "base_dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/asterdex/asterdex.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-asterdex/src/binding/host.rs",
+          "contains": "fn base_dispose(&self, _: Js) -> ResultValue<Js>"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-asterdex/src/exchange_runtime.rs",
+          "contains": "h.base_dispose(owner)?;"
+        }
+      ]
+    },
+    {
       "file": "safe-cex-venue-hyperliquid/src/binding.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
