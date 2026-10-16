@@ -59,6 +59,62 @@ status = "ported"
 note = "Recursive currencies and coins use insertion order with canonical array-index enumeration after decoding and typed insertion, including Serialize; no lexical BTreeMap reordering. "
 
 [[symbol]]
+ts = "OptionRight"
+kind = "type"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::OptionRight"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "OptionTerms"
+kind = "type"
+layer = "mirror"
+rs = [ "safe-cex-types/src/lib.rs::OptionTerms", "safe-cex-types/src/lib.rs::European", "safe-cex-types/src/lib.rs::Cash" ]
+status = "ported"
+note = "Split: the record plus one unit type per single-literal field, so style accepts and emits only 'european' and settlement only 'cash'; the bindings keep the literal types via ts(type). Explicit targets: safe-cex-types/src/lib.rs::OptionTerms safe-cex-types/src/lib.rs::European safe-cex-types/src/lib.rs::Cash"
+
+[[symbol]]
+ts = "OptionGreeks"
+kind = "type"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::OptionGreeks"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "OptionQuote"
+kind = "type"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::OptionQuote"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "OptionChainQuery"
+kind = "type"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::OptionChainQuery"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "OptionChainRow"
+kind = "type"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::OptionChainRow"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "AccountGreeks"
+kind = "type"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::AccountGreeks"
+status = "ported"
+note = ""
+
+[[symbol]]
 ts = "Market"
 kind = "type"
 layer = "mirror"
