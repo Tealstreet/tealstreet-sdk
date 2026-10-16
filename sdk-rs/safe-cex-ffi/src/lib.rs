@@ -1,4 +1,4 @@
-//! Minimal host-boundary proof; exchange behavior remains in the SDK.
+//! Host bindings; exchange behavior remains in the SDK.
 
 #[cfg(all(feature = "node", feature = "wasm"))]
 compile_error!("node and wasm are mutually exclusive host features");
@@ -18,3 +18,6 @@ pub fn parity_probe(n: u32) -> String {
 pub fn version() -> String {
     env!("CARGO_PKG_VERSION").to_owned()
 }
+
+#[cfg(feature = "node")]
+mod native_exchange;

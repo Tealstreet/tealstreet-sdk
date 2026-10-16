@@ -419,7 +419,7 @@ fn private_recovery_native_state_timers_callbacks_and_errors() {
         "independent method floors"
     );
     assert_eq!(
-        oracle["contentHash"], "02af349e584a51daa6f49f561fbda4eaae11f98266c0e68ae2239f73bca40257",
+        oracle["contentHash"], "4c7c78ee4a757dbfaa657d0142690f0d8646fad617f7bb27d2b166f4bd41b8ed",
         "authored full source-only corpus pin after every native assertion"
     );
 }

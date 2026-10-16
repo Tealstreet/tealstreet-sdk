@@ -2903,6 +2903,7 @@ dependencies = [
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "tokio",
 ]
 
 [[package]]
@@ -3877,6 +3878,8 @@ dependencies = [
  "napi-derive",
  "safe-cex",
  "safe-cex-registry",
+ "serde_json",
+ "tokio",
  "wasm-bindgen",
 ]
 
@@ -4263,11 +4266,13 @@ name = "safe-cex-venue-lighter"
 version = "0.1.0"
 dependencies = [
  "form_urlencoded",
+ "getrandom 0.2.17",
  "indexmap 2.14.2",
  "num-bigint 0.4.6",
  "safe-cex-candle-cache",
  "safe-cex-crypto",
  "safe-cex-exchange",
+ "safe-cex-lighter-sdk",
  "safe-cex-num",
  "safe-cex-store",
  "safe-cex-transport",

@@ -2,10 +2,10 @@
 //! retain Get/Set, callee and receiver order, import bindings, object/throw
 //! identity, UTF16, actual Error construction and queued await. Full exchange,
 //! HTTP, signer and JS engine bindings are separate work. The imported index
-//! parser has its source ordinary Number-or-undefined result domain; ENDPOINTS
+//! parser result is compared after JS ToNumber; ENDPOINTS
 //! is the ordinary unmodified source table.
 use crate::{
-    sdk_account_api::AccountValue,
+    sdk_account_api::{AccountValue, primitive_to_number},
     transaction_promise::{NativePromise, PromiseResolver, TransactionRuntime},
     transaction_signing::{SigningResult, TransactionSigningError},
 };
@@ -196,14 +196,9 @@ pub fn get_validated_api_key_index(
     let opts = h.get(&h.owner(), "options")?;
     let index = h.get(&opts, "apiKeyIndex")?;
     let index = parse.call(&[index])?;
-    let invalid = if is_undefined(&index) {
-        true
-    } else {
-        let AccountValue::Number(n) = &index else {
-            unreachable!("source parser Number result")
-        };
-        *n < 0.0 || *n > 255.0
-    };
+    let invalid = is_undefined(&index)
+        || primitive_to_number(&index)? < 0.0
+        || primitive_to_number(&index)? > 255.0;
     if invalid {
         return fail(
             h,
