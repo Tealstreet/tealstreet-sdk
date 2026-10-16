@@ -499,6 +499,7 @@ impl RustVenueHost for Venues {
         Ok(
             safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
                 runtime: self.runtime.clone(),
+                external_public_data: None,
                 http: self.wire.clone(),
                 limiter: Rc::new(safe_cex_venue_hyperliquid::rate_limit::RateLimiter::new(
                     Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
