@@ -20,6 +20,8 @@ pub mod fallback;
 #[path = "../../../infra/tradetunnel/src/frames.rs"]
 mod frames;
 pub mod how;
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod native;
 pub mod relay;
 pub mod socket;
 

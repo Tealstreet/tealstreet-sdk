@@ -14,6 +14,8 @@ pub mod income_paging;
 pub mod journal;
 pub mod js_runtime;
 pub mod lifecycle;
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod native;
 pub mod order_operations;
 pub mod position_intervals;
 pub mod proxy_token;
