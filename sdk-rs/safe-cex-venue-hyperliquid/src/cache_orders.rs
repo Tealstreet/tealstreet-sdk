@@ -41,6 +41,7 @@ pub fn clear_stale_session_storage<H: CacheOrdersHost>(h: &mut H, cache: &H::Val
                 "tealstreet_hip3_seenFills",
                 "tealstreet_hip3_prePlacement",
                 "tealstreet_hip3_pendingOrders",
+                "tealstreet_hl_placementRecords",
             ] {
                 let key = h.literal(&text(key));
                 method(h, &storage, "removeItem", &[key])?;

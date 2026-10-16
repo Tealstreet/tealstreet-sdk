@@ -12,12 +12,20 @@ pub enum CacheMethod {
     WritePre,
     AddPre,
     MatchPre,
+    MatchPreTrigger,
+    RemovePreByCloid,
     ClearPre,
     ReadPending,
     WritePending,
     GetPending,
     AddPending,
     RemovePending,
+    ReadRecords,
+    WriteRecords,
+    RecordLive,
+    AddRecord,
+    GetRecord,
+    RemoveRecord,
     HasFill,
     MarkFill,
     Dispose,
@@ -30,6 +38,11 @@ pub enum Callback {
     MatchValid,
     PriceMatch,
     AmountMatch,
+    /// matchPrePlacementTrigger: a StopLoss/TakeProfit entry whose amount equals the capture.
+    TriggerCandidate,
+    /// removePrePlacementByCloid: `e.cloid === cloid` (some) and its negation (filter).
+    CloidMatch,
+    CloidMismatch,
 }
 pub const METHODS: &[(&str, CacheMethod)] = &[
     ("initializeBroadcastChannel", CacheMethod::Initialize),
@@ -41,12 +54,20 @@ pub const METHODS: &[(&str, CacheMethod)] = &[
     ("writePrePlacementCache", CacheMethod::WritePre),
     ("addPrePlacement", CacheMethod::AddPre),
     ("matchPrePlacement", CacheMethod::MatchPre),
+    ("matchPrePlacementTrigger", CacheMethod::MatchPreTrigger),
+    ("removePrePlacementByCloid", CacheMethod::RemovePreByCloid),
     ("clearPrePlacement", CacheMethod::ClearPre),
     ("readPendingOrdersCache", CacheMethod::ReadPending),
     ("writePendingOrdersCache", CacheMethod::WritePending),
     ("getPendingOrder", CacheMethod::GetPending),
     ("addPendingOrder", CacheMethod::AddPending),
     ("removePendingOrder", CacheMethod::RemovePending),
+    ("readPlacementRecordStorage", CacheMethod::ReadRecords),
+    ("writePlacementRecordStorage", CacheMethod::WriteRecords),
+    ("isPlacementRecordLive", CacheMethod::RecordLive),
+    ("addPlacementRecord", CacheMethod::AddRecord),
+    ("getPlacementRecord", CacheMethod::GetRecord),
+    ("removePlacementRecord", CacheMethod::RemoveRecord),
     ("hasSeenFill", CacheMethod::HasFill),
     ("markFillSeen", CacheMethod::MarkFill),
     ("dispose", CacheMethod::Dispose),
@@ -149,6 +170,8 @@ pub fn new_cache<H: CacheRuntimeHost>(
     h.define_data(&owner, &text("workerPrePlacementCache"), &pre)?;
     let seen = h.new_set()?;
     h.define_data(&owner, &text("workerSeenFillsSet"), &seen)?;
+    let records = h.new_map()?;
+    h.define_data(&owner, &text("placementRecords"), &records)?;
     let null = h.null();
     h.define_data(&owner, &text("orderCacheBroadcast"), &null)?;
     method(h, &owner, "initializeBroadcastChannel", |_| Ok(vec![]))?;
@@ -205,6 +228,12 @@ pub fn receive<H: CacheRuntimeHost>(
     } else if is(h, "removePrePlacement") && h.truthy(key) {
         let map = h.get(cache, "workerPrePlacementCache")?;
         method(h, &map, "delete", |_| Ok(vec![key.clone()]))?;
+    } else if is(h, "addPlacementRecord") && h.truthy(key) && h.truthy(data) {
+        let map = h.get(cache, "placementRecords")?;
+        method(h, &map, "set", |_| Ok(vec![key.clone(), data.clone()]))?;
+    } else if is(h, "removePlacementRecord") && h.truthy(key) {
+        let map = h.get(cache, "placementRecords")?;
+        method(h, &map, "delete", |_| Ok(vec![key.clone()]))?;
     } else if is(h, "seenFill") && h.truthy(key) {
         let set = h.get(cache, "workerSeenFillsSet")?;
         method(h, &set, "add", |_| Ok(vec![key.clone()]))?;
@@ -232,6 +261,7 @@ pub fn add_pre_placement<H: CacheRuntimeHost>(
     kind: &H::Value,
     price: &H::Value,
     amount: &H::Value,
+    cloid: &H::Value,
 ) -> Result<(), H::Error> {
     let key = method(h, cache, "getPrePlacementKey", |_| {
         Ok(vec![coin.clone(), side.clone()])
@@ -242,6 +272,10 @@ pub fn add_pre_placement<H: CacheRuntimeHost>(
     h.define_data(&entry, &text("amount"), amount)?;
     let timestamp = h.now()?;
     h.define_data(&entry, &text("timestamp"), &timestamp)?;
+    // ...(cloid ? { cloid } : {}): the spread copies only a truthy cloid.
+    if h.truthy(cloid) {
+        h.define_data(&entry, &text("cloid"), cloid)?;
+    }
     let record = method(h, cache, "readPrePlacementCache", |_| Ok(vec![]))?;
     let current = h.get_index(&record, &key)?;
     if !h.truthy(&current) {
@@ -383,6 +417,255 @@ pub fn match_pre_placement<H: CacheRuntimeHost>(
     h.define_data(&result, &text("price"), &price)?;
     Ok(result)
 }
+/// Drops `key` everywhere when `remaining` is empty, otherwise stores it, then
+/// broadcasts; shared by matchPrePlacementTrigger and removePrePlacementByCloid.
+fn store_remaining<H: CacheRuntimeHost>(
+    h: &mut H,
+    cache: &H::Value,
+    record: &H::Value,
+    key: &H::Value,
+    remaining: &H::Value,
+) -> Result<(), H::Error> {
+    let length = h.get(remaining, "length")?;
+    if h.equal(&length, &h.number(0.)) {
+        h.delete(record, key)?;
+        let map = h.get(cache, "workerPrePlacementCache")?;
+        method(h, &map, "delete", |_| Ok(vec![key.clone()]))?;
+        method(h, cache, "broadcastCacheUpdate", |h| {
+            Ok(vec![h.literal(&text("removePrePlacement")), key.clone()])
+        })?;
+    } else {
+        let property = h.property_key(key)?;
+        h.set(record, &property, remaining)?;
+        let map = h.get(cache, "workerPrePlacementCache")?;
+        method(h, &map, "set", |_| Ok(vec![key.clone(), remaining.clone()]))?;
+        method(h, cache, "broadcastCacheUpdate", |h| {
+            Ok(vec![h.literal(&text("addPrePlacement")), key.clone(), remaining.clone()])
+        })?;
+    }
+    method(h, cache, "writePrePlacementCache", |_| Ok(vec![record.clone()]))?;
+    Ok(())
+}
+/// ts: HyperliquidCrossCache.matchPrePlacementTrigger. No price match and no FIFO
+/// fallback: only a lone live trigger-type entry of exactly the frame's size.
+pub fn match_pre_placement_trigger<H: CacheRuntimeHost>(
+    h: &mut H,
+    cache: &H::Value,
+    coin: &H::Value,
+    side: &H::Value,
+    amount: &H::Value,
+) -> Result<H::Value, H::Error> {
+    let key = method(h, cache, "getPrePlacementKey", |_| {
+        Ok(vec![coin.clone(), side.clone()])
+    })?;
+    let record = method(h, cache, "readPrePlacementCache", |_| Ok(vec![]))?;
+    let entries = h.get_index(&record, &key)?;
+    if !h.truthy(&entries) {
+        return Ok(h.undefined());
+    }
+    let length = h.get(&entries, "length")?;
+    if h.equal(&length, &h.number(0.)) {
+        return Ok(h.undefined());
+    }
+    let now = h.now()?;
+    let valid = method(h, &entries, "filter", |h| {
+        Ok(vec![h.function(now, Callback::MatchValid)?])
+    })?;
+    let candidates = method(h, &valid, "filter", |h| {
+        Ok(vec![h.function(amount.clone(), Callback::TriggerCandidate)?])
+    })?;
+    let length = h.get(&candidates, "length")?;
+    if !h.equal(&length, &h.number(1.)) {
+        return Ok(h.undefined());
+    }
+    let matched = h.get(&candidates, "0")?;
+    let index = method(h, &valid, "indexOf", |_| Ok(vec![matched.clone()]))?;
+    method(h, &valid, "splice", |h| Ok(vec![index, h.number(1.)]))?;
+    store_remaining(h, cache, &record, &key, &valid)?;
+    let result = h.object()?;
+    let kind = h.get(&matched, "type")?;
+    h.define_data(&result, &text("type"), &kind)?;
+    let price = h.get(&matched, "price")?;
+    h.define_data(&result, &text("price"), &price)?;
+    Ok(result)
+}
+/// ts: HyperliquidCrossCache.removePrePlacementByCloid. Consumes only the entry
+/// placed with `cloid`, so a cloid-less frame cannot later claim it by FIFO.
+pub fn remove_pre_placement_by_cloid<H: CacheRuntimeHost>(
+    h: &mut H,
+    cache: &H::Value,
+    coin: &H::Value,
+    side: &H::Value,
+    cloid: &H::Value,
+) -> Result<(), H::Error> {
+    let key = method(h, cache, "getPrePlacementKey", |_| {
+        Ok(vec![coin.clone(), side.clone()])
+    })?;
+    let record = method(h, cache, "readPrePlacementCache", |_| Ok(vec![]))?;
+    let entries = h.get_index(&record, &key)?;
+    if !h.truthy(&entries) {
+        return Ok(());
+    }
+    let any = method(h, &entries, "some", |h| {
+        Ok(vec![h.function(cloid.clone(), Callback::CloidMatch)?])
+    })?;
+    if !h.truthy(&any) {
+        return Ok(());
+    }
+    let remaining = method(h, &entries, "filter", |h| {
+        Ok(vec![h.function(cloid.clone(), Callback::CloidMismatch)?])
+    })?;
+    store_remaining(h, cache, &record, &key, &remaining)
+}
+/// ts: HyperliquidCrossCache#isPlacementRecordLive, inclusive at the TTL.
+pub fn is_placement_record_live<H: CacheRuntimeHost>(
+    h: &mut H,
+    record: &H::Value,
+    now: &H::Value,
+) -> Result<bool, H::Error> {
+    let placed = h.get(record, "placedAt")?;
+    let age = h.subtract(now, &placed)?;
+    let ttl = h.number(cross_cache::PLACEMENT_RECORD_TTL_MS);
+    h.less_equal(&age, &ttl)
+}
+fn record_live<H: CacheRuntimeHost>(
+    h: &mut H,
+    cache: &H::Value,
+    record: &H::Value,
+    now: &H::Value,
+) -> Result<bool, H::Error> {
+    let live = method(h, cache, "isPlacementRecordLive", |_| {
+        Ok(vec![record.clone(), now.clone()])
+    })?;
+    Ok(h.truthy(&live))
+}
+const MAX_PLACEMENT_RECORDS: f64 = 500.;
+/// ts: HyperliquidCrossCache.addPlacementRecord. Evicts in insertion order until
+/// the map is within the cap and its oldest entry live, then prunes storage.
+pub fn add_placement_record<H: CacheRuntimeHost>(
+    h: &mut H,
+    cache: &H::Value,
+    cloid: &H::Value,
+    record: &H::Value,
+) -> Result<(), H::Error> {
+    let now = h.now()?;
+    let map = h.get(cache, "placementRecords")?;
+    method(h, &map, "set", |_| Ok(vec![cloid.clone(), record.clone()]))?;
+    let map = h.get(cache, "placementRecords")?;
+    let iterator = h.entries(&map)?;
+    while let Some(entry) = h.iterator_step(&iterator)? {
+        let body: Result<bool, H::Error> = (|| {
+            let [key, value] = h.entry_pair(&entry)?;
+            let map = h.get(cache, "placementRecords")?;
+            let size = h.get(&map, "size")?;
+            let cap = h.number(MAX_PLACEMENT_RECORDS);
+            if h.less_equal(&size, &cap)? && record_live(h, cache, &value, &now)? {
+                return Ok(true);
+            }
+            let map = h.get(cache, "placementRecords")?;
+            method(h, &map, "delete", |_| Ok(vec![key]))?;
+            Ok(false)
+        })();
+        match body {
+            // A break on a Map iterator: Map iterators have no `return` to call.
+            Ok(true) => break,
+            Ok(false) => {}
+            Err(error) => {
+                h.close_after_throw(&iterator);
+                return Err(error);
+            }
+        }
+    }
+    let stored = method(h, cache, "readPlacementRecordStorage", |_| Ok(vec![]))?;
+    let property = h.property_key(cloid)?;
+    h.set(&stored, &property, record)?;
+    let keys = h.object_keys(&stored)?;
+    let iterator = h.entries(&keys)?;
+    while let Some(key) = h.iterator_step(&iterator)? {
+        let body = (|| {
+            let value = h.get_index(&stored, &key)?;
+            if !record_live(h, cache, &value, &now)? {
+                h.delete(&stored, &key)?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = body {
+            h.close_after_throw(&iterator);
+            return Err(error);
+        }
+    }
+    let keys = h.object_keys(&stored)?;
+    let mut index = 0.;
+    loop {
+        let length = h.get(&keys, "length")?;
+        let cap = h.number(MAX_PLACEMENT_RECORDS);
+        let limit = h.subtract(&length, &cap)?;
+        if !h.less(&h.number(index), &limit)? {
+            break;
+        }
+        let key = h.get_index(&keys, &h.number(index))?;
+        h.delete(&stored, &key)?;
+        index += 1.;
+    }
+    method(h, cache, "writePlacementRecordStorage", |_| {
+        Ok(vec![stored.clone()])
+    })?;
+    method(h, cache, "broadcastCacheUpdate", |h| {
+        Ok(vec![
+            h.literal(&text("addPlacementRecord")),
+            cloid.clone(),
+            record.clone(),
+        ])
+    })?;
+    Ok(())
+}
+/// ts: HyperliquidCrossCache.getPlacementRecord: memory first, then storage, live only.
+pub fn get_placement_record<H: CacheRuntimeHost>(
+    h: &mut H,
+    cache: &H::Value,
+    cloid: &H::Value,
+) -> Result<H::Value, H::Error> {
+    let map = h.get(cache, "placementRecords")?;
+    let memory = method(h, &map, "get", |_| Ok(vec![cloid.clone()]))?;
+    let record = if h.is_nullish(&memory) {
+        let stored = method(h, cache, "readPlacementRecordStorage", |_| Ok(vec![]))?;
+        h.get_index(&stored, cloid)?
+    } else {
+        memory
+    };
+    if !h.truthy(&record) {
+        return Ok(h.undefined());
+    }
+    let now = h.now()?;
+    if record_live(h, cache, &record, &now)? {
+        Ok(record)
+    } else {
+        Ok(h.undefined())
+    }
+}
+/// ts: HyperliquidCrossCache.removePlacementRecord; broadcasts only an in-memory removal.
+pub fn remove_placement_record<H: CacheRuntimeHost>(
+    h: &mut H,
+    cache: &H::Value,
+    cloid: &H::Value,
+) -> Result<(), H::Error> {
+    let map = h.get(cache, "placementRecords")?;
+    let in_memory = method(h, &map, "delete", |_| Ok(vec![cloid.clone()]))?;
+    let stored = method(h, cache, "readPlacementRecordStorage", |_| Ok(vec![]))?;
+    let current = h.get_index(&stored, cloid)?;
+    if h.truthy(&current) {
+        h.delete(&stored, cloid)?;
+        method(h, cache, "writePlacementRecordStorage", |_| {
+            Ok(vec![stored.clone()])
+        })?;
+    }
+    if h.truthy(&in_memory) {
+        method(h, cache, "broadcastCacheUpdate", |h| {
+            Ok(vec![h.literal(&text("removePlacementRecord")), cloid.clone()])
+        })?;
+    }
+    Ok(())
+}
 /// ts: getCrossCache; assignment occurs only after successful construction.
 pub fn get_cross_cache<H: CacheRuntimeHost>(
     h: &mut H,
@@ -415,7 +698,7 @@ pub fn mark_fill_seen<H: CacheRuntimeHost>(
     method(h, &cache, "markFillSeen", |_| Ok(vec![fill.clone()]))?;
     Ok(())
 }
-/// Function body dispatch composes the eighteen existing/new mapped methods.
+/// Function body dispatch composes the twenty-six mapped prototype methods.
 pub fn run_callback<H: CacheRuntimeHost>(
     h: &mut H,
     body: Callback,
@@ -429,6 +712,7 @@ pub fn run_callback<H: CacheRuntimeHost>(
     let third = a(2);
     let fourth = a(3);
     let fifth = a(4);
+    let sixth = a(5);
     match body {
         Callback::Receive => {
             receive(h, capture, &first)?;
@@ -453,6 +737,25 @@ pub fn run_callback<H: CacheRuntimeHost>(
             };
             let value = h.get(&first, key)?;
             Ok(h.boolean(h.equal(&value, capture)))
+        }
+        Callback::TriggerCandidate => {
+            // (e.type === OrderType.StopLoss || e.type === OrderType.TakeProfit) && e.amount === wsAmount
+            // `||` reads e.type again only when the first comparison fails.
+            let kind = h.get(&first, "type")?;
+            let trigger = h.equal(&kind, &h.literal(&text("stop_market"))) || {
+                let kind = h.get(&first, "type")?;
+                h.equal(&kind, &h.literal(&text("take_profit_market")))
+            };
+            if !trigger {
+                return Ok(h.boolean(false));
+            }
+            let amount = h.get(&first, "amount")?;
+            Ok(h.boolean(h.equal(&amount, capture)))
+        }
+        Callback::CloidMatch | Callback::CloidMismatch => {
+            let cloid = h.get(&first, "cloid")?;
+            let same = h.equal(&cloid, capture);
+            Ok(h.boolean(if body == Callback::CloidMatch { same } else { !same }))
         }
         Callback::Method(body) => {
             match body {
@@ -486,11 +789,17 @@ pub fn run_callback<H: CacheRuntimeHost>(
                 CacheMethod::WritePre => {
                     cross_cache::write_pre_placement_cache(h, receiver, &first)?
                 }
-                CacheMethod::AddPre => {
-                    add_pre_placement(h, receiver, &first, &second, &third, &fourth, &fifth)?
-                }
+                CacheMethod::AddPre => add_pre_placement(
+                    h, receiver, &first, &second, &third, &fourth, &fifth, &sixth,
+                )?,
                 CacheMethod::MatchPre => {
                     return match_pre_placement(h, receiver, &first, &second, &third, &fourth);
+                }
+                CacheMethod::MatchPreTrigger => {
+                    return match_pre_placement_trigger(h, receiver, &first, &second, &third);
+                }
+                CacheMethod::RemovePreByCloid => {
+                    remove_pre_placement_by_cloid(h, receiver, &first, &second, &third)?
                 }
                 CacheMethod::ClearPre => {
                     crate::cache_orders::clear_pre_placement(h, receiver, &first, &second)?
@@ -510,6 +819,19 @@ pub fn run_callback<H: CacheRuntimeHost>(
                 CacheMethod::RemovePending => {
                     crate::cache_orders::remove_pending_order(h, receiver, &first)?
                 }
+                CacheMethod::ReadRecords => {
+                    return cross_cache::read_placement_record_storage(h, receiver);
+                }
+                CacheMethod::WriteRecords => {
+                    cross_cache::write_placement_record_storage(h, receiver, &first)?
+                }
+                CacheMethod::RecordLive => {
+                    let live = is_placement_record_live(h, &first, &second)?;
+                    return Ok(h.boolean(live));
+                }
+                CacheMethod::AddRecord => add_placement_record(h, receiver, &first, &second)?,
+                CacheMethod::GetRecord => return get_placement_record(h, receiver, &first),
+                CacheMethod::RemoveRecord => remove_placement_record(h, receiver, &first)?,
                 CacheMethod::HasFill => {
                     let set = h.get(receiver, "workerSeenFillsSet")?;
                     return method(h, &set, "has", |_| Ok(vec![first]));
