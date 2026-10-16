@@ -166,3 +166,16 @@ pinned. Its native control observes every decoded slot and executes the ordinary
 Serde/conversion probes. Expanded-slot, native-identity and removed-policy
 controls must fail before restoration passes. This policy grants no permission
 to other tuples; callers cannot redirect its expected type, suffix or probe mode.
+
+
+Eleven GRVT aliases use the existing reviewed fixed-instantiation registry in
+`../accepted-set/generic-aliases.json`. Each pins its exact source, raw/expanded
+compiler targets, original generics (including defaults/lifetimes), canonical
+root and independently authored invariant Rust type. The selected arguments
+are explicit bool or bool/bool, and static lifetimes for three unsized FnMut
+capabilities; these scopes do not classify other instantiations or silently
+select a source generic default. AddedMarkets<bool> and JsResult<bool,bool> are
+actual decoders, not callback exemptions. Fields<bool> preserves its original
+static borrowed string keys: its reviewed type identity does not grant
+DeserializeOwned or bypass the existing borrowed-alias refusal. Decoder
+classifications and borrowed production-path coverage remain separate obligations.
