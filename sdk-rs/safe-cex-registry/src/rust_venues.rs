@@ -26,8 +26,10 @@ use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
 use safe_cex_venue_grvt::binding::exchange::{GrvtDependencies, GrvtExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
+use safe_cex_venue_lighter::binding::exchange::{LighterDependencies, LighterNativeExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use safe_cex_venue_polymarket::binding::exchange::{PolymarketDependencies, PolymarketExchange};
+use safe_cex_venue_weex::{WeexDependencies, WeexExchange};
 use safe_cex_venue_woo::{WooDependencies, WooExchange};
 use std::rc::Rc;
 
@@ -102,6 +104,23 @@ pub trait RustVenueHost {
         ))
     }
 
+    fn cryptocom(
+        &self,
+    ) -> Result<safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies, ExchangeError>
+    {
+        Err(ExchangeError::new(
+            "cryptocom inputs are unavailable on this host",
+        ))
+    }
+
+    fn phemex(
+        &self,
+    ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "phemex inputs are unavailable on this host",
+        ))
+    }
+
     /// Native inputs for the source's Phase-0 scaffold; start still refuses support.
     fn txflow(
         &self,
@@ -121,6 +140,11 @@ pub trait RustVenueHost {
 
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
+    }
+    fn weex(&self) -> Result<WeexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "WEEX dependencies were not supplied by this RustVenueHost",
+        ))
     }
     fn woo(&self) -> Result<WooDependencies, ExchangeError> {
         Err(ExchangeError::new(
@@ -146,6 +170,12 @@ pub trait RustVenueHost {
     fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "BingX dependencies are unavailable on this host",
+        ))
+    }
+    /// Lighter and Lighter Robinhood use the same bound class and host services.
+    fn lighter(&self) -> Result<LighterDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Lighter dependencies are unavailable on this host",
         ))
     }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
@@ -199,12 +229,16 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Grvt, grvt_constructor),
     (ExchangeName::Bybit, bybit_constructor),
     (ExchangeName::Bybitdemo, bybit_constructor),
+    (ExchangeName::Bybitspot, bybit_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
     (ExchangeName::Coinbasespot, coinbase_constructor),
+    (ExchangeName::Cryptocom, cryptocom_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Hyperliquidspot, hyperliquidspot_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
+    (ExchangeName::Lighter, lighter_constructor),
+    (ExchangeName::LighterRobinhood, lighter_constructor),
     (ExchangeName::Kucoin, kucoin_constructor),
     (ExchangeName::Kucoinspot, kucoin_constructor),
     (ExchangeName::Mexc, mexc_constructor),
@@ -212,9 +246,11 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Phemex, phemex_constructor),
     (ExchangeName::Polymarket, polymarket_constructor),
     (ExchangeName::Txflow, txflow_constructor),
     (ExchangeName::Woo, woo_constructor),
+    (ExchangeName::Weex, weex_constructor),
 ];
 
 pub fn grvt_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -329,6 +365,32 @@ pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
     })
 }
 
+pub fn phemex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_phemex::binding::exchange::PhemexExchange::new(
+                name,
+                options,
+                store,
+                host.phemex()?,
+            )?,
+        )
+    })
+}
+
+pub fn cryptocom_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_cryptocom::binding::exchange::CryptocomExchange::new(
+                name,
+                options,
+                store,
+                host.cryptocom()?,
+            )?,
+        )
+    })
+}
+
 pub fn backpack_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.backpack()?;
@@ -393,6 +455,12 @@ fn external_factory(
             },
         )),
     }
+}
+
+pub fn weex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(WeexExchange::new(name, options, store, host.weex()?)?)
+    })
 }
 
 pub fn woo_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -486,6 +554,17 @@ pub fn kraken_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = KrakenExchange::new(name, options, store, host.kraken()?)?;
         Ok(exchange)
+    })
+}
+
+pub fn lighter_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(LighterNativeExchange::new(
+            name,
+            options,
+            store,
+            host.lighter()?,
+        )?)
     })
 }
 

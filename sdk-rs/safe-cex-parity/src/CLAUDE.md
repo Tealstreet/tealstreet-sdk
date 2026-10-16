@@ -106,6 +106,12 @@ non-decoder receipts are counted separately. Total decoders cannot be validated
 by an is_ok-only adapter. A new
 raw decoder needs an adapter and positive witnesses; a typed constructor needs
 its reason. Record arrays use Serde's field order, not JSON map insertion order.
+Observed methods normally require distinct inputs and outputs. Only the two
+`Capture` serializer metadata constructors listed in
+`../accepted-set/constant-outputs.json` may set `constantOutput: true`. Their
+actual compiler package, API, body span, whole-source hash, native adapter and
+cases are pinned. Both distinct metadata inputs still execute; this is no
+permission for other constant methods, altered adapters or decoder exemptions.
 The bounded `construction.json` policy classifies Clone/Copy on private-field
 types, including service handles whose shared ownership is intentional.
 
@@ -143,3 +149,12 @@ invention diagnostics, restores exact bytes and requires the focused tests to
 pass. A second batch falsely claims explicitly unassigned capabilities and must
 fail both native ownership and canonical-remainder assertions. These are
 annotation checks, not fresh runtime behavior proofs.
+
+Two exact nongeneric function-pointer aliases (`RetryCondition` in Bitunix and
+`BlofinApiFactory` in Blofin) have reviewed compiler signatures in
+`../accepted-set/function-pointer-aliases.json`. Their source identity, complete
+raw/expanded ASTs, every nested authenticated compiler root and selected workspace
+package are pinned. Native probes require invariant equality with independently
+authored Rust types and execute the ordinary alias Serde/conversion checks. This
+is capability classification, not callback execution or permission for other
+function pointers. Contracts cannot supply expected signatures or probe modes.

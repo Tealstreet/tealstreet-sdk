@@ -257,7 +257,7 @@ pub(crate) fn base_websocket_class(realm: &mut Realm, deps: SocketDependencies) 
         r.define_str(&ws, "addEventListener", add)?;
         let socket = h.socket.clone();
         let close = r.native("close", 0, move |_, _, _| {
-            socket.force_close();
+            socket.close_current_websocket();
             Ok(Value::Undefined)
         });
         r.define_str(&ws, "close", close)?;

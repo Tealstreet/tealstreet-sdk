@@ -115,6 +115,11 @@ signer hosts fail visibly until BingX signing is connected.
 `tests/native_host_bingx.rs` starts it on loopback HTTP/WS, verifies a signed order
 payload and caller client ID, and cancels the resulting order.
 
+Lighter and Lighter Robinhood construct `LighterNativeExchange` through the Rust
+table. The native host gives each instance a transport registry seeded from its
+runtime, fresh terminal HTTP and OS signing entropy. Hosted remote signing is
+refused because this binding uses the local SDK signer. Construction tests cover
+both names and their deployment-specific REST origins and quote currencies.
 
 Hyperliquid is constructed through the native Rust table with options-aware
 transport composition. All native host constructors require the same caller-owned
@@ -130,9 +135,18 @@ Private MEXC fills must reach the venue emitter; retain the weak callback when
 adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
 native request signatures against a local server.
 
-TxFlow is constructible only as the source Phase-0 scaffold. Native inputs build
-its HTTP client, while start emits the exact refusal before IO. Keep its existing
-source start boundary and test both mainnet/testnet construction without network.
+Crypto.com constructs through `cryptocom_constructor` using its bound Js runtime.
+Native HTTP inputs carry the account's hosted signer and supply the existing
+external-public-data gateway factory. The native host
+constructor still takes the caller-owned Hyperliquid limiter introduced by the
+shared host API. `tests/native_host_cryptocom.rs` constructs through the registry
+and production native host, then reads markets over real local HTTP and checks
+read purity. The module-host construction path remains the default.
+
+Phemex's Rust constructor receives the shared Js HTTP host and external-data
+factory. Its local HTTP witness checks amount/price precision independently and
+verifies the account-query HMAC against the bytes observed by the server. Native
+Phemex tunnel construction fails explicitly without a transport installer.
 
 Kraken Futures/Spot native inputs use the shared hosted signer bridge for private
 HTTP and Futures websocket challenges. Both retain the hosted account name with
@@ -144,3 +158,27 @@ shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
 `tests/native_host_apexomni.rs` covers signed startup, placement, private WS order
 delivery and cancellation over local native transports; its constructor-removal
 control lives in the venue's scripts/registry-control.py.
+
+The Bybit host also constructs `Bybitspot` after its distinct Spot receiver is
+bound. Native Bybit loopback HTTP coverage includes Spot for local and hosted
+signing; its existing registry dependency edge and caller-owned limiter API
+remain shared across these constructors. Inverse/HyroTrader await their bindings.
+
+ApexOmni's signed native host shares the account capability with HTTP and private
+WS auth, retaining remote accountName while keeping the API secret in the browser.
+`native_host_apexomni` verifies both signed wire paths and pending-signature
+cancellation; the Omni seed remains necessary for source L2 contract signing.
+
+Bitget, Bitget USDC and Bitget Inverse native constructors supply the common
+gateway factory through their existing `external_public_data` dependency. The
+loopback `native_host_bitget_external_data` test covers all three names: gateway
+market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
+with no venue REST or private/public venue sockets in public-only mode.
+
+WEEX is registered through its concrete native binding and the shared signed HTTP
+host, gateway factory and UTC host date profile. `tests/native_host_weex.rs` checks
+its account read and exact request HMAC over loopback HTTP.
+
+TxFlow is constructible only as the source Phase-0 scaffold. Native inputs build
+its HTTP client, while start emits the exact refusal before IO. Keep its existing
+source start boundary and test both mainnet/testnet construction without network.

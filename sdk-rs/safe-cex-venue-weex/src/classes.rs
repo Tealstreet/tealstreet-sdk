@@ -60,6 +60,15 @@ pub trait ClassHost: Sized + 'static {
         name: &'static str,
         body: BoundMember<Self::Value, Self::Error>,
     ) -> Result<Self::Value, Self::Error>;
+    /// Native hosts can retain a weak lexical receiver to avoid an Rc cycle.
+    /// The default preserves the opaque-value host contract used by the oracle.
+    fn bind_receiver(
+        &self,
+        receiver: Self::Value,
+        body: NativeMember<Self::Value, Self::Error>,
+    ) -> BoundMember<Self::Value, Self::Error> {
+        Rc::new(move |args| body(receiver.clone(), args))
+    }
     /// Install once per host class scope, retaining the existing callable for later instances.
     fn prototype(
         &self,
@@ -107,13 +116,13 @@ fn bind<H: ClassHost>(
         .ok_or_else(|| h.binding_error(kind, name, "constructor binding absent"))?
         .1
         .clone();
-    let receiver = receiver.clone();
+    let bound = h.bind_receiver(receiver.clone(), body);
     let owner = h.clone();
     h.arrow(
         name,
         Rc::new(move |args| {
             let _owner = &owner;
-            body(receiver.clone(), args)
+            bound(args)
         }),
     )
 }

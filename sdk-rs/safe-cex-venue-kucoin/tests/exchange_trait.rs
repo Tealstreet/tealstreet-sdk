@@ -734,3 +734,17 @@ fn spot_secondary_key_signs_reads_and_primary_signs_writes() {
         "spot cancel signed with the primary key"
     );
 }
+
+#[test]
+fn source_identity_flags_survive_spot_facade_construction() {
+    let (futures, _) = support::futures();
+    assert!(!futures.base().is_spot && !futures.base().is_demo);
+    let (spot, _) = support::spot();
+    assert!(
+        spot.base().is_spot,
+        "KuCoin source isSpot flag reaches typed base"
+    );
+    assert!(!spot.base().is_demo);
+    spot.dispose().unwrap();
+    futures.dispose().unwrap();
+}

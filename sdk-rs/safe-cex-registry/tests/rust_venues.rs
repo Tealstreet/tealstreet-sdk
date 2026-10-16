@@ -492,6 +492,24 @@ struct Venues {
     kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
 }
 impl RustVenueHost for Venues {
+    fn lighter(
+        &self,
+    ) -> Result<safe_cex_venue_lighter::binding::exchange::LighterDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("lighter");
+        let registry = Rc::new(safe_cex_transport::TransportRegistry::default());
+        registry.set_default_transport(self.runtime.transport());
+        Ok(
+            safe_cex_venue_lighter::binding::exchange::LighterDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                    self.runtime.clone(),
+                    self.wire.clone(),
+                ),
+                registry,
+                signing_entropy: None,
+            },
+        )
+    }
     fn grvt(
         &self,
     ) -> Result<safe_cex_venue_grvt::binding::exchange::GrvtDependencies, ExchangeError> {
@@ -749,12 +767,16 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Grvt,
             ExchangeName::Bybit,
             ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
             ExchangeName::Coinbase,
             ExchangeName::Coinbasespot,
+            ExchangeName::Cryptocom,
             ExchangeName::Hyperliquid,
             ExchangeName::Hyperliquidspot,
             ExchangeName::Kraken,
             ExchangeName::Krakenspot,
+            ExchangeName::Lighter,
+            ExchangeName::LighterRobinhood,
             ExchangeName::Kucoin,
             ExchangeName::Kucoinspot,
             ExchangeName::Mexc,
@@ -762,9 +784,11 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Okxdemo,
             ExchangeName::Okxeu,
             ExchangeName::Okxeudemo,
+            ExchangeName::Phemex,
             ExchangeName::Polymarket,
             ExchangeName::Txflow,
             ExchangeName::Woo,
+            ExchangeName::Weex,
         ],
         "REGISTRY table membership is a deliberate, reviewed list"
     );
@@ -1128,6 +1152,35 @@ fn native_kraken_dependencies_retain_module_state_per_host() {
     assert!(
         !Rc::ptr_eq(&first.futures_nonces, &other.futures_nonces),
         "REGISTRY separate native runtimes have separate module state"
+    );
+}
+
+#[test]
+fn lighter_family_constructs_through_registry_and_reads_deployment_markets() {
+    let host = venues();
+    host.wire.bodies.lock().unwrap().insert("/api/v1/orderBookDetails".into(),json!({"code":200,"order_book_details":[{"symbol":"BTC","market_id":1,"market_type":"perp","status":"active","supported_size_decimals":4,"supported_price_decimals":1,"min_base_amount":"0.0001","min_quote_amount":"10","order_quote_limit":"1000","min_initial_margin_fraction":200,"market_config":{"market_margin_mode":0}}]}));
+    for (name, quote) in [
+        (ExchangeName::Lighter, "USDC"),
+        (ExchangeName::LighterRobinhood, "USDG"),
+    ] {
+        let exchange = construct(
+            name.clone(),
+            &host,
+            json!({"key":"","secret":"01000000000000000000000000000000000000000000000000000000000000000000000000000000","apiKeyIndex":"3","applicationId":"42"}),
+        );
+        let markets =
+            run(&host.runtime, exchange.fetch_markets()).expect("Lighter registry market read");
+        assert_eq!(exchange.name(), &name);
+        assert_eq!(markets.len(), 1);
+        assert_eq!(markets[0].symbol, "BTC");
+        assert_eq!(markets[0].quote, quote);
+        assert_eq!(markets[0].precision.amount, 0.0001);
+        exchange.dispose().unwrap();
+    }
+    assert_eq!(*host.calls.borrow(), ["lighter", "lighter"]);
+    assert_eq!(
+        *host.wire.requests.lock().unwrap(),
+        ["/api/v1/orderBookDetails", "/api/v1/orderBookDetails"]
     );
 }
 
