@@ -44,24 +44,6 @@ pub fn listen_inverse_ohlcv<S, O, C, R, E>(
     )
 }
 
-/// The source bulk wrapper deliberately discards the socket method's return.
-pub fn listen_ohlcvs<S, O, C, R, E>(
-    options: O,
-    callback: C,
-    websocket: impl FnOnce(&str) -> Result<S, E>,
-    call: impl FnOnce(S, &str, O, C) -> Result<R, E>,
-) -> Result<(), E> {
-    listen(
-        "publicWebsocket",
-        "listenOHLCVs",
-        options,
-        callback,
-        websocket,
-        call,
-    )?;
-    Ok(())
-}
-
 pub fn listen_inverse_ohlcvs<S, O, C, R, E>(
     options: O,
     callback: C,

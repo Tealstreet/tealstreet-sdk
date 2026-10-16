@@ -382,12 +382,7 @@ fn stream_delegation_matches_maintained_bodies() {
                         |s, m, o, c| h.invoke(s, m, Arg::Options(o), c, &callback),
                     )
                 } else {
-                    listen_ohlcvs(
-                        options,
-                        cb,
-                        |p| h.websocket(p),
-                        |s, m, o, c| h.invoke(s, m, Arg::Options(o), c, &callback),
-                    )
+                    unreachable!("spot has no bulk OHLCV body")
                 };
                 result.map(|()| None)
             }
