@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "205 production creator candidates discovered across all potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "207 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1582,9 +1582,20 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "85d784c78908351367cefac3aa453919a8cca573e38f49f3df1c03ebe6b8c83d",
+      "producer_sha256": "e4a29fc5c563362803c5e8b42f23bf803143c818b03170fc22bca98085755c05",
       "classification": "no-owned-latch",
-      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation."
+      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Combined source socket lookup registration retains only weak synchronous callbacks; lazy core lookup installs no pending reservation."
+    },
+    {
+      "owner": "src/js_runtime/base_exchange.rs::worker_rpc",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "a6b0d7009c0cb2ea8817bb822ec16d3619e4b894737150161b628cee955b8487",
+      "classification": "delegated",
+      "delegate": "src/exchange.rs::BaseExchange::call_method_in_worker",
+      "reason": "The runtime-owned Promise keeps local venue/JSON arguments and awaits the existing core worker owner. WorkerReplyGuard owns the exact reply listener and timeout; no second listener, timer or independent latch is installed by this wrapper. Observer loss retains the source eager Promise task. The shared JS runtime test checks successful/error/timeout settlement and completion-hook forwarding."
     },
     {
       "owner": "src/js_runtime/builtins.rs::chain_value",

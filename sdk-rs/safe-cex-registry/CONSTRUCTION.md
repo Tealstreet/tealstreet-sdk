@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `asterdex`, `backpack`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`),
 the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
@@ -175,3 +175,7 @@ This changes the scope wording of one CHOSEN resolution, but none of its choices
 - **Also run:** `yarn layers:check` and `parity:check` (staying at zero).
 
 The native Kraken host shares its Futures nonce counter and Spot client-ID generator across instances constructed by that host. The generator uses OS entropy. Its typed constructor visibly refuses hosted `remoteSigner`; external public data uses the shared gateway factory. Journal folding remains an optional host dependency, not a newly implemented journal engine.
+
+BingX uses `BingxExchange::new` with shared-js_runtime HTTP/socket dependencies.
+Its native-host E2E test verifies signed startup/placement/cancellation; the venue
+crate proves all 16 Exchange methods, retaining source-inherited rejections.
