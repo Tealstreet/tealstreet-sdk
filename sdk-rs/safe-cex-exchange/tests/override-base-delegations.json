@@ -467,6 +467,25 @@
           "contains": "pub base: OnceCell<Rc<BaseWebSocket>>,"
         }
       ]
+    },
+    {
+      "file": "safe-cex-venue-phemex/src/binding/session.rs",
+      "finding": "base_dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/phemex/phemex.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-phemex/src/binding/session.rs",
+          "contains": "fn base_dispose(&mut self)"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-phemex/src/session_control.rs",
+          "contains": "host.base_dispose()?;"
+        }
+      ]
     }
   ]
 }

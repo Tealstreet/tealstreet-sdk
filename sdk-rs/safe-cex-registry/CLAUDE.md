@@ -130,6 +130,19 @@ Private MEXC fills must reach the venue emitter; retain the weak callback when
 adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
 native request signatures against a local server.
 
+Crypto.com constructs through `cryptocom_constructor` using its bound Js runtime.
+Native HTTP inputs carry the account's hosted signer and supply the existing
+external-public-data gateway factory. The native host
+constructor still takes the caller-owned Hyperliquid limiter introduced by the
+shared host API. `tests/native_host_cryptocom.rs` constructs through the registry
+and production native host, then reads markets over real local HTTP and checks
+read purity. The module-host construction path remains the default.
+
+Phemex's Rust constructor receives the shared Js HTTP host and external-data
+factory. Its local HTTP witness checks amount/price precision independently and
+verifies the account-query HMAC against the bytes observed by the server. Native
+Phemex tunnel construction fails explicitly without a transport installer.
+
 Kraken Futures/Spot native inputs use the shared hosted signer bridge for private
 HTTP and Futures websocket challenges. Both retain the hosted account name with
 empty local secrets. The native witness verifies signed HTTP bytes and challenge
