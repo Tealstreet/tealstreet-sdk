@@ -183,6 +183,15 @@ jobs:
         uses: actions/checkout@v7
         with:
           fetch-depth: 1
+      # The test tier builds every crate plus the TS/native oracles and ran the
+      # hosted runner out of disk (os error 28) late in the job. Drop preinstalled
+      # SDKs this workflow never uses before the build starts.
+      - name: Free runner disk for the test tier
+        if: matrix.check == 'test'
+        run: |
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup /opt/hostedtoolcache/CodeQL
+          df -h /
       - name: Cache cargo
         uses: actions/cache@v6
         with:
