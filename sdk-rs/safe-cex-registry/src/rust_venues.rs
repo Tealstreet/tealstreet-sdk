@@ -64,6 +64,15 @@ pub struct BlofinDependencies {
 
 /// Host inputs for Rust venue construction, requested once per constructed instance.
 pub trait RustVenueHost {
+    /// Per-name inputs for the six source Orderly subclasses.
+    fn orderly(
+        &self,
+        _: ExchangeName,
+    ) -> Result<safe_cex_venue_orderly::native_exchange::OrderlyDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Orderly dependencies were not supplied by this host",
+        ))
+    }
     /// AsterDEX needs a per-lane HTTP factory to preserve secondary routing.
     fn asterdex(
         &self,
@@ -113,11 +122,28 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
+    (ExchangeName::Kodiakfi, orderly_constructor),
+    (ExchangeName::Mode, orderly_constructor),
+    (ExchangeName::Salsadex, orderly_constructor),
+    (ExchangeName::TealstreetDex, orderly_constructor),
+    (ExchangeName::What, orderly_constructor),
+    (ExchangeName::Woofi, orderly_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
 ];
+
+pub fn orderly_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.orderly(name.clone())?;
+        Ok(
+            safe_cex_venue_orderly::native_exchange::OrderlyExchange::new(
+                name, options, store, deps,
+            )?,
+        )
+    })
+}
 
 pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {

@@ -175,3 +175,12 @@ This changes the scope wording of one CHOSEN resolution, but none of its choices
 - **Also run:** `yarn layers:check` and `parity:check` (staying at zero).
 
 The native Kraken host shares its Futures nonce counter and Spot client-ID generator across instances constructed by that host. The generator uses OS entropy. Its typed constructor visibly refuses hosted `remoteSigner`; external public data uses the shared gateway factory. Journal folding remains an optional host dependency, not a newly implemented journal engine.
+
+
+Orderly-family Rust construction covers kodiakfi, mode, salsadex, tealstreet-dex,
+what and woofi. `RustVenueHost::orderly(name)` supplies their shared runtime,
+per-options HTTP capability and external-public-data factory. The native host
+retains the selected family name while routing the final signed request through
+the shared transport stack. `tests/native_host_orderly.rs` verifies the actual
+Ed25519 signature server-side for every family entry. Native hosted remoteSigner
+is refused explicitly until that capability is wired.

@@ -322,7 +322,7 @@ fn private_stream_waits_for_the_auth_reply_before_subscriptions() {
     venue.dispose().unwrap();
 }
 #[test]
-fn definitive_auth_rejection_deactivates_and_transient_statuses_throw_before_sockets() {
+fn definitive_auth_rejection_and_transient_statuses_stop_before_sockets() {
     for status in [401, 408, 429, 503] {
         let (venue, rt, _, wire) = support::fixture(
             json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
@@ -348,6 +348,114 @@ fn definitive_auth_rejection_deactivates_and_transient_statuses_throw_before_soc
             rt.urls.borrow().is_empty(),
             "failed validation precedes every socket dial"
         );
+        venue.dispose().unwrap();
+    }
+}
+
+#[test]
+fn caller_id_preflight_matches_the_source_regex_before_http() {
+    let (venue, rt, _, wire) =
+        support::fixture(json!({"key":"key","secret":"11111111111111111111111111111111"}));
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    take(&wire);
+    for invalid in [
+        "".to_string(),
+        "-leading".into(),
+        "a".repeat(37),
+        "a\n".into(),
+        "a\r".into(),
+        "a\u{2028}".into(),
+        "a\u{2029}".into(),
+        "😀".repeat(19),
+    ] {
+        let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTCUSDC","type":"limit","side":"buy","amount":1,"price":100,"clientOrderId":invalid})).unwrap();
+        let error = drive(&rt, venue.base().place_order(venue.as_ref(), opts)).unwrap_err();
+        assert!(
+            error.message.contains("clientOrderId"),
+            "invalid caller id {invalid:?}: {}",
+            error.message
+        );
+        assert!(!(venue
+            .base()
+            .settings
+            .client_order_id_rule
+            .as_ref()
+            .unwrap()
+            .is_valid)(&invalid));
+        assert!(
+            wire.requests.borrow().is_empty(),
+            "caller ID rejected before HTTP"
+        );
+    }
+    let rule = venue.base().settings.client_order_id_rule.as_ref().unwrap();
+    for valid in ["a".repeat(36), "😀".repeat(18), "a-b c".into()] {
+        assert!((rule.is_valid)(&valid), "valid caller id: {valid:?}");
+    }
+}
+
+#[test]
+fn signed_requests_verify_over_exact_wire_method_url_and_body() {
+    use base64::Engine;
+    let (venue, rt, _, wire) = support::fixture(
+        json!({"key":"key","secret":"11111111111111111111111111111111","applicationId":"account"}),
+    );
+    script(&wire);
+    drive(&rt, venue.get_account()).unwrap();
+    let requests = wire.requests.borrow();
+    let request = &requests[0];
+    let preimage = format!("{}GET/v1/client/info", rt.now.get() as u64);
+    assert_eq!(request.headers["orderly-textsign"], preimage);
+    assert_eq!(request.headers["orderly-account-id"], "account");
+    let signature = base64::engine::general_purpose::URL_SAFE
+        .decode(&request.headers["orderly-signature"])
+        .unwrap();
+    let public_key = [
+        0x3b, 0x6a, 0x27, 0xbc, 0xce, 0xb6, 0xa4, 0x2d, 0x62, 0xa3, 0xa8, 0xd0, 0x2a, 0x6f, 0x0d,
+        0x73, 0x65, 0x32, 0x15, 0x77, 0x1d, 0xe2, 0x43, 0xa6, 0x3a, 0xc0, 0x48, 0xa1, 0x8b, 0x59,
+        0xda, 0x29,
+    ];
+    assert!(
+        safe_cex_crypto::ed25519::verify(preimage.as_bytes(), &public_key, &signature).unwrap()
+    );
+    assert!(
+        !safe_cex_crypto::ed25519::verify(b"wrong-method-or-path", &public_key, &signature)
+            .unwrap()
+    );
+}
+
+#[test]
+fn each_family_constructor_preserves_its_source_order_tag_and_normalized_key() {
+    use safe_cex_types::ExchangeName;
+    for (name, tag) in [
+        (ExchangeName::Kodiakfi, "TEALKODIAK"),
+        (ExchangeName::Mode, "TEALMODE"),
+        (ExchangeName::Salsadex, "TEALSALSA"),
+        (ExchangeName::TealstreetDex, "TEALSTREET"),
+        (ExchangeName::What, "TEALWHAT"),
+        (ExchangeName::Woofi, "TEALSTREET"),
+    ] {
+        let (venue, rt, _, wire) = support::fixture_for(
+            name.clone(),
+            json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"account"}),
+        );
+        script(&wire);
+        drive(&rt, venue.start()).unwrap();
+        let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTCUSDC","type":"limit","side":"buy","amount":0.012,"price":101.37,"clientOrderId":"family-id"})).unwrap();
+        drive(&rt, venue.base().place_order(venue.as_ref(), opts)).unwrap();
+        let request = wire
+            .requests
+            .borrow()
+            .iter()
+            .find(|r| r.url == "/v1/order" && r.method == "post")
+            .unwrap()
+            .clone();
+        assert_eq!(
+            request.body.as_ref().unwrap().untransformed().unwrap()["order_tag"],
+            json!(tag),
+            "{name:?} source subclass"
+        );
+        assert_eq!(request.headers["orderly-key"], "ed25519:fixture-key");
         venue.dispose().unwrap();
     }
 }

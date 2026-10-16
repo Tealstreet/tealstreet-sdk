@@ -235,3 +235,59 @@ impl Exchange for OrderlyExchange {
         self.rt.base().dispose()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    #[test]
+    fn private_signing_failure_sends_nothing_and_uses_shared_recovery() {
+        let (venue, runtime, _, _) = crate::binding_test_support::fixture(
+            serde_json::json!({"key":"key","secret":"invalid!","applicationId":"account"}),
+        );
+        venue
+            .rt
+            .this
+            .get("privateWebsocket")
+            .unwrap()
+            .call_method("connectAndSubscribe", vec![])
+            .unwrap();
+        for _ in 0..12 {
+            runtime.pump();
+        }
+        assert!(
+            !runtime.urls.borrow().is_empty(),
+            "actual private socket dialed"
+        );
+        assert!(
+            runtime.sent.borrow().is_empty(),
+            "signing failure sends neither auth nor subscriptions"
+        );
+        assert!(
+            runtime
+                .console
+                .borrow()
+                .iter()
+                .any(|message| message.contains("signing could not complete; reconnecting")),
+            "shared signing recovery invoked"
+        );
+        assert!(
+            runtime
+                .console
+                .borrow()
+                .iter()
+                .any(|message| message.contains("Explicit reconnect call")),
+            "reconnect attempted"
+        );
+        assert!(
+            !runtime
+                .console
+                .borrow()
+                .iter()
+                .chain(runtime.errors.borrow().iter())
+                .any(|message| message.contains("auth failed"))
+        );
+        crate::binding_test_support::drive(&runtime, async {
+            venue.dispose().unwrap();
+        });
+    }
+}

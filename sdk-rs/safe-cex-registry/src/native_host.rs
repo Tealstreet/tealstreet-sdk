@@ -97,6 +97,42 @@ fn kraken_spot_ids() -> Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>> {
 
 impl RustVenueHost for NativeVenueHost {
     #[expect(clippy::arc_with_non_send_sync)]
+    fn orderly(
+        &self,
+        name: safe_cex_types::ExchangeName,
+    ) -> Result<safe_cex_venue_orderly::native_exchange::OrderlyDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for orderly on the native host",
+            ));
+        }
+        let runtime = self.runtime.clone();
+        let adapter = self.adapter.clone();
+        Ok(
+            safe_cex_venue_orderly::native_exchange::OrderlyDependencies {
+                runtime: self.runtime.clone(),
+                http: Rc::new(move |options| {
+                    if options.remote_signer.is_some() {
+                        return Err(ExchangeError::new(
+                            "remoteSigner is not wired for orderly on the native host",
+                        ));
+                    }
+                    Ok(safe_cex_exchange::js_runtime::client::rest_http_host(
+                        runtime.clone(),
+                        Arc::new(SourceApiRest {
+                            name: name.clone(),
+                            runtime: runtime.clone(),
+                            adapter: adapter.clone(),
+                            options: options.clone(),
+                        }),
+                    ))
+                }),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
+    #[expect(clippy::arc_with_non_send_sync)]
     fn asterdex(
         &self,
     ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
@@ -118,7 +154,8 @@ impl RustVenueHost for NativeVenueHost {
                     }
                     Ok(safe_cex_exchange::js_runtime::client::rest_http_host(
                         runtime.clone(),
-                        Arc::new(AsterRest {
+                        Arc::new(SourceApiRest {
+                            name: safe_cex_types::ExchangeName::Asterdex,
                             runtime: runtime.clone(),
                             adapter: adapter.clone(),
                             options: options.clone(),
@@ -254,12 +291,13 @@ impl RustVenueHost for NativeVenueHost {
 
 // The source API factory supplies its base URL after choosing primary/secondary
 // options. Route the final post-signing request through the shared HTTP stack.
-struct AsterRest {
+struct SourceApiRest {
+    name: safe_cex_types::ExchangeName,
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
     options: safe_cex_types::ExchangeOptions,
 }
-impl RestAdapter for AsterRest {
+impl RestAdapter for SourceApiRest {
     fn execute(
         &self,
         mut request: safe_cex_transport::RestRequest,
@@ -268,7 +306,7 @@ impl RestAdapter for AsterRest {
             let client = native_client(
                 &self.runtime,
                 &self.adapter,
-                safe_cex_types::ExchangeName::Asterdex,
+                self.name.clone(),
                 &self.options,
                 request.clone(),
                 None,

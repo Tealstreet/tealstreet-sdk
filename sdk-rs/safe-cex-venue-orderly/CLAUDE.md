@@ -18,8 +18,8 @@ Set `SAFE_CEX_TYPESCRIPT_PATH=/Users/sam/cs/tealstreet-next/node_modules/typescr
 Scope cargo commands to `-p safe-cex-venue-orderly --jobs 1`. During development
 use cargo check or a single scoped test target; reserve the full scoped suite,
 fmt check and separate strict host/wasm clippy for merge-up readiness. Never run
-two Cargo processes concurrently. The runtime Exchange, REST and websocket hooks
-are not implemented. Reuse the six shared crates as those slices are added.
+two Cargo processes concurrently. The concrete `native_exchange::OrderlyExchange` composes the existing source bodies
+on shared `js_runtime` primitives; keep source workflows in their owning modules.
 
 `tests/controls.py` mutates one production constant/helper or one oracle capture
 at a time and requires the named assertion to fail, restores exact bytes in a
@@ -185,3 +185,20 @@ combinations, two rejection identities and one pending/resumed call. Fixed sourc
 counts and native index walks prevent shortening a capture from shortening the
 test. Mode and reduceOnly inversion controls require named exit-101 failures and
 passing restorations. The getter's own REST body remains separately rowed.
+
+
+`native_exchange` constructs all six Orderly family names from real options.
+`binding` implements only their runtime/import/HTTP/socket primitives on the
+shared Scope/Js layer. All 16 Exchange methods execute existing source bodies;
+the four inherited unsupported methods retain the exact `Not implemented`
+error. `fetchPositions` retains its source balance write. The mutable source
+disposal flag is set before socket disposal; native owned resources are then
+released through BaseExchange. Private subscriptions remain server-auth-gated.
+P4 signing-exception recovery uses the shared authenticate_and_subscribe wrapper
+around the unchanged private onOpen body. This intentional difference and the
+native cleanup boundary are named in BINDING_GATES.md and the PR description.
+`tests/exchange_trait.rs` constructs production exchanges over scripted transport;
+its all-16 method witness and production-disabling controls are described in
+BINDING_GATES.md. The registry's native server test verifies exact Ed25519
+preimages for all six names. Hosted remoteSigner is explicitly refused until
+that separate native capability is wired.

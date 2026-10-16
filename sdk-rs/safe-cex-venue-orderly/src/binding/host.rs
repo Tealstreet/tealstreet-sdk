@@ -20,26 +20,26 @@ pub(super) struct Host {
     pub this: Js,
 }
 impl Host {
-    pub fn new(rt: &Rt) -> Self {
+    pub(super) fn new(rt: &Rt) -> Self {
         Self {
             weak: Rc::downgrade(&rt.shared),
             this: rt.this.clone(),
         }
     }
-    pub fn rt(&self) -> R<Rt> {
+    pub(super) fn rt(&self) -> R<Rt> {
         scope(&self.weak, self.this.clone())
     }
-    pub fn global(&self, name: &str, args: Vec<V>) -> R<V> {
+    pub(super) fn global(&self, name: &str, args: Vec<V>) -> R<V> {
         Ok(v(self.rt()?.global(name)?.call(
             Js::Undefined,
             args.into_iter().map(|x| (*x).clone()).collect(),
         )?))
     }
-    pub fn values(&self, rows: &Js) -> R<Vec<Js>> {
+    pub(super) fn values(&self, rows: &Js) -> R<Vec<Js>> {
         rows.array_values()
             .ok_or_else(|| Thrown::type_error("Expected an array"))
     }
-    pub fn function(&self, name: &str, body: crate::classes::BoundMember<Self>) -> V {
+    pub(super) fn function(&self, name: &str, body: crate::classes::BoundMember<Self>) -> V {
         let weak = self.weak.clone();
         let this = self.this.clone();
         v(Js::function(name, move |_, args| {

@@ -224,6 +224,17 @@ pub fn fixture(
     Rc<safe_cex_store::store::DefaultStore>,
     Arc<Wire>,
 ) {
+    fixture_for(safe_cex_types::ExchangeName::TealstreetDex, options)
+}
+pub fn fixture_for(
+    name: safe_cex_types::ExchangeName,
+    options: Value,
+) -> (
+    Rc<safe_cex_venue_orderly::native_exchange::OrderlyExchange>,
+    Rc<Runtime>,
+    Rc<safe_cex_store::store::DefaultStore>,
+    Arc<Wire>,
+) {
     use safe_cex_venue_orderly::native_exchange::{OrderlyDependencies, OrderlyExchange};
     let runtime = Rc::new(Runtime {
         sockets: RefCell::default(),
@@ -242,7 +253,7 @@ pub fn fixture(
     let rt = runtime.clone();
     let transport = wire.clone();
     let venue = OrderlyExchange::new(
-        safe_cex_types::ExchangeName::TealstreetDex,
+        name,
         serde_json::from_value(options).unwrap(),
         store.clone(),
         OrderlyDependencies {

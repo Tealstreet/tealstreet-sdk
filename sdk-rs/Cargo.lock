@@ -3953,6 +3953,8 @@ dependencies = [
 name = "safe-cex-registry"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
+ "ed25519-dalek",
  "futures-util",
  "getrandom 0.2.17",
  "hmac 0.12.1",
@@ -3968,6 +3970,7 @@ dependencies = [
  "safe-cex-venue-blofin",
  "safe-cex-venue-kraken",
  "safe-cex-venue-okx",
+ "safe-cex-venue-orderly",
  "serde",
  "serde_json",
  "sha2 0.10.9",

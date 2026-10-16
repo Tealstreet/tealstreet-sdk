@@ -1,4 +1,4 @@
-//! Orderly source-by-source port. Runtime exchange hooks remain pending.
+//! Orderly source bodies and concrete shared-runtime Exchange composition.
 pub mod account_order_reads;
 pub mod api;
 pub mod classes;
@@ -18,3 +18,9 @@ pub mod ws_controls;
 
 mod binding;
 pub mod native_exchange;
+
+#[cfg(test)]
+extern crate self as safe_cex_venue_orderly;
+#[cfg(test)]
+#[path = "../tests/support/exchange_runtime.rs"]
+mod binding_test_support;

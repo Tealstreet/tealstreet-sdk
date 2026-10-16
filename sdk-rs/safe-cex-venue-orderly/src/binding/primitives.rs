@@ -436,6 +436,8 @@ impl crate::classes::ClassHost for Host {
             (*options).clone(),
             (*store).clone(),
         )?;
+        // The source dispose body assigns its inherited mutable field before closing sockets.
+        this.define("isDisposed", Js::Bool(false))?;
         if let Js::Object(object) = &this {
             *object.proto.borrow_mut() = Some(rt.shared.extra.prototype.clone());
         }
@@ -634,7 +636,7 @@ pub(super) fn get_key(value: &Js, key: &str) -> R<V> {
         ));
     }
     fn present(value: &Js, key: &str) -> R<bool> {
-        if value.has_own(key) || !value.get(key)?.is_undefined() {
+        if value.has_own(key) {
             return Ok(true);
         }
         if let Js::Object(object) = value {
