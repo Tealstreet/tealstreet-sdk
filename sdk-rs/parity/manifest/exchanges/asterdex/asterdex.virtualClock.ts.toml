@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-venue-asterdex/src/clock_helpers.rs", "safe-cex-venue-a
 ts = "AsterDEXVirtualClock"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock"
+rs = [ "safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock", "safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock::new" ]
 status = "divergent"
-note = "CHOSEN: AsterDEXVirtualClock owns typed epoch snapshots and a supplied BaseExchange/ClockHttp capability instead of module-global Axios/Dayjs dependencies. BaseExchange disposal cancels its detached tasks; the JS module clock survives exchange disposal. A native realm must remain live; dropped completion waiters alone do not cancel work. Explicit ownership permits native host injection and isolates venue instances."
+note = "CHOSEN: AsterDEXVirtualClock owns typed epoch snapshots and a supplied BaseExchange/ClockHttp capability instead of module-global Axios/Dayjs dependencies. BaseExchange disposal cancels its detached tasks; the JS module clock survives exchange disposal. A native realm must remain live; dropped completion waiters alone do not cancel work. Explicit ownership permits native host injection and isolates venue instances. Split member `safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock::new`. Class field initializers: null server/client times, no interval, null syncInFlight, lifecycleVersion 0 and preferred API version v1."
 
 [[symbol]]
 ts = "AsterDEXVirtualClock.start"
@@ -38,9 +38,9 @@ note = "Pure snapshot helper extracted from its TS owner: safe-cex-venue-asterde
 ts = "AsterDEXVirtualClock.getCurrentTimeMs"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/clock_helpers.rs::get_current_time_ms"
+rs = [ "safe-cex-venue-asterdex/src/clock_helpers.rs::get_current_time_ms", "safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock::get_current_time_ms" ]
 status = "ported"
-note = "Pure snapshot helper extracted from its TS owner: safe-cex-venue-asterdex/src/clock_helpers.rs::get_current_time_ms . Explicit server/client/now inputs replace instance reads. Date results are represented by epoch milliseconds (including NaN), with shared TimeClip; live real-Dayjs oracle pins 7600 snapshots. Lifecycle is not claimed by this row."
+note = "Pure snapshot helper extracted from its TS owner: safe-cex-venue-asterdex/src/clock_helpers.rs::get_current_time_ms . Explicit server/client/now inputs replace instance reads. Date results are represented by epoch milliseconds (including NaN), with shared TimeClip; live real-Dayjs oracle pins 7600 snapshots. Lifecycle is not claimed by this row. Split member `safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock::get_current_time_ms`. Instance getCurrentTimeMs: feeds the stored server/client times and runtime now into the mapped getCurrentTimeMs body."
 
 [[symbol]]
 ts = "AsterDEXVirtualClock.syncClientServerTime"
@@ -86,9 +86,9 @@ note = "Pure helper extracted from its TS owner: safe-cex-venue-asterdex/src/clo
 ts = "AsterDEXVirtualClock.getTimeOffset"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/clock_helpers.rs::get_time_offset"
+rs = [ "safe-cex-venue-asterdex/src/clock_helpers.rs::get_time_offset", "safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock::get_time_offset" ]
 status = "ported"
-note = "Pure snapshot helper extracted from its TS owner: safe-cex-venue-asterdex/src/clock_helpers.rs::get_time_offset . Explicit server/client/now inputs replace instance reads. Date results are represented by epoch milliseconds (including NaN), with shared TimeClip; live real-Dayjs oracle pins 7600 snapshots. Lifecycle is not claimed by this row."
+note = "Pure snapshot helper extracted from its TS owner: safe-cex-venue-asterdex/src/clock_helpers.rs::get_time_offset . Explicit server/client/now inputs replace instance reads. Date results are represented by epoch milliseconds (including NaN), with shared TimeClip; live real-Dayjs oracle pins 7600 snapshots. Lifecycle is not claimed by this row. Split member `safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock::get_time_offset`. Instance getTimeOffset: feeds the stored server/client times into the mapped getTimeOffset body."
 
 [[symbol]]
 ts = "AsterDEXVirtualClock.forceSyncAndGetOffset"
@@ -102,9 +102,9 @@ note = "CHOSEN: AsterDEXVirtualClock::force_sync_and_get_offset keeps awaiting t
 ts = "AsterDEXVirtualClock.needsSync"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/clock_helpers.rs::needs_sync"
+rs = [ "safe-cex-venue-asterdex/src/clock_helpers.rs::needs_sync", "safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock::needs_sync" ]
 status = "ported"
-note = "Pure snapshot helper extracted from its TS owner: safe-cex-venue-asterdex/src/clock_helpers.rs::needs_sync . Explicit server/client/now inputs replace instance reads. Date results are represented by epoch milliseconds (including NaN), with shared TimeClip; live real-Dayjs oracle pins 7600 snapshots. Lifecycle is not claimed by this row."
+note = "Pure snapshot helper extracted from its TS owner: safe-cex-venue-asterdex/src/clock_helpers.rs::needs_sync . Explicit server/client/now inputs replace instance reads. Date results are represented by epoch milliseconds (including NaN), with shared TimeClip; live real-Dayjs oracle pins 7600 snapshots. Lifecycle is not claimed by this row. Split member `safe-cex-venue-asterdex/src/virtual_clock.rs::AsterDEXVirtualClock::needs_sync`. Instance needsSync: feeds the stored server/client times and runtime now into the mapped needsSync body."
 
 [[symbol]]
 ts = "asterDEXVirtualClock"

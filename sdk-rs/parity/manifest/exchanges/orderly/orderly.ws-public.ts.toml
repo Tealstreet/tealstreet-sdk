@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-venue-orderly/src/public_feeds.rs", "safe-cex-venue-ord
 ts = "OrderlyPublicWebsocket"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-orderly/src/socket_classes.rs::public"
+rs = [ "safe-cex-venue-orderly/src/socket_classes.rs::public", "safe-cex-venue-orderly/src/socket_classes.rs::construct", "safe-cex-venue-orderly/src/socket_classes.rs::definitions" ]
 status = "ported"
-note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::public_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim. Rename target: `safe-cex-venue-orderly/src/socket_classes.rs::public`."
+note = "Complete source body/factory over mandatory original runtime/import bindings: sdk-rs/parity/MANIFEST-SPEC.md#orderly-api-and-public-feed-bodies. Actual-source/native witness tests/api_book_sockets.rs::public_native; compiled family control scripts/api-book-sockets-controls.py. Original values, callbacks/errors, mutation and effect order retained. Intrinsic/query/HTTP/signer/timer/member bindings are dependencies; finite witness scope and class member invocation limits documented; no complete runtime or live-network claim. Rename target: `safe-cex-venue-orderly/src/socket_classes.rs::public`. Split member `safe-cex-venue-orderly/src/socket_classes.rs::construct`. Shared websocket construction: super call, the public topics and messageHandlers field initializers, then binding each field-fn arrow from the definitions table. Split member `safe-cex-venue-orderly/src/socket_classes.rs::definitions`. Source-ordered field-fn tables mapping each websocket member name to its bound Rust body for the public class (and the private class sharing the same construction path)."
 
 [[symbol]]
 ts = "OrderlyPublicWebsocket.connectAndSubscribe"

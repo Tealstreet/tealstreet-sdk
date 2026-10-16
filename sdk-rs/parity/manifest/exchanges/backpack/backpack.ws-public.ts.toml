@@ -14,105 +14,105 @@ note = "MIXED: concrete BaseWebSocket protocol bindings share subscriptions, han
 ts = "BackpackPublicWebSocket.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/startup_recovery.rs::construct_public"
+rs = [ "safe-cex-venue-backpack/src/startup_recovery.rs::construct_public", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::new" ]
 status = "ported"
-note = "Super constructor before fresh subscription Set/topics/state/fetcher/depth-throttle maps; initialize ticker handler with1000ms/leading/trailing true after native state initialization, retaining handler/base identity and original super/factory errors. Full class and ordinary arrow-method bindings remain pending; compatible ticker-handler factory is supplied. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::construct_public`."
+note = "Super constructor before fresh subscription Set/topics/state/fetcher/depth-throttle maps; initialize ticker handler with1000ms/leading/trailing true after native state initialization, retaining handler/base identity and original super/factory errors. Full class and ordinary arrow-method bindings remain pending; compatible ticker-handler factory is supplied. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::construct_public`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::new`. Owned constructor: builds the base websocket with this protocol, the parent link and the initial subscriptions, listener maps and 1000ms ticker throttle fields."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.connectAndSubscribe"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/socket_lifecycle.rs::connect_public"
+rs = [ "safe-cex-venue-backpack/src/socket_lifecycle.rs::connect_public", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::connect_and_subscribe" ]
 status = "ported"
-note = "Disposed guard; network URL lookup, socket creation/assignment, ordered open/message/close listener calls against live sockets with receiver lookup before handler lookup. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/socket_lifecycle.rs::connect_public`."
+note = "Disposed guard; network URL lookup, socket creation/assignment, ordered open/message/close listener calls against live sockets with receiver lookup before handler lookup. Actual-source oracle: tests/private_auth.rs. Full socket adapter remains pending; compatible supplied operations are the boundary. Rename target: `safe-cex-venue-backpack/src/socket_lifecycle.rs::connect_public`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::connect_and_subscribe`. Owned socket method body: when not disposed picks the TESTNET or PRODUCTION WSS_URLS entry from parent options and starts the websocket."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.onOpen"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::on_open"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::on_open", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::on_open" ]
 status = "ported"
-note = "Disposed guard once; track/reset/resubscribe/ping callback order and original errors over compatible callbacks. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::on_open`."
+note = "Disposed guard once; track/reset/resubscribe/ping callback order and original errors over compatible callbacks. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::on_open`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::on_open`. Owned socket method that runs the onOpen body with trackLastReceived, resetAndRefetchOrderBooks, resubscribe and ping bound to this socket."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.ping"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::ping"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::ping", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::ping" ]
 status = "ported"
-note = "Disposed/connected short circuit; monotonic time stored before PING send; preserves f64 bits and original callback errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::ping`."
+note = "Disposed/connected short circuit; monotonic time stored before PING send; preserves f64 bits and original callback errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::ping`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::ping`. Owned socket method that runs the ping body with the disposed and connected checks, pingAt clock and PING send of this socket."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#resetAndRefetchOrderBooks"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/orderbook_state.rs::reset_and_refetch_order_books"
+rs = [ "safe-cex-venue-backpack/src/orderbook_state.rs::reset_and_refetch_order_books", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::reset_and_refetch_order_books" ]
 status = "ported"
-note = "Complete ordered own-key snapshots and live property operations through compatible host view; fresh state object identity and existing terminal handler Set identity retained; snapshot fetchers invoked without awaiting. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::reset_and_refetch_order_books`."
+note = "Complete ordered own-key snapshots and live property operations through compatible host view; fresh state object identity and existing terminal handler Set identity retained; snapshot fetchers invoked without awaiting. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::reset_and_refetch_order_books`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::reset_and_refetch_order_books`. Owned socket body: replaces every order book state with a fresh one keeping its terminal handlers, then invokes every stored snapshot fetcher."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#resubscribe"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::resubscribe"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::resubscribe", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::resubscribe" ]
 status = "ported"
-note = "Ordered Set snapshot, empty no-op, UTF-16 JSON.stringify strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::resubscribe`."
+note = "Ordered Set snapshot, empty no-op, UTF-16 JSON.stringify strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::resubscribe`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::resubscribe`. Owned socket method that runs the resubscribe body over this socket subscriptions and send."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_order_book"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_order_book", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_order_book" ]
 status = "ported"
-note = "depth prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_order_book`."
+note = "depth prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_order_book`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_order_book`. Owned socket method that runs the subscribeToOrderBook body over this socket subscriptions and send."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToTicker"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_ticker"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_ticker", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_ticker" ]
 status = "ported"
-note = "ticker prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_ticker`."
+note = "ticker prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_ticker`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_ticker`. Owned socket method that runs the subscribeToTicker body over this socket subscriptions and send."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToTrades"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_trades"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_trades", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_trades" ]
 status = "ported"
-note = "trade prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_trades`."
+note = "trade prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_trades`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_trades`. Owned socket method that runs the subscribeToTrades body over this socket subscriptions and send."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToBookTicker"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_book_ticker"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_book_ticker", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_book_ticker" ]
 status = "ported"
-note = "bookTicker prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_book_ticker`."
+note = "bookTicker prefix, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_book_ticker`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_book_ticker`. Owned socket method that runs the subscribeToBookTicker body over this socket subscriptions and send."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.subscribeToKline"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_kline"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::subscribe_to_kline", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_kline" ]
 status = "ported"
-note = "kline.interval.symbol, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_kline`."
+note = "kline.interval.symbol, ordered Set dedup, add before send, UTF-16 strings and original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::subscribe_to_kline`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::subscribe_to_kline`. Owned socket method that runs the subscribeToKline body over this socket subscriptions and send."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.unsubscribeFromKline"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::unsubscribe_from_kline"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::unsubscribe_from_kline", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::unsubscribe_from_kline" ]
 status = "ported"
-note = "Delegates one kline.interval.symbol stream through compatible callback preserving original errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::unsubscribe_from_kline`."
+note = "Delegates one kline.interval.symbol stream through compatible callback preserving original errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::unsubscribe_from_kline`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::unsubscribe_from_kline`. Owned socket method that runs the unsubscribeFromKline body, delegating to this socket unsubscribe."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.onMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/socket_events.rs::on_public_message"
+rs = [ "safe-cex-venue-backpack/src/socket_events.rs::on_public_message", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::on_message" ]
 status = "ported"
-note = "Disposed guard/receive tracking outside catch; jsonParse dependency, confirmation/error/pong guards, wrapped-data fallback, repeated event reads, captured dispatch and native stream identity; emitter lookup before error serialization/coercion. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::on_public_message`."
+note = "Disposed guard/receive tracking outside catch; jsonParse dependency, confirmation/error/pong guards, wrapped-data fallback, repeated event reads, captured dispatch and native stream identity; emitter lookup before error serialization/coercion. Actual-source oracle: tests/socket_events.rs. Compatible property/call operations and typed UTF-16 fields; full socket adapter and arbitrary host prototypes are not claimed; throttle scheduling is supplied. Rename target: `safe-cex-venue-backpack/src/socket_events.rs::on_public_message`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::on_message`. Owned socket method that unwraps a text frame and runs the public onMessage body over this socket frame."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#handleDepthUpdate"
@@ -174,17 +174,17 @@ note = "Use truthy UTF-16 stream or interval/symbol fallback; capture handler ar
 ts = "BackpackPublicWebSocket.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-backpack/src/public_listeners.rs::listen_ohlcv", "safe-cex-venue-backpack/src/public_listeners.rs::Host", "safe-cex-venue-backpack/src/public_listeners.rs::Host::Error", "safe-cex-venue-backpack/src/public_listeners.rs::Host::cleanup_stats", "safe-cex-venue-backpack/src/public_listeners.rs::Host::connected", "safe-cex-venue-backpack/src/public_listeners.rs::Host::date", "safe-cex-venue-backpack/src/public_listeners.rs::Host::emit", "safe-cex-venue-backpack/src/public_listeners.rs::Host::market", "safe-cex-venue-backpack/src/public_listeners.rs::Host::state", "safe-cex-venue-backpack/src/public_listeners.rs::Host::subscribe_kline", "safe-cex-venue-backpack/src/public_listeners.rs::Host::timeout", "safe-cex-venue-backpack/src/public_listeners.rs::Host::unsubscribe_kline" ]
+rs = [ "safe-cex-venue-backpack/src/public_listeners.rs::listen_ohlcv", "safe-cex-venue-backpack/src/public_listeners.rs::Host", "safe-cex-venue-backpack/src/public_listeners.rs::Host::Error", "safe-cex-venue-backpack/src/public_listeners.rs::Host::cleanup_stats", "safe-cex-venue-backpack/src/public_listeners.rs::Host::connected", "safe-cex-venue-backpack/src/public_listeners.rs::Host::date", "safe-cex-venue-backpack/src/public_listeners.rs::Host::emit", "safe-cex-venue-backpack/src/public_listeners.rs::Host::market", "safe-cex-venue-backpack/src/public_listeners.rs::Host::state", "safe-cex-venue-backpack/src/public_listeners.rs::Host::subscribe_kline", "safe-cex-venue-backpack/src/public_listeners.rs::Host::timeout", "safe-cex-venue-backpack/src/public_listeners.rs::Host::unsubscribe_kline", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::listen_ohlcv" ]
 status = "ported"
-note = "Market lookup/error/no-op; per-topic parser filters symbol and null OHLCV fields, appends Z before date parsing and parses native numbers. Connected polling, handler identity, live topic counts and unsubscribe ordering match the source over compatible state/callback operations. Actual-source native candle fields and cleanup: tests/adapter_methods.rs::candle_listener_native_values_and_cleanup; finite floor through iteration 2. API split: safe-cex-venue-backpack/src/public_listeners.rs::listen_ohlcv retains the operation body; shared declarations safe-cex-venue-backpack/src/public_listeners.rs::Host safe-cex-venue-backpack/src/public_listeners.rs::Host::Error safe-cex-venue-backpack/src/public_listeners.rs::Host::cleanup_stats safe-cex-venue-backpack/src/public_listeners.rs::Host::connected safe-cex-venue-backpack/src/public_listeners.rs::Host::date safe-cex-venue-backpack/src/public_listeners.rs::Host::emit safe-cex-venue-backpack/src/public_listeners.rs::Host::market safe-cex-venue-backpack/src/public_listeners.rs::Host::state safe-cex-venue-backpack/src/public_listeners.rs::Host::subscribe_kline safe-cex-venue-backpack/src/public_listeners.rs::Host::timeout safe-cex-venue-backpack/src/public_listeners.rs::Host::unsubscribe_kline supply the listener host/error types, retained state/market/connection reads, date conversion, error emission, retry timer and kline subscribe/unsubscribe/stat cleanup. These are consumed host capabilities, not a claim of completed runtime assembly."
+note = "Market lookup/error/no-op; per-topic parser filters symbol and null OHLCV fields, appends Z before date parsing and parses native numbers. Connected polling, handler identity, live topic counts and unsubscribe ordering match the source over compatible state/callback operations. Actual-source native candle fields and cleanup: tests/adapter_methods.rs::candle_listener_native_values_and_cleanup; finite floor through iteration 2. API split: safe-cex-venue-backpack/src/public_listeners.rs::listen_ohlcv retains the operation body; shared declarations safe-cex-venue-backpack/src/public_listeners.rs::Host safe-cex-venue-backpack/src/public_listeners.rs::Host::Error safe-cex-venue-backpack/src/public_listeners.rs::Host::cleanup_stats safe-cex-venue-backpack/src/public_listeners.rs::Host::connected safe-cex-venue-backpack/src/public_listeners.rs::Host::date safe-cex-venue-backpack/src/public_listeners.rs::Host::emit safe-cex-venue-backpack/src/public_listeners.rs::Host::market safe-cex-venue-backpack/src/public_listeners.rs::Host::state safe-cex-venue-backpack/src/public_listeners.rs::Host::subscribe_kline safe-cex-venue-backpack/src/public_listeners.rs::Host::timeout safe-cex-venue-backpack/src/public_listeners.rs::Host::unsubscribe_kline supply the listener host/error types, retained state/market/connection reads, date conversion, error emission, retry timer and kline subscribe/unsubscribe/stat cleanup. These are consumed host capabilities, not a claim of completed runtime assembly. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::listen_ohlcv`. Owned socket method that runs the listenOHLCV body over this socket listener frame and returns its dispose callback."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-backpack/src/public_listeners.rs::listen_order_book", "safe-cex-venue-backpack/src/public_listeners.rs::Host::Throttle", "safe-cex-venue-backpack/src/public_listeners.rs::Host::apply", "safe-cex-venue-backpack/src/public_listeners.rs::Host::cancel_throttle", "safe-cex-venue-backpack/src/public_listeners.rs::Host::disposed", "safe-cex-venue-backpack/src/public_listeners.rs::Host::error_text", "safe-cex-venue-backpack/src/public_listeners.rs::Host::recover", "safe-cex-venue-backpack/src/public_listeners.rs::Host::snapshot", "safe-cex-venue-backpack/src/public_listeners.rs::Host::spawn", "safe-cex-venue-backpack/src/public_listeners.rs::Host::subscribe_depth", "safe-cex-venue-backpack/src/public_listeners.rs::Host::terminate", "safe-cex-venue-backpack/src/public_listeners.rs::Host::totals", "safe-cex-venue-backpack/src/public_listeners.rs::Host::unsubscribe" ]
+rs = [ "safe-cex-venue-backpack/src/public_listeners.rs::listen_order_book", "safe-cex-venue-backpack/src/public_listeners.rs::Host::Throttle", "safe-cex-venue-backpack/src/public_listeners.rs::Host::apply", "safe-cex-venue-backpack/src/public_listeners.rs::Host::cancel_throttle", "safe-cex-venue-backpack/src/public_listeners.rs::Host::disposed", "safe-cex-venue-backpack/src/public_listeners.rs::Host::error_text", "safe-cex-venue-backpack/src/public_listeners.rs::Host::recover", "safe-cex-venue-backpack/src/public_listeners.rs::Host::snapshot", "safe-cex-venue-backpack/src/public_listeners.rs::Host::spawn", "safe-cex-venue-backpack/src/public_listeners.rs::Host::subscribe_depth", "safe-cex-venue-backpack/src/public_listeners.rs::Host::terminate", "safe-cex-venue-backpack/src/public_listeners.rs::Host::totals", "safe-cex-venue-backpack/src/public_listeners.rs::Host::unsubscribe", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::listen_order_book" ]
 status = "ported"
-note = "Per-listener book identity with shared per-market sequence state, eager in-flight guard, snapshot/initial bridge/continuous replay, bounded buffering, gap recovery, terminal callbacks, finally guard and unsubscribe cancellation/cache cleanup follow source body order. Delta sequence is reread after apply. Actual-source native book levels/totals, sequence flags, queue and identity: tests/adapter_methods.rs::depth_listener_native_snapshot_and_sequence; finite floor through iteration 2, not exhaustive recovery proof. API split: safe-cex-venue-backpack/src/public_listeners.rs::listen_order_book retains the operation body; shared declarations safe-cex-venue-backpack/src/public_listeners.rs::Host::Throttle safe-cex-venue-backpack/src/public_listeners.rs::Host::apply safe-cex-venue-backpack/src/public_listeners.rs::Host::cancel_throttle safe-cex-venue-backpack/src/public_listeners.rs::Host::disposed safe-cex-venue-backpack/src/public_listeners.rs::Host::error_text safe-cex-venue-backpack/src/public_listeners.rs::Host::recover safe-cex-venue-backpack/src/public_listeners.rs::Host::snapshot safe-cex-venue-backpack/src/public_listeners.rs::Host::spawn safe-cex-venue-backpack/src/public_listeners.rs::Host::subscribe_depth safe-cex-venue-backpack/src/public_listeners.rs::Host::terminate safe-cex-venue-backpack/src/public_listeners.rs::Host::totals safe-cex-venue-backpack/src/public_listeners.rs::Host::unsubscribe supply the shared throttle type, snapshot future/spawn, delta application/totals, recovery/terminal callbacks, disposal/error checks and unsubscribe/throttle cancellation. These are consumed host capabilities, not a claim of completed runtime assembly."
+note = "Per-listener book identity with shared per-market sequence state, eager in-flight guard, snapshot/initial bridge/continuous replay, bounded buffering, gap recovery, terminal callbacks, finally guard and unsubscribe cancellation/cache cleanup follow source body order. Delta sequence is reread after apply. Actual-source native book levels/totals, sequence flags, queue and identity: tests/adapter_methods.rs::depth_listener_native_snapshot_and_sequence; finite floor through iteration 2, not exhaustive recovery proof. API split: safe-cex-venue-backpack/src/public_listeners.rs::listen_order_book retains the operation body; shared declarations safe-cex-venue-backpack/src/public_listeners.rs::Host::Throttle safe-cex-venue-backpack/src/public_listeners.rs::Host::apply safe-cex-venue-backpack/src/public_listeners.rs::Host::cancel_throttle safe-cex-venue-backpack/src/public_listeners.rs::Host::disposed safe-cex-venue-backpack/src/public_listeners.rs::Host::error_text safe-cex-venue-backpack/src/public_listeners.rs::Host::recover safe-cex-venue-backpack/src/public_listeners.rs::Host::snapshot safe-cex-venue-backpack/src/public_listeners.rs::Host::spawn safe-cex-venue-backpack/src/public_listeners.rs::Host::subscribe_depth safe-cex-venue-backpack/src/public_listeners.rs::Host::terminate safe-cex-venue-backpack/src/public_listeners.rs::Host::totals safe-cex-venue-backpack/src/public_listeners.rs::Host::unsubscribe supply the shared throttle type, snapshot future/spawn, delta application/totals, recovery/terminal callbacks, disposal/error checks and unsubscribe/throttle cancellation. These are consumed host capabilities, not a claim of completed runtime assembly. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::listen_order_book`. Owned socket method that runs the listenOrderBook body over this socket listener frame and returns its dispose callback."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#applyOrderBookUpdate"
@@ -222,30 +222,30 @@ note = "Complete undefined guards, non-reversed range and strict next-first-ID e
 ts = "BackpackPublicWebSocket#recoverOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/startup_recovery.rs::recover_order_book"
+rs = [ "safe-cex-venue-backpack/src/startup_recovery.rs::recover_order_book", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::recover_order_book" ]
 status = "ported"
-note = "State and snapshot-fetcher lookup before guard; terminal/in-flight/scheduled no-ops, exhaustion at3, increment f64 attempt and reset snapshot/id before warning; enqueue one deferred callback retaining original fetcher and state identity, disposed/replaced-state guard before scheduled clear and fetch. UTF16 messages and JS number spellings, native state/callee identity. Compatible native fields and supplied microtask/log/fetch operations. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::recover_order_book`."
+note = "State and snapshot-fetcher lookup before guard; terminal/in-flight/scheduled no-ops, exhaustion at3, increment f64 attempt and reset snapshot/id before warning; enqueue one deferred callback retaining original fetcher and state identity, disposed/replaced-state guard before scheduled clear and fetch. UTF16 messages and JS number spellings, native state/callee identity. Compatible native fields and supplied microtask/log/fetch operations. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::recover_order_book`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::recover_order_book`. Owned socket method that runs the recoverOrderBook body over this socket frame."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket#terminateOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/startup_recovery.rs::terminate_order_book"
+rs = [ "safe-cex-venue-backpack/src/startup_recovery.rs::terminate_order_book", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::terminate_order_book" ]
 status = "ported"
-note = "Terminal guard, mark terminal/unload/clear deltas, set error-emitted before one notification; capture live handler Set after emission and traverse live slots including additions/deletions; each thrown handler warns and continues, logger errors stop. Native handler identity and UTF16 reason/error messages. Compatible native fields and supplied emit/log/callback operations. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::terminate_order_book`."
+note = "Terminal guard, mark terminal/unload/clear deltas, set error-emitted before one notification; capture live handler Set after emission and traverse live slots including additions/deletions; each thrown handler warns and continues, logger errors stop. Native handler identity and UTF16 reason/error messages. Compatible native fields and supplied emit/log/callback operations. Actual-source oracle: tests/startup_recovery.rs; independent finite input/cardinality pins and native assertions. Rename target: `safe-cex-venue-backpack/src/startup_recovery.rs::terminate_order_book`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::terminate_order_book`. Owned socket method that runs the terminateOrderBook body over this socket frame."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.unsubscribe"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/public_control.rs::unsubscribe"
+rs = [ "safe-cex-venue-backpack/src/public_control.rs::unsubscribe", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::unsubscribe" ]
 status = "ported"
-note = "Empty no-op; send snapshot before deleting; live streams after reentrant send, holes skipped; original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::unsubscribe`."
+note = "Empty no-op; send snapshot before deleting; live streams after reentrant send, holes skipped; original send errors. Public socket adapter wiring remains pending; this row covers the method body over compatible state views. Source oracle: tests/public_control.rs. Rename target: `safe-cex-venue-backpack/src/public_control.rs::unsubscribe`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::unsubscribe`. Owned socket method that runs the unsubscribe body over this socket subscriptions and send."
 
 [[symbol]]
 ts = "BackpackPublicWebSocket.dispose"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-backpack/src/orderbook_state.rs::dispose"
+rs = [ "safe-cex-venue-backpack/src/orderbook_state.rs::dispose", "safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::dispose" ]
 status = "ported"
-note = "Clear subscriptions, replace state/fetcher records, cancel snapshotted throttle values, replace throttle record, read socket twice and close current value; preserves partial state and original errors through compatible host operations. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::dispose`."
+note = "Clear subscriptions, replace state/fetcher records, cancel snapshotted throttle values, replace throttle record, read socket twice and close current value; preserves partial state and original errors through compatible host operations. Actual-source oracle: tests/orderbook_state.rs. Full socket adapter and arbitrary host prototypes are not claimed. Rename target: `safe-cex-venue-backpack/src/orderbook_state.rs::dispose`. Split member `safe-cex-venue-backpack/src/public_adapter.rs::BackpackPublicWebSocket::dispose`. Owned socket method body: clears handlers, subscriptions, topics, order book state and snapshot fetchers, cancels ticker and depth throttles and pending tasks, then disposes the base socket."

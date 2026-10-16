@@ -30,9 +30,9 @@ note = "CHOSEN: PrivateStream::connect_and_subscribe dispatches listen-key POST 
 ts = "AsterDEXPrivateWebsocket.onOpen"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/ws_helpers.rs::private_on_open"
+rs = [ "safe-cex-venue-asterdex/src/ws_helpers.rs::private_on_open", "safe-cex-venue-asterdex/src/listen_key.rs::ListenKeyLifecycle::reset_connect_retry_count" ]
 status = "ported"
-note = "Preserves active-open ordering: reset retry count to zero, log the exact Info message, ping, then request a 10-retry private snapshot only when reconnecting websocket mode is enabled. Disposed opens do nothing. The live oracle reads the TypeScript config literal and invokes the actual class field; source mutation fails by row assertion. Renamed target: safe-cex-venue-asterdex/src/ws_helpers.rs::private_on_open."
+note = "Preserves active-open ordering: reset retry count to zero, log the exact Info message, ping, then request a 10-retry private snapshot only when reconnecting websocket mode is enabled. Disposed opens do nothing. The live oracle reads the TypeScript config literal and invokes the actual class field; source mutation fails by row assertion. Renamed target: safe-cex-venue-asterdex/src/ws_helpers.rs::private_on_open. Split member `safe-cex-venue-asterdex/src/listen_key.rs::ListenKeyLifecycle::reset_connect_retry_count`. The this.connectRetryCount = 0 step of onOpen, invoked by the private socket open handler."
 
 [[symbol]]
 ts = "AsterDEXPrivateWebsocket.ping"
@@ -70,9 +70,9 @@ note = "MIXED: PrivateStream::handle_order_trade_update applies NEW/partial/fill
 ts = "AsterDEXPrivateWebsocket#mirrorCumulativeOrderFill"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::mirror_cumulative_order_fill"
+rs = [ "safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::mirror_cumulative_order_fill", "safe-cex-venue-asterdex/src/account_helpers.rs::mirror_cumulative_order_fill" ]
 status = "ported"
-note = "The concrete method preserves the finite/ID guard and performs Store.update_order with status, cumulative fill, clamped remaining and source time before fill emission. Store notification failures propagate after mutation. tests/live_private_stream.rs::cumulative_fill_is_written_before_emission asserts the native order snapshot captured inside the fill listener. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-63: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped. Rename target: `safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::mirror_cumulative_order_fill`."
+note = "The concrete method preserves the finite/ID guard and performs Store.update_order with status, cumulative fill, clamped remaining and source time before fill emission. Store notification failures propagate after mutation. tests/live_private_stream.rs::cumulative_fill_is_written_before_emission asserts the native order snapshot captured inside the fill listener. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-63: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped. Rename target: `safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::mirror_cumulative_order_fill`. Split member `safe-cex-venue-asterdex/src/account_helpers.rs::mirror_cumulative_order_fill`. Typed native port of the row body: reads i/z/q, rejects empty ids and nonfinite amounts, derives FILLED status, clamped remaining and update time."
 
 [[symbol]]
 ts = "AsterDEXPrivateWebsocket#getOrderUpdateTime"
@@ -126,9 +126,9 @@ note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary e
 ts = "AsterDEXPrivateWebsocket#handleAccountUpdate"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::handle_account_update"
+rs = [ "safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::handle_account_update", "safe-cex-venue-asterdex/src/account_helpers.rs::handle_account_update" ]
 status = "divergent"
-note = "CHOSEN: The concrete method parses balances, applies the current-currency merge, reconcile and finite guard through apply_balance_updates, then emits the account payload. Native payloads own snapshots and currencies retain own UTF-8 keys instead of Object.prototype mutation; see sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. tests/live_private_stream.rs measures account and balance effects plus the __proto__ boundary. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-60: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped. Rename target: `safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::handle_account_update`."
+note = "CHOSEN: The concrete method parses balances, applies the current-currency merge, reconcile and finite guard through apply_balance_updates, then emits the account payload. Native payloads own snapshots and currencies retain own UTF-8 keys instead of Object.prototype mutation; see sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. tests/live_private_stream.rs measures account and balance effects plus the __proto__ boundary. Retaining untyped prototype or callable referents would violate this handler's shared native model fields; owned callback snapshots allow Store reentry after its borrows are released. Reconciled integration documentation audit sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-60: the concrete runtime target supersedes the old helper-only coverage annotation; the original helper witnesses remain separately scoped. Rename target: `safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::handle_account_update`. Split member `safe-cex-venue-asterdex/src/account_helpers.rs::handle_account_update`. Typed native port of the row body: null guard, parses B balances via parseAssetBalanceUpdates with f/l fields and always emits the account payload."
 
 [[symbol]]
 ts = "AsterDEXPrivateWebsocket#handleAccountPositionUpdate"
@@ -286,6 +286,6 @@ note = "PrivateRepairs::clear_order_reconcile_timer cancels/removes the optional
 ts = "AsterDEXPrivateWebsocket.dispose"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::dispose"
+rs = [ "safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::dispose", "safe-cex-venue-asterdex/src/listen_key.rs::ListenKeyLifecycle::reset_for_dispose" ]
 status = "divergent"
-note = "CHOSEN: PrivateStream::dispose resets key/keepalive/failure/retry state, clears all six venue timers/queued repair flags, then disposes actual BaseWebSocket without disposing parent or resetting Store, and retains last account event time as source does. Native BaseWebSocket cancels socket-owned tasks and permanently closes its task owner; source super.dispose closes socket/timers while already-running JavaScript promises can finish and a manually invoked reconnect can install fresh callbacks. Rename target: `safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::dispose`."
+note = "CHOSEN: PrivateStream::dispose resets key/keepalive/failure/retry state, clears all six venue timers/queued repair flags, then disposes actual BaseWebSocket without disposing parent or resetting Store, and retains last account event time as source does. Native BaseWebSocket cancels socket-owned tasks and permanently closes its task owner; source super.dispose closes socket/timers while already-running JavaScript promises can finish and a manually invoked reconnect can install fresh callbacks. Rename target: `safe-cex-venue-asterdex/src/private_stream.rs::PrivateStream::dispose`. Split member `safe-cex-venue-asterdex/src/listen_key.rs::ListenKeyLifecycle::reset_for_dispose`. The listen-key part of dispose: clears listenKey, keepalive time, failure and retry counters and the refresh, watchdog and connect-retry timers."

@@ -14,17 +14,17 @@ note = "Pure helper extracted from its TS owner: safe-cex-venue-asterdex/src/exc
 ts = "AsterDEXExchange"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange"
+rs = [ "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange", "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::OPEN_INTEREST_BATCH_SIZE", "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::OPEN_INTEREST_POLL_INTERVAL_MS" ]
 status = "divergent"
-note = "CHOSEN: Rc-owned native composition and an explicit member registry replace JavaScript subclass/prototype constructor identity. Native consumers retain typed owner/task/socket lifetimes rather than a JavaScript class interpreter; instanceof and source prototype reflection are excluded. Constructor/static values and lifecycle bodies are mapped independently; no concrete HTTP/backend integration claim. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ."
+note = "CHOSEN: Rc-owned native composition and an explicit member registry replace JavaScript subclass/prototype constructor identity. Native consumers retain typed owner/task/socket lifetimes rather than a JavaScript class interpreter; instanceof and source prototype reflection are excluded. Constructor/static values and lifecycle bodies are mapped independently; no concrete HTTP/backend integration claim. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy . Split member `safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::OPEN_INTEREST_BATCH_SIZE`. The class static readonly OPEN_INTEREST_BATCH_SIZE = 25 declared on AsterDEXExchange. Split member `safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::OPEN_INTEREST_POLL_INTERVAL_MS`. The class static readonly OPEN_INTEREST_POLL_INTERVAL_MS = 15000 declared on AsterDEXExchange."
 
 [[symbol]]
 ts = "AsterDEXExchange.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::new"
+rs = [ "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::new", "safe-cex-venue-asterdex/src/exchange_runtime.rs::METHOD_FIELDS" ]
 status = "ported"
-note = "Base/options/store handles, ordered declared fields and 44 arrow-member initializers, API-version assignment, four API slots, and public-before-private socket construction. Native source oracle asserts static values, field order, API slot IDs and original socket owner/store handles. Required member bindings are existing mapped Rust bodies, not a fallback source evaluator."
+note = "Base/options/store handles, ordered declared fields and 44 arrow-member initializers, API-version assignment, four API slots, and public-before-private socket construction. Native source oracle asserts static values, field order, API slot IDs and original socket owner/store handles. Required member bindings are existing mapped Rust bodies, not a fallback source evaluator. Split member `safe-cex-venue-asterdex/src/exchange_runtime.rs::METHOD_FIELDS`. Ordered list of arrow-function instance fields the constructor defines on the owner, mirroring the source class field declaration order."
 
 [[symbol]]
 ts = "AsterDEXExchange.get canSign"
@@ -102,17 +102,17 @@ note = "Creates the four native API instances and assigns primary/secondary/unli
 ts = "AsterDEXExchange.start"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::start_exchange"
+rs = [ "safe-cex-venue-asterdex/src/exchange_runtime.rs::start_exchange", "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::start" ]
 status = "ported"
-note = "Owns complete startup body: external-public guard, clock/auth ordering, market/ticker Store updates and precision log, independent position/order catches and timestamps, conditional sockets and unawaited tick, outer error log/rethrow. Source floor 16 startup cases; task ownership/reactions are bound runtime primitives. Rename target: `safe-cex-venue-asterdex/src/exchange_runtime.rs::start_exchange`."
+note = "Owns complete startup body: external-public guard, clock/auth ordering, market/ticker Store updates and precision log, independent position/order catches and timestamps, conditional sockets and unawaited tick, outer error log/rethrow. Source floor 16 startup cases; task ownership/reactions are bound runtime primitives. Rename target: `safe-cex-venue-asterdex/src/exchange_runtime.rs::start_exchange`. Split member `safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::start`. Instance entry point for the start field-fn; delegates to the mapped start_exchange body with the bound host and owner."
 
 [[symbol]]
 ts = "AsterDEXExchange#tick"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::tick"
+rs = [ "safe-cex-venue-asterdex/src/exchange_runtime.rs::tick", "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::tick" ]
 status = "ported"
-note = "Owns due calculations at 25s/25s/75s, balance-version argument, stale-position guard and full Store writes, disposal short circuits, independent warning catches and 3s rescheduling. Source floor eleven cases, including exact boundaries, version race and disposal during each fetch. Rename target: `safe-cex-venue-asterdex/src/exchange_runtime.rs::tick`."
+note = "Owns due calculations at 25s/25s/75s, balance-version argument, stale-position guard and full Store writes, disposal short circuits, independent warning catches and 3s rescheduling. Source floor eleven cases, including exact boundaries, version race and disposal during each fetch. Rename target: `safe-cex-venue-asterdex/src/exchange_runtime.rs::tick`. Split member `safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::tick`. Instance entry point for the private tick field-fn; delegates to the mapped tick body with the bound host and owner."
 
 [[symbol]]
 ts = "AsterDEXExchange#fetchBalance"
@@ -518,6 +518,6 @@ note = "Pure helper safe-cex-venue-asterdex/src/exchange_helpers.rs::map_timefra
 ts = "AsterDEXExchange.dispose"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::dispose"
+rs = [ "safe-cex-venue-asterdex/src/exchange_runtime.rs::dispose", "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::dispose" ]
 status = "ported"
-note = "Clock stop precedes public/private socket disposal and base disposal; abrupt completion stops later effects. Four source cases cover both sockets, absent sockets and two failures. Rename target: `safe-cex-venue-asterdex/src/exchange_runtime.rs::dispose`."
+note = "Clock stop precedes public/private socket disposal and base disposal; abrupt completion stops later effects. Four source cases cover both sockets, absent sockets and two failures. Rename target: `safe-cex-venue-asterdex/src/exchange_runtime.rs::dispose`. Split member `safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::dispose`. Instance entry point for the dispose field-fn; delegates to the mapped dispose body with the bound host and owner."
