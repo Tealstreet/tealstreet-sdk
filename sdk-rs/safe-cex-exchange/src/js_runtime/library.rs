@@ -114,7 +114,7 @@ fn words(s: &str) -> Vec<String> {
     out
 }
 
-pub fn snake_case(s: &str) -> String {
+fn snake_case(s: &str) -> String {
     words(s)
         .iter()
         .map(|w| w.to_lowercase())
@@ -122,7 +122,7 @@ pub fn snake_case(s: &str) -> String {
         .join("_")
 }
 
-pub fn camel_case(s: &str) -> String {
+fn camel_case(s: &str) -> String {
     words(s)
         .iter()
         .enumerate()
@@ -184,21 +184,32 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
     } else if collection.is_nullish() {
         vec![]
     } else {
-        collection.own_entries()?.into_iter().map(|(_, v)| v).collect()
+        collection
+            .own_entries()?
+            .into_iter()
+            .map(|(_, v)| v)
+            .collect()
     };
     let keys = match iteratees {
         Js::Array(_) => list(iteratees),
         Js::Undefined | Js::Null => vec![],
         other => vec![other.clone()],
     };
-    let keys = if keys.is_empty() { vec![Js::Undefined] } else { keys };
+    let keys = if keys.is_empty() {
+        vec![Js::Undefined]
+    } else {
+        keys
+    };
     let descending = match orders {
         Js::Array(_) => list(orders),
         Js::Undefined | Js::Null => vec![],
         other => vec![other.clone()],
     }
     .iter()
-    .map(|o| o.as_str().is_some_and(|s| String::from_utf16_lossy(s) == "desc"))
+    .map(|o| {
+        o.as_str()
+            .is_some_and(|s| String::from_utf16_lossy(s) == "desc")
+    })
     .collect::<Vec<_>>();
     let mut rows = vec![];
     for (index, value) in values.into_iter().enumerate() {
@@ -214,7 +225,11 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
             match compare_ascending(x, y) {
                 Ok(Ordering::Equal) => continue,
                 Ok(o) => {
-                    return if descending.get(i) == Some(&true) { o.reverse() } else { o };
+                    return if descending.get(i) == Some(&true) {
+                        o.reverse()
+                    } else {
+                        o
+                    };
                 }
                 Err(e) => {
                     failure.get_or_insert(e);
@@ -232,13 +247,13 @@ fn order_by(collection: &Js, iteratees: &Js, orders: &Js) -> Result<Js, Thrown> 
 
 /// bignumber.js value: `coefficient * 10^-scale`; `None` is NaN.
 #[derive(Clone, Debug, PartialEq)]
-pub struct Decimal {
+struct Decimal {
     coefficient: BigInt,
     scale: i64,
 }
 
 impl Decimal {
-    pub fn parse(source: &str) -> Option<Decimal> {
+    fn parse(source: &str) -> Option<Decimal> {
         let s = safe_cex_num::js_trim(source);
         let (negative, s) = match s.strip_prefix('-') {
             Some(rest) => (true, rest),
@@ -250,7 +265,10 @@ impl Decimal {
         };
         let (whole, fraction) = mantissa.split_once('.').unwrap_or((mantissa, ""));
         if whole.is_empty() && fraction.is_empty()
-            || !whole.bytes().chain(fraction.bytes()).all(|b| b.is_ascii_digit())
+            || !whole
+                .bytes()
+                .chain(fraction.bytes())
+                .all(|b| b.is_ascii_digit())
         {
             return None;
         }
@@ -293,11 +311,19 @@ impl Decimal {
     }
     fn plus(&self, other: &Self) -> Self {
         let (a, b, scale) = self.aligned(other);
-        Decimal { coefficient: a + b, scale }.normalize()
+        Decimal {
+            coefficient: a + b,
+            scale,
+        }
+        .normalize()
     }
     fn minus(&self, other: &Self) -> Self {
         let (a, b, scale) = self.aligned(other);
-        Decimal { coefficient: a - b, scale }.normalize()
+        Decimal {
+            coefficient: a - b,
+            scale,
+        }
+        .normalize()
     }
     fn times(&self, other: &Self) -> Self {
         Decimal {
@@ -309,7 +335,10 @@ impl Decimal {
     /// ROUND_DOWN integer quotient; division by zero is NaN.
     fn integer_quotient(&self, other: &Self) -> Option<Self> {
         let (a, b, _) = self.aligned(other);
-        (b != BigInt::default()).then(|| Decimal { coefficient: a / b, scale: 0 })
+        (b != BigInt::default()).then(|| Decimal {
+            coefficient: a / b,
+            scale: 0,
+        })
     }
     fn compare(&self, other: &Self) -> Ordering {
         let (a, b, _) = self.aligned(other);
@@ -322,7 +351,7 @@ impl Decimal {
         self.coefficient < BigInt::default()
     }
     /// Plain notation; `dp` rounds ROUND_HALF_UP and pads to that many places.
-    pub fn fixed(&self, dp: Option<i64>) -> String {
+    fn fixed(&self, dp: Option<i64>) -> String {
         let value = match dp {
             Some(dp) if dp < self.scale => {
                 let drop = (self.scale - dp) as u32;
@@ -356,7 +385,7 @@ impl Decimal {
         format!("{}{body}", if value.negative() && !zero { "-" } else { "" })
     }
     /// bignumber.js toString: exponential outside EXPONENTIAL_AT [-7, 20].
-    pub fn display(&self) -> String {
+    fn display(&self) -> String {
         let digits = self.digits();
         let exponent = digits.len() as i64 - 1 - self.scale;
         if self.coefficient == BigInt::default() || (-7 < exponent && exponent < 21) {
@@ -374,7 +403,7 @@ impl Decimal {
             if exponent > 0 { "+" } else { "" }
         )
     }
-    pub fn to_f64(&self) -> f64 {
+    fn to_f64(&self) -> f64 {
         safe_cex_num::number_from_string(&self.display())
     }
 }
@@ -396,7 +425,7 @@ fn decimal_of(v: &Js) -> Result<Option<Decimal>, Thrown> {
     }
 }
 
-pub fn big_number(value: Option<Decimal>) -> Js {
+fn big_number(value: Option<Decimal>) -> Js {
     let object = Js::object_with_class("BigNumber", vec![("_isBigNumber", Js::Bool(true))]);
     let binary = |name: &'static str, op: fn(&Decimal, &Decimal) -> Option<Decimal>| {
         let value = value.clone();
@@ -404,7 +433,12 @@ pub fn big_number(value: Option<Decimal>) -> Js {
             name,
             func(name, move |a| {
                 let other = decimal_of(&arg(&a, 0))?;
-                Ok(big_number(value.as_ref().zip(other.as_ref()).and_then(|(x, y)| op(x, y))))
+                Ok(big_number(
+                    value
+                        .as_ref()
+                        .zip(other.as_ref())
+                        .and_then(|(x, y)| op(x, y)),
+                ))
             }),
         )
     };
@@ -441,20 +475,30 @@ pub fn big_number(value: Option<Decimal>) -> Js {
             "toFixed",
             func("toFixed", move |a| {
                 let dp = arg(&a, 0);
-                let dp = if dp.is_undefined() { None } else { Some(dp.to_number()? as i64) };
-                Ok(Js::str(&fixed.as_ref().map_or("NaN".into(), |d| d.fixed(dp))))
+                let dp = if dp.is_undefined() {
+                    None
+                } else {
+                    Some(dp.to_number()? as i64)
+                };
+                Ok(Js::str(
+                    &fixed.as_ref().map_or("NaN".into(), |d| d.fixed(dp)),
+                ))
             }),
         ),
         (
             "toString",
             func("toString", move |_| {
-                Ok(Js::str(&string.as_ref().map_or("NaN".into(), Decimal::display)))
+                Ok(Js::str(
+                    &string.as_ref().map_or("NaN".into(), Decimal::display),
+                ))
             }),
         ),
         (
             "toNumber",
             func("toNumber", move |_| {
-                Ok(Js::Number(number.as_ref().map_or(f64::NAN, Decimal::to_f64)))
+                Ok(Js::Number(
+                    number.as_ref().map_or(f64::NAN, Decimal::to_f64),
+                ))
             }),
         ),
     ];
@@ -465,7 +509,9 @@ pub fn big_number(value: Option<Decimal>) -> Js {
     let _ = object.define(
         "valueOf",
         func("valueOf", move |_| {
-            Ok(Js::str(&shown.as_ref().map_or("NaN".into(), Decimal::display)))
+            Ok(Js::str(
+                &shown.as_ref().map_or("NaN".into(), Decimal::display),
+            ))
         }),
     );
     let _ = object.define(
@@ -518,7 +564,7 @@ fn days_in_month(y: i64, m: i64) -> i64 {
 }
 
 /// dayjs `add(n, unit)` on the UTC calendar (dayjs uses the host zone).
-pub fn dayjs_add(ms: f64, amount: f64, unit: &str) -> f64 {
+fn dayjs_add(ms: f64, amount: f64, unit: &str) -> f64 {
     if !ms.is_finite() {
         return f64::NAN;
     }
@@ -561,7 +607,9 @@ fn dayjs_ms(v: &Js, now: f64) -> Result<f64, Thrown> {
         Js::Undefined => now,
         Js::Null => f64::NAN,
         Js::Number(n) => *n,
-        Js::Object(_) if v.get("_isDayjs")?.truthy() => v.call_method("valueOf", vec![])?.to_number()?,
+        Js::Object(_) if v.get("_isDayjs")?.truthy() => {
+            v.call_method("valueOf", vec![])?.to_number()?
+        }
         Js::String(s) => parse_iso(&String::from_utf16_lossy(s)).unwrap_or(f64::NAN),
         other => other.to_number()?,
     })
@@ -572,7 +620,11 @@ fn parse_iso(s: &str) -> Option<f64> {
     let s = s.trim_end_matches('Z');
     let (date, time) = s.split_once(['T', ' ']).unwrap_or((s, ""));
     let mut parts = date.split('-').map(|p| p.parse::<i64>().ok());
-    let (y, m, d) = (parts.next()??, parts.next().flatten().unwrap_or(1), parts.next().flatten().unwrap_or(1));
+    let (y, m, d) = (
+        parts.next()??,
+        parts.next().flatten().unwrap_or(1),
+        parts.next().flatten().unwrap_or(1),
+    );
     let mut ms = days_from_civil(y, m, d) as f64 * DAY_MS;
     if !time.is_empty() {
         let mut t = time.split(':');
@@ -584,13 +636,17 @@ fn parse_iso(s: &str) -> Option<f64> {
     Some(ms)
 }
 
-pub fn dayjs(ms: f64) -> Js {
+fn dayjs(ms: f64) -> Js {
     let at = |f: fn(f64) -> f64| func("", move |_| Ok(Js::Number(f(ms))));
     let shift = |sign: f64| {
         func("", move |a| {
             let amount = arg(&a, 0).to_number()?;
             let unit = arg(&a, 1);
-            let unit = if unit.is_undefined() { String::new() } else { text(&unit)? };
+            let unit = if unit.is_undefined() {
+                String::new()
+            } else {
+                text(&unit)?
+            };
             Ok(dayjs(dayjs_add(ms, sign * amount, &unit)))
         })
     };
@@ -619,7 +675,9 @@ fn qs_encode(s: &str) -> String {
     let mut out = String::new();
     for b in s.as_bytes() {
         match b {
-            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => out.push(*b as char),
+            b'A'..=b'Z' | b'a'..=b'z' | b'0'..=b'9' | b'-' | b'.' | b'_' | b'~' => {
+                out.push(*b as char)
+            }
             _ => out.push_str(&format!("%{b:02X}")),
         }
     }
@@ -637,15 +695,23 @@ fn qs_pairs(prefix: &str, value: &Js, out: &mut Vec<String>) -> Result<(), Throw
         }
         Js::Object(_) => {
             for (k, v) in value.own_entries()? {
-                qs_pairs(&format!("{prefix}[{}]", String::from_utf16_lossy(&k)), &v, out)?;
+                qs_pairs(
+                    &format!("{prefix}[{}]", String::from_utf16_lossy(&k)),
+                    &v,
+                    out,
+                )?;
             }
         }
-        other => out.push(format!("{}={}", qs_encode(prefix), qs_encode(&text(other)?))),
+        other => out.push(format!(
+            "{}={}",
+            qs_encode(prefix),
+            qs_encode(&text(other)?)
+        )),
     }
     Ok(())
 }
 
-pub fn qs_stringify(value: &Js) -> Result<String, Thrown> {
+fn qs_stringify(value: &Js) -> Result<String, Thrown> {
     let mut out = vec![];
     if matches!(value, Js::Object(_)) {
         for (k, v) in value.own_entries()? {
@@ -655,7 +721,7 @@ pub fn qs_stringify(value: &Js) -> Result<String, Thrown> {
     Ok(out.join("&"))
 }
 
-pub fn decode_uri_component(s: &[u16]) -> Result<Vec<u16>, Thrown> {
+fn decode_uri_component(s: &[u16]) -> Result<Vec<u16>, Thrown> {
     let malformed = || Thrown::error("URIError", "URI malformed");
     let hex = |i: usize| -> Result<u8, Thrown> {
         let pair = s.get(i + 1..i + 3).ok_or_else(malformed)?;
@@ -703,7 +769,11 @@ fn nanoid<X>(scope: &Scope<X>, size: usize) -> String {
 
 fn sleep_promise<X>(scope: &Scope<X>, ms: f64) -> Js {
     let runtime = scope.exchange_runtime();
-    let delay = if ms.is_finite() && ms > 0.0 { ms as u64 } else { 0 };
+    let delay = if ms.is_finite() && ms > 0.0 {
+        ms as u64
+    } else {
+        0
+    };
     let sleeper = runtime.clone();
     Js::Promise(Promise::spawn(
         &runtime,
@@ -767,9 +837,7 @@ fn define_on(owner: &Js, key: &str, value: Js) {
 /// Install the shared utility modules next to `install_builtins`' globals.
 pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let def = |k: &str, v: Js| define_on(g, k, v);
-    let scoped = |name: &'static str,
-                  f: fn(&Scope<X>, Vec<Js>) -> Result<Js, Thrown>|
-     -> Js {
+    let scoped = |name: &'static str, f: fn(&Scope<X>, Vec<Js>) -> Result<Js, Thrown>| -> Js {
         let rt = rt.clone();
         Js::function(name, move |_, a| f(&scope_of(&rt)?, a))
     };
@@ -779,7 +847,9 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             &number,
             "isFinite",
             func("isFinite", |a| {
-                Ok(Js::Bool(matches!(arg(&a, 0), Js::Number(n) if n.is_finite())))
+                Ok(Js::Bool(
+                    matches!(arg(&a, 0), Js::Number(n) if n.is_finite()),
+                ))
             }),
         );
         if let Ok(parse_int) = g.get("parseInt") {
@@ -789,14 +859,20 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     def(
         "decodeURIComponent",
         func("decodeURIComponent", |a| {
-            Ok(Js::utf16(&decode_uri_component(&arg(&a, 0).to_js_string()?)?))
+            Ok(Js::utf16(&decode_uri_component(
+                &arg(&a, 0).to_js_string()?,
+            )?))
         }),
     );
 
     let chunk = func("chunk", |a| {
         let values = list(&arg(&a, 0));
         let size = arg(&a, 1);
-        let size = if size.is_undefined() { 1.0 } else { size.to_number()?.trunc() };
+        let size = if size.is_undefined() {
+            1.0
+        } else {
+            size.to_number()?.trunc()
+        };
         if values.is_empty() || size.partial_cmp(&1.0).is_none_or(Ordering::is_lt) {
             return Ok(Js::array(vec![]));
         }
@@ -839,14 +915,20 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         for v in values {
             let current = iteratee(&by, v)?;
             if !current.is_undefined() {
-                total = if total.is_undefined() { current } else { add_js(total, current)? };
+                total = if total.is_undefined() {
+                    current
+                } else {
+                    add_js(total, current)?
+                };
             }
         }
         Ok(total)
     });
     let uniq = func("uniq", |a| uniq_by(list(&arg(&a, 0)), &Js::Undefined));
     let uniq_by_fn = func("uniqBy", |a| uniq_by(list(&arg(&a, 0)), &arg(&a, 1)));
-    let order_by_fn = func("orderBy", |a| order_by(&arg(&a, 0), &arg(&a, 1), &arg(&a, 2)));
+    let order_by_fn = func("orderBy", |a| {
+        order_by(&arg(&a, 0), &arg(&a, 1), &arg(&a, 2))
+    });
     let lodash = Js::object(vec![]);
     for (name, f) in [
         ("chunk", chunk),
@@ -889,13 +971,20 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 let mut out = vec![];
                 let len = list(&array).len();
                 for i in 0..len {
-                    let Some(Some(v)) = array.array_items().and_then(|xs| xs.get(i).cloned()) else {
+                    let Some(Some(v)) = array.array_items().and_then(|xs| xs.get(i).cloned())
+                    else {
                         out.push(Js::Undefined);
                         continue;
                     };
-                    out.push(await_js(call(&f, vec![v, Js::Number(i as f64), array.clone()])?).await?);
+                    out.push(
+                        await_js(call(&f, vec![v, Js::Number(i as f64), array.clone()])?).await?,
+                    );
                 }
-                Ok(if collect { Js::array(out) } else { Js::Undefined })
+                Ok(if collect {
+                    Js::array(out)
+                } else {
+                    Js::Undefined
+                })
             })))
         })
     };
@@ -912,7 +1001,12 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
 
     let numeric = |name: &'static str, f: fn(f64, f64) -> f64| {
-        func(name, move |a| Ok(Js::Number(f(arg(&a, 0).to_number()?, arg(&a, 1).to_number()?))))
+        func(name, move |a| {
+            Ok(Js::Number(f(
+                arg(&a, 0).to_number()?,
+                arg(&a, 1).to_number()?,
+            )))
+        })
     };
     def("add", numeric("add", safe_cex_num::add));
     def("subtract", numeric("subtract", safe_cex_num::subtract));
@@ -929,7 +1023,9 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     def(
         "roundUSD",
-        func("roundUSD", |a| Ok(Js::Number(safe_cex_num::round_usd(arg(&a, 0).to_number()?)))),
+        func("roundUSD", |a| {
+            Ok(Js::Number(safe_cex_num::round_usd(arg(&a, 0).to_number()?)))
+        }),
     );
     def(
         "oldestCursorId",
@@ -937,7 +1033,11 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             let field = text(&arg(&a, 1))?;
             let mut ids = vec![];
             for row in list(&arg(&a, 0)) {
-                let raw = if row.is_nullish() { Js::Undefined } else { row.get(&field)? };
+                let raw = if row.is_nullish() {
+                    Js::Undefined
+                } else {
+                    row.get(&field)?
+                };
                 if !raw.is_nullish() {
                     ids.push(text(&raw)?);
                 }
@@ -952,19 +1052,28 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             if mode.strict_equals(&Js::str("oneway")) || !side.truthy() {
                 return Ok(symbol);
             }
-            add_js(add_js(Js::String(symbol.to_js_string()?), Js::str(":"))?, Js::String(side.to_js_string()?))
+            add_js(
+                add_js(Js::String(symbol.to_js_string()?), Js::str(":"))?,
+                Js::String(side.to_js_string()?),
+            )
         }),
     );
     def(
         "normalizeExecutionPositionSide",
         func("normalizeExecutionPositionSide", |a| {
             let raw = arg(&a, 0);
-            let value = if raw.is_nullish() { String::new() } else { text(&raw)? };
-            Ok(Js::str(match safe_cex_num::js_trim(&value).to_lowercase().as_str() {
-                "long" | "open long" | "close long" => "long",
-                "short" | "open short" | "close short" => "short",
-                _ => "both",
-            }))
+            let value = if raw.is_nullish() {
+                String::new()
+            } else {
+                text(&raw)?
+            };
+            Ok(Js::str(
+                match safe_cex_num::js_trim(&value).to_lowercase().as_str() {
+                    "long" | "open long" | "close long" => "long",
+                    "short" | "open short" | "close short" => "short",
+                    _ => "both",
+                },
+            ))
         }),
     );
     def(
@@ -987,7 +1096,9 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         func("inverseObj", |a| {
             let source = arg(&a, 0);
             if source.is_nullish() {
-                return Err(Thrown::type_error("Cannot convert undefined or null to object"));
+                return Err(Thrown::type_error(
+                    "Cannot convert undefined or null to object",
+                ));
             }
             let out = Js::object(vec![]);
             for (k, v) in source.own_entries()? {
@@ -1014,7 +1125,12 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "updateOrderBook",
         func("updateOrderBook", |a| {
             let upsert = arg(&a, 3);
-            update_order_book(&arg(&a, 0), &arg(&a, 1), arg(&a, 2), upsert.is_undefined() || upsert.truthy())
+            update_order_book(
+                &arg(&a, 0),
+                &arg(&a, 1),
+                arg(&a, 2),
+                upsert.is_undefined() || upsert.truthy(),
+            )
         }),
     );
     def(
@@ -1038,7 +1154,11 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             let now = s.now();
             let existing = list(&arg(&a, 1));
             let cutoff = arg(&a, 2);
-            let cutoff = if cutoff.is_undefined() { 1000.0 } else { cutoff.to_number()? };
+            let cutoff = if cutoff.is_undefined() {
+                1000.0
+            } else {
+                cutoff.to_number()?
+            };
             let mut merged = vec![];
             for update in list(&arg(&a, 0)) {
                 let id = update.get("id")?;
@@ -1049,8 +1169,13 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                         break;
                     }
                 }
-                let last = if found.is_nullish() { Js::Undefined } else { found.get("lastUpdate")? };
-                let fresh = last.truthy() && (now - last.to_number()?).partial_cmp(&cutoff) != Some(Ordering::Greater);
+                let last = if found.is_nullish() {
+                    Js::Undefined
+                } else {
+                    found.get("lastUpdate")?
+                };
+                let fresh = last.truthy()
+                    && (now - last.to_number()?).partial_cmp(&cutoff) != Some(Ordering::Greater);
                 merged.push(if fresh { found } else { update });
             }
             merged.extend(existing);
@@ -1095,7 +1220,10 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         func("createHmac", |a| {
             let algorithm = text(&arg(&a, 0))?;
             if algorithm != "sha256" {
-                return Err(Thrown::error("Error", &format!("Digest method not supported: {algorithm}")));
+                return Err(Thrown::error(
+                    "Error",
+                    &format!("Digest method not supported: {algorithm}"),
+                ));
             }
             let key = text(&arg(&a, 1))?;
             let payload = Rc::new(std::cell::RefCell::new(String::new()));
@@ -1131,17 +1259,25 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "nanoid",
         scoped("nanoid", |s, a| {
             let size = arg(&a, 0);
-            let size = if size.is_undefined() { 21.0 } else { size.to_number()? };
+            let size = if size.is_undefined() {
+                21.0
+            } else {
+                size.to_number()?
+            };
             Ok(Js::str(&nanoid(s, size.max(0.0) as usize)))
         }),
     );
     def(
         "uuid",
-        scoped("uuid", |s, _| Ok(Js::str(&nanoid(s, 21).replace(['-', '_'], "")))),
+        scoped("uuid", |s, _| {
+            Ok(Js::str(&nanoid(s, 21).replace(['-', '_'], "")))
+        }),
     );
     def(
         "sleep",
-        scoped("sleep", |s, a| Ok(sleep_promise(s, arg(&a, 0).to_number()?))),
+        scoped("sleep", |s, a| {
+            Ok(sleep_promise(s, arg(&a, 0).to_number()?))
+        }),
     );
     def(
         "loop",
@@ -1189,7 +1325,8 @@ mod tests {
         fn spell(v: serde_json::Value) -> serde_json::Value {
             match v {
                 serde_json::Value::Number(n) => {
-                    serde_json::from_str(&safe_cex_num::js_number_string(n.as_f64().unwrap())).unwrap()
+                    serde_json::from_str(&safe_cex_num::js_number_string(n.as_f64().unwrap()))
+                        .unwrap()
                 }
                 serde_json::Value::Array(xs) => xs.into_iter().map(spell).collect(),
                 serde_json::Value::Object(m) => m.into_iter().map(|(k, v)| (k, spell(v))).collect(),
@@ -1206,7 +1343,9 @@ mod tests {
     fn big_number_is_exact_decimal() {
         let g = globals();
         let n = |x: Js| run(&g, "BigNumber", vec![x]);
-        let sum = n(Js::str("0.1")).call_method("plus", vec![Js::Number(0.2)]).unwrap();
+        let sum = n(Js::str("0.1"))
+            .call_method("plus", vec![Js::Number(0.2)])
+            .unwrap();
         assert_eq!(s(&sum.call_method("toString", vec![]).unwrap()), "0.3");
         let step = n(Js::Number(0.01));
         let lot = n(Js::Number(1000.005))
@@ -1215,7 +1354,11 @@ mod tests {
             .call_method("multipliedBy", vec![step])
             .unwrap();
         assert_eq!(s(&lot.call_method("toFixed", vec![]).unwrap()), "1000");
-        let fixed = |x: &str, dp: f64| s(&n(Js::str(x)).call_method("toFixed", vec![Js::Number(dp)]).unwrap());
+        let fixed = |x: &str, dp: f64| {
+            s(&n(Js::str(x))
+                .call_method("toFixed", vec![Js::Number(dp)])
+                .unwrap())
+        };
         assert_eq!(fixed("1.005", 2.0), "1.01");
         assert_eq!(fixed("-1.005", 2.0), "-1.01");
         assert_eq!(fixed("1.5", 3.0), "1.500");
@@ -1228,9 +1371,24 @@ mod tests {
             vec![n(Js::Number(3.0)), Js::Number(2.5)],
         )
         .unwrap();
-        assert_eq!(min.call_method("toNumber", vec![]).unwrap().as_f64(), Some(2.5));
-        assert!(n(Js::str("abc")).call_method("toNumber", vec![]).unwrap().as_f64().unwrap().is_nan());
-        assert!(!n(Js::Number(f64::NAN)).call_method("gt", vec![Js::Number(0.0)]).unwrap().truthy());
+        assert_eq!(
+            min.call_method("toNumber", vec![]).unwrap().as_f64(),
+            Some(2.5)
+        );
+        assert!(
+            n(Js::str("abc"))
+                .call_method("toNumber", vec![])
+                .unwrap()
+                .as_f64()
+                .unwrap()
+                .is_nan()
+        );
+        assert!(
+            !n(Js::Number(f64::NAN))
+                .call_method("gt", vec![Js::Number(0.0)])
+                .unwrap()
+                .truthy()
+        );
     }
 
     #[test]
@@ -1241,7 +1399,10 @@ mod tests {
         assert_eq!(dayjs_add(jan31, -1.0, "w"), jan31 - 7.0 * DAY_MS);
         assert_eq!(dayjs_add(jan31, -300.0, "m"), jan31 - 18_000_000.0);
         assert_eq!(dayjs_add(jan31, 1.0, "y"), 1_738_281_600_000.0);
-        assert_eq!(dayjs(jan31).call_method("unix", vec![]).unwrap().as_f64(), Some(1_706_659_200.0));
+        assert_eq!(
+            dayjs(jan31).call_method("unix", vec![]).unwrap().as_f64(),
+            Some(1_706_659_200.0)
+        );
         assert_eq!(parse_iso("2024-01-31T00:00:00Z"), Some(jan31));
     }
 
@@ -1257,7 +1418,10 @@ mod tests {
         let encoded = qs_stringify(&params).unwrap();
         assert_eq!(encoded, "a=1&b%5B0%5D=1&b%5B1%5D=2&d=&e=x%20y%2C");
         let decoded = decode_uri_component(&super::super::value::utf16(&encoded)).unwrap();
-        assert_eq!(String::from_utf16_lossy(&decoded), "a=1&b[0]=1&b[1]=2&d=&e=x y,");
+        assert_eq!(
+            String::from_utf16_lossy(&decoded),
+            "a=1&b[0]=1&b[1]=2&d=&e=x y,"
+        );
         let euro = decode_uri_component(&super::super::value::utf16("%E2%82%AC")).unwrap();
         assert_eq!(String::from_utf16_lossy(&euro), "€");
         assert!(decode_uri_component(&super::super::value::utf16("%E2")).is_err());
@@ -1267,60 +1431,156 @@ mod tests {
     fn lodash_and_utils() {
         let g = globals();
         let nums = |xs: &[f64]| Js::array(xs.iter().map(|x| Js::Number(*x)).collect());
-        assert_eq!(json(&run(&g, "chunk", vec![nums(&[1.0, 2.0, 3.0]), Js::Number(2.0)])), "[[1,2],[3]]");
-        assert_eq!(json(&run(&g, "chunk", vec![nums(&[1.0]), Js::Number(0.0)])), "[]");
-        let nested = Js::array(vec![nums(&[1.0]), Js::Number(2.0), Js::array(vec![nums(&[3.0])])]);
+        assert_eq!(
+            json(&run(
+                &g,
+                "chunk",
+                vec![nums(&[1.0, 2.0, 3.0]), Js::Number(2.0)]
+            )),
+            "[[1,2],[3]]"
+        );
+        assert_eq!(
+            json(&run(&g, "chunk", vec![nums(&[1.0]), Js::Number(0.0)])),
+            "[]"
+        );
+        let nested = Js::array(vec![
+            nums(&[1.0]),
+            Js::Number(2.0),
+            Js::array(vec![nums(&[3.0])]),
+        ]);
         assert_eq!(json(&run(&g, "flatten", vec![nested])), "[1,2,[3]]");
-        let rows = |xs: &[Js]| Js::array(xs.iter().map(|x| Js::object(vec![("a", x.clone())])).collect());
+        let rows = |xs: &[Js]| {
+            Js::array(
+                xs.iter()
+                    .map(|x| Js::object(vec![("a", x.clone())]))
+                    .collect(),
+            )
+        };
         let data = rows(&[Js::Number(2.0), Js::Undefined, Js::Number(1.0), Js::Null]);
-        assert_eq!(json(&run(&g, "sumBy", vec![rows(&[Js::Number(1.0), Js::Number(2.0)]), Js::str("a")])), "3");
+        assert_eq!(
+            json(&run(
+                &g,
+                "sumBy",
+                vec![rows(&[Js::Number(1.0), Js::Number(2.0)]), Js::str("a")]
+            )),
+            "3"
+        );
         assert_eq!(json(&run(&g, "sumBy", vec![Js::array(vec![])])), "0");
-        let asc = run(&g, "orderBy", vec![data.clone(), Js::array(vec![Js::str("a")]), Js::array(vec![Js::str("asc")])]);
+        let asc = run(
+            &g,
+            "orderBy",
+            vec![
+                data.clone(),
+                Js::array(vec![Js::str("a")]),
+                Js::array(vec![Js::str("asc")]),
+            ],
+        );
         assert_eq!(json(&asc), r#"[{"a":1},{"a":2},{"a":null},{}]"#);
         let desc = run(&g, "orderBy", vec![data, Js::str("a"), Js::str("desc")]);
         assert_eq!(json(&desc), r#"[{},{"a":null},{"a":2},{"a":1}]"#);
-        let split = run(&g, "partition", vec![nums(&[0.0, 1.0, 2.0]), Js::function("", |_, a| Ok(arg(&a, 0)))]);
+        let split = run(
+            &g,
+            "partition",
+            vec![
+                nums(&[0.0, 1.0, 2.0]),
+                Js::function("", |_, a| Ok(arg(&a, 0))),
+            ],
+        );
         assert_eq!(json(&split), "[[1,2],[0]]");
-        assert_eq!(json(&run(&g, "uniq", vec![nums(&[1.0, 1.0, f64::NAN, f64::NAN, 2.0])])), "[1,null,2]");
+        assert_eq!(
+            json(&run(
+                &g,
+                "uniq",
+                vec![nums(&[1.0, 1.0, f64::NAN, f64::NAN, 2.0])]
+            )),
+            "[1,null,2]"
+        );
         let by_id = rows(&[Js::Number(1.0), Js::Number(1.0), Js::Number(2.0)]);
-        assert_eq!(json(&run(&g, "uniqBy", vec![by_id, Js::str("a")])), r#"[{"a":1},{"a":2}]"#);
+        assert_eq!(
+            json(&run(&g, "uniqBy", vec![by_id, Js::str("a")])),
+            r#"[{"a":1},{"a":2}]"#
+        );
         let side = Js::object(vec![("Buy", Js::str("buy"))]);
         assert_eq!(json(&run(&g, "inverseObj", vec![side])), r#"{"buy":"Buy"}"#);
         let omitted = Js::object(vec![("a", Js::Undefined), ("b", Js::Null)]);
-        assert_eq!(json(&run(&g, "omitUndefined", vec![omitted])), r#"{"b":null}"#);
-        let id = |side: Js, mode: Js| s(&run(&g, "createPositionId", vec![Js::str("BTC"), side, mode]));
+        assert_eq!(
+            json(&run(&g, "omitUndefined", vec![omitted])),
+            r#"{"b":null}"#
+        );
+        let id = |side: Js, mode: Js| {
+            s(&run(
+                &g,
+                "createPositionId",
+                vec![Js::str("BTC"), side, mode],
+            ))
+        };
         assert_eq!(id(Js::str("long"), Js::str("hedged")), "BTC:long");
         assert_eq!(id(Js::str("long"), Js::str("oneway")), "BTC");
         assert_eq!(id(Js::Undefined, Js::str("hedged")), "BTC");
-        assert_eq!(s(&run(&g, "normalizeExecutionPositionSide", vec![Js::str(" Close LONG ")])), "long");
-        assert_eq!(s(&run(&g, "normalizeExecutionPositionSide", vec![Js::str("buy")])), "both");
+        assert_eq!(
+            s(&run(
+                &g,
+                "normalizeExecutionPositionSide",
+                vec![Js::str(" Close LONG ")]
+            )),
+            "long"
+        );
+        assert_eq!(
+            s(&run(
+                &g,
+                "normalizeExecutionPositionSide",
+                vec![Js::str("buy")]
+            )),
+            "both"
+        );
         let cursor = rows(&[Js::str("120"), Js::str("99"), Js::str("x"), Js::Null]);
-        assert_eq!(s(&run(&g, "oldestCursorId", vec![cursor, Js::str("a")])), "99");
-        let record = Js::object(vec![("order_id", Js::Number(7.0)), ("clientId", Js::Number(8.0))]);
-        assert_eq!(json(&run(&g, "v", vec![record.clone(), Js::str("orderId")])), "7");
-        assert_eq!(json(&run(&g, "v", vec![record.clone(), Js::str("client_id")])), "8");
+        assert_eq!(
+            s(&run(&g, "oldestCursorId", vec![cursor, Js::str("a")])),
+            "99"
+        );
+        let record = Js::object(vec![
+            ("order_id", Js::Number(7.0)),
+            ("clientId", Js::Number(8.0)),
+        ]);
+        assert_eq!(
+            json(&run(&g, "v", vec![record.clone(), Js::str("orderId")])),
+            "7"
+        );
+        assert_eq!(
+            json(&run(&g, "v", vec![record.clone(), Js::str("client_id")])),
+            "8"
+        );
         assert!(run(&g, "v", vec![record, Js::str("missing")]).is_undefined());
         assert_eq!(snake_case("HTTPServer2Go"), "http_server_2_go");
         assert_eq!(camel_case("order_id"), "orderId");
         let finite = g.get("Number").unwrap().get("isFinite").unwrap();
         assert!(!call(&finite, vec![Js::str("1")]).unwrap().truthy());
         let hmac = run(&g, "createHmac", vec![Js::str("sha256"), Js::str("key")])
-            .call_method("update", vec![Js::str("The quick brown fox jumps over the lazy dog")])
+            .call_method(
+                "update",
+                vec![Js::str("The quick brown fox jumps over the lazy dog")],
+            )
             .unwrap()
             .call_method("digest", vec![Js::str("hex")])
             .unwrap();
-        assert_eq!(s(&hmac), "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8");
+        assert_eq!(
+            s(&hmac),
+            "f7bc83f430538424b13298e6aa6fb143ef4d59a14946175997479dbc2d1a3cd8"
+        );
     }
 
     #[test]
     fn order_book_upsert_keeps_sort() {
         let g = globals();
-        let level = |p: f64, a: f64| Js::object(vec![("price", Js::Number(p)), ("amount", Js::Number(a))]);
+        let level =
+            |p: f64, a: f64| Js::object(vec![("price", Js::Number(p)), ("amount", Js::Number(a))]);
         let book = Js::object(vec![
             ("bids", Js::array(vec![level(3.0, 1.0), level(1.0, 1.0)])),
             ("asks", Js::array(vec![level(4.0, 1.0)])),
         ]);
-        let up = |side: &str, l: Js| run(&g, "updateOrderBook", vec![book.clone(), Js::str(side), l]).as_f64();
+        let up = |side: &str, l: Js| {
+            run(&g, "updateOrderBook", vec![book.clone(), Js::str(side), l]).as_f64()
+        };
         assert_eq!(up("bids", level(2.0, 5.0)), Some(1.0));
         assert_eq!(up("bids", level(3.0, 0.0)), Some(-1.0));
         assert_eq!(up("asks", level(4.0, 2.0)), Some(0.0));
