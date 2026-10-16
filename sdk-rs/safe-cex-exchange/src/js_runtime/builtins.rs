@@ -47,6 +47,10 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
                 _ => None,
             }
         }
+        Js::BigInt(n) => {
+            let n = n.clone();
+            (name == "toString").then(|| method("toString", move |_| Ok(Js::str(&n.to_string()))))
+        }
         Js::Bool(b) => {
             let b = *b;
             (name == "toString").then(|| {
