@@ -216,7 +216,7 @@ test('moving registry back beside venues rejects its constructor dependency', ()
 });
 test('registry constructs only the listed venues', () => {
   const { policy, metadata } = inputs();
-  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-coinbase', 'safe-cex-venue-cryptocom', 'safe-cex-venue-phemex', 'safe-cex-venue-okx', 'safe-cex-venue-kraken', 'safe-cex-venue-hyperliquid', 'safe-cex-venue-polymarket']);
+  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-coinbase', 'safe-cex-venue-cryptocom', 'safe-cex-venue-phemex', 'safe-cex-venue-okx', 'safe-cex-venue-kraken', 'safe-cex-venue-hyperliquid', 'safe-cex-venue-polymarket', 'safe-cex-venue-kucoin', 'safe-cex-venue-mexc']);
   addEdge(metadata, 'safe-cex-registry', 'safe-cex-venue-bybit');
   assert.throws(() => validateLayers(policy, metadata), /^AssertionError \[ERR_ASSERTION\]: unlisted registry constructor: safe-cex-registry -> safe-cex-venue-bybit$/);
 });
@@ -227,8 +227,9 @@ test('removing a listed registry constructor rejects its live edge', () => {
 });
 test('a listed registry constructor without a live edge is stale', () => {
   const { policy, metadata } = inputs();
-  policy.registryConstructors.venues.push('safe-cex-venue-kucoin');
-  assert.throws(() => validateLayers(policy, metadata), /stale registry constructor: safe-cex-registry -> safe-cex-venue-kucoin/);
+  const registry = metadata.packages.find(pkg => pkg.name === 'safe-cex-registry');
+  registry.dependencies = registry.dependencies.filter(dep => dep.name !== 'safe-cex-venue-backpack');
+  assert.throws(() => validateLayers(policy, metadata), /stale registry constructor: safe-cex-registry -> safe-cex-venue-backpack/);
 });
 test('venue cannot depend upward on constructor registry', () => {
   const { policy, metadata } = inputs();
