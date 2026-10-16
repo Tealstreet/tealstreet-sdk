@@ -131,15 +131,20 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                     }
                 }
                 Command::Close { id, reply } => {
-                    let closed = accounts.remove(&id).map(|open| {
-                        (open.unwatch)();
-                        tokio::task::spawn_local(async move {
-                            let _ =
-                                native_account_call(open.account, "dispose".into(), vec![]).await;
-                        });
+                    let Some(open) = accounts.remove(&id) else {
+                        let _ = reply.send(Err(error_json(&format!("no native account {id}"))));
+                        continue;
+                    };
+                    (open.unwatch)();
+                    // Acknowledgement means disposal finished; keep its errors visible
+                    // to the JS host rather than leaving live work behind a resolved close.
+                    tokio::task::spawn_local(async move {
+                        let result = native_account_call(open.account, "dispose".into(), vec![])
+                            .await
+                            .map(|_| ())
+                            .map_err(|error| error.to_string());
+                        let _ = reply.send(result);
                     });
-                    let _ = reply
-                        .send(closed.ok_or_else(|| error_json(&format!("no native account {id}"))));
                 }
             }
         }
@@ -268,7 +273,7 @@ pub fn signer_available(id: u32, available: bool) -> napi::Result<()> {
         .map_err(|_| rejected(error_json("native host thread stopped")))
 }
 
-/// Stops forwarding and disposes the account.
+/// Stops forwarding and resolves after disposal; disposal errors reject.
 #[napi]
 pub async fn native_account_close(id: u32) -> napi::Result<()> {
     send(|reply| Command::Close { id, reply }).await

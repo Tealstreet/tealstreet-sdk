@@ -26,3 +26,11 @@ Bun must already be on PATH; the native smoke names it and its installation
 instructions if missing. Setup does not install Bun.
 `CARGO` can specify the Cargo executable. Build output is ignored under `dist/`;
 both smokes rebuild before executing and fail on errors/timeouts.
+
+With the `node` feature, `nativeAccountOpen`, `nativeAccountCallMethod`,
+`nativeAccountSignerAvailable` and `nativeAccountClose` expose the registry's
+JSON account host. Events and private Store slices are forwarded to JS; signing
+and proxy tokens remain host callbacks. `nativeAccountClose` stops forwarding
+immediately, then resolves after disposal completes, or rejects with its error.
+Calls and repeated closes against a removed account reject.
+`smoke/bun/native-exchange.mjs` exercises this surface against a local HTTP server.

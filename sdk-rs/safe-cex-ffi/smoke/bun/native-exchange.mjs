@@ -66,6 +66,7 @@ assert.ok(seen.every((s) => s.key in routes), `every request had a local route: 
 
 await assert.rejects(native.nativeAccountCallMethod(id, 'noSuchMethod', '[]'), /Unknown method noSuchMethod/);
 await native.nativeAccountClose(id);
+await assert.rejects(native.nativeAccountClose(id), /no native account/);
 await assert.rejects(native.nativeAccountCallMethod(id, 'fetchMarkets', '[]'), /no native account/);
 server.close();
 console.log(`native exchange smoke passed: ${signed.length} remote signatures, ${stores.length} store slices, ${events.length} events`);
