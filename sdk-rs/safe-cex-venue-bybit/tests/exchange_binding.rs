@@ -188,21 +188,7 @@ fn fetch_tickers_parses_rows_for_known_markets() {
             ]}),
         );
     });
-    let market: safe_cex_types::Market = serde_json::from_value(json!({
-        "id": "BTCUSDT", "symbol": "BTCUSDT", "base": "BTC", "quote": "USDT", "active": true,
-        "precision": {"amount": 0.001, "price": 0.1},
-        "limits": {"amount": {"min": 0.001, "max": 100}, "leverage": {"min": 1, "max": 100}}
-    }))
-    .unwrap();
-    safe_cex_store::Store::update(
-        h.store.as_ref(),
-        safe_cex_store::StoreUpdate {
-            markets: Some(vec![market]),
-            ..Default::default()
-        },
-        false,
-    )
-    .unwrap();
+    seed_market(&h);
     let tickers = h.drive(h.venue().fetch_tickers()).expect("fetchTickers");
     assert_eq!(
         tickers.len(),
@@ -306,4 +292,146 @@ fn validate_account_checks_the_key_then_reads_balance() {
         bad.wire.calls("/v5/account/wallet-balance").is_empty(),
         "a rejected key reads no balance"
     );
+}
+
+fn seed_market(h: &support::Harness) {
+    let market: safe_cex_types::Market = serde_json::from_value(json!({
+        "id": "BTCUSDT", "symbol": "BTCUSDT", "base": "BTC", "quote": "USDT", "active": true,
+        "precision": {"amount": 0.001, "price": 0.1},
+        "limits": {"amount": {"min": 0.001, "max": 100}, "leverage": {"min": 1, "max": 100}}
+    }))
+    .unwrap();
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(vec![market]),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+}
+
+fn position_list(leverage: &str) -> serde_json::Value {
+    json!({"list": [{
+        "symbol": "BTCUSDT", "side": "Buy", "size": "0.5", "avgPrice": "25000",
+        "positionValue": "12500", "leverage": leverage, "unrealisedPnl": "0",
+        "curRealisedPnl": "0", "liqPrice": "0", "positionIdx": 0, "updatedTime": "1", "seq": 1,
+        "positionStatus": "Normal"
+    }], "nextPageCursor": ""})
+}
+
+#[test]
+fn set_leverage_clamps_to_the_market_and_refreshes_the_position() {
+    let h = harness(options(), |w| {
+        w.ok("GET", "/v5/position/list", position_list("10"));
+        w.ok("POST", "/v5/position/set-leverage", json!({}));
+    });
+    seed_market(&h);
+    h.drive(h.venue().set_leverage("BTCUSDT".into(), 150.0, None))
+        .expect("setLeverage");
+    let posts = h.wire.calls("/v5/position/set-leverage");
+    assert_eq!(posts.len(), 1);
+    assert_eq!(
+        posts[0].body,
+        json!({"category": "linear", "symbol": "BTCUSDT", "buyLeverage": "100", "sellLeverage": "100"}),
+        "clamped to the market's 100x"
+    );
+    let reads = h.wire.calls("/v5/position/list");
+    assert_eq!(reads.len(), 2, "position read before and after the write");
+    assert_eq!(reads[0].params["symbol"], "BTCUSDT");
+
+    let unchanged = harness(options(), |w| {
+        w.ok("GET", "/v5/position/list", position_list("100"));
+    });
+    seed_market(&unchanged);
+    unchanged
+        .drive(
+            unchanged
+                .venue()
+                .set_leverage("BTCUSDT".into(), 100.0, None),
+        )
+        .expect("setLeverage at the current leverage");
+    assert!(
+        unchanged.wire.calls("/v5/position/set-leverage").is_empty(),
+        "an unchanged leverage sends nothing"
+    );
+}
+
+#[test]
+fn change_position_mode_switches_linear_usdt_and_refreshes() {
+    let h = harness(options(), |w| {
+        w.route(
+            "POST",
+            "/v5/position/switch-mode",
+            200,
+            json!({"retCode": 0, "retMsg": "All symbols switched successfully.", "result": {}}),
+        );
+        w.ok("GET", "/v5/position/list", position_list("10"));
+    });
+    h.drive(h.venue().change_position_mode(true, Some("ETHUSDT".into())))
+        .expect("changePositionMode");
+    let posts = h.wire.calls("/v5/position/switch-mode");
+    assert_eq!(
+        posts[0].body,
+        json!({"category": "linear", "coin": "USDT", "mode": 3}),
+        "the symbol is cleared: bulk linear USDT"
+    );
+    assert!(
+        !h.wire.calls("/v5/position/list").is_empty(),
+        "positions refreshed"
+    );
+
+    let inverse = harness(options(), |_| {});
+    let error = inverse
+        .drive(
+            inverse
+                .venue()
+                .change_position_mode(true, Some("BTCUSD".into())),
+        )
+        .expect_err("inverse symbols are refused");
+    assert_eq!(
+        error.message,
+        "Bybit position mode can only be changed on linear markets here (BTCUSD)"
+    );
+}
+
+#[test]
+fn change_margin_type_switches_the_account_and_restamps_positions() {
+    let h = harness(options(), |w| {
+        w.route(
+            "POST",
+            "/v5/account/set-margin-mode",
+            200,
+            json!({"retCode": 0, "retMsg": "Request accepted", "result": {"reasons": []}}),
+        );
+        w.ok("GET", "/v5/position/list", position_list("10"));
+    });
+    h.drive(h.venue().change_margin_type(true, None))
+        .expect("changeMarginType");
+    assert_eq!(
+        h.wire.calls("/v5/account/set-margin-mode")[0].body,
+        json!({"setMarginMode": "ISOLATED_MARGIN"})
+    );
+    let positions = safe_cex_store::Store::positions(h.store.as_ref());
+    assert!(!positions.is_empty());
+    assert!(
+        positions
+            .iter()
+            .all(|p| p.margin_type == Some(safe_cex_types::MarginType::Isolated)),
+        "refetched positions carry the new margin type: {positions:?}"
+    );
+
+    let refused = harness(options(), |w| {
+        w.route(
+            "POST",
+            "/v5/account/set-margin-mode",
+            200,
+            json!({"retCode": 0, "retMsg": "Request accepted", "result": {"reasons": [{"reasonCode": "3400045", "reasonMsg": "Insufficient margin"}]}}),
+        );
+    });
+    let error = refused
+        .drive(refused.venue().change_margin_type(true, None))
+        .expect_err("a reason refuses the switch");
+    assert_eq!(error.message, "Insufficient margin");
 }

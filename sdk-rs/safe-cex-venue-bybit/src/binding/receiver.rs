@@ -296,6 +296,20 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         members::account::format_balance(rt, arg(&a, 0))
     });
 
+    // Position controls (members/controls.rs).
+    method(&this, rt, "setLeverage", |rt, a| {
+        members::controls::set_leverage(rt, arg(&a, 0), arg(&a, 1))
+    });
+    method(&this, rt, "changePositionMode", |rt, a| {
+        members::controls::change_position_mode(rt, arg(&a, 0), arg(&a, 1))
+    });
+    method(&this, rt, "changePositionModeHelper", |rt, a| {
+        members::controls::change_position_mode_helper(rt, &a)
+    });
+    method(&this, rt, "changeMarginType", |rt, a| {
+        members::controls::change_margin_type(rt, arg(&a, 0), arg(&a, 1))
+    });
+
     // Public data (members/markets.rs).
     method(&this, rt, "fetchFees", |rt, a| {
         members::markets::fetch_fees(rt, arg(&a, 0))
