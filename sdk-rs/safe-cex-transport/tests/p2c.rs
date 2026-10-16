@@ -495,7 +495,7 @@ fn bybit_excludes_instruments_network_retry_but_keeps_signature_retry() {
     venue.replies.lock().unwrap().push_back(Err(failure));
     assert!(run(policy.execute(&venue, &RetryClock::default())).is_ok());
     assert_eq!(venue.accepted.lock().unwrap().len(), 3);
-    for venue_kind in [SignatureRetryVenue::Bitrue, SignatureRetryVenue::Apexomni] {
+    for venue_kind in [SignatureRetryVenue::Bitrue] {
         venue.replies.lock().unwrap().push_back(Err(reset()));
         let policy = signature_error_on_read(
             read(
@@ -507,7 +507,7 @@ fn bybit_excludes_instruments_network_retry_but_keeps_signature_retry() {
         );
         assert!(run(policy.execute(&venue, &RetryClock::default())).is_ok());
     }
-    assert_eq!(venue.accepted.lock().unwrap().len(), 7);
+    assert_eq!(venue.accepted.lock().unwrap().len(), 5);
 }
 
 struct HeldClock(Mutex<u64>);

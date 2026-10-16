@@ -252,7 +252,6 @@ impl WriteRequest {
 pub enum SignatureRetryVenue {
     Bybit,
     Bitrue,
-    Apexomni,
 }
 
 pub fn is_error_signature(response: &RestResponse) -> Result<bool, safe_cex_num::JsCoercionError> {
