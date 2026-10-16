@@ -9,6 +9,21 @@
   },
   "delegations": [
     {
+      "file": "safe-cex-venue-apexomni/src/binding/hosts.rs",
+      "finding": "public_data_only bypasses dynamic hook can_sign through base",
+      "kind": "no-venue-override",
+      "member": "canSign",
+      "classes": [
+        "ApexOmniExchange"
+      ],
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/base.ts",
+          "contains": "return this.options.publicDataOnly === true || !this.canSign;"
+        }
+      ]
+    },
+    {
       "file": "safe-cex-venue-coinbase/src/binding/lifecycle.rs",
       "finding": "dispose_base bypasses dynamic hook dispose through base",
       "kind": "source-super",
@@ -187,29 +202,6 @@
     },
     {
       "file": "safe-cex-venue-backpack/src/adapter.rs",
-      "finding": "dispose bypasses dynamic hook dispose through base",
-      "kind": "chosen-base",
-      "evidence": [
-        {
-          "file": "sdk-rs/parity/manifest/exchanges/backpack/backpack.exchange.ts.toml",
-          "contains": "Disposal intentionally uses BaseExchange cleanup"
-        }
-      ],
-      "dispose_source": [
-        {
-          "file": "packages/safe-cex/src/exchanges/backpack/backpack.exchange.ts",
-          "class": "BackpackExchange",
-          "definition_file": "packages/safe-cex/src/exchanges/backpack/backpack.exchange.ts",
-          "definition_class": "BackpackExchange",
-          "start_line": 97,
-          "end_line": 101,
-          "own": true,
-          "super_call": false
-        }
-      ]
-    },
-    {
-      "file": "safe-cex-venue-backpack/src/adapter.rs",
       "finding": "public_only bypasses dynamic hook can_sign through base",
       "kind": "no-venue-override",
       "member": "canSign",
@@ -235,52 +227,6 @@
         {
           "file": "packages/safe-cex/src/exchanges/base.ts",
           "contains": "return this.options.publicDataOnly === true || !this.canSign;"
-        }
-      ]
-    },
-    {
-      "file": "safe-cex-venue-backpack/src/private_adapter.rs",
-      "finding": "dispose bypasses dynamic hook dispose through base",
-      "kind": "socket-receiver",
-      "evidence": [
-        {
-          "file": "sdk-rs/safe-cex-venue-backpack/src/private_adapter.rs",
-          "contains": "pub base: Rc<BaseWebSocket>,"
-        }
-      ],
-      "dispose_source": [
-        {
-          "file": "packages/safe-cex/src/exchanges/backpack/backpack.ws-private.ts",
-          "class": "BackpackPrivateWebSocket",
-          "definition_file": "packages/safe-cex/src/exchanges/backpack/backpack.ws-private.ts",
-          "definition_class": "BackpackPrivateWebSocket",
-          "start_line": 520,
-          "end_line": 529,
-          "own": true,
-          "super_call": false
-        }
-      ]
-    },
-    {
-      "file": "safe-cex-venue-backpack/src/public_adapter.rs",
-      "finding": "dispose bypasses dynamic hook dispose through base",
-      "kind": "socket-receiver",
-      "evidence": [
-        {
-          "file": "sdk-rs/safe-cex-venue-backpack/src/public_adapter.rs",
-          "contains": "pub base: Rc<BaseWebSocket>,"
-        }
-      ],
-      "dispose_source": [
-        {
-          "file": "packages/safe-cex/src/exchanges/backpack/backpack.ws-public.ts",
-          "class": "BackpackPublicWebSocket",
-          "definition_file": "packages/safe-cex/src/exchanges/backpack/backpack.ws-public.ts",
-          "definition_class": "BackpackPublicWebSocket",
-          "start_line": 755,
-          "end_line": 764,
-          "own": true,
-          "super_call": false
         }
       ]
     },
@@ -787,6 +733,68 @@
           "definition_class": "PolymarketExchange",
           "start_line": 175,
           "end_line": 177,
+          "own": true,
+          "super_call": true
+        }
+      ]
+    },
+    {
+      "file": "safe-cex-venue-grvt/src/binding/private.rs",
+      "finding": "base_dispose bypasses dynamic hook dispose through base",
+      "kind": "socket-receiver",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/grvt/grvt.ws-private.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-grvt/src/binding/private.rs",
+          "contains": "sockets::core_of(&h.0.shared.sockets, &self.this)"
+        },
+        {
+          "file": "sdk-rs/safe-cex-exchange/src/js_runtime/sockets.rs",
+          "contains": "pub base: OnceCell<Rc<BaseWebSocket>>,"
+        }
+      ],
+      "dispose_source": [
+        {
+          "file": "packages/safe-cex/src/exchanges/grvt/grvt.ws-private.ts",
+          "class": "GrvtPrivateWebSocket",
+          "definition_file": "packages/safe-cex/src/exchanges/grvt/grvt.ws-private.ts",
+          "definition_class": "GrvtPrivateWebSocket",
+          "start_line": 923,
+          "end_line": 932,
+          "own": true,
+          "super_call": true
+        }
+      ]
+    },
+    {
+      "file": "safe-cex-venue-grvt/src/binding/public.rs",
+      "finding": "invoke bypasses dynamic hook dispose through base",
+      "kind": "socket-receiver",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/grvt/grvt.ws-public.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-grvt/src/binding/public.rs",
+          "contains": "sockets::core_of(&h.0.shared.sockets, &self.this)"
+        },
+        {
+          "file": "sdk-rs/safe-cex-exchange/src/js_runtime/sockets.rs",
+          "contains": "pub base: OnceCell<Rc<BaseWebSocket>>,"
+        }
+      ],
+      "dispose_source": [
+        {
+          "file": "packages/safe-cex/src/exchanges/grvt/grvt.ws-public.ts",
+          "class": "GrvtPublicWebSocket",
+          "definition_file": "packages/safe-cex/src/exchanges/grvt/grvt.ws-public.ts",
+          "definition_class": "GrvtPublicWebSocket",
+          "start_line": 663,
+          "end_line": 669,
           "own": true,
           "super_call": true
         }

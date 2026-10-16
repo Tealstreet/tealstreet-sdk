@@ -17,17 +17,31 @@ TypeScript class/property-arrow AST nodes; comments are not super-call evidence.
 
 | Surface | Source | Concrete mismatch / result | Owner |
 | --- | --- | --- | --- |
-| Backpack exchange | `backpack.exchange.ts:97` | Rust adapter cancels owned tasks and calls BaseExchange.dispose before sockets; source only writes isDisposed then disposes public/private. | codex-l89ogr, acknowledged separate source-parity follow-up |
-| Backpack private socket | `backpack.ws-private.ts:520` | Rust adapter additionally resets pending position/balance state, cancels owned tasks and calls BaseWebSocket.dispose; source clears subscriptions/orders timeout and closes ws. | codex-l89ogr, acknowledged |
-| Backpack public socket | `backpack.ws-public.ts:755` | Rust adapter additionally clears handlers/topics, cancels ticker/tasks and calls BaseWebSocket.dispose; source resets its subscription/book/fetcher/throttle state and closes ws. | codex-l89ogr, acknowledged |
+| Backpack exchange | `backpack.exchange.ts:97` | Extra task cancellation and superclass disposal removed in #227; bound actual-source witness checks flag and socket order. | codex-l89ogr, repaired |
+| Backpack private socket | `backpack.ws-private.ts:520` | Invented state/task/base cleanup removed in #227; source subscriptions/timeout cleanup and transport close retained. | codex-l89ogr, repaired |
+| Backpack public socket | `backpack.ws-public.ts:755` | Invented handler/topic/task/base cleanup removed in #227; source local cleanup and transport close retained. | codex-l89ogr, repaired |
 | Crypto.com exchange | `cryptocom.exchange.ts:80` | Extra wrapper base cleanup removed by merged #186; 22 current binding tests pass, including four old read-only-flag failures. | codex-f74ybe, repaired |
 | Orderly exchange | `orderly.exchange.ts:129` | Extra base cleanup and private shadow flag removed on #179; source-writable shared flag + constructed disposal regression proof. | codex-ydwdec, repaired on open PR |
 
 Backpack exchange's old `chosen-base` review and the two `socket-receiver` reviews
 explain why the existing syntactic gate accepts these source mismatches. A receiver
 type alone proves neither that a source override calls super nor the cleanup order.
-The current Backpack disposal manifest rows are marked ported despite describing
-added base/task cleanup; its owner must reconcile those rows with the repaired path.
+The three obsolete Backpack delegation reviews are removed with #227's production
+repair. Its owner reconciled the disposal manifest rows and supplied three bound
+actual-source tests plus native/relay state-retention tests for the narrow close
+primitive. Neither a receiver classification nor a source citation alone proves
+all cleanup behavior.
+
+Two further transport-close bridges need separate runtime repairs:
+`safe-cex-exchange/src/js_runtime/sockets.rs` installs `ws.close` using
+`BaseWebSocket::force_close`, and Hyperliquid's `realm/facade_socket.rs` does the
+same. Source `base.ws.ts:1194-1202` distinguishes `forceClose` metadata from
+`ws.close`; Crypto.com's two own socket disposals and Hyperliquid's private
+disposal call the latter without super. They need #227's
+`close_current_websocket` primitive and native/source forceClosed-retention
+witnesses. The shared bridge is assigned to codex-nlry7m; the Hyperliquid bridge
+is reported to the overseer. These routed runtime issues are outside this
+classification gate's proof.
 
 ## Complete venue pass
 
@@ -37,7 +51,7 @@ Paths below are relative to each `sdk-rs/safe-cex-venue-<venue>/src/` directory.
 | --- | --- | --- |
 | apexomni | `exchange.rs; ws_private.rs` | Exchange base then sockets; private throttle cleanup then super. Binding197 remains venue-owned. |
 | asterdex | `native_exchange.rs; exchange_runtime.rs; binding/sockets.rs` | Virtual clock/local socket cleanup then base; socket protocols call super in source order. |
-| backpack | `adapter.rs; private_adapter.rs; public_adapter.rs` | MISMATCH: extra base cleanup on all three concrete surfaces; routed l89ogr (acknowledged). |
+| backpack | `adapter.rs; private_adapter.rs; public_adapter.rs` | CORRECTED227: source-only cleanup; direct transport close preserves superclass metadata and owned tasks. |
 | binance | `exchange_classes.rs; private_classes.rs; public_classes.rs` | USD-M/PM/Spot exchange wrappers delegate once to source-mapped lifecycle; socket overrides retain super and inherited socket paths. |
 | bingx | `binding/exchange.rs; exchange.rs; listen_key.rs` | Exchange base then sockets; private listen-key timeout cleanup then super. |
 | bitget | `binding/exchange.rs; stream_lifecycle.rs; binding/hosts/{private,assembly}.rs` | Exchange source body owns super; secondary ticker sockets inherit BaseWebSocket.dispose. |
@@ -152,8 +166,9 @@ A source-super edge requires an own source super call. A socket-receiver edge mu
 have either its own source super call or an inherited BaseWebSocket definition.
 The shared BaseExchange facade bridge cites BaseExchange.dispose itself with the
 separate base-implementation classification. An own no-super override cannot be
-accepted through chosen-base or socket-receiver labels. The three known Backpack
-rows therefore block the production gate until the routed repair removes them.
+accepted through chosen-base or socket-receiver labels. The three obsolete
+Backpack rows are removed after #227; negative controls continue to reject their
+former classifications against the actual no-super source bodies.
 
 The Rust override_contract target runs the live validator and its Node controls.
 The controls reject missing/stale/mismatched source claims, false superclass

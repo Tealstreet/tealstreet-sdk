@@ -2820,3 +2820,36 @@ fn disposed_how_message_does_not_dispatch_clock() {
         String::from_utf8_lossy(&output.stderr)
     );
 }
+
+#[test]
+fn how_consumes_grvt_config_extensions_like_actual_source() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/grvt-config-source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "GRVT CONFIG SOURCE {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(cases.len(), 7, "GRVT CONFIG source corpus count");
+    for case in cases {
+        let host = FakeHost::new();
+        let adapter = HowRestAdapter::new(host.clone(), None, false).unwrap();
+        let mut call = request("/lite/v1/account_summary");
+        call.base_url = Some("https://trades.grvt.io".into());
+        call.headers = serde_json::from_value(case["headers"].clone()).unwrap();
+        call.config_extensions = serde_json::from_value(case["extra"].clone()).unwrap();
+        host.run(leaf_error(adapter.execute(call))).unwrap();
+        assert_eq!(
+            host.venue.requests.borrow()[0]["arg"]["headers"],
+            case["expected"],
+            "GRVT CONFIG HOW header projection: {}",
+            case["extra"]
+        );
+    }
+}

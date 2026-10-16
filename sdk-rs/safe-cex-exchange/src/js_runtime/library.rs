@@ -834,6 +834,22 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         Js::function(name, move |_, a| f(&scope_of(&rt)?, a))
     };
 
+    def(
+        "throttle",
+        scoped("throttle", |rt, a| {
+            let function = arg(&a, 0);
+            if !function.is_callable() {
+                return Err(Thrown::type_error("Expected a function"));
+            }
+            let wait = arg(&a, 1).to_number()?;
+            let wait = if wait.is_nan() { 0. } else { wait };
+            let options = arg(&a, 2);
+            let leading = !in_operator(&options, "leading") || options.get("leading")?.truthy();
+            let trailing = !in_operator(&options, "trailing") || options.get("trailing")?.truthy();
+            Ok(super::throttle::new(rt, function, wait, leading, trailing))
+        }),
+    );
+
     if let Ok(number) = g.get("Number") {
         if let Ok(parse_int) = g.get("parseInt") {
             define_on(&number, "parseInt", parse_int);

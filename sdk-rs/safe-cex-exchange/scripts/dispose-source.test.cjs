@@ -8,21 +8,9 @@ const root = path.resolve(__dirname, '../../..');
 const sources = new DisposeSources(root);
 const review = JSON.parse(fs.readFileSync(path.join(__dirname, '../tests/override-base-delegations.json'), 'utf8'));
 const rows = review.delegations.filter(row => /hook dispose\b|BaseExchange::dispose\b/.test(row.finding));
-const knownBackpack = new Set([
-  'safe-cex-venue-backpack/src/adapter.rs',
-  'safe-cex-venue-backpack/src/private_adapter.rs',
-  'safe-cex-venue-backpack/src/public_adapter.rs',
-]);
-
 for (const row of rows) {
   test(`actual dispose source classification: ${row.file}`, () => {
-    // These routed production mismatches must remain rejected, not blessed by
-    // their previous chosen-base/socket-receiver labels. Remove with the repair.
-    if (knownBackpack.has(row.file)) {
-      assert.throws(() => sources.validate(row), /dispose base cleanup has no source super call/);
-    } else {
-      sources.validate(row);
-    }
+    sources.validate(row);
   });
 }
 

@@ -341,6 +341,7 @@ fn run(privacy: &str, name: &str) {
         let host = SocketHost::new(runtime.clone(), private, variant, name);
         runtime.operations.borrow_mut().clear();
         let input = native::input(&row["input"]);
+        let initial_positions = store.positions().to_vec();
         let mut result = J::Undefined;
         if private {
             let socket = ApexOmniPrivateWebsocket::new(parent.clone(), host.clone()).unwrap();
@@ -560,7 +561,39 @@ fn run(privacy: &str, name: &str) {
                 ),
             ),
         ]);
-        native::check_fields(&state, &row["state"], &label);
+        if private && name == "positionsThrottle" && variant == 2 {
+            // P4 explicitly requires a second disposal check after awaiting.
+            // Retain the live source observation of late publication; compare
+            // every other state axis, and assert the chosen native axis directly.
+            assert_eq!(
+                store.positions().to_vec(),
+                initial_positions,
+                "disposed timer retains the prior positions"
+            );
+            let source_positions = row["state"]["values"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .find(|field| field[0] == "positions")
+                .unwrap();
+            assert_eq!(
+                source_positions[1]["values"].as_array().unwrap().len(),
+                4,
+                "source timer still publishes four late positions"
+            );
+            let J::Object(mut native_fields) = state else {
+                panic!()
+            };
+            native_fields.retain(|(name, _)| name != "positions");
+            let mut expected = row["state"].clone();
+            expected["values"]
+                .as_array_mut()
+                .unwrap()
+                .retain(|field| field[0] != "positions");
+            native::check_fields(&J::Object(native_fields), &expected, &label);
+        } else {
+            native::check_fields(&state, &row["state"], &label);
+        }
         assert_eq!(
             host.timers.borrow().len(),
             row["timers"].as_u64().unwrap() as usize,

@@ -928,22 +928,12 @@ impl AuthHost for SocketHost {
             "signed" => self.this().get("signedChallenge").map_err(ex)?,
             "remote" => {
                 if self.rt.base().signers.remote_signer.is_some() {
-                    let name = self
-                        .rt
-                        .shared
-                        .extra
-                        .options
-                        .remote_signer
-                        .as_ref()
-                        .and_then(|r| {
-                            serde_json::to_value(r)
-                                .ok()
-                                .and_then(|v| v.get("accountName").cloned())
-                        });
-                    Js::object(vec![(
-                        "accountName",
-                        name.map(|v| from_json(&v)).unwrap_or(Js::Undefined),
-                    )])
+                    // Shared hosted-account construction injects the signer and
+                    // accountName into the live parent options, after typed input.
+                    self.parent()?
+                        .get("options")
+                        .and_then(|options| options.get("remoteSigner"))
+                        .map_err(ex)?
                 } else {
                     Js::Undefined
                 }

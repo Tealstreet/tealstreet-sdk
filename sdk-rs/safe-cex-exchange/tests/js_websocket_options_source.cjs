@@ -2,7 +2,7 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const vm = require('node:vm');
-const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH);
+const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH || 'typescript');
 const file = path.resolve(__dirname, '../../../packages/safe-cex/src/exchanges/base.ws.ts');
 const tree = ts.createSourceFile(file, fs.readFileSync(file, 'utf8'), ts.ScriptTarget.Latest, true);
 const klass = tree.statements.find(node => ts.isClassDeclaration(node) && node.name?.text === 'BaseWebSocket');

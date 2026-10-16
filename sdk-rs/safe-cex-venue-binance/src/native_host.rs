@@ -174,7 +174,7 @@ fn register_client(
     )
 }
 fn lookup_client(this: &NativeImports, handle: &EventValue) -> Result<Rc<NativeClient>, Failure> {
-    let index = handle.get("nativeClient")?.number()?;
+    let index = handle.read("nativeClient")?.number()?;
     this.clients
         .borrow()
         .get(index as usize)
@@ -368,29 +368,29 @@ fn config_value(request: &RestRequest) -> Result<EventValue, Failure> {
         ("method", string(&request.method)),
     ]);
     if let Some(base) = &request.base_url {
-        config.define("baseURL", string(base));
+        config.write("baseURL", string(base));
     }
     if let Some(timeout) = request.timeout_ms {
-        config.define("timeout", number(timeout as f64));
+        config.write("timeout", number(timeout as f64));
     }
-    let headers = EventValue::object(Default::default());
+    let headers = EventValue::record_object(Default::default());
     for (name, value) in &request.headers {
-        headers.define(name, string(value));
+        headers.write(name, string(value));
     }
-    config.define("headers", headers);
+    config.write("headers", headers);
     if let Some(params) = &request.params {
-        config.define("params", EventValue::from_json(params.clone()));
+        config.write("params", EventValue::from_json(params.clone()));
     }
     if let Some(body) = &request.body {
         let data = body.untransformed().map_err(|e| failure(e.to_string()))?;
-        config.define("data", EventValue::from_json(data.clone()));
+        config.write("data", EventValue::from_json(data.clone()));
     }
     Ok(config)
 }
 fn rest_request(config: &EventValue, original: &RestRequest) -> Result<RestRequest, Failure> {
     let mut request = original.clone();
-    request.url = config.get("url")?.text()?;
-    let headers = config.get("headers")?;
+    request.url = config.read("url")?.text()?;
+    let headers = config.read("headers")?;
     request.headers = Default::default();
     if !headers.nullish() {
         let Value::Object(map) = to_json(&headers)? else {
@@ -408,23 +408,23 @@ fn rest_request(config: &EventValue, original: &RestRequest) -> Result<RestReque
             }
         }
     }
-    let params = config.get("params")?;
+    let params = config.read("params")?;
     request.params = if params.nullish() {
         None
     } else {
         Some(to_json(&params)?)
     };
-    let data = config.get("data")?;
+    let data = config.read("data")?;
     request.body = if matches!(data, EventValue::Undefined) {
         None
     } else {
         Some(RestBody::Untransformed(to_json(&data)?))
     };
-    let timeout = config.get("timeout")?;
+    let timeout = config.read("timeout")?;
     if !timeout.nullish() {
         request.timeout_ms = Some(timeout.number()? as i64);
     }
-    request.skip_remote_signing = config.get("safeCexSkipRemoteSigning")?.truthy();
+    request.skip_remote_signing = config.read("safeCexSkipRemoteSigning")?.truthy();
     Ok(request)
 }
 fn response_data(response: &RestResponse, transform: ResponseTransform) -> Value {
@@ -450,9 +450,9 @@ fn response_value(
     config: &RestRequest,
     transform: ResponseTransform,
 ) -> Result<EventValue, Failure> {
-    let headers = EventValue::object(Default::default());
+    let headers = EventValue::record_object(Default::default());
     for (name, value) in &response.headers {
-        headers.define(name, string(value));
+        headers.write(name, string(value));
     }
     Ok(record([
         (
@@ -473,14 +473,14 @@ fn error_value(error: &Failure) -> EventValue {
         ("message", string(&error.message)),
         ("name", string(&error.name)),
     ]);
-    value.define(
+    value.write(
         "code",
         error
             .code
             .clone()
             .map_or(EventValue::Undefined, EventValue::from_json),
     );
-    value.define(
+    value.write(
         "response",
         error
             .response
@@ -537,7 +537,7 @@ async fn respond(
             (ResponseStage::Guard(_, rejected), Err(error)) => rejected(error)?.await,
         };
     }
-    state.and_then(|response| response.get("data")).map(Some)
+    state.and_then(|response| response.read("data")).map(Some)
 }
 fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<EventValue, Failure> {
     match result {
@@ -546,7 +546,7 @@ fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<Even
             Err(original.unwrap_or_else(|| {
                 failure(
                     value
-                        .get("message")
+                        .read("message")
                         .and_then(|m| m.text())
                         .unwrap_or_default(),
                 )
@@ -574,7 +574,7 @@ impl RequestBindings for NativeRequestBindings {
         Ok(headers)
     }
     fn mark_skip(&mut self, config: EventValue) -> Result<EventValue, Failure> {
-        config.define("safeCexSkipRemoteSigning", EventValue::Bool(true));
+        config.write("safeCexSkipRemoteSigning", EventValue::Bool(true));
         Ok(config)
     }
     fn sign(
@@ -596,7 +596,7 @@ impl RequestBindings for NativeRequestBindings {
             }
         };
         let (key, secret) = (text("key")?, text("secret")?);
-        let remote = options.get("remoteSigner")?.truthy();
+        let remote = options.read("remoteSigner")?.truthy();
         let exchange: safe_cex_types::ExchangeName =
             serde_json::from_value(Value::String(name.text()?))
                 .map_err(|e| failure(e.to_string()))?;
@@ -636,7 +636,7 @@ impl ResponseBindings for NativeResponseBindings {
     // The truthy marker ends this pass; run_request re-dispatches the request once.
     fn resend(&mut self, response: EventValue) -> Result<EventValue, Failure> {
         if self.resend_allowed
-            && is_binance_style_signature_rejection(&to_json(&response.get("data")?)?)
+            && is_binance_style_signature_rejection(&to_json(&response.read("data")?)?)
                 .map_err(|e| failure(e.message))?
         {
             self.resend_requested = true;
@@ -650,9 +650,17 @@ fn typed_options(options: &EventValue) -> Result<safe_cex_types::ExchangeOptions
     // The signer is host-held (`imports.remote`); typed options cannot name it.
     let view = match options {
         EventValue::Object(object) => {
-            let mut record = object.borrow().clone();
-            record.fields.remove("remoteSigner");
-            EventValue::Object(Rc::new(RefCell::new(record)))
+            let view = EventValue::record_object(
+                options
+                    .spread()
+                    .into_iter()
+                    .filter(|(key, _)| key != "remoteSigner")
+                    .collect(),
+            );
+            if let EventValue::Object(clone) = &view {
+                *clone.proto.borrow_mut() = object.proto.borrow().clone();
+            }
+            view
         }
         other => other.clone(),
     };
@@ -674,7 +682,7 @@ impl FactoryBindings for Factorizer<'_> {
     ) -> Result<EventValue, Failure> {
         let typed = typed_options(&options)?;
         let name: safe_cex_types::ExchangeName =
-            serde_json::from_value(Value::String(exchange.get("name")?.text()?))
+            serde_json::from_value(Value::String(exchange.read("name")?.text()?))
                 .map_err(|e| failure(e.to_string()))?;
         let mut request = RestRequest {
             base_url: Some(config.base_url.text()?),
@@ -855,12 +863,12 @@ impl ExchangeImports for NativeImports {
         if let Some(rate) = &rate {
             primary = rate(primary)?;
         }
-        let secondary_key = opts.get("secondary_key")?;
+        let secondary_key = opts.read("secondary_key")?;
         let triple = |route: EventValue, primary: EventValue, secondary: EventValue| {
             if venue == Venue::Spot {
                 route
             } else {
-                EventValue::Array(Rc::new(RefCell::new(vec![route, primary, secondary])))
+                EventValue::array(vec![route, primary, secondary])
             }
         };
         if !secondary_key.truthy() {
@@ -870,10 +878,10 @@ impl ExchangeImports for NativeImports {
             return Ok(triple(primary.clone(), primary.clone(), primary));
         }
         // ts: createApiWithSecondaryKey — secondary_* options replace their unprefixed keys.
-        let secondary_options = EventValue::object(opts.spread());
+        let secondary_options = EventValue::record_object(opts.spread());
         for (key, value) in opts.spread() {
             if let Some(stripped) = key.strip_prefix("secondary_") {
-                secondary_options.define(stripped, value);
+                secondary_options.write(stripped, value);
             }
         }
         let secondary = factory(secondary_options)?;
@@ -1076,7 +1084,7 @@ impl ExchangeImports for NativeImports {
             .borrow()
             .upgrade()
             .ok_or_else(|| failure("fold with no live exchange bound"))?;
-        let account = opts.get("account")?.text()?;
+        let account = opts.read("account")?.text()?;
         let bound = |key: &str| -> Result<Option<f64>, Failure> {
             let value = opts.get(key)?;
             if value.nullish() {
@@ -1325,17 +1333,17 @@ impl ListenerHost for NativeListenerOperations {
             let EventValue::Array(levels) = data.get(key)? else {
                 return Ok(vec![]);
             };
-            let levels = levels.borrow().clone();
+            let levels = array_values(&levels);
             levels
                 .iter()
-                .map(|row| Ok(vec![row.get("0")?.text()?, row.get("1")?.text()?]))
+                .map(|row| Ok(vec![row.read("0")?.text()?, row.read("1")?.text()?]))
                 .collect()
         };
         load_binance_order_book_snapshot(
             &mut book.borrow_mut(),
             &rows("bids")?,
             &rows("asks")?,
-            data.get("lastUpdateId")?.number()?,
+            data.read("lastUpdateId")?.number()?,
             &mut sync.borrow_mut(),
         );
         Ok(())
@@ -1348,7 +1356,7 @@ impl ListenerHost for NativeListenerOperations {
         let last = last_id.number()?;
         let mut kept = vec![];
         for update in updates {
-            if update.get("u")?.number()? > last {
+            if update.read("u")?.number()? > last {
                 kept.push(update);
             }
         }
@@ -1522,7 +1530,7 @@ impl PrivateBase for CorePrivateBase {
     }
     fn diagnostic(&self, data: EventValue) -> Result<(), Failure> {
         let value = match &data {
-            EventValue::String(text) => Value::String(text.clone()),
+            EventValue::String(_) => Value::String(data.text()?),
             other => to_json(other)?,
         };
         ex(self
