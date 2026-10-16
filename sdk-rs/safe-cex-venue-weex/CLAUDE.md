@@ -85,7 +85,7 @@ alone to remove each object response's guard in turn: a complete valid array in
 Serde field order must fail the named assertion, then restoring the guard must
 pass all four tests. The record union continues to admit arrays.
 
-Thirty-four selected helper contracts record individually reviewed dispatch,
+Forty-nine selected helper contracts record individually reviewed dispatch,
 request-construction and host-operation roles with exact compiler signatures.
 Their native receipts are classification evidence. Response owners use the
 separate executed decoder observations above.
@@ -94,6 +94,19 @@ Retained-input, typed-error conversion, present-field, optional-boolean and
 public-trade contracts execute direct native adapters. The three generic class
 constructors have typed API classifications; their concrete Factory behavior is
 covered by the production constructor E2E, including both source sockets.
+
+The concrete Host and Factory contracts additionally execute native property
+lookup, receiver binding, requests, callback bodies and prototype linkage. The
+concrete Exchange contracts call all twelve selected raw-input methods through
+the production binding with scripted HTTP/WS hosts. They inspect native model
+fields and numeric bits, request effects, and order-book delivery and cleanup.
+`accepted-set/weex-binding-fixture.rs` reuses the E2E I/O hosts for these adapters;
+it replaces no venue method. The constant-table projection uses a module-scope
+typed serializer helper instead of a local macro with opaque declaration effects.
+
+Run `tests/accepted-binding-controls.mjs` alone to remove capture, undefined
+omission and side-normalizer routing in turn. Each compiling production mutation
+must fail its native contract; exact source restoration must pass.
 
 Seven enum normalizers in `src/utils.rs` mirror their source control flow and use
 the actual shared tables. `WeexUtilityInput` captures its opaque `value` with

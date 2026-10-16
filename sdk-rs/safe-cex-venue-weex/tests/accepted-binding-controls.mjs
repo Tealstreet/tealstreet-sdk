@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { inventory } from '../../safe-cex-parity/scripts/accepted-inventory.mjs';
 import { runProbes } from '../../safe-cex-parity/scripts/accepted-probes.mjs';
+import { loadContracts } from '../../safe-cex-parity/scripts/accepted-contract-files.mjs';
 
 const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..');
 function cargo(args) {
@@ -26,7 +27,7 @@ const found = inventory(doc, {
   receiverTraits: JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/receiver-traits.json'))),
   readSource: file => fs.readFileSync(path.join(root, file)),
 });
-const contracts = JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/contracts.json')));
+const contracts = loadContracts();
 const file = path.join(root, 'safe-cex-venue-weex/src/binding/values.rs');
 const original = fs.readFileSync(file);
 const controls = [

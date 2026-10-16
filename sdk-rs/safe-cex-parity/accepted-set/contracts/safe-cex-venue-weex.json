@@ -6401,7 +6401,7 @@
     },
     "category": "non-decoder",
     "reason": "Selects a compiled constant/table by its internal name and projects typed values into the VM; the argument is a code selector, with no input record or text grammar.",
-    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/classes.rs at 51-79. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/classes.rs at 58-79. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
   },
   "safe_cex_venue_weex::binding::classes::dispatch": {
     "api": {
@@ -6683,7 +6683,7 @@
     },
     "category": "non-decoder",
     "reason": "Routes a statically selected public-socket source operation to its existing body over VM handles, including event callbacks and subscription operations. Frame parsing remains the explicitly called parser operation.",
-    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/sockets.rs at 283-387. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/sockets.rs at 293-397. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
   },
   "safe_cex_venue_weex::binding::sockets::frame": {
     "api": {
@@ -6788,7 +6788,7 @@
     },
     "category": "non-decoder",
     "reason": "Builds the outbound method/id/optional-params VM object and sends its shared JSON.stringify result through send or sendWithLog. Its method string is an outbound operation identifier, not serialized input.",
-    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/sockets.rs at 75-85. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/sockets.rs at 76-89. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
   },
   "safe_cex_venue_weex::binding::sockets::parent_call": {
     "api": {
@@ -6974,7 +6974,7 @@
     },
     "category": "non-decoder",
     "reason": "Selects a named private-socket source operation over an existing Host and VM argument vector, routing to native auth/refresh/message/disposal bodies. It adds no independent serialized-data admission policy.",
-    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/socket_private.rs at 240-281. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/socket_private.rs at 249-290. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
   },
   "safe_cex_venue_weex::binding::values::define": {
     "api": {
@@ -7543,7 +7543,7 @@
     },
     "category": "non-decoder",
     "reason": "Applies the same nullish/property access operation without a Host argument; the string selects a VM property and no data owner is decoded.",
-    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 219-225. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 220-226. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
   },
   "safe_cex_venue_weex::classes::NativeMember": {
     "category": "non-decoder",
@@ -11217,100 +11217,5 @@
         ]
       }
     ]
-  },
-  "safe_cex_venue_weex::binding::classes::table": {
-    "category": "non-decoder",
-    "api": {
-      "kind": "function",
-      "name": "table",
-      "signature": {
-        "inputs": [
-          [
-            "values",
-            {
-              "borrowed_ref": {
-                "lifetime": null,
-                "is_mutable": false,
-                "type": {
-                  "slice": {
-                    "tuple": [
-                      {
-                        "borrowed_ref": {
-                          "lifetime": null,
-                          "is_mutable": false,
-                          "type": {
-                            "primitive": "str"
-                          }
-                        }
-                      },
-                      {
-                        "generic": "T"
-                      }
-                    ]
-                  }
-                }
-              }
-            }
-          ]
-        ],
-        "output": {
-          "resolved_path": {
-            "path": "core::result::Result",
-            "args": {
-              "angle_bracketed": {
-                "args": [
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_exchange::js_runtime::value::Js",
-                        "args": null
-                      }
-                    }
-                  },
-                  {
-                    "type": {
-                      "resolved_path": {
-                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
-                        "args": null
-                      }
-                    }
-                  }
-                ],
-                "constraints": []
-              }
-            }
-          }
-        },
-        "is_c_variadic": false
-      },
-      "generics": {
-        "params": [
-          {
-            "name": "T",
-            "kind": {
-              "type": {
-                "bounds": [
-                  {
-                    "trait_bound": {
-                      "trait": {
-                        "path": "serde_core::ser::Serialize",
-                        "args": null
-                      },
-                      "generic_params": [],
-                      "modifier": "none"
-                    }
-                  }
-                ],
-                "default": null,
-                "is_synthetic": false
-              }
-            }
-          }
-        ],
-        "where_predicates": []
-      }
-    },
-    "reason": "Constructs a VM table from an existing typed static slice of constant key/value pairs using from_typed; it serializes already typed values and defines outbound properties rather than admitting a decoded wire owner.",
-    "evidence": "Reviewed the module-scope helper extracted unchanged from the local expression macro. Native compiler inventory pins its exact generic Serialize API; actual constant tables are exercised by concrete exchange/socket construction and binding method E2Es. The generic helper does not grant input-domain eligibility to its type argument."
   }
 }
