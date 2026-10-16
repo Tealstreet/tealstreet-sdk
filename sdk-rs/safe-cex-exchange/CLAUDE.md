@@ -954,3 +954,9 @@ Blob.text perform UTF-8 replacement only when the venue explicitly asks for text
 compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
 checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
+
+The JS HTTP bridge retains JSON-data adapter config in RestRequest.config_extensions,
+including GRVT's browser cookie/account fields. It leaves executable Axios hooks
+on the source config. Hosted effective config still spreads that source object,
+then overlays actual adapter fields; terminal extension updates survive too.
+Cookie promotion belongs exclusively to HOW, not the direct HTTP bridge.

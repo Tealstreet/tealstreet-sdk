@@ -689,6 +689,33 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
         }
         params = Js::Undefined;
     }
+    // Keep adapter-owned data properties without serializing executable Axios
+    // capabilities. The source config itself stays live for response hooks.
+    let mut config_extensions = indexmap::IndexMap::new();
+    for (key, value) in config.own_entries()? {
+        let key = String::from_utf16(&key)
+            .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at a typed boundary"))?;
+        if matches!(
+            key.as_str(),
+            "method"
+                | "url"
+                | "baseURL"
+                | "headers"
+                | "data"
+                | "params"
+                | "timeout"
+                | "adapter"
+                | "paramsSerializer"
+                | "transformRequest"
+                | "transformResponse"
+                | "safeCexSkipRemoteSigning"
+        ) || value.is_undefined()
+            || value.is_callable()
+        {
+            continue;
+        }
+        config_extensions.insert(key, to_json(&value)?);
+    }
     let timeout = config.get("timeout")?;
     // ts: markSkipRemoteSigning tags a public request a hosted signer need not see.
     let skip_remote_signing = config.get("safeCexSkipRemoteSigning")?.truthy();
@@ -710,6 +737,7 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
             Some(to_json(&params)?)
         },
         skip_remote_signing,
+        config_extensions,
         ..Default::default()
     })
 }
@@ -729,6 +757,9 @@ fn response_data(body: RestResponseBody) -> Js {
 
 fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
     let result = config.spread_object()?;
+    for (name, value) in &request.config_extensions {
+        result.set(name, from_json(value))?;
+    }
     result.set("method", Js::str(&request.method))?;
     result.set("url", Js::str(&request.url))?;
     result.set(

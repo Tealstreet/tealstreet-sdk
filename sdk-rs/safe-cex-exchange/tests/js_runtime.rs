@@ -2522,3 +2522,57 @@ fn date_now_is_integer_while_performance_retains_fractional_milliseconds() {
         );
     }
 }
+
+#[test]
+fn rest_http_host_retains_adapter_config_without_inventing_direct_cookie_headers() {
+    let runtime = Rc::new(Runtime::default());
+    let terminal = std::sync::Arc::new(Terminal::default());
+    let xhr = client::create(
+        client::rest_http_host(runtime.clone(), terminal.clone()),
+        Js::object(vec![("baseURL", Js::str("https://trades.grvt.io"))]),
+    );
+    let response = settle(
+        &runtime,
+        xhr.call_method(
+            "post",
+            vec![
+                Js::str("/ok"),
+                Js::Null,
+                Js::object(vec![
+                    ("grvtCookie", Js::str("rm=true; gravity=session-42")),
+                    ("grvtAccountId", Js::str("42")),
+                    (
+                        "customTrace",
+                        Js::object(vec![("attempt", Js::Number(2.0))]),
+                    ),
+                    (
+                        "headers",
+                        Js::object(vec![("X-Ts-Grvt-Session", Js::str("session-42"))]),
+                    ),
+                ]),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let seen = terminal.seen.lock().unwrap();
+    assert_eq!(
+        seen[0].config_extensions["grvtCookie"],
+        json!("rm=true; gravity=session-42"),
+        "REST ADAPTER CONFIG lost GRVT cookie before terminal transport"
+    );
+    assert_eq!(seen[0].config_extensions["grvtAccountId"], json!("42"));
+    assert_eq!(
+        seen[0].config_extensions["customTrace"],
+        json!({"attempt":2.0})
+    );
+    assert!(
+        !seen[0].headers.contains_key("Cookie"),
+        "DIRECT source cookie behavior"
+    );
+    assert_eq!(seen[0].headers["X-Ts-Grvt-Session"], "session-42");
+    assert_eq!(
+        to_json(&response.get("config").unwrap().get("customTrace").unwrap()).unwrap(),
+        json!({"attempt":2.0})
+    );
+}
