@@ -3,8 +3,12 @@ import fs from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
+import { spawnSync } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
 import { compilerNames, normalizeCompiler, proposalKind, sourceEvidence, targetProposals, main } from './review-contract-proposals.mjs';
 import { contractFor } from './accepted-contracts.mjs';
+import { runProbes } from './accepted-probes.mjs';
+import { buildScanner } from './accepted-scanner.mjs';
 
 function fixture() {
   const repository = fs.mkdtempSync(path.join(os.tmpdir(), 'accepted-review-proposals-'));
@@ -83,6 +87,13 @@ test('CLI refuses contract destinations and duplicate flags before running Cargo
   assert.throws(() => main(['--crate=x', '--census=x', `--out=${path.resolve('sdk-rs/safe-cex-parity/accepted-set/contracts.json')}`]), /output must be outside/);
   for (const jobs of ['0', '3', '-1', '1.5', '01', 'unlimited']) {
     assert.throws(() => main(['--crate=x', '--census=missing.json', `--jobs=${jobs}`]), /--jobs must be 1 or 2/);
+    assert.throws(() => runProbes(undefined, undefined, undefined, undefined, { jobs }), /probe jobs must be 1 or 2/);
+    assert.throws(() => buildScanner(jobs), /jobs must be 1 or 2/);
   }
   assert.throws(() => main(['--crate=x', '--census=x', '--jobs=1', '--jobs=2']), /duplicate --jobs/);
+  for (const [args, message] of [[['--jobs=0'], /--jobs must be 1 or 2/], [['--jobs=1', '--jobs=2'], /duplicate --jobs/]]) {
+    const result = spawnSync(process.execPath, [fileURLToPath(new URL('./accepted-set.mjs', import.meta.url)), ...args], { encoding: 'utf8' });
+    assert.notEqual(result.status, 0);
+    assert.match(result.stderr, message);
+  }
 });
