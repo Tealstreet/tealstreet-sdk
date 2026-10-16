@@ -31,6 +31,7 @@ use safe_cex_venue_binance::{
     public_listeners::{self as listeners, Action, Book, ListenerHost, ListenerState, SyncState},
     request_weight::Failure,
 };
+use safe_cex_venue_okx::binding::exchange::OkxDependencies;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -518,6 +519,15 @@ impl RustVenueHost for Venues {
             date_parse: Rc::new(|_| Ok(1_735_689_600_000.0)),
         })
     }
+    fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("okx");
+        let runtime: Rc<dyn ExchangeRuntime> = self.runtime.clone();
+        Ok(OkxDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(runtime, self.wire.clone()),
+            external_public_data: None,
+        })
+    }
 }
 fn venues() -> Rc<Venues> {
     Rc::new(Venues {
@@ -574,7 +584,14 @@ fn table_members_are_exactly_the_bound_venues() {
     let names: Vec<_> = RUST_VENUES.iter().map(|(name, _)| name.clone()).collect();
     assert_eq!(
         names,
-        [ExchangeName::Backpack, ExchangeName::Binance],
+        [
+            ExchangeName::Backpack,
+            ExchangeName::Binance,
+            ExchangeName::Okx,
+            ExchangeName::Okxdemo,
+            ExchangeName::Okxeu,
+            ExchangeName::Okxeudemo,
+        ],
         "REGISTRY table membership is a deliberate, reviewed list"
     );
 }
@@ -648,6 +665,52 @@ fn binance_constructs_through_the_registry_and_reads_its_account() {
         *host.imports.requests.borrow(),
         ["/fapi/v3/balance"],
         "REGISTRY binance getAccount request"
+    );
+}
+
+#[test]
+fn okx_family_constructs_through_the_registry_and_reads_its_markets() {
+    let opts = json!({"key": "key", "secret": "secret", "passphrase": "pass"});
+    for name in [
+        ExchangeName::Okx,
+        ExchangeName::Okxdemo,
+        ExchangeName::Okxeu,
+        ExchangeName::Okxeudemo,
+    ] {
+        let host = venues();
+        let exchange = construct(name.clone(), &host, opts.clone());
+        assert_eq!(exchange.name(), &name, "REGISTRY okx family name");
+        assert_eq!(
+            *host.calls.borrow(),
+            ["okx"],
+            "REGISTRY okx host inputs requested once"
+        );
+    }
+    let host = venues();
+    let exchange = construct(ExchangeName::Okx, &host, opts);
+    host.wire.bodies.lock().unwrap().insert(
+        "/api/v5/public/instruments".into(),
+        json!({"code": "0", "msg": "", "data": [{
+            "instId": "BTC-USDT-SWAP", "instType": "SWAP", "ctType": "linear", "ctVal": "0.01",
+            "ctValCcy": "BTC", "settleCcy": "USDT", "uly": "BTC-USDT", "instFamily": "BTC-USDT",
+            "baseCcy": "", "quoteCcy": "", "lotSz": "1", "tickSz": "0.1", "minSz": "1",
+            "maxLmtSz": "100000", "maxMktSz": "5000", "maxStopSz": "5000",
+            "maxTriggerSz": "100000", "maxTwapSz": "100000", "maxIcebergSz": "100000",
+            "lever": "100", "state": "live"
+        }]}),
+    );
+    let markets = run(&host.runtime, exchange.fetch_markets())
+        .unwrap_or_else(|e| panic!("REGISTRY okx fetchMarkets: {}", e.message));
+    assert_eq!(markets.len(), 1, "REGISTRY okx markets");
+    assert_eq!(markets[0].symbol, "BTCUSDT", "REGISTRY okx market symbol");
+    assert!(
+        host.wire
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|u| u == "/api/v5/public/instruments"),
+        "REGISTRY okx fetchMarkets reached the scripted wire"
     );
 }
 

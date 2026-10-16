@@ -14,6 +14,7 @@ use safe_cex_venue_backpack::{
     native_http::{BuildHttp, InstallTransport},
 };
 use safe_cex_venue_binance::exchange_classes::{BinanceExchange, ExchangeDependencies};
+use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use std::rc::Rc;
 
 /// What `BackpackExchange::new` takes besides the BaseExchange the registry builds.
@@ -28,6 +29,8 @@ pub struct BackpackDependencies {
 pub trait RustVenueHost {
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
+    /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
+    fn okx(&self) -> Result<OkxDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -44,6 +47,10 @@ type RustConstructorEntry = fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor;
 pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Backpack, backpack_constructor),
     (ExchangeName::Binance, binance_constructor),
+    (ExchangeName::Okx, okx_constructor),
+    (ExchangeName::Okxdemo, okx_constructor),
+    (ExchangeName::Okxeu, okx_constructor),
+    (ExchangeName::Okxeudemo, okx_constructor),
 ];
 
 pub fn backpack_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -72,6 +79,13 @@ pub fn binance_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
         let exchange = BinanceExchange::new(name, options, store, host.binance()?)
             .map_err(Rc::unwrap_or_clone)?;
         Ok(Rc::new(exchange))
+    })
+}
+
+pub fn okx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = OkxExchange::new(name, options, store, host.okx()?)?;
+        Ok(exchange)
     })
 }
 

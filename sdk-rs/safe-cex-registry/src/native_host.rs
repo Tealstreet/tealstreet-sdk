@@ -4,6 +4,7 @@ use crate::rust_venues::{BackpackDependencies, RustVenueHost};
 use safe_cex_exchange::{native::native_runtime, runtime::ExchangeError, websocket::WsRuntime};
 use safe_cex_transport::{RestAdapter, native::reqwest_adapter};
 use safe_cex_venue_binance::exchange_classes::ExchangeDependencies;
+use safe_cex_venue_okx::binding::exchange::OkxDependencies;
 use std::{rc::Rc, sync::Arc};
 
 pub type AdapterFactory = Rc<dyn Fn() -> Result<Arc<dyn RestAdapter>, ExchangeError>>;
@@ -46,6 +47,16 @@ impl RustVenueHost for NativeVenueHost {
             build_http: inputs.build_http,
             install_transport: inputs.install_transport,
             date_parse: inputs.date_parse,
+        })
+    }
+    fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
+        Ok(OkxDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                (self.adapter)()?,
+            ),
+            external_public_data: None,
         })
     }
 }
