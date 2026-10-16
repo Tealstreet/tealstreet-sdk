@@ -59,19 +59,19 @@ fn to_json(value: &EventValue) -> Result<Value, Failure> {
 
 /// Production Binance dependencies over the given native runtime.
 pub fn native_dependencies(runtime: Rc<NativeRuntime>) -> Result<ExchangeDependencies, ExchangeError> {
+    let runtime: Rc<dyn WsRuntime> = runtime;
     let adapter: Arc<dyn RestAdapter> =
         Arc::new(ReqwestAdapter::new().map_err(|e| ExchangeError::new(e.to_string()))?);
     Ok(native_dependencies_with_adapter(runtime, adapter))
 }
 /// As `native_dependencies`, with an explicit terminal HTTP adapter.
 pub fn native_dependencies_with_adapter(
-    runtime: Rc<NativeRuntime>,
+    runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
 ) -> ExchangeDependencies {
-    let ws: Rc<dyn WsRuntime> = runtime;
     ExchangeDependencies {
-        runtime: ws.clone(),
-        imports: NativeImports::new(ws, adapter),
+        runtime: runtime.clone(),
+        imports: NativeImports::new(runtime, adapter),
         signers: Default::default(),
         remote_signer_token: None,
         payload_signer_token: None,
