@@ -362,3 +362,14 @@ through to the native value (position `info`), and `capture_is_algo` accepts the
 decoded order-type string as well as the native enum. `tests/private_classes.rs`
 pins every method's outcome and transport routes per class, constructed via each
 `::new` over a route-scripted `request` import.
+
+`native_host` (feature `native`) is the production `ExchangeImports`. Each
+factory call builds an axios-equivalent client over the shared `HttpClient`:
+the ported request interceptors run inside `execute_with_interceptor` (so a
+public endpoint's header removal stands), response stages run FIFO (factory
+interceptors, then weight guards), reads retry on network failure, and the
+secondary-key split routes `get` to the secondary client. The private base is a
+core `BaseWebSocket` with id 3 whose protocol forwards open/message to the
+registered listeners; close stays with the core. `PrivateBase::install_hooks`
+routes watchdog ping and reconnect back into `PrivateState`. Paging and
+closed-position folding are not wired on this host and fail visibly.

@@ -302,7 +302,9 @@ impl JsRestAdapter {
                 .collect(),
         );
         let url = Js::str(&request.url);
-        let pending = if request.method == "post" {
+        // Axios normalizes the verb; RestRequest callers send "GET" as often as "get".
+        let method = request.method.to_lowercase();
+        let pending = if method == "post" {
             let data = match &request.body {
                 Some(body) => {
                     let bytes = body
@@ -318,7 +320,7 @@ impl JsRestAdapter {
             };
             self.xhr.call_method("post", vec![url, data, config])?
         } else {
-            self.xhr.call_method(&request.method, vec![url, config])?
+            self.xhr.call_method(&method, vec![url, config])?
         };
         rest_response(&await_js(pending).await?)
     }

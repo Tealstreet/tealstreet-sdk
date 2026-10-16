@@ -100,6 +100,8 @@ pub trait ExchangeImports {
         &self,
         signer: EventValue,
     ) -> Result<crate::api_factory::RemoteSignCall, Failure>;
+    /// Receives the exchange's emitAndLogError before any client is created.
+    fn bind_emitter(&self, _emit: Rc<dyn Fn(EventValue) -> Result<(), Failure>>) {}
     fn virtual_now(&self) -> f64;
     fn uuid(&self) -> String;
     fn dayjs(&self, value: Option<f64>) -> Result<f64, Failure>;
@@ -300,6 +302,13 @@ impl ExchangeState {
             resync: Default::default(),
             root: OnceCell::new(),
         });
+        let emitter = Rc::downgrade(&owner);
+        owner.imports.bind_emitter(Rc::new(move |message| {
+            emitter
+                .upgrade()
+                .ok_or_else(|| failure("exchange dropped"))?
+                .emit(message)
+        }));
         let bindings = Rc::new(Constructor(owner.clone(), OnceCell::new(), OnceCell::new()));
         let name = decoded(&owner.base.name)?;
         let store = record([]);
@@ -575,6 +584,12 @@ impl crate::private_session::ConstructorBindings for Constructor {
                         virtual_now: Rc::new(move || time.virtual_now()),
                     },
                 )?;
+                if let Some(socket) = child.base.core_socket() {
+                    self.0.base.set_borrowed_socket(
+                        safe_cex_exchange::socket_lifecycle::SocketSlot::Private,
+                        &socket,
+                    );
+                }
                 self.0
                     .private
                     .set(Rc::downgrade(&child))
@@ -1898,6 +1913,9 @@ impl ExchangeState {
 }
 
 impl PrivateParent for ExchangeState {
+    fn socket_parent(&self) -> Option<Rc<dyn WsParent>> {
+        self.this.upgrade().map(|owner| owner as Rc<dyn WsParent>)
+    }
     fn options(&self) -> Result<EventValue, Failure> {
         Ok(self.options.clone())
     }
