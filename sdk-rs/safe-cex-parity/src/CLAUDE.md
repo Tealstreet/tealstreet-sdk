@@ -134,6 +134,11 @@ identity/message, zero HTTP and unchanged Store/notification/runtime state.
 Every compiler-listed API remains in the complete owner contract; get_account
 and schedule_cancel behavior tests do not invent indexed entries or unit-input
 permissions. Unknown constant methods and changed adapters remain refused.
+The single reviewed `DirectTransport::ws_connection` native-method record in
+`constant-outputs/safe-cex-transport.json` also pins its actual compiler API,
+package, raw-input role, Rust span/hash, maintained TS callback and exact native
+adapter/cases. Distinct URL inputs observe the returned connection capability;
+both reviewed outputs are absent. No other transport method inherits permission.
 The bounded `construction/<crate>.json` policy classifies Clone/Copy on private-field
 types, including service handles whose shared ownership is intentional.
 
