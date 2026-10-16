@@ -502,9 +502,9 @@ note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice.
 ts = "BaseWebSocket.dispose"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::dispose"
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::dispose", "safe-cex-exchange/src/websocket.rs::WsProtocol::dispose" ]
 status = "ported"
-note = ""
+note = "Split: BaseWebSocket::dispose holds the shared teardown; WsProtocol::dispose is the subclass override hook it calls first (a no-op by default), where a venue's dispose override (mexc's divergent-closure cleanup) releases its own state before the base teardown. Renamed Rust target: safe-cex-exchange/src/websocket.rs::WsProtocol::dispose."
 
 [[symbol]]
 ts = "BaseWebSocket.reconnect"
