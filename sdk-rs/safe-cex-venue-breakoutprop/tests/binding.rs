@@ -732,3 +732,15 @@ fn inherited_public_trades_retains_native_state_without_http() {
         );
     }
 }
+
+// The accepted-set expression names its exact compiler owner and invokes the
+// typed trait method on this observer's production receiver.
+pub fn accepted_typed_refusal(
+    input: &Value,
+    invoke: impl FnOnce(
+        Rc<BreakoutpropExchange>,
+    ) -> std::pin::Pin<Box<dyn Future<Output = ExchangeError>>>,
+) -> Value {
+    let f = refusal_fixture(input);
+    observe_refusal(&f, || f.run(invoke(f.exchange.clone())))
+}

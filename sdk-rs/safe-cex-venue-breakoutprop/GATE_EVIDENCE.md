@@ -627,3 +627,23 @@ in a native example against this library. That temporary example is removed; log
 and proposed policy rows remain outside the repository. This proves the adapters,
 not accepted-set policy permission or a complete package gate. The ordinary gate
 and the binding-integrated inventory expansion remain separate work.
+
+# Binding-integrated mutation completion and typed refusal adapters
+
+The interrupted original corpus was resumed at its first incomplete control.
+All remaining 30 controls compiled, failed a named native assertion at exit 101,
+then passed after exact restoration: six default controls, six supplemental,
+fourteen consuming decoders, two auth decoders and two candle decoders. With the
+previous thirteen complete default controls, all 43 planned controls are proven.
+The final consuming/candle controls bypass their separate census/cardinality
+checks so decoded native full-value assertions independently detect element loss.
+Each corpus verified exact source/test bytes restored; no compiler failure counts
+as a negative control. This is the venue corpus, not the global accepted-set
+mutation gate.
+
+The first inherited-refusal expressions called concrete fixture methods and
+therefore did not meet the multi-entry validator's literal $type requirement.
+The corrected expressions name the actual owner and invoke its Exchange trait
+methods on the native observer's production receiver. All five exact expressions
+compile and execute the ten independently expected native cases. The observer
+returns the actual ExchangeError after polling; it creates no policy exception.
