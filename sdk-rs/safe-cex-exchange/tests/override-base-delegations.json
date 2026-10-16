@@ -8,6 +8,16 @@
   },
   "delegations": [
     {
+      "file": "safe-cex-venue-polymarket/src/binding/members.rs",
+      "finding": "exchange bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {"file": "packages/safe-cex/src/exchanges/polymarket/polymarket.exchange.ts", "contains": "super.dispose();"},
+        {"file": "sdk-rs/safe-cex-venue-polymarket/src/binding/members.rs", "contains": "rt.base().dispose().map_err(|e| error(&e.message))"},
+        {"file": "sdk-rs/safe-cex-venue-polymarket/src/disposal.rs", "contains": "dispose_base()"}
+      ]
+    },
+    {
       "file": "safe-cex-venue-bingx/src/binding/hosts.rs",
       "finding": "is_public_data_only bypasses dynamic hook can_sign through base",
       "kind": "no-venue-override",
