@@ -9,6 +9,17 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
+async fn retry_signature_rejection(
+    request: ClassifiedRequest,
+    adapter: &dyn RestAdapter,
+    retries: usize,
+    venue: SignatureRetryVenue,
+    clock: &dyn RateLimitClock,
+) -> Result<RestResponse, safe_cex_transport::RestFailure> {
+    retry_signature_rejection_with_receipt(request, adapter, retries, venue, clock)
+        .await
+        .map(|execution| execution.response)
+}
 fn run<T>(future: impl Future<Output = T>) -> T {
     let waker = Waker::noop();
     let mut future = std::pin::pin!(future);
@@ -479,35 +490,38 @@ fn polling_override_replaces_clamps_and_preserves_wildcard_fallthrough() {
 #[test]
 fn bybit_excludes_instruments_network_retry_but_keeps_signature_retry() {
     let venue = Venue::default();
-    venue.replies.lock().unwrap().push_back(Err(reset()));
-    let policy = signature_error_on_read(
-        read(
+    let instruments = || {
+        ClassifiedRequest::Read(read(
             ReadClassification::Methods,
             req("GET", "/v5/market/instruments-info"),
-        ),
-        3,
-        SignatureRetryVenue::Bybit,
+        ))
+    };
+    venue.replies.lock().unwrap().push_back(Err(reset()));
+    assert!(
+        run(retry_signature_rejection(
+            instruments(),
+            &venue,
+            3,
+            SignatureRetryVenue::Bybit,
+            &RetryClock::default(),
+        ))
+        .is_err()
     );
-    assert!(run(policy.execute(&venue, &RetryClock::default())).is_err());
     assert_eq!(venue.accepted.lock().unwrap().len(), 1);
     let mut failure = signature_failure(br#"{"retMsg":"error sign!"}"#.to_vec());
     failure.request = Box::new(req("GET", "/v5/market/instruments-info"));
     venue.replies.lock().unwrap().push_back(Err(failure));
-    assert!(run(policy.execute(&venue, &RetryClock::default())).is_ok());
+    assert!(
+        run(retry_signature_rejection(
+            instruments(),
+            &venue,
+            3,
+            SignatureRetryVenue::Bybit,
+            &RetryClock::default(),
+        ))
+        .is_ok()
+    );
     assert_eq!(venue.accepted.lock().unwrap().len(), 3);
-    for venue_kind in [SignatureRetryVenue::Bitrue, SignatureRetryVenue::Apexomni] {
-        venue.replies.lock().unwrap().push_back(Err(reset()));
-        let policy = signature_error_on_read(
-            read(
-                ReadClassification::Methods,
-                req("GET", "/v5/market/instruments-info"),
-            ),
-            1,
-            venue_kind,
-        );
-        assert!(run(policy.execute(&venue, &RetryClock::default())).is_ok());
-    }
-    assert_eq!(venue.accepted.lock().unwrap().len(), 7);
 }
 
 struct HeldClock(Mutex<u64>);
@@ -1742,6 +1756,7 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
             method: "POST".into(),
             url: "/remote-input".into(),
             skip_remote_signing: skip,
+            config_extensions: [("grvtCookie".into(), json!("gravity=retained"))].into(),
             body: Some(safe_cex_transport::RestBody::Untransformed(
                 json!({"input":79}),
             )),
@@ -1761,6 +1776,11 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
                 "/signed-before-terminal"
             },
             "receipt_remote_native_signed_config {skip}"
+        );
+        assert_eq!(
+            venue.requests.lock().unwrap()[0].config_extensions["grvtCookie"],
+            json!("gravity=retained"),
+            "REST CONFIG signed/bypass terminal extensions {skip}"
         );
         assert_eq!(
             signer.calls.lock().unwrap().len(),

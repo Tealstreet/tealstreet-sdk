@@ -155,15 +155,147 @@ pub fn create(host: Host, defaults: Js) -> Js {
 
 fn merged_config(defaults: &Js, request: &Js) -> Result<Js, Thrown> {
     let config = defaults.spread_object()?;
-    let headers = defaults.get("headers")?.spread_object()?;
+    let headers = axios_headers()?;
+    for (k, v) in defaults.get("headers")?.spread_object()?.own_entries()? {
+        set_header(&headers, Js::utf16(&k), v, Js::Undefined)?;
+    }
     for (k, v) in request.get("headers")?.spread_object()?.own_entries()? {
-        headers.define_key(&k, v)?;
+        set_header(&headers, Js::utf16(&k), v, Js::Undefined)?;
     }
     for (k, v) in request.own_entries()? {
         config.define_key(&k, v)?;
     }
     config.define("headers", headers)?;
     Ok(config)
+}
+
+// The source request interceptors receive AxiosHeaders, not a plain record.
+// Methods live on its prototype so own-entry enumeration remains wire data.
+fn axios_headers() -> Result<Js, Thrown> {
+    let prototype = Js::object(vec![
+        (
+            "set",
+            Js::function("set", |this, a| {
+                let name = arg(&a, 0);
+                if name.is_object() {
+                    for (key, value) in name.own_entries()? {
+                        set_header(&this, Js::utf16(&key), value, arg(&a, 1))?;
+                    }
+                } else if !name.is_nullish() {
+                    set_header(&this, name, arg(&a, 1), arg(&a, 2))?;
+                }
+                Ok(this)
+            }),
+        ),
+        (
+            "get",
+            Js::function("get", |this, a| {
+                if arg(&a, 1).truthy() {
+                    return Err(Thrown::type_error(
+                        "AxiosHeaders.get parser overload is not bound",
+                    ));
+                }
+                header_key(&this, &arg(&a, 0))?.map_or(Ok(Js::Undefined), |key| this.get_key(&key))
+            }),
+        ),
+        (
+            "has",
+            Js::function("has", |this, a| {
+                if arg(&a, 1).truthy() {
+                    return Err(Thrown::type_error(
+                        "AxiosHeaders.has matcher overload is not bound",
+                    ));
+                }
+                Ok(Js::Bool(match header_key(&this, &arg(&a, 0))? {
+                    Some(key) => !this.get_key(&key)?.is_undefined(),
+                    None => false,
+                }))
+            }),
+        ),
+    ]);
+    let headers = Js::object_with_class("AxiosHeaders", vec![]);
+    if let Js::Object(object) = &headers {
+        *object.proto.borrow_mut() = Some(prototype);
+    }
+    Ok(headers)
+}
+
+fn normalized_header(name: &Js) -> Result<Vec<u16>, Thrown> {
+    if !name.truthy() {
+        return Ok(vec![]);
+    }
+    Ok(name
+        .call_method("toString", vec![])?
+        .call_method("trim", vec![])?
+        .call_method("toLowerCase", vec![])?
+        .to_js_string()?
+        .to_vec())
+}
+fn header_key(headers: &Js, name: &Js) -> Result<Option<super::value::Str>, Thrown> {
+    let normalized = normalized_header(name)?;
+    if normalized.is_empty() {
+        return Ok(None);
+    }
+    for key in headers.own_keys().into_iter().rev() {
+        if normalized_header(&Js::utf16(&key))? == normalized {
+            return Ok(Some(key));
+        }
+    }
+    Ok(None)
+}
+fn normalized_header_value(value: Js) -> Result<Js, Thrown> {
+    if value.is_nullish() || value.strict_equals(&Js::Bool(false)) {
+        return Ok(value);
+    }
+    if let Some(values) = value.array_values() {
+        return values
+            .into_iter()
+            .map(normalized_header_value)
+            .collect::<Result<Vec<_>, _>>()
+            .map(Js::array);
+    }
+    let units = value.to_js_string()?;
+    let units: Vec<u16> = units
+        .iter()
+        .copied()
+        .filter(|c| !matches!(*c,0..=8|10..=31|127))
+        .collect();
+    let start = units
+        .iter()
+        .position(|c| !matches!(*c, 9 | 32))
+        .unwrap_or(units.len());
+    let end = units
+        .iter()
+        .rposition(|c| !matches!(*c, 9 | 32))
+        .map_or(start, |i| i + 1);
+    Ok(Js::utf16(&units[start..end]))
+}
+fn set_header(headers: &Js, name: Js, value: Js, rewrite: Js) -> Result<(), Thrown> {
+    let normalized = normalized_header(&name)?;
+    if normalized.is_empty() {
+        return Ok(());
+    }
+    let existing = header_key(headers, &name)?;
+    let current = existing
+        .as_ref()
+        .map(|key| headers.get_key(key))
+        .transpose()?
+        .unwrap_or(Js::Undefined);
+    if existing.is_none()
+        || current.is_undefined()
+        || rewrite.strict_equals(&Js::Bool(true))
+        || (rewrite.is_undefined() && !current.strict_equals(&Js::Bool(false)))
+    {
+        let key = match existing {
+            Some(key) => key,
+            None => name
+                .call_method("toString", vec![])?
+                .call_method("trim", vec![])?
+                .to_js_string()?,
+        };
+        headers.define_key(&key, normalized_header_value(value)?)?;
+    }
+    Ok(())
 }
 
 fn axios_error(response: &Js, config: &Js) -> Result<Thrown, Thrown> {
@@ -341,13 +473,14 @@ impl JsRestAdapter {
         }
     }
     async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
-        let config = Js::object(
-            request
-                .params
-                .iter()
-                .map(|params| ("params", from_json(params)))
-                .collect(),
-        );
+        let config = Js::object(vec![]);
+        for (name, value) in &request.config_extensions {
+            config.define(name, from_json(value))?;
+        }
+        // Typed parameters remain authoritative over an extension of that name.
+        if let Some(params) = &request.params {
+            config.define("params", from_json(params))?;
+        }
         let url = Js::str(&request.url);
         // Axios normalizes the verb; RestRequest callers send "GET" as often as "get".
         let method = request.method.to_lowercase();
@@ -557,6 +690,33 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
         }
         params = Js::Undefined;
     }
+    // Keep adapter-owned data properties without serializing executable Axios
+    // capabilities. The source config itself stays live for response hooks.
+    let mut config_extensions = indexmap::IndexMap::new();
+    for (key, value) in config.own_entries()? {
+        let key = String::from_utf16(&key)
+            .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at a typed boundary"))?;
+        if matches!(
+            key.as_str(),
+            "method"
+                | "url"
+                | "baseURL"
+                | "headers"
+                | "data"
+                | "params"
+                | "timeout"
+                | "adapter"
+                | "paramsSerializer"
+                | "transformRequest"
+                | "transformResponse"
+                | "safeCexSkipRemoteSigning"
+        ) || value.is_undefined()
+            || value.is_callable()
+        {
+            continue;
+        }
+        config_extensions.insert(key, to_json(&value)?);
+    }
     let timeout = config.get("timeout")?;
     // ts: markSkipRemoteSigning tags a public request a hosted signer need not see.
     let skip_remote_signing = config.get("safeCexSkipRemoteSigning")?.truthy();
@@ -578,6 +738,7 @@ fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Throw
             Some(to_json(&params)?)
         },
         skip_remote_signing,
+        config_extensions,
         ..Default::default()
     })
 }
@@ -597,6 +758,9 @@ fn response_data(body: RestResponseBody) -> Js {
 
 fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
     let result = config.spread_object()?;
+    for (name, value) in &request.config_extensions {
+        result.set(name, from_json(value))?;
+    }
     result.set("method", Js::str(&request.method))?;
     result.set("url", Js::str(&request.url))?;
     result.set(

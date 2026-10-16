@@ -38,6 +38,7 @@ async function capture(venue,method,url,data,failure,elapsed=0,extra={}) {
   });return module.exports;
  }
  const factory=load(path.join(root,`packages/safe-cex/src/exchanges/kucoin/${venue}.api.ts`));
+ if(extra.signatureCorpus){Date.now=originalNow;return extra.signatureCorpus.map(data=>factory.isKucoinSignatureRejection(data));}
  const options={key:'fixture-key',secret:'fixture-secret',passphrase:'fixture-pass',...extra.options};
  const remoteSigner={sign:async request=>{signRequests.push(request.config);return {id:request.id,config:request.config};}};
  if(extra.remote)options.remoteSigner=remoteSigner;

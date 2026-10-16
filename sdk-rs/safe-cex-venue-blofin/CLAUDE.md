@@ -194,8 +194,10 @@ historyId for round-trip identity. Native callbacks are infallible and row input
 retained JSON/UTF-8; dynamic executable/getter inputs are excluded. The focused
 live test is --test position_adapter -- --include-ignored. No fetch wiring is claimed.
 
-`src/modes.rs` ports three instance utilities ahead of their REST consumers:
-getPositionSide, applyConfirmedPositionMode and afterMethodCalledInWorker.
+`src/modes.rs` ports four instance utilities ahead of their REST consumers:
+getPositionSide, applyConfirmedPositionMode, applyConfirmedMarginType and
+afterMethodCalledInWorker. changeMarginType applies the response's confirmed
+marginMode, falling back to the argument, before refetching.
 AccountModes is an explicit native cache context, not a replacement exchange
 class. Mode reads use an asynchronous callback once with the selected symbol;
 confirmed-mode updates use the real shared Store, set cache before callbacks,

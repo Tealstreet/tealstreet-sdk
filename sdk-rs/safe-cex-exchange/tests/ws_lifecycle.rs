@@ -842,6 +842,71 @@ mod js_sockets {
     }
 
     #[test]
+    fn binary_delivery_preserves_bytes_until_explicit_text_conversion() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = JsSocketContext::new(runtime.clone());
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let ws = socket
+            .call_method("createWebsocket", vec![Js::str("wss://venue")])
+            .unwrap();
+        let received = Rc::new(RefCell::new(Vec::new()));
+        let values = received.clone();
+        ws.call_method(
+            "addEventListener",
+            vec![
+                Js::str("message"),
+                Js::function("capture", move |_, args| {
+                    values.borrow_mut().push(arg(&args, 0).get("data")?);
+                    Ok(Js::Undefined)
+                }),
+            ],
+        )
+        .unwrap();
+        let io = live_socket(&runtime);
+        io.events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Binary(vec![0, 128, 255, 65])));
+        io.events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text("plain".into())));
+        runtime.pump();
+        let received = received.borrow();
+        assert_eq!(received.len(), 2);
+        assert!(
+            matches!(&received[0], Js::Object(object) if object.class == "Buffer"),
+            "binary frame remains a Buffer"
+        );
+        let bytes = received[0].get("bytes").unwrap().array_values().unwrap();
+        assert_eq!(
+            bytes
+                .iter()
+                .map(|v| v.as_f64().unwrap() as u8)
+                .collect::<Vec<_>>(),
+            vec![0, 128, 255, 65]
+        );
+        assert_eq!(received[0].get("byteLength").unwrap().as_f64(), Some(4.0));
+        assert_eq!(
+            received[0]
+                .get("buffer")
+                .unwrap()
+                .get("bytes")
+                .unwrap()
+                .array_values()
+                .unwrap()
+                .len(),
+            4
+        );
+        assert_eq!(
+            received[0].to_display(),
+            "\0��A",
+            "Buffer text conversion stays explicit"
+        );
+        assert!(matches!(&received[1], Js::String(_)));
+        assert_eq!(received[1].to_display(), "plain");
+    }
+
+    #[test]
     fn redial_drops_the_replaced_handles_listeners_so_one_frame_dispatches_once() {
         let (venue, runtime, _store, _) = fixture();
         let context = JsSocketContext::new(runtime.clone());

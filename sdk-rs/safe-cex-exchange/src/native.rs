@@ -224,7 +224,9 @@ impl ExchangeRuntime for NativeRuntime {
         self.origin.elapsed().as_secs_f64() * 1000.0
     }
     fn now_ms(&self) -> f64 {
-        wall_clock_ms()
+        // JavaScript wall-clock timestamps (Date.now) have integer milliseconds.
+        // Keep sub-millisecond precision on monotonic_now_ms for pacing/metrics.
+        wall_clock_ms().floor()
     }
     fn sleep(&self, delay_ms: u64) -> ExchangeFuture<'static, ()> {
         Box::pin(async move {

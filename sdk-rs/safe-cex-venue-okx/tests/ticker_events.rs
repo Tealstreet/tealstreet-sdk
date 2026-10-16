@@ -355,6 +355,11 @@ fn notifying_ticker_writers_preserve_original_error_and_stop_after_commit() {
             "notification subscriber identities inner to outer {method}"
         );
         error.store_subscriber_ids = expected.store_subscriber_ids.clone();
+        // The recovered error retains the opaque notification cause it came through.
+        assert!(
+            error.store_subscriber_cause.take().is_some(),
+            "notification retains its Store cause {method}"
+        );
         assert_eq!(
             error, expected,
             "notification original error identity {method}"
