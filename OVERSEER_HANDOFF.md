@@ -35,6 +35,17 @@ not `--last-rev`. `mirrors/README.md` → "Adding a Mirror" has the wording.
 Until that lands, a Rust job here compiles nothing, and a green badge on it
 means nothing — which is worse than no job, so do not add one first.
 
+**The seed would have failed this repo's own `secret-scan` job before
+2026-10-16.** This repo had no `.gitleaks.toml` at all and the slice did not
+carry one, so that job fell back to gitleaks' DEFAULT rules — and `sdk-rs`
+carries 332 synthetic findings outside `target/` (Hardhat dev keys, exchange-doc
+example keys, generated signing fixtures). A seed commit adds all of them at
+once, on a PUBLIC repo. `.gitleaks.toml` is now in the slice, in all FIVE places
+the path set is encoded (`TEALSTREET_SDK_FILES`, the two `paths:` blocks in
+`sdk-secret-scan.yml`, its `SDK_PATHS`, and `slice_mono_paths` in
+`copybara-mirror-sync.sh` — `yarn check:mirror-paths` fails until they agree).
+Confirm the file is present at this repo's root before pushing a seed branch.
+
 ## 3. One authoring home, and it is now this repo
 
 Authoring the same change in both repos makes both sides edit the same hunks
