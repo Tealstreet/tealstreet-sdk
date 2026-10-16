@@ -426,7 +426,7 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     let w = weak.clone();
     def(
         "BaseWebSocket",
-        Js::constructor("BaseWebSocket", move |_, a| Ok(sockets::base_websocket(&shared(&w)?, arg(&a, 0)))),
+        Js::constructor("BaseWebSocket", move |_, a| Ok(sockets::base_websocket(&shared(&w)?.shared.sockets, arg(&a, 0)))),
     );
     let w = weak.clone();
     def(
@@ -438,7 +438,7 @@ pub(crate) fn register(g: &Js, weak: Weak<Shared>) {
     let w = weak.clone();
     def(
         "safeCexAxiosCreate",
-        Js::function("safeCexAxiosCreate", move |_, a| Ok(client::create(&shared(&w)?, arg(&a, 0)))),
+        Js::function("safeCexAxiosCreate", move |_, a| Ok(client::create(shared(&w)?.shared.http.clone(), arg(&a, 0)))),
     );
     def(
         "retry",

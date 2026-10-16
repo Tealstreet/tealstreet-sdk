@@ -15,17 +15,11 @@ use std::{
     rc::{Rc, Weak},
 };
 
-/// Wire-level operations the host supplies; everything above them is ported code.
-pub trait BitgetImports {
-    /// Send one HTTP request whose config already passed the request interceptors.
-    /// Resolves the Axios response object `{ data, status, headers, config }`.
-    fn send(&self, config: Js) -> JsFuture<'static>;
-}
 
 pub(crate) struct Shared {
     pub runtime: Rc<dyn WsRuntime>,
-    pub venue: RefCell<Option<Weak<dyn Exchange>>>,
-    pub imports: Rc<dyn BitgetImports>,
+    pub http: Rc<dyn safe_cex_exchange::js_runtime::client::JsHttpHost>,
+    pub sockets: Rc<safe_cex_exchange::js_runtime::sockets::JsSocketContext>,
     pub store: Rc<dyn Store>,
     pub base: OnceCell<Rc<BaseExchange>>,
     pub globals: Js,
@@ -35,8 +29,6 @@ pub(crate) struct Shared {
     pub options: safe_cex_types::ExchangeOptions,
     pub external_public_data: Option<ExternalPublicDataFactory>,
     pub timers: RefCell<Vec<(Js, Box<dyn safe_cex_exchange::runtime::ExchangeTask>)>>,
-    pub socket_ids: std::cell::Cell<u64>,
-    pub socket_cores: RefCell<Vec<(Js, Rc<super::sockets::SocketCore>)>>,
 }
 
 pub type ExternalPublicDataFactory = Rc<

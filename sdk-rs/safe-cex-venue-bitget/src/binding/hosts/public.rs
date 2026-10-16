@@ -800,7 +800,7 @@ struct JsPublicData {
 
 impl JsPublicData {
     fn base(&self) -> Option<Rc<safe_cex_exchange::websocket::BaseWebSocket>> {
-        sockets::core_of(&self.rt, &self.socket).and_then(|core| core.base.get().cloned())
+        sockets::core_of(&self.rt.shared.sockets, &self.socket).and_then(|core| core.base.get().cloned())
     }
     fn cleanup(value: Js) -> ListenerCleanup {
         Box::new(move || value.call(Js::Undefined, vec![]).map(|_| ()).map_err(exchange_error))
@@ -893,7 +893,7 @@ fn ping(rt: &Rt, private: bool) -> Result<Js, Thrown> {
     let base = if disposed {
         None
     } else {
-        let core = sockets::core_of(rt, &this).ok_or_else(|| Thrown::error("Error", "Bitget socket has no core"))?;
+        let core = sockets::core_of(&rt.shared.sockets, &this).ok_or_else(|| Thrown::error("Error", "Bitget socket has no core"))?;
         Some(core.base()?)
     };
     let ping_at = Cell::new(0.0);

@@ -2,7 +2,7 @@
 use super::{
     globals,
     promise::await_js,
-    rt::{BitgetImports, Rt, Shared, Variant},
+    rt::{Rt, Shared, Variant},
     store,
     value::{Js, Thrown, from_typed, to_typed},
 };
@@ -22,7 +22,8 @@ use std::{
 
 pub struct BitgetDependencies {
     pub runtime: Rc<dyn WsRuntime>,
-    pub imports: Rc<dyn BitgetImports>,
+    /// HTTP wire host for every client the venue creates.
+    pub http: Rc<dyn safe_cex_exchange::js_runtime::client::JsHttpHost>,
     /// Provider for `options.externalPublicData`; required when that option is set.
     pub external_public_data: Option<super::rt::ExternalPublicDataFactory>,
 }
@@ -75,8 +76,8 @@ impl BitgetExchange {
             super::hosts::register_all(&globals, weak.clone());
             Shared {
                 runtime: deps.runtime.clone(),
-                venue: RefCell::new(None),
-                imports: deps.imports.clone(),
+                http: deps.http.clone(),
+                sockets: safe_cex_exchange::js_runtime::sockets::JsSocketContext::new(deps.runtime.clone()),
                 store: store.clone(),
                 base: OnceCell::new(),
                 globals,
@@ -86,8 +87,6 @@ impl BitgetExchange {
                 options: options.clone(),
                 external_public_data: deps.external_public_data.clone(),
                 timers: RefCell::default(),
-                socket_ids: std::cell::Cell::new(0),
-                socket_cores: RefCell::default(),
             }
         });
         let rt = Rt { shared: shared.clone(), this: Js::Undefined };
@@ -111,7 +110,7 @@ impl BitgetExchange {
             capabilities: capabilities(),
         });
         let dyn_venue: Rc<dyn Exchange> = venue.clone();
-        *shared.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
+        *shared.sockets.venue.borrow_mut() = Some(Rc::downgrade(&dyn_venue));
         Ok(venue)
     }
 
