@@ -22,7 +22,7 @@ function execute(file, suffix, dependency) {
 const types = execute('cryptocom.types.ts', '', name => {throw Error('unexpected type import: ' + name);});
 const api = execute('cryptocom.api.ts', '\nexports.__public = isPublicEndpoint; exports.__write = isNonRetryablePrivateWrite;', name => {
   if (name === './cryptocom.types') return types;
-  if (['axios-retry', '../../safeCexAxiosCreate', './cryptocom.signing'].includes(name)) return {};
+  if (['axios-retry', '../../safeCexAxiosCreate', './cryptocom.signing', '../../utils/signatureRejection'].includes(name)) return {};
   throw Error('unexpected API import: ' + name);
 });
 const retained = types.PUBLIC_ENDPOINTS;
