@@ -30,9 +30,11 @@ Measured local results before PR creation:
 - Native registry: all six names construct through production native HTTP and
   strict server-side Ed25519 verification. Aster's native HMAC regression and
   twelve registry construction/membership tests pass: fourteen tests total.
-- Parity: zero findings, 7459 rows / 17057 public Rust items.
+- Parity: zero findings, 7459 rows / 17081 public Rust items after merging master.
 - Registry live TS equivalence: 48 ordered names in both source registries.
 - Layer policy: 88 tests passed with the Orderly constructor dependency listed.
+- Strict host all-target and wasm library clippy passed for Orderly and registry.
+  Scoped rustfmt completed successfully.
 
 The shared native registry adapter now takes a venue name; Aster's existing
 routing is retained. Native hosted remoteSigner remains visibly refused until
@@ -49,4 +51,18 @@ disregard silence and attempt reconnect; actual subscriptions still wait for
 the server's successful auth reply. The onOpen row is divergent and the overseer
 accepted this choice on 2026-10-16. Source disposal sets its mutable flag and
 disposes sockets first, then native BaseExchange releases owned resources; this
-ordering was also accepted. No extra read or disposal guards were added.
+ordering was also accepted and the dispose manifest row names the native cleanup
+as a CHOSEN divergence. No extra read or disposal guards were added.
+
+
+Commands (run sequentially to keep Cargo processes scoped):
+
+```sh
+SAFE_CEX_TYPESCRIPT_PATH="$PWD/node_modules/typescript" cargo test --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-orderly --all-targets --jobs 1 -- --include-ignored
+cargo test --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-registry --test native_host_orderly --test native_host_asterdex --test rust_venues --jobs 1
+cargo run --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-parity --bin parity-check --
+cargo clippy --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-orderly -p safe-cex-registry --all-targets --jobs 1 -- -D warnings
+cargo clippy --locked --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-orderly -p safe-cex-registry --target wasm32-unknown-unknown --lib --jobs 1 -- -D warnings
+node sdk-rs/safe-cex-registry/scripts/check.mjs
+node --test sdk-rs/scripts/check-layers.test.mjs
+```
