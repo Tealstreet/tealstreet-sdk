@@ -168,8 +168,9 @@ receives a ValidatedOrder, enforcing the shared client-ID gate before dispatch.
 The binding keeps the existing typed/JSON helper boundaries and their recorded
 divergences. The native Exchange boundary also converts declared typed inputs
 and results through JSON; executable callbacks and socket/class handles stay in
-shared JS values internally. The HOW adapter remains an explicit constructor
-refusal; this slice supports direct transport and does not claim tunnel parity.
+shared JS values internally. HTTP creation uses the shared source factory and runtime provider. The source
+tealstreetTunnel branch installs its BigInt adapter through the shared factory;
+proxy authorization follows venue signing. No venue-local adapter refusal remains.
 Public jsonParse performs ordinary Number parsing, while the private big-int
 parser retains its source non-string passthrough. Browser compressed Blob input
 uses the existing Store read_blob helper with its byte-to-character projection.
@@ -180,3 +181,7 @@ private dial/subscription, and the native Buffer/plain-JSON public frame path.
 `scripts/binding-controls.py` sequentially breaks each trait dispatch and requires
 its named assertion, then a restored pass. Do not compile concurrently with it.
 The registry's native_host_bitrue test verifies the HMAC at a local HTTP server.
+
+`routing-controls.py` compiles disconnected factory and adapter bindings; both
+must fail the constructed venue routing assertion, then pass after restoration.
+Run these controls sequentially without another compiler.

@@ -106,14 +106,28 @@ impl PrivateHost for Rt {
     fn axios_headers(&self, v: Js) -> Result<Js, Thrown> {
         Ok(v)
     }
-    fn axios_create(&self, config: Js, _options: Js, _exchange: Js) -> Result<Js, Thrown> {
-        Ok(client::create(self.shared.http.clone(), config))
+    fn axios_create(&self, config: Js, options: Js, exchange: Js) -> Result<Js, Thrown> {
+        client::factory::create(
+            self.shared.http.clone(),
+            self.shared.runtime.transport().as_ref(),
+            config,
+            &options,
+            safe_cex_exchange::js_runtime::value::to_typed(&exchange.get("name")?)?,
+        )
     }
-    fn transport(&self, _client: Js, _options: Js, _name: Js, _parser: &str) -> Result<(), Thrown> {
-        Err(Thrown::error(
-            "Error",
-            "Bitrue HOW transport requires a hosted transport adapter",
-        ))
+    fn transport(&self, client: Js, options: Js, name: Js, parser: &str) -> Result<(), Thrown> {
+        let variant = match parser {
+            "bigInt" => safe_cex_transport::RestAdapterVariant::BigInt,
+            _ => return Err(Thrown::type_error("Unexpected Bitrue transport parser")),
+        };
+        client::factory::install_transport_adapter(
+            self.shared.http.clone(),
+            self.shared.runtime.transport().as_ref(),
+            &client,
+            &options,
+            safe_cex_exchange::js_runtime::value::to_typed(&name)?,
+            variant,
+        )
     }
     fn clean_float(&self, value: Js) -> Result<Js, Thrown> {
         Ok(Js::Number(safe_cex_store::incremental_fills::clean_float(

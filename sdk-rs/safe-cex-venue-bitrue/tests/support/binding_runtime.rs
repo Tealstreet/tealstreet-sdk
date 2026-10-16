@@ -23,6 +23,7 @@ pub struct Runtime {
     jobs: RefCell<Vec<Job>>,
     pub sockets: RefCell<Vec<(String, Rc<Socket>)>>,
     pub reports: RefCell<Vec<String>>,
+    pub provider: RefCell<Option<Arc<dyn TransportProvider>>>,
 }
 struct Task(Rc<Cell<bool>>);
 impl ExchangeTask for Task {
@@ -142,7 +143,10 @@ impl WsSocket for Socket {
 }
 impl WsRuntime for Runtime {
     fn transport(&self) -> Arc<dyn TransportProvider> {
-        Arc::new(safe_cex_transport::DirectTransport)
+        self.provider
+            .borrow()
+            .clone()
+            .unwrap_or_else(|| Arc::new(safe_cex_transport::DirectTransport))
     }
     fn tunnel_host(&self) -> Rc<dyn TunnelHost> {
         panic!("Bitrue binding E2E never tunnels")

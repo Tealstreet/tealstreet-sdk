@@ -437,3 +437,168 @@ fn private_listen_key_failure_never_dials_or_subscribes_and_public_binary_uses_p
     );
     venue.dispose().unwrap();
 }
+
+#[test]
+#[expect(clippy::arc_with_non_send_sync)]
+fn source_routing_authorizes_signed_requests_and_installs_bigint_only_for_tunnel() {
+    use safe_cex_transport::{
+        DirectTransport, PrivateProxy, ResolvedRouting, RestAdapter, RestAdapterContext,
+        RestAdapterVariant, RestAuthorizer, RestFuture, RestRequest, RestResponse,
+        RestResponseBody, RestTransport, RestTransportContext, RoutingOptions, TransportError,
+        TransportFuture, TransportProvider, WsConnection,
+    };
+    use std::sync::Arc;
+    struct Authorize;
+    impl RestAuthorizer for Authorize {
+        fn authorize<'a>(&'a self, request: &'a mut RestRequest) -> TransportFuture<'a, ()> {
+            Box::pin(async move {
+                assert!(
+                    request
+                        .headers
+                        .iter()
+                        .any(|(k, v)| k.eq_ignore_ascii_case("X-CH-SIGN") && v.len() == 64),
+                    "ROUTING venue signs before proxy authorization"
+                );
+                request
+                    .headers
+                    .insert("Proxy-Authorization".into(), "Bearer routed".into());
+                Ok(())
+            })
+        }
+    }
+    struct Terminal(Rc<RefCell<Vec<RestRequest>>>);
+    impl RestAdapter for Terminal {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.borrow_mut().push(request);
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Untransformed(json!({"code":"0","data":{}})),
+                })
+            })
+        }
+    }
+    struct Provider {
+        variants: Rc<RefCell<Vec<RestAdapterVariant>>>,
+        sent: Rc<RefCell<Vec<RestRequest>>>,
+    }
+    impl TransportProvider for Provider {
+        fn name(&self) -> &str {
+            "binding-routing"
+        }
+        fn rest(&self, c: RestTransportContext<'_>) -> Result<RestTransport, TransportError> {
+            assert_eq!(
+                c.exchange,
+                &ExchangeName::Bitrue,
+                "ROUTING exchange selection"
+            );
+            assert_eq!(
+                c.config.base_url.as_deref(),
+                Some("https://fapi.bitrue.com"),
+                "ROUTING original base"
+            );
+            Ok(RestTransport {
+                base_url: Some("https://routing-origin".into()),
+                proxied: true,
+                authorize: Some(Arc::new(Authorize)),
+            })
+        }
+        fn rest_adapter(&self, c: RestAdapterContext<'_>) -> Option<Arc<dyn RestAdapter>> {
+            self.variants.borrow_mut().push(c.variant);
+            Some(Arc::new(Terminal(self.sent.clone())))
+        }
+        fn proxy_prefix(&self, _: RestTransportContext<'_>) -> String {
+            String::new()
+        }
+        fn public_cors_proxy(&self) -> Option<String> {
+            None
+        }
+        fn private_proxy(&self, _: &ExchangeName) -> Option<Arc<dyn PrivateProxy>> {
+            None
+        }
+        fn require_proxy(&self, options: ExchangeOptions) -> ExchangeOptions {
+            options
+        }
+        fn server_proxy_url(&self, _: &ExchangeName) -> Option<String> {
+            None
+        }
+        fn ws_routing(&self, name: &ExchangeName, options: &RoutingOptions) -> ResolvedRouting {
+            DirectTransport.ws_routing(name, options)
+        }
+        fn ws_connection(&self, _: &str) -> Option<WsConnection> {
+            None
+        }
+    }
+    for tunnel in [false, true] {
+        let runtime = Rc::new(support::Runtime::default());
+        let variants = Rc::new(RefCell::new(vec![]));
+        let sent = Rc::new(RefCell::new(vec![]));
+        *runtime.provider.borrow_mut() = Some(Arc::new(Provider {
+            variants: variants.clone(),
+            sent: sent.clone(),
+        }));
+        let http = Rc::new(Http(
+            runtime.clone(),
+            RefCell::new(vec![]),
+            Cell::new(false),
+        ));
+        let venue=BitrueExchange::new(ExchangeName::Bitrue,serde_json::from_value(json!({"key":"key","secret":"secret","tealstreetTunnel":tunnel,"extra":{"recvWindow":12345}})).unwrap(),Rc::new(DefaultStore::new()),BitrueDependencies {runtime:runtime.clone(),http:http.clone(),external_public_data:None}).expect("ROUTING constructed with provider");
+        assert_eq!(
+            serde_json::to_value(complete(&runtime, venue.validate_account()).unwrap().error)
+                .unwrap(),
+            json!(""),
+            "ROUTING validation"
+        );
+        if tunnel {
+            assert_eq!(
+                *variants.borrow(),
+                [RestAdapterVariant::BigInt, RestAdapterVariant::BigInt],
+                "ROUTING both source clients use bigInt adapter"
+            );
+            assert!(
+                http.1.borrow().is_empty(),
+                "ROUTING installed adapter replaces terminal host"
+            );
+            let requests = sent.borrow();
+            assert_eq!(
+                requests.len(),
+                2,
+                "ROUTING source validation then snapshot reads"
+            );
+            assert_eq!(
+                requests[0].base_url.as_deref(),
+                Some("https://routing-origin")
+            );
+            assert_eq!(
+                requests[0].timeout_ms,
+                Some(20_000),
+                "ROUTING source factory overrides recvWindow timeout"
+            );
+            assert!(requests[0].headers.iter().any(|(k, v)| {
+                k.eq_ignore_ascii_case("Proxy-Authorization") && v == "Bearer routed"
+            }));
+        } else {
+            assert!(
+                variants.borrow().is_empty(),
+                "ROUTING source does not install tunnel adapter without flag"
+            );
+            let requests = http.1.borrow();
+            assert_eq!(
+                requests.len(),
+                2,
+                "ROUTING source validation then snapshot reads"
+            );
+            assert_eq!(
+                requests[0]["baseURL"], "https://routing-origin",
+                "ROUTING selected factory base"
+            );
+            assert_eq!(
+                requests[0]["headers"]["Proxy-Authorization"],
+                "Bearer routed"
+            );
+        }
+        venue.dispose().unwrap();
+    }
+}

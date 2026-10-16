@@ -19,15 +19,17 @@ socket. A native Buffer ping frame distinguishes ordinary public Number JSON
 parsing from private big-integer string rewriting. Disposal closes both sockets.
 
 The binding retains existing declared typed helper/JSON domain choices; it does
-not widen them to arbitrary source objects. The HOW transport adapter is still
-an explicit constructor refusal, tracked by overseer queue ddi2il-12 (shared
-proxy/tunnel routing) for removal once the shared adapter becomes available. Shared worker RPC comes from #173, with no
+not widen them to arbitrary source objects. The former HOW transport refusal is removed by shared routing PR185
+(overseer queue ddi2il-12). Source creation selects provider routing, forces20s,
+authorizes after venue signing, and installs its BigInt adapter only under the
+original tealstreetTunnel condition. The routed E2E covers both flag states.
+Shared worker RPC comes from #173, with no
 venue-local duplicate. See the manifest class/constructor notes for these
 adapter choices and the existing helper-level divergences.
 
 Validation on the branch:
 
-- Full Bitrue crate: 64 tests across26 targets,0failed/ignored, including actual
+- Full Bitrue crate before routing follow-up: 64 tests across26 targets,0failed/ignored, including actual
   TypeScript oracles (`SAFE_CEX_TYPESCRIPT_PATH` set; `--include-ignored`).
 - `scripts/binding-controls.py`:16 independent dispatch mutations compile and
   exit101 at their named BIND assertion; each restored production file passes.
@@ -39,3 +41,6 @@ The shared cancellation inventory passes all7 tests. The shared override audit
 is tracked separately by #175; latest master exposes a Crypto.com dispose/base
 classification that belongs to that venue's owner. No Bitrue production change
 is hidden behind an audit exemption.
+
+The routing follow-up adds one E2E and two compiling disconnect controls in
+`scripts/routing-controls.py`. Earlier sixteen method controls remain unchanged.
