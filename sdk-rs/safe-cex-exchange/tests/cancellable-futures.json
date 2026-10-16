@@ -125,7 +125,7 @@
         "async-block",
         "async-block"
       ],
-      "producer_sha256": "90cc35b7b53c7ee16e3b40c741af0686fe3fc16815a125e9a2a706fbb11ab4f7",
+      "producer_sha256": "af92b2262176a88f1b2acfa65eb54addffaa2f8f2db052b97169006469315b47",
       "classification": "delegated",
       "delegate": "registered concrete capability callback / BaseExchange validated placement",
       "reason": "default owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
