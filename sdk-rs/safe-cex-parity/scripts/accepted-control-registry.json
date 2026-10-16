@@ -37,7 +37,8 @@
       "multiple observed entrypoints execute independently and cannot claim non-decoder receipts",
       "open JSON and supplemental methods require native witnesses without replacing shape checks",
       "self-only Visitor unit witnesses cannot invent varying input or exempt data methods",
-      "reviewed host operations bind exact compiler bodies and cannot exempt cache decoders"
+      "reviewed host operations bind exact compiler bodies and cannot exempt cache decoders",
+      "reviewed serializer constants pin compiler source adapters and witnesses"
     ],
     "accepted-controls.test.mjs": [
       "private Cargo targets cannot execute a stale default scanner in production or history",
@@ -162,6 +163,9 @@
     ],
     "accepted-ws-auth-native.test.mjs": [
       "WS four native families reject field and presence mutations before wire assertions"
+    ],
+    "accepted-constant-output-native.test.mjs": [
+      "reviewed serializer constants execute actual production values and reject native drift"
     ]
   },
   "mutations": [
@@ -291,6 +295,12 @@
     "metadata Snapshot positional-array widening",
     "alias default substitution removed",
     "observed typed entrypoint raw compiler role",
-    "hosted signer tuple expanded target"
+    "hosted signer tuple expanded target",
+    "constant serializer source pin",
+    "constant serializer compiler API pin",
+    "constant serializer adapter pin",
+    "constant serializer native witness pin",
+    "constant serializer unit native value",
+    "constant serializer tuple native state"
   ]
 }

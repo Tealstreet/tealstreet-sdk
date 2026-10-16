@@ -7,7 +7,7 @@ workspace = Path(__file__).resolve().parents[2]
 source = workspace / 'safe-cex-registry/src/rust_venues.rs'
 original = source.read_text()
 needle = '    (ExchangeName::Apexomni, apexomni_constructor),\n'
-command = ['cargo', 'test', '-p', 'safe-cex-registry', '--jobs', '1', '--test', 'native_host_apexomni']
+command = ['cargo', 'test', '-p', 'safe-cex-registry', '--jobs', '1', '--test', 'native_host_apexomni', 'apexomni_native_registry_bootstraps_signs_places_and_cancels', '--', '--exact']
 assert original.count(needle) == 1
 try:
     source.write_text(original.replace(needle, ''))

@@ -34,8 +34,8 @@ fn oracle() -> &'static serde_json::Value {
         );
         assert_eq!(
             v["sourceHashes"].as_object().unwrap().len(),
-            8,
-            "RUNTIME source file floor through7"
+            9,
+            "RUNTIME source file floor through8 (includes actual omitUndefined)"
         );
         v
     })

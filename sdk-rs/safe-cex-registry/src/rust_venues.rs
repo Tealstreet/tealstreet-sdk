@@ -102,6 +102,23 @@ pub trait RustVenueHost {
         ))
     }
 
+    fn cryptocom(
+        &self,
+    ) -> Result<safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies, ExchangeError>
+    {
+        Err(ExchangeError::new(
+            "cryptocom inputs are unavailable on this host",
+        ))
+    }
+
+    fn phemex(
+        &self,
+    ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "phemex inputs are unavailable on this host",
+        ))
+    }
+
     /// Optional hosted account capability; no host-local secret is required.
     fn bitrue(&self) -> Result<safe_cex_venue_bitrue::BitrueDependencies, ExchangeError> {
         Err(ExchangeError::new(
@@ -151,6 +168,7 @@ pub trait RustVenueHost {
     fn grvt(&self) -> Result<GrvtDependencies, ExchangeError>;
     fn hyperliquid(
         &self,
+        name: ExchangeName,
         options: &ExchangeOptions,
     ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError>;
     fn polymarket(&self) -> Result<PolymarketDependencies, ExchangeError> {
@@ -191,7 +209,9 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bybitspot, bybit_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
     (ExchangeName::Coinbasespot, coinbase_constructor),
+    (ExchangeName::Cryptocom, cryptocom_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
+    (ExchangeName::Hyperliquidspot, hyperliquidspot_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
     (ExchangeName::Kucoin, kucoin_constructor),
@@ -201,6 +221,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Phemex, phemex_constructor),
     (ExchangeName::Polymarket, polymarket_constructor),
     (ExchangeName::Woo, woo_constructor),
 ];
@@ -211,9 +232,20 @@ pub fn grvt_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     })
 }
 
+pub fn hyperliquidspot_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |_, options, store| {
+        let deps = host.hyperliquid(ExchangeName::Hyperliquidspot, &options)?;
+        Ok(
+            safe_cex_venue_hyperliquid::spot_binding::HyperliquidSpotExchange::new(
+                options, store, deps,
+            )?,
+        )
+    })
+}
+
 pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |_, options, store| {
-        let deps = host.hyperliquid(&options)?;
+        let deps = host.hyperliquid(ExchangeName::Hyperliquid, &options)?;
         let exchange =
             safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
         Ok(exchange)
@@ -301,6 +333,32 @@ pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
                 options,
                 store,
                 host.asterdex()?,
+            )?,
+        )
+    })
+}
+
+pub fn phemex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_phemex::binding::exchange::PhemexExchange::new(
+                name,
+                options,
+                store,
+                host.phemex()?,
+            )?,
+        )
+    })
+}
+
+pub fn cryptocom_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_cryptocom::binding::exchange::CryptocomExchange::new(
+                name,
+                options,
+                store,
+                host.cryptocom()?,
             )?,
         )
     })

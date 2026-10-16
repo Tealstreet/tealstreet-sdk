@@ -508,6 +508,7 @@ impl RustVenueHost for Venues {
     #[allow(clippy::arc_with_non_send_sync)]
     fn hyperliquid(
         &self,
+        _: ExchangeName,
         _: &ExchangeOptions,
     ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError> {
         self.calls.borrow_mut().push("hyperliquid");
@@ -751,7 +752,9 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bybitspot,
             ExchangeName::Coinbase,
             ExchangeName::Coinbasespot,
+            ExchangeName::Cryptocom,
             ExchangeName::Hyperliquid,
+            ExchangeName::Hyperliquidspot,
             ExchangeName::Kraken,
             ExchangeName::Krakenspot,
             ExchangeName::Kucoin,
@@ -761,6 +764,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Okxdemo,
             ExchangeName::Okxeu,
             ExchangeName::Okxeudemo,
+            ExchangeName::Phemex,
             ExchangeName::Polymarket,
             ExchangeName::Woo,
         ],

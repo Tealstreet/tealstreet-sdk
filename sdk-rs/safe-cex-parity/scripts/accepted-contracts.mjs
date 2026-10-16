@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
+import { reviewedConstantOutput } from './accepted-constant-output.mjs';
 
 export function contractFor(type, contracts, context = {}) {
   const contract = contracts[type.name];
@@ -41,6 +42,7 @@ export function contractFor(type, contracts, context = {}) {
   ];
   const expected = contract.entrypoints ?? [];
   assert.deepEqual(actual, expected.map(entry => entry.api), `${type.name}: accepted-set assertion: unclassified or changed decoder/conversion entrypoint`);
+  for (const entry of expected) if (entry.constantOutput !== undefined) assert.ok(contract.shape === 'observed' && expected.length > 1 && entry.input === 'observed' && entry.unitInput === undefined, `${type.name}: accepted-set assertion: constant output requires a reviewed multi-entry observed API`);
   if (type.rawEntrypoints) assert.ok(type.rawEntrypoints.length === actual.length && type.rawEntrypoints.every(value => typeof value === 'boolean'), `${type.name}: accepted-set assertion: compiler raw-input roles must cover every entrypoint`);
   for (const [index, entry] of expected.entries()) if (entry.input === 'non-decoder') validateHostEntrypoint(type, entry, index, context);
   if (contract.shape === 'observed') {
@@ -67,7 +69,8 @@ export function contractFor(type, contracts, context = {}) {
       }
       assert.ok(entry.call?.includes('$type') && entry.call.includes('$value') && entry.cases?.length >= 2 && entry.cases.every(row => Object.hasOwn(row, 'input') && Object.hasOwn(row, 'output')), `${type.name}: accepted-set assertion: every observed entrypoint requires executed input/output witnesses`);
       assert.doesNotMatch(entry.call, /serde_json::to_(?:string|value|vec)/, `${type.name}: accepted-set assertion: observed methods cannot serialize decoded owners`);
-      assert.ok(new Set(entry.cases.map(row => JSON.stringify(row.input))).size >= 2 && new Set(entry.cases.map(row => JSON.stringify(row.output))).size >= 2, `${type.name}: accepted-set assertion: observed entrypoint requires distinct inputs and outputs`);
+      const constant = reviewedConstantOutput(type, entry, expected.indexOf(entry), context);
+      assert.ok(new Set(entry.cases.map(row => JSON.stringify(row.input))).size >= 2 && (constant || new Set(entry.cases.map(row => JSON.stringify(row.output))).size >= 2), `${type.name}: accepted-set assertion: observed entrypoint requires distinct inputs and outputs`);
     }
     const call = `{ match $value["entrypoint"].as_u64().expect("internally generated observed entrypoint") { ${observed.map((entry, index) => `${index} => { ${entry.call.includes('$value') ? 'let __accepted_input = &$value["input"];' : ''} ${entry.call.replaceAll('$value', '__accepted_input')} },`).join(' ')} _ => panic!("unclassified observed entrypoint") } }`;
     const cases = observed.flatMap((entry, index) => entry.cases.map(row => ({ input: { entrypoint: index, input: row.input }, output: row.output })));
