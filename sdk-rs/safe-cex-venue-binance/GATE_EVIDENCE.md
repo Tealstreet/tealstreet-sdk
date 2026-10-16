@@ -3403,3 +3403,46 @@ files, venue tests and scripts compare unchanged against `9501adec0c`; the
 existing compiled targets execute all 13 live/native tests successfully again.
 Fresh ordinary discovery and four production contract probes pass with zero
 failed owners; parity-check passes 7,459 rows and 17,183 public Rust items.
+
+
+### String union native witnesses
+
+The income, API-type and orderbook-apply unions retain their existing String
+admission and Serialize spellings. Their private ordinary derived enums are
+replaced with private Serde remote schemas. Public variants remain unchanged,
+including `TRANSFER`, `COMMISSION` and `DeliveredSettelment`. The generator owns
+the income schema and emits its targeted acronym lint allowance because remote
+variants must use those exact public names.
+
+`tests/accepted_string_shapes.rs` checks all 24 source literals against actual
+native variants before serialization, then separately checks existing wire
+spellings. Every valid unit tag rejects its otherwise valid tagged-null object
+through owned, borrowed, qualified and JSON-text decoding. Arrays, null, numbers,
+booleans, unknown strings and non-admitted case, whitespace and BOM spellings
+also reject. The real Serde unknown-variant metadata inventories all accepted
+rename and alias spellings; the maintained live TS oracles still compare those
+metadata with the source AST.
+
+The three new tests pass against the original public decoders before the remote
+refactor. `python3 sdk-rs/safe-cex-venue-binance/scripts/string-shape-controls.py`
+then completes three compiling controls: removing only each String frontdoor
+admits a valid tagged object and fails its named assertion; exact source restore
+passes that assertion again. The controls ran before the acronym lint allowance;
+that allowance leaves all three decoder bodies and schemas unchanged.
+
+The final selected `accepted_string_shapes`, `accepted_record_shapes`, `types`,
+`numeric_ingress` and `spot_protocol` targets pass 17 tests with zero ignored,
+including live TypeScript tables, all union tags and numeric ingress witnesses.
+Generator freshness, two formatter-toolchain tests, workspace formatting and
+scoped all-target Clippy with warnings denied pass. The invention/status checker
+passes 7,459 rows and 17,183 public Rust items. This is a selected tranche; it
+does not establish whole-venue accepted-contract completion.
+
+The maintained `node sdk-rs/safe-cex-venue-binance/scripts/string-contracts.mjs`
+executes fresh ordinary native/default inventory and the three selected
+contracts against actual production libraries: three runtime results, zero
+failed owners. The private remote schemas add no independently inventoried
+decoder/API. Discovery remains 235 owners, 80 aliases and two construction
+policies; those counts describe discovery, not completed classification. Run
+accepted probes serially. Other owners, aliases, local scopes and feature/wasm
+coverage are excluded from this focused command.
