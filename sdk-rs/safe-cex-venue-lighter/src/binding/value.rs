@@ -8,7 +8,6 @@ use crate::{
         AuthTokenEncoding, HostThrownValue, SigningResult, TransactionSigningError,
     },
 };
-use num_bigint::BigInt;
 use safe_cex_exchange::{
     js_runtime::{
         promise::Promise,
@@ -121,13 +120,6 @@ fn object_js(object: &Rc<dyn AccountObject>) -> Js {
         .expect("host objects originate in js_runtime")
 }
 
-pub(crate) fn bigint(value: &Js) -> Option<BigInt> {
-    match value {
-        Js::BigInt(b) => Some((**b).clone()),
-        _ => None,
-    }
-}
-
 /// A JS throw crossing into a body keeps its original value for rethrow.
 pub(crate) fn to_signing(thrown: Thrown) -> TransactionSigningError {
     TransactionSigningError::Thrown(HostThrownValue::new(thrown))
@@ -144,10 +136,6 @@ pub(crate) fn to_thrown(error: TransactionSigningError) -> Thrown {
             Thrown::error(name, &String::from_utf16_lossy(&message))
         }
     }
-}
-
-pub(crate) fn js_result<T>(result: Result<T, Thrown>) -> SigningResult<T> {
-    result.map_err(to_signing)
 }
 
 /// FIFO microtasks for the crate's native promises, drained by one runtime task

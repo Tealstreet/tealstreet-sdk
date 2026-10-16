@@ -1,5 +1,6 @@
 //! Production binding of the ported LighterExchange class to the shared
 //! js_runtime and the `Exchange` trait.
+pub mod exchange;
 mod globals;
 mod hosts;
 mod ingress;

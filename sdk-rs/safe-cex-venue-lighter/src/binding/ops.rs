@@ -35,21 +35,6 @@ pub(crate) fn to_string(value: &Js) -> Result<Str, Thrown> {
     value.to_js_string()
 }
 
-/// ToNumeric: `Js::BigInt` or `Js::Number`.
-pub(crate) fn to_numeric(value: &Js) -> Result<Js, Thrown> {
-    runtime::to_numeric(&runtime::to_primitive(value)?)
-}
-
-/// ToLength, clamped to 2^53 - 1.
-pub(crate) fn to_length(value: &Js) -> Result<usize, Thrown> {
-    let n = runtime::to_primitive(value)?.to_number()?;
-    Ok(if n.is_nan() || n <= 0.0 {
-        0
-    } else {
-        n.min(9_007_199_254_740_991.0) as usize
-    })
-}
-
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub(crate) enum Arithmetic {
     Add,
