@@ -1671,6 +1671,14 @@ impl BaseWebSocket {
                     .get_watchdog_stale_threshold_ms()
                     .unwrap_or(WS_RECONNECT_THRESHOLD_MS)
     }
+    /// Raw source `lastReceived` field, including zero and non-finite values.
+    pub fn last_received(&self) -> f64 {
+        self.state.borrow().last_received
+    }
+    /// Assign only source `lastReceived`; callers own health synchronization.
+    pub fn set_last_received(&self, value: f64) {
+        self.state.borrow_mut().last_received = value;
+    }
     pub fn last_message_timestamp(&self) -> Option<f64> {
         let received = self.state.borrow().last_received;
         (received > 0.0).then_some(received)
@@ -3804,6 +3812,85 @@ mod tests {
             Poll::Ready(result) => result,
             Poll::Pending => panic!("future unexpectedly pending"),
         }
+    }
+
+    #[test]
+    fn raw_last_received_preserves_native_bits() {
+        let (socket, parent, runtime, _) = fixture();
+        assert_eq!(socket.last_received().to_bits(), 0);
+        // Fixed IEEE-754 witnesses: both zeros, NaN payloads, infinities,
+        // a negative finite value, a subnormal and a fractional timestamp.
+        let cases = [
+            0x8000_0000_0000_0000,
+            0x7ff8_0000_0000_0042,
+            0xfff8_0000_0000_1234,
+            0x7ff0_0000_0000_0000,
+            0xfff0_0000_0000_0000,
+            0xbff0_0000_0000_0000,
+            0x0000_0000_0000_0001,
+            0x412e_8480_8000_0000,
+            0x0000_0000_0000_0000,
+        ];
+        for bits in cases {
+            socket.set_last_received(f64::from_bits(bits));
+            assert_eq!(
+                socket.last_received().to_bits(),
+                bits,
+                "raw lastReceived bits"
+            );
+        }
+        assert_eq!(
+            parent.sync.get(),
+            0,
+            "assignment must not synchronize health"
+        );
+        assert!(
+            parent.events.borrow().is_empty(),
+            "assignment must not emit"
+        );
+        assert!(
+            runtime.jobs.borrow().is_empty(),
+            "assignment must not schedule"
+        );
+    }
+
+    #[test]
+    fn raw_last_received_drives_health_timestamp_and_reset() {
+        let (socket, _, runtime, _) = fixture();
+        runtime.socket.ready.set(1);
+        run(socket.create_websocket("wss://fixture".into(), vec![], None)).unwrap();
+        runtime.now.set(1_000_000.5);
+        // Expected normalized timestamps are independent of the raw getter.
+        let cases = [
+            (1_000_000.25_f64, Some(1_000_000.25_f64), true),
+            (0.0, None, false),
+            (-0.0, None, false),
+            (-1.0, None, false),
+            (f64::NAN, None, false),
+            (f64::NEG_INFINITY, None, false),
+            (f64::INFINITY, Some(f64::INFINITY), true),
+            (999_999.75, Some(999_999.75), true),
+            (0.0, None, false),
+        ];
+        for (raw, expected, healthy) in cases {
+            socket.set_last_received(raw);
+            let expected_bits = expected.map(f64::to_bits);
+            assert_eq!(
+                socket.last_message_timestamp().map(f64::to_bits),
+                expected_bits,
+                "lastMessageTimestamp must observe source lastReceived"
+            );
+            assert_eq!(
+                socket
+                    .diagnostics()
+                    .last_message_timestamp
+                    .map(f64::to_bits),
+                expected_bits,
+                "health timestamp must observe source lastReceived"
+            );
+            assert_eq!(socket.is_healthy(), healthy, "health must observe reset");
+        }
+        socket.dispose();
     }
 
     #[test]
