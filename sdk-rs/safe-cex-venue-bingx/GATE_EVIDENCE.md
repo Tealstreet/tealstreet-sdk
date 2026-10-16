@@ -1389,3 +1389,44 @@ SDK Cargo manifest/lock, extractor/indexer and source BingX/helper inputs compar
 unchanged to the measured merged SHA 3a9bde4431 with exit **0**. The 47-test/check/
 index receipts therefore stand. This final preservation receipt is documentation
 only and is followed by a complete source/test diff before push.
+
+
+## Production Exchange binding and registry, 2026-10-16
+
+The crate-root BingxExchange assembles the existing venue bodies with shared
+js_runtime HTTP, intrinsics, socket cores and Store; no transport or value-model
+replacement is used. Required 16 Exchange hooks have individually named E2Es.
+The source inherits base.ts:799-801,989-991,1138-1140 rejections for max leverage,
+schedule cancel and public trades; the tests require the exact Error and no I/O.
+
+- Full crate suite with the actual TypeScript compiler: 92 passed (65 existing,
+  27 assembled host tests). Host all-targets and wasm strict Clippy pass.
+- binding-controls.py: all 16 deliberate wrong Exchange bodies compiled and
+  failed their exact named E2E; restoration passed. Separate controls for both
+  public listener overrides compiled, failed and restored (18 bound_ tests).
+- Public/private gzip and zlib Ping frames each produce Pong through the real
+  shared binary bridge and shared read_blob inflater. Both listeners receive
+  actual protocol frames and unsubscribe. The book callback snapshot cost is
+  explicit at its manifest row and is asserted after cleanup.
+- HTTP proofs cover primary/secondary keys, caller-ID rejection before requests,
+  bigint wire IDs, one re-signed signature refusal (HTTP200 and400), fresh read
+  signatures, no ambiguous-write replay, and preserved HTTP status/request/hints.
+- Native registry/constructor tests: 15 pass including BingX startup, a server-side
+  HMAC check, placement/cancellation and existing Binance signature resend. Removing
+  the BingX table entry compiles and fails construction; restoring it passes.
+- Global parity invention/status gate: 0 findings after current master integration, 7459 rows /17061 Rust items.
+  Read-only extractor: no BingX or registry drift; shared base/safeCexAxiosCreate
+  metadata remains routed to its owners (0 added/0 orphaned symbols).
+- registry:check passes. layers:check is 86/88: the two existing Lighter missing-
+  classification assertions expect an old incoming edge; BingX exact membership
+  and all actual graph validations pass. The overseer has the failure details.
+
+Shared raw-response preservation and binary delivery are independent prerequisites
+#149 and #160. Existing per-row venue divergences remain; this evidence does not
+claim whole-venue equivalence. Hosted signing is visibly unavailable in this host.
+
+Placement uses fractional inputs amount1.2345/price100.127 against steps .001/.01;
+the actual maintained TypeScript adjust helper returns1.235/100.13. Separate
+binding-precision-controls.py mutations swap each production precision operand;
+both compile and fail their named wire quantity/price assertion, then restore.
+This strengthens the binding witness: integral inputs alone would mask a swap.
