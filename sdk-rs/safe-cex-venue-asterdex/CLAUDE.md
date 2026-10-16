@@ -76,3 +76,7 @@ receiver, outside structural options. Preserve the source's API-key requirement
 and use the existing exchange_options decoder when inspecting fields beside a
 runtime handle. Bare clock axios sends skip the shared remote adapter; account
 clients keep the same hosted identity through post-sign transport selection.
+
+`ALIAS_CONTRACT_REVIEW.md` records the eight original native/default aliases.
+The selected gate retains full discovery and authenticates actual compiler
+artifacts before native Serde/conversion probes and compiled identity controls.

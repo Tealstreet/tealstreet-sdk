@@ -641,5 +641,1277 @@
     },
     "reason": "Compares two already-typed UTF-8 operands through the shared pinned root collator and returns native Ordering. The string operands are literal sort keys, not serialized representations; this body parses no value or record.",
     "evidence": "Reviewed the complete production body against packages/safe-cex/src/exchanges/kraken/kraken.api.ts. tests/accepted_helpers.rs::sort_compares_literal_operands_without_decoding_them executes independently authored native observations through this exact API; tests/helpers.rs runs the actual TS declarations and pinned nanoid dependency. The combined four native plus five live-source tests pass with zero ignored. scripts/helper-contract-controls.py compiled a changed result, required this named native witness to fail after compilation, restored exact source and passed the named witness. All nine native/source tests pass again after the four controls. Accepted-set receipts for this role are classification-only, not execution. The existing UTF-8/root-collator/error-snapshot/fixed-ID host profile is MANIFEST-SPEC#kraken-module-utility-adapters; no new decoding exemption or complete alias/feature/wasm coverage is claimed."
+  },
+  "safe_cex_venue_kraken::fills::num": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "num",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/kraken/kraken.fills.ts. Number(value) with finite-only admission and positive-zero fallback, retaining finite native f64 bits including negative zero. Actual complete body and MANIFEST-SPEC#kraken-utility-wire-domain reviewed. tests/accepted_scalar_helpers.rs observes native bits, presence, Boolean results and coercion-error names before Serialize, including missing scalar and explicit local-time host callbacks; tests/utilities.rs executes the actual TS declarations. Production cases are independently authored; UTC host for date production probes, with UTC+02 callback behavior covered separately natively. Six sequential compiled controls each fail the changed owner's named native witness and only its own production output probe; exact source restoration passes the named witness and all six production probes each time. Final exact source bytes and all twelve native/source tests pass, zero ignored. Stock JSON/UTF-8 scope; callable hooks, BigInt/Symbol, arbitrary prototypes, full Error identity and feature/wasm accepted behavior are not claimed.",
+    "call": "{ match $type(Some($value)) { Ok(value) => serde_json::json!({\"bits\":format!(\"{:016x}\",value.to_bits())}), Err(error) => serde_json::json!({\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": true,
+        "output": {
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": 0,
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": -2.75,
+        "output": {
+          "bits": "c006000000000000"
+        }
+      },
+      {
+        "input": "-0",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "  ",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "0x10",
+        "output": {
+          "bits": "4030000000000000"
+        }
+      },
+      {
+        "input": "0b101",
+        "output": {
+          "bits": "4014000000000000"
+        }
+      },
+      {
+        "input": "0o10",
+        "output": {
+          "bits": "4020000000000000"
+        }
+      },
+      {
+        "input": "1.25e2",
+        "output": {
+          "bits": "405f400000000000"
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": [
+          null
+        ],
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": [
+          "2.5"
+        ],
+        "output": {
+          "bits": "4004000000000000"
+        }
+      },
+      {
+        "input": [
+          1,
+          2
+        ],
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "bad",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "Infinity",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "-Infinity",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "toString": null
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kraken::fills::optional_num": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "optional_num",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "f64"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/kraken/kraken.fills.ts. Presence-sensitive Number(value): missing/null/empty string are absent; whitespace/false/zero remain present finite numbers, nonfinite results are absent. Actual complete body and MANIFEST-SPEC#kraken-utility-wire-domain reviewed. tests/accepted_scalar_helpers.rs observes native bits, presence, Boolean results and coercion-error names before Serialize, including missing scalar and explicit local-time host callbacks; tests/utilities.rs executes the actual TS declarations. Production cases are independently authored; UTC host for date production probes, with UTC+02 callback behavior covered separately natively. Six sequential compiled controls each fail the changed owner's named native witness and only its own production output probe; exact source restoration passes the named witness and all six production probes each time. Final exact source bytes and all twelve native/source tests pass, zero ignored. Stock JSON/UTF-8 scope; callable hooks, BigInt/Symbol, arbitrary prototypes, full Error identity and feature/wasm accepted behavior are not claimed.",
+    "call": "{ match $type(Some($value)) { Ok(Some(value)) => serde_json::json!({\"bits\":format!(\"{:016x}\",value.to_bits())}), Ok(None) => serde_json::json!({\"none\":true}), Err(error) => serde_json::json!({\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": true,
+        "output": {
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": 0,
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": -2.75,
+        "output": {
+          "bits": "c006000000000000"
+        }
+      },
+      {
+        "input": "-0",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "  ",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "0x10",
+        "output": {
+          "bits": "4030000000000000"
+        }
+      },
+      {
+        "input": "0b101",
+        "output": {
+          "bits": "4014000000000000"
+        }
+      },
+      {
+        "input": "0o10",
+        "output": {
+          "bits": "4020000000000000"
+        }
+      },
+      {
+        "input": "1.25e2",
+        "output": {
+          "bits": "405f400000000000"
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": [
+          null
+        ],
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": [
+          "2.5"
+        ],
+        "output": {
+          "bits": "4004000000000000"
+        }
+      },
+      {
+        "input": [
+          1,
+          2
+        ],
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "bad",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "Infinity",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "-Infinity",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": {
+          "toString": null
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kraken::income::num": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "num",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "f64"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/kraken/kraken.income.ts. Presence-sensitive Number(value): missing/null/empty string are absent; whitespace/false/zero remain present finite numbers, nonfinite results are absent. Actual complete body and MANIFEST-SPEC#kraken-utility-wire-domain reviewed. tests/accepted_scalar_helpers.rs observes native bits, presence, Boolean results and coercion-error names before Serialize, including missing scalar and explicit local-time host callbacks; tests/utilities.rs executes the actual TS declarations. Production cases are independently authored; UTC host for date production probes, with UTC+02 callback behavior covered separately natively. Six sequential compiled controls each fail the changed owner's named native witness and only its own production output probe; exact source restoration passes the named witness and all six production probes each time. Final exact source bytes and all twelve native/source tests pass, zero ignored. Stock JSON/UTF-8 scope; callable hooks, BigInt/Symbol, arbitrary prototypes, full Error identity and feature/wasm accepted behavior are not claimed.",
+    "call": "{ match $type(Some($value)) { Ok(Some(value)) => serde_json::json!({\"bits\":format!(\"{:016x}\",value.to_bits())}), Ok(None) => serde_json::json!({\"none\":true}), Err(error) => serde_json::json!({\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": true,
+        "output": {
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": 0,
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": -2.75,
+        "output": {
+          "bits": "c006000000000000"
+        }
+      },
+      {
+        "input": "-0",
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "  ",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "0x10",
+        "output": {
+          "bits": "4030000000000000"
+        }
+      },
+      {
+        "input": "0b101",
+        "output": {
+          "bits": "4014000000000000"
+        }
+      },
+      {
+        "input": "0o10",
+        "output": {
+          "bits": "4020000000000000"
+        }
+      },
+      {
+        "input": "1.25e2",
+        "output": {
+          "bits": "405f400000000000"
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": [
+          null
+        ],
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": [
+          "2.5"
+        ],
+        "output": {
+          "bits": "4004000000000000"
+        }
+      },
+      {
+        "input": [
+          1,
+          2
+        ],
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "bad",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "Infinity",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "-Infinity",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": {
+          "toString": null
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kraken::fills::to_seconds": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "to_seconds",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "local_to_utc",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "primitive": "f64"
+                            }
+                          ],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce(f64) -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "primitive": "f64"
+                              }
+                            ],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/kraken/kraken.fills.ts. Date.parse of nullish-to-empty string coercion, finite fallback and mathematical floor of milliseconds/1000, including pre-epoch fractions. Actual complete body and MANIFEST-SPEC#kraken-utility-wire-domain reviewed. tests/accepted_scalar_helpers.rs observes native bits, presence, Boolean results and coercion-error names before Serialize, including missing scalar and explicit local-time host callbacks; tests/utilities.rs executes the actual TS declarations. Production cases are independently authored; UTC host for date production probes, with UTC+02 callback behavior covered separately natively. Six sequential compiled controls each fail the changed owner's named native witness and only its own production output probe; exact source restoration passes the named witness and all six production probes each time. Final exact source bytes and all twelve native/source tests pass, zero ignored. Stock JSON/UTF-8 scope; callable hooks, BigInt/Symbol, arbitrary prototypes, full Error identity and feature/wasm accepted behavior are not claimed.",
+    "call": "{ match $type(Some($value), |ms| ms) { Ok(value) => serde_json::json!({\"bits\":format!(\"{:016x}\",value.to_bits())}), Err(error) => serde_json::json!({\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": "1970-01-01T00:00:01.999Z",
+        "output": {
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": "1969-12-31T23:59:59.999Z",
+        "output": {
+          "bits": "bff0000000000000"
+        }
+      },
+      {
+        "input": "1970-01-01T00:00:00.999Z",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "1970-01-01T00:00:00.000Z",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "1970-01-01T01:00:00+01:00",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "1970-01-01T03:00:01.999",
+        "output": {
+          "bits": "40c5188000000000"
+        }
+      },
+      {
+        "input": [
+          "1970-01-01T00:00:01.999Z"
+        ],
+        "output": {
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "bad-date",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "toString": null
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kraken::income::to_ms": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "to_ms",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "local_to_utc",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "primitive": "f64"
+                            }
+                          ],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce(f64) -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "primitive": "f64"
+                              }
+                            ],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/kraken/kraken.income.ts. Date.parse of nullish-to-empty string coercion, finite fallback and unscaled native milliseconds. Actual complete body and MANIFEST-SPEC#kraken-utility-wire-domain reviewed. tests/accepted_scalar_helpers.rs observes native bits, presence, Boolean results and coercion-error names before Serialize, including missing scalar and explicit local-time host callbacks; tests/utilities.rs executes the actual TS declarations. Production cases are independently authored; UTC host for date production probes, with UTC+02 callback behavior covered separately natively. Six sequential compiled controls each fail the changed owner's named native witness and only its own production output probe; exact source restoration passes the named witness and all six production probes each time. Final exact source bytes and all twelve native/source tests pass, zero ignored. Stock JSON/UTF-8 scope; callable hooks, BigInt/Symbol, arbitrary prototypes, full Error identity and feature/wasm accepted behavior are not claimed.",
+    "call": "{ match $type(Some($value), |ms| ms) { Ok(value) => serde_json::json!({\"bits\":format!(\"{:016x}\",value.to_bits())}), Err(error) => serde_json::json!({\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": "1970-01-01T00:00:01.999Z",
+        "output": {
+          "bits": "409f3c0000000000"
+        }
+      },
+      {
+        "input": "1969-12-31T23:59:59.999Z",
+        "output": {
+          "bits": "bff0000000000000"
+        }
+      },
+      {
+        "input": "1970-01-01T00:00:00.999Z",
+        "output": {
+          "bits": "408f380000000000"
+        }
+      },
+      {
+        "input": "1970-01-01T00:00:00.000Z",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "1970-01-01T01:00:00+01:00",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "1970-01-01T03:00:01.999",
+        "output": {
+          "bits": "41649a69e0000000"
+        }
+      },
+      {
+        "input": [
+          "1970-01-01T00:00:01.999Z"
+        ],
+        "output": {
+          "bits": "409f3c0000000000"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "bad-date",
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "toString": null
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kraken::income::is_position_size_leg": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_position_size_leg",
+      "signature": {
+        "inputs": [
+          [
+            "row",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/kraken/kraken.income.ts. Decodes asset/contract fields by nullish-to-empty String coercion and lowercase before testing nonempty equality. The raw Value API admits non-map inputs as false; it is not a typed literal comparator. Actual complete body and MANIFEST-SPEC#kraken-utility-wire-domain reviewed. tests/accepted_scalar_helpers.rs observes native bits, presence, Boolean results and coercion-error names before Serialize, including missing scalar and explicit local-time host callbacks; tests/utilities.rs executes the actual TS declarations. Production cases are independently authored; UTC host for date production probes, with UTC+02 callback behavior covered separately natively. Six sequential compiled controls each fail the changed owner's named native witness and only its own production output probe; exact source restoration passes the named witness and all six production probes each time. Final exact source bytes and all twelve native/source tests pass, zero ignored. Stock JSON/UTF-8 scope; callable hooks, BigInt/Symbol, arbitrary prototypes, full Error identity and feature/wasm accepted behavior are not claimed.",
+    "call": "{ match $type($value) { Ok(value) => serde_json::json!({\"value\":value}), Err(error) => serde_json::json!({\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": {
+          "asset": "PF_XRPUSD",
+          "contract": "pf_xrpusd"
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "asset": "usd",
+          "contract": "pf_xrpusd"
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "asset": "",
+          "contract": ""
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "asset": null,
+          "contract": null
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "asset": false,
+          "contract": false
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "asset": 0,
+          "contract": 0
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "asset": [],
+          "contract": []
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "asset": [
+            "PF_XRPUSD"
+          ],
+          "contract": "pf_xrpusd"
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "asset": {},
+          "contract": {}
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "asset": " usd ",
+          "contract": "usd"
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "asset": "USD"
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": 12,
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "asset": {
+            "toString": null
+          },
+          "contract": "x"
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
   }
 }
