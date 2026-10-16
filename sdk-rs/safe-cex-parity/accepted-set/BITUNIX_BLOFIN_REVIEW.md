@@ -275,3 +275,32 @@ This batch leaves 36 original Bitunix owners and the previously measured
 49 Blofin owners. The original Blofin census stopped at receiver drift, so its
 empty missing-owner array does not prove runtime completeness. Full-package,
 local-owner and feature/WASM matrices remain separate obligations.
+
+## REST read and write hosts
+
+Another six Bitunix owners execute native/default witnesses. The three writes
+retain both position-mode literals, complete position preflight before warning,
+POST-before-setting order, full UTF-16 symbols including isolated surrogates,
+leverage clamp bits and updates to both long/short IDs after successful POST.
+Transport, setting, warning, rejection and report failures remain distinct.
+
+Market and ticker reads independently inspect two complete native outputs,
+including every declared number bit and optional-field absence. Unknown and
+filtered rows remain distinct. Their fallback fixtures return two distinct
+cached rows and inspect the full vectors. Balance checks native arithmetic,
+account-mode updates, zero-value precedence and the complete two-position
+borrowed slice, including pointer identity. Ready callback hosts bound this
+profile; arbitrary transport scheduling and executable host objects remain
+separate obligations.
+
+All six actual native owners pass, with no classification-only receipts. Eight
+compiled copied-production mutations alter the mode literal, UTF-16 symbol,
+short-position update ID, market amount precision, ticker ask, frozen-balance
+arithmetic, both cached fallback vectors and the returned position slice. Each
+fails the intended native observation, then passes after exact restoration.
+The two cached-vector and position truncation gaps were found by independent
+review and repaired before publication. Production source bytes are unchanged.
+
+After the six earlier REST/history owners, this batch leaves 30 original
+Bitunix owners and the previously measured 49 Blofin owners. Complete-package,
+local-owner and feature/WASM matrices remain separate obligations.
