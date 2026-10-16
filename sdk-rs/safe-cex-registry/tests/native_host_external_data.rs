@@ -127,64 +127,74 @@ fn subscribed_as(h: &Harness, exchange: &str, channel: &str) -> bool {
 /// `ExternalPublicDataFactory`, called with the exchange's own base.
 #[test]
 fn okx_starts_on_a_public_data_gateway_over_websocket() {
-    run_local(async {
-        let options = json!({"key":"","secret":"","publicDataOnly":true,
-            "externalPublicData":{"type":"websocket","url":"ws://gateway.local/gateway","exchangeId":"okx"}});
-        let h = Rc::new(
-            venue_harness(
-                safe_cex_types::ExchangeName::Okx,
-                Rc::new(|_| None),
-                options,
-                None,
-                safe_cex_exchange::native::native_runtime(),
-            )
-            .await,
-        );
-        let gateway = h.clone();
-        tokio::task::spawn_local(async move {
-            eventually("okx provider subscribes to tickers and markets", || {
-                subscribed_as(&gateway, "okx", "tickers")
-                    && subscribed_as(&gateway, "okx", "market")
-            })
-            .await;
-            let push = gateway_peer(&gateway).expect("gateway socket");
-            let market = json!({"id":"GW-USDT-SWAP","symbol":"GWUSDT","base":"GW","quote":"USDT","active":true,
+    run_local(starts_on_gateway(safe_cex_types::ExchangeName::Okx, "okx"));
+}
+
+#[test]
+fn kraken_starts_on_a_public_data_gateway_over_websocket() {
+    run_local(starts_on_gateway(
+        safe_cex_types::ExchangeName::Kraken,
+        "kraken",
+    ));
+}
+
+async fn starts_on_gateway(name: safe_cex_types::ExchangeName, exchange_id: &'static str) {
+    let options = json!({"key":"","secret":"","publicDataOnly":true,
+            "externalPublicData":{"type":"websocket","url":"ws://gateway.local/gateway","exchangeId":exchange_id}});
+    let h = Rc::new(
+        venue_harness(
+            name,
+            Rc::new(|_| None),
+            options,
+            None,
+            safe_cex_exchange::native::native_runtime(),
+        )
+        .await,
+    );
+    let gateway = h.clone();
+    tokio::task::spawn_local(async move {
+        eventually("provider subscribes to tickers and markets", || {
+            subscribed_as(&gateway, exchange_id, "tickers")
+                && subscribed_as(&gateway, exchange_id, "market")
+        })
+        .await;
+        let push = gateway_peer(&gateway).expect("gateway socket");
+        let market = json!({"id":"GW-USDT-SWAP","symbol":"GWUSDT","base":"GW","quote":"USDT","active":true,
                 "precision":{"amount":1,"price":0.01},"limits":{"amount":{"min":1,"max":100},"leverage":{"min":1,"max":20}}});
-            let ticker = json!({"id":"GW-USDT-SWAP","symbol":"GWUSDT","bid":9.9,"ask":10.1,"last":10.0,"mark":10.0,"index":10.0,
+        let ticker = json!({"id":"GW-USDT-SWAP","symbol":"GWUSDT","bid":9.9,"ask":10.1,"last":10.0,"mark":10.0,"index":10.0,
                 "percentage":1.0,"openInterest":0,"fundingRate":0,"fundingTime":0,"volume":1,"quoteVolume":10});
-            for (channel, data) in [("market", market), ("tickers", ticker)] {
-                push.send(
-                    json!({"type":"data","exchangeId":"okx","channel":channel,"data":[data]})
-                        .to_string(),
-                )
-                .unwrap();
-            }
-        });
-        h.exchange
-            .start()
-            .await
-            .expect("okx start with externalPublicData");
-        assert_eq!(
-            h.store
-                .markets()
-                .iter()
-                .map(|m| m.symbol.clone())
-                .collect::<Vec<_>>(),
-            ["GWUSDT"],
-            "okx markets came from the gateway"
-        );
-        assert!(
-            h.store
-                .tickers()
-                .iter()
-                .any(|t| t.symbol == "GWUSDT" && t.last == 10.0),
-            "okx tickers came from the gateway"
-        );
-        let rest: Vec<_> = h.seen.borrow().iter().map(|s| s.path.clone()).collect();
-        assert!(
-            !rest.iter().any(|p| p.starts_with("/api/v5/")),
-            "no OKX public REST: {rest:?}"
-        );
-        h.exchange.dispose().expect("dispose");
+        for (channel, data) in [("market", market), ("tickers", ticker)] {
+            push.send(
+                json!({"type":"data","exchangeId":exchange_id,"channel":channel,"data":[data]})
+                    .to_string(),
+            )
+            .unwrap();
+        }
     });
+    h.exchange
+        .start()
+        .await
+        .expect("start with externalPublicData");
+    assert_eq!(
+        h.store
+            .markets()
+            .iter()
+            .map(|m| m.symbol.clone())
+            .collect::<Vec<_>>(),
+        ["GWUSDT"],
+        "markets came from the gateway"
+    );
+    assert!(
+        h.store
+            .tickers()
+            .iter()
+            .any(|t| t.symbol == "GWUSDT" && t.last == 10.0),
+        "tickers came from the gateway"
+    );
+    let rest: Vec<_> = h.seen.borrow().iter().map(|s| s.path.clone()).collect();
+    assert!(
+        rest.is_empty(),
+        "gateway startup makes no venue REST request: {rest:?}"
+    );
+    h.exchange.dispose().expect("dispose");
 }

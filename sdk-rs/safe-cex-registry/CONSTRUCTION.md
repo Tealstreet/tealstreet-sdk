@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `backpack`, `bitunix`, `blofin`, the Binance family (`binance`, `binancepm`,
+Status: implemented for `backpack`, `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`), the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
@@ -64,7 +64,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bitget`, `bybit`, `kraken`, `kucoin`, `mexc`, `lighter`
+follow-up PR. Expected next: `bitget`, `bybit`, `kucoin`, `mexc`, `lighter`
 and `woo`.
 
 Each follow-up does four things:
@@ -83,7 +83,7 @@ Each follow-up does four things:
   The Rust path is native-only until the facade's wasm build links venue crates.
   That needs its own wasm size and feature audit, which this change does not
   claim.
-- **Every name not in the table.** Today that is 45 of 47.
+- **Every name not in the table.**
   - A name moves to the table when its venue lane reports the class bound:
     all 16 trait methods live, or TS-identical refusals cited.
   - The table and the binding audit must agree. A test pins the table's members
@@ -163,3 +163,5 @@ This changes the scope wording of one CHOSEN resolution, but none of its choices
 - **Prove-fail:** swapping the two table factories must fail the name
   assertion.
 - **Also run:** `yarn layers:check` and `parity:check` (staying at zero).
+
+The native Kraken host shares its Futures nonce counter and Spot client-ID generator across instances constructed by that host. The generator uses OS entropy. Its typed constructor visibly refuses hosted `remoteSigner`; external public data uses the shared gateway factory. Journal folding remains an optional host dependency, not a newly implemented journal engine.

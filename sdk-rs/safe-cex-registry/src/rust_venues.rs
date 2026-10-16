@@ -22,6 +22,7 @@ use safe_cex_venue_binance::exchange_classes::{
 };
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
+use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use std::rc::Rc;
 
@@ -67,6 +68,8 @@ pub trait RustVenueHost {
     fn okx(&self) -> Result<OkxDependencies, ExchangeError>;
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError>;
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError>;
+    /// Futures and Spot share the SDK runtime's nonce and client-ID state.
+    fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -87,6 +90,8 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Binancespot, binancespot_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Kraken, kraken_constructor),
+    (ExchangeName::Krakenspot, kraken_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
@@ -194,6 +199,13 @@ pub fn blofin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
             external,
             deps.remote_signer_account_name,
         )?;
+        Ok(exchange)
+    })
+}
+
+pub fn kraken_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = KrakenExchange::new(name, options, store, host.kraken()?)?;
         Ok(exchange)
     })
 }

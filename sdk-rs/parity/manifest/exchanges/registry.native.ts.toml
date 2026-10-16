@@ -230,17 +230,17 @@ note = "CHOSEN: native_hyperliquidspot selects the actual source module ./hyperl
 ts = "exchangeRegistry.kraken"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_kraken"
+rs = [ "safe-cex-registry/src/loaders.rs::native_kraken", "safe-cex-registry/src/rust_venues.rs::kraken_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::kraken" ]
 status = "divergent"
-note = "CHOSEN: native_kraken selects the actual source module ./kraken/kraken.exchange and export KrakenExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_kraken. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_kraken selects the actual source module ./kraken/kraken.exchange and export KrakenExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_kraken. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members `safe-cex-registry/src/rust_venues.rs::kraken_constructor`, `safe-cex-registry/src/rust_venues.rs::RustVenueHost::kraken` construct the bound Kraken family through the Rust path; native host retains module-scoped nonce/client-ID state."
 
 [[symbol]]
 ts = "exchangeRegistry.krakenspot"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_krakenspot"
+rs = [ "safe-cex-registry/src/loaders.rs::native_krakenspot", "safe-cex-registry/src/rust_venues.rs::kraken_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::kraken" ]
 status = "divergent"
-note = "CHOSEN: native_krakenspot selects the actual source module ./kraken/krakenspot.exchange and export KrakenSpotExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_krakenspot. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_krakenspot selects the actual source module ./kraken/krakenspot.exchange and export KrakenSpotExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_krakenspot. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members `safe-cex-registry/src/rust_venues.rs::kraken_constructor`, `safe-cex-registry/src/rust_venues.rs::RustVenueHost::kraken` construct the bound Kraken family through the Rust path; native host retains module-scoped nonce/client-ID state."
 
 [[symbol]]
 ts = "exchangeRegistry.kucoin"

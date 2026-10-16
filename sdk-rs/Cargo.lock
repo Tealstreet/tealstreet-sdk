@@ -3929,6 +3929,7 @@ name = "safe-cex-registry"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "getrandom 0.2.17",
  "hmac 0.12.1",
  "safe-cex-exchange",
  "safe-cex-store",
@@ -3938,6 +3939,7 @@ dependencies = [
  "safe-cex-venue-binance",
  "safe-cex-venue-bitunix",
  "safe-cex-venue-blofin",
+ "safe-cex-venue-kraken",
  "safe-cex-venue-okx",
  "serde",
  "serde_json",
