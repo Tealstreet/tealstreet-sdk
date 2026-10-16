@@ -113,6 +113,12 @@ never create a fresh budget per hosted account. The Hyperliquid adapter preserve
 the transport-resolved baseURL, repeat query serialization, hosted action signing
 and info skip-signing. Its local HTTP proof is `tests/native_host_hyperliquid.rs`.
 
+KuCoin futures/Spot and MEXC registry entries reuse their concrete constructors.
+Their native host inputs retain each API's signing/transport/retry middleware.
+Private MEXC fills must reach the venue emitter; retain the weak callback when
+adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
+native request signatures against a local server.
+
 Crypto.com constructs through `cryptocom_constructor` using its bound Js runtime.
 Native inputs share the account's hosted signer between HTTP and private WS auth,
 and supply the existing external-public-data gateway factory. The native host

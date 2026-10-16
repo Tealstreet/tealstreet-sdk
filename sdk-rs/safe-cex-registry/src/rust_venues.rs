@@ -64,8 +64,33 @@ pub struct BlofinDependencies {
     pub remote_signer_account_name: Option<String>,
 }
 
+/// Native collaborators of the already-bound MEXC exchange.
+pub struct MexcDependencies {
+    pub runtime: Rc<dyn WsRuntime>,
+    pub http: Rc<dyn RestAdapter>,
+    pub local_to_utc: Rc<dyn Fn(f64) -> f64>,
+    pub external_public_data: Option<ExternalPublicDataFactory>,
+}
+
 /// Host inputs for Rust venue construction, requested once per constructed instance.
 pub trait RustVenueHost {
+    fn kucoin_external_public_data(&self) -> Option<ExternalPublicDataFactory> {
+        None
+    }
+    fn kucoin(
+        &self,
+        _: ExchangeName,
+        _: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_kucoin::kucoin_exchange::KucoinDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "KuCoin dependencies were not supplied by this host",
+        ))
+    }
+    fn mexc(&self, _: &ExchangeOptions) -> Result<MexcDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "MEXC dependencies were not supplied by this host",
+        ))
+    }
     /// AsterDEX needs a per-lane HTTP factory to preserve secondary routing.
     fn asterdex(
         &self,
@@ -148,6 +173,9 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
+    (ExchangeName::Kucoin, kucoin_constructor),
+    (ExchangeName::Kucoinspot, kucoin_constructor),
+    (ExchangeName::Mexc, mexc_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
@@ -161,6 +189,79 @@ pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstruct
         let exchange =
             safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
         Ok(exchange)
+    })
+}
+
+pub fn kucoin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.kucoin(name.clone(), &options)?;
+        let parts = safe_cex_exchange::js_runtime::base_exchange::BaseExchangeParts {
+            name: name.clone(),
+            options,
+            store,
+            settings: ExchangeSettings {
+                supports_public_only: true,
+                positions_supported: Some(name != ExchangeName::Kucoinspot),
+                ..Default::default()
+            },
+            external_public_data: host.kucoin_external_public_data(),
+        };
+        match name {
+            ExchangeName::Kucoin => Ok(
+                safe_cex_venue_kucoin::kucoin_exchange::KucoinExchange::new(parts, deps)?,
+            ),
+            ExchangeName::Kucoinspot => {
+                Ok(safe_cex_venue_kucoin::kucoin_exchange::KucoinSpotExchange::new(parts, deps)?)
+            }
+            _ => Err(ExchangeError::new(
+                "KuCoin constructor requires a KuCoin family name",
+            )),
+        }
+    })
+}
+
+pub fn mexc_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.mexc(&options)?;
+        let external = external_factory("mexc", deps.external_public_data, &options)?;
+        let base = BaseExchange::new(
+            name,
+            options,
+            store,
+            deps.runtime.clone(),
+            ExchangeSettings {
+                supports_public_only: true,
+                tick_interval: Some(2_000.0),
+                ..Default::default()
+            },
+        );
+        let weak: Rc<
+            std::cell::RefCell<std::rc::Weak<safe_cex_venue_mexc::exchange::MexcExchange>>,
+        > = Rc::default();
+        let fill_parent = weak.clone();
+        let venue = safe_cex_venue_mexc::exchange::MexcExchange::new(
+            base,
+            deps.http,
+            deps.local_to_utc,
+            safe_cex_venue_mexc::sockets::MexcSocketDependencies {
+                runtime: deps.runtime,
+                remote_account_name: None,
+                emit_fill: Rc::new(move |fill| {
+                    use safe_cex_exchange::exchange::Exchange;
+                    if let Some(parent) = fill_parent.borrow().upgrade() {
+                        parent.base().emit(
+                            "fill",
+                            serde_json::to_value(fill)
+                                .map_err(|e| ExchangeError::new(e.to_string()))?,
+                        )?;
+                    }
+                    Ok(())
+                }),
+            },
+            external,
+        );
+        *weak.borrow_mut() = Rc::downgrade(&venue);
+        Ok(venue)
     })
 }
 
