@@ -15,6 +15,7 @@ fn binance_futures_runs_on_the_native_host_over_local_http_and_websocket() {
             store,
             seen,
             peers,
+            ..
         } = binance_harness(Rc::new(|_| None)).await;
 
         let markets = exchange

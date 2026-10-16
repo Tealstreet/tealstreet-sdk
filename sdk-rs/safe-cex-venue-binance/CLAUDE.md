@@ -375,7 +375,10 @@ routes watchdog ping and reconnect back into `PrivateState`. `bind_owner` gives
 the host the exchange weakly: response interceptors emit through it, `paginate`
 runs the shared `income_paging` pager over the venue's rethrowing page fetch,
 and `fold_closed_positions` runs `build_records` over the exchange's own fills
-and income dispatch.
+and income dispatch. A hosted remote signer arrives through `native_dependencies`:
+clients get it as the HTTP signer (the venue interceptor leaves requests unsigned
+when `options.remoteSigner` is set) and `remote_sign` relays ws-auth to it; the
+options token is stripped before typed decoding, since typed options cannot hold it.
 
 `ExchangeImports::request` args are the query params for GET/DELETE and the body
 for POST/PUT — never an axios config object; every call site passes that shape.

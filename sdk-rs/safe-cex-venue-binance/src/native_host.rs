@@ -31,12 +31,15 @@ use safe_cex_exchange::{
     },
     income_paging::{IncomePageParams, IncomeRangeOptions, paginate_income_range},
     native::{NativeHttpHost, nanoid},
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    runtime::{
+        ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeSigners, ExchangeTask, RemoteSigner,
+    },
     websocket::{BaseWebSocket, WsProtocol, WsRuntime},
 };
 use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestRequest, RestResponse, TransportRegistry,
+    signing::{RemoteSignerRequest, RemoteSignerResponse},
     socket::SocketFrame,
 };
 use safe_cex_types::{Execution, ExecutionsOptions, IncomeRecord};
@@ -65,16 +68,54 @@ fn to_json(value: &EventValue) -> Result<Value, Failure> {
 }
 
 /// Production Binance dependencies over a native runtime and terminal HTTP adapter.
+/// `external` builds the externalPublicData provider for an exchange's base; the
+/// registry supplies it, since the providers live above the venue layer.
+/// `remote` is the account's hosted signer and its `accountName`, when it has one.
 pub fn native_dependencies(
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
+    external: ExternalFactory,
+    remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
 ) -> ExchangeDependencies {
+    let token = remote.as_ref().map(|(_, account)| match account {
+        Some(account) => record([("accountName", string(account.clone()))]),
+        None => record([]),
+    });
     ExchangeDependencies {
         runtime: runtime.clone(),
-        imports: native_imports(runtime, adapter),
-        signers: Default::default(),
-        remote_signer_token: None,
+        signers: ExchangeSigners {
+            remote_signer: remote.as_ref().map(|(signer, _)| signer.clone()),
+            payload_signer: None,
+        },
+        imports: native_imports(runtime, adapter, external, remote),
+        remote_signer_token: token,
         payload_signer_token: None,
+    }
+}
+/// The hosted signer as the transport's signing capability, for the HTTP client.
+struct TransportSigner(Rc<dyn RemoteSigner>);
+// Transport adapters deliberately use Arc while native futures remain local.
+#[allow(clippy::arc_with_non_send_sync)]
+fn transport_signer(
+    signer: Rc<dyn RemoteSigner>,
+) -> Arc<dyn safe_cex_transport::signing::RemoteSigner> {
+    Arc::new(TransportSigner(signer))
+}
+impl safe_cex_transport::signing::RemoteSigner for TransportSigner {
+    fn sign(
+        &self,
+        request: RemoteSignerRequest,
+    ) -> safe_cex_transport::TransportFuture<'_, RemoteSignerResponse> {
+        self.0.sign(request)
+    }
+    fn sign_query(
+        &self,
+        request: safe_cex_transport::query_signing::HttpSigningRequest,
+    ) -> safe_cex_transport::TransportFuture<
+        '_,
+        safe_cex_transport::query_signing::HttpSigningResponse,
+    > {
+        self.0.sign_query(request)
     }
 }
 
@@ -85,14 +126,29 @@ struct NativeImports {
     registry: TransportRegistry,
     clients: RefCell<Vec<Rc<NativeClient>>>,
     timers: Rc<NativeTimers>,
-    /// The exchange's emitAndLogError, bound during construction.
+    /// The exchange, bound weakly during construction.
     owner: Rc<RefCell<Weak<ExchangeState>>>,
+    external: ExternalFactory,
+    remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
     /// publicXhr (Futures/PM) or xhr (Spot): the order-book snapshot client.
     public_client: RefCell<Option<Rc<NativeClient>>>,
     this: Weak<NativeImports>,
 }
-fn native_imports(runtime: Rc<dyn WsRuntime>, adapter: Arc<dyn RestAdapter>) -> Rc<NativeImports> {
+type ExternalFactory = Rc<
+    dyn Fn(
+        &safe_cex_types::ExchangeOptionsExternalPublicData,
+        Rc<safe_cex_exchange::exchange::BaseExchange>,
+    ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData>,
+>;
+fn native_imports(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: Arc<dyn RestAdapter>,
+    external: ExternalFactory,
+    remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
+) -> Rc<NativeImports> {
     Rc::new_cyclic(|this| NativeImports {
+        external,
+        remote,
         timers: native_timers(runtime.clone()),
         runtime,
         owner: Rc::new(RefCell::new(Weak::new())),
@@ -559,8 +615,17 @@ impl FactoryBindings for Factorizer<'_> {
         options: EventValue,
         exchange: EventValue,
     ) -> Result<EventValue, Failure> {
+        // The signer is host-held (`imports.remote`); typed options cannot name it.
+        let view = match &options {
+            EventValue::Object(object) => {
+                let mut record = object.borrow().clone();
+                record.fields.remove("remoteSigner");
+                EventValue::Object(Rc::new(RefCell::new(record)))
+            }
+            other => other.clone(),
+        };
         let typed: safe_cex_types::ExchangeOptions =
-            crate::class_decode::decode(options.clone()).map_err(|e| failure(e.to_string()))?;
+            crate::class_decode::decode(view).map_err(|e| failure(e.to_string()))?;
         let name: safe_cex_types::ExchangeName =
             serde_json::from_value(Value::String(exchange.get("name")?.text()?))
                 .map_err(|e| failure(e.to_string()))?;
@@ -589,8 +654,12 @@ impl FactoryBindings for Factorizer<'_> {
             options: typed,
             request,
             provider: Some(self.imports.runtime.transport()),
-            signer: None,
-            account_name: None,
+            signer: self
+                .imports
+                .remote
+                .as_ref()
+                .map(|(signer, _)| transport_signer(signer.clone())),
+            account_name: self.imports.remote.as_ref().and_then(|(_, a)| a.clone()),
             adapter: self.imports.adapter.clone(),
             host: self.imports.host.clone(),
             runtime: runtime.clone(),
@@ -805,9 +874,12 @@ impl ExchangeImports for NativeImports {
     }
     fn external_provider(
         &self,
-        _options: &safe_cex_types::ExchangeOptionsExternalPublicData,
+        options: &safe_cex_types::ExchangeOptionsExternalPublicData,
     ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData> {
-        Rc::new(UnavailableExternalData(self.runtime.clone()))
+        match self.owner.borrow().upgrade() {
+            Some(owner) => (self.external)(options, owner.base.clone()),
+            None => Rc::new(UnavailableExternalData(self.runtime.clone())),
+        }
     }
     fn private_base(&self, parent: Rc<dyn PrivateParent>) -> Result<Rc<dyn PrivateBase>, Failure> {
         let ws_parent = parent
@@ -827,9 +899,25 @@ impl ExchangeImports for NativeImports {
         self.timers.clone()
     }
     fn remote_sign(&self, _signer: EventValue) -> Result<RemoteSignCall, Failure> {
-        Err(failure(
-            "remote signing is not available on the native direct host",
-        ))
+        let (signer, _) = self
+            .remote
+            .clone()
+            .ok_or_else(|| failure("remoteSigner is set but the host supplied no signer"))?;
+        Ok(Rc::new(move |request: EventValue| {
+            let signer = signer.clone();
+            let text =
+                serde_json::to_string(&to_json(&request)?).map_err(|e| failure(e.to_string()))?;
+            let request: RemoteSignerRequest =
+                serde_json::from_str(&text).map_err(|e| failure(e.to_string()))?;
+            Ok(Box::pin(async move {
+                let response = signer
+                    .sign(request)
+                    .await
+                    .map_err(|e| failure(e.to_string()))?;
+                let value = serde_json::to_value(&response).map_err(|e| failure(e.to_string()))?;
+                Ok(EventValue::from_json(value))
+            }) as ApiFuture)
+        }))
     }
     fn virtual_now(&self) -> f64 {
         VIRTUAL_CLOCK.get_current_time_ms()
@@ -1460,7 +1548,7 @@ fn iso_string(ms: f64) -> Result<String, Failure> {
 
 /// externalPublicData on a host with no provider: every use fails visibly.
 struct UnavailableExternalData(Rc<dyn WsRuntime>);
-const NO_EXTERNAL: &str = "externalPublicData is not available on the native direct host";
+const NO_EXTERNAL: &str = "externalPublicData requested with no live exchange bound";
 impl safe_cex_exchange::external::ExternalPublicData for UnavailableExternalData {
     fn connect(&self) {
         self.0.report_exception(
