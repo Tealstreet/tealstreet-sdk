@@ -272,7 +272,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/store.rs::StoreState::patch_object_in_place"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::patch_object_in_place`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::patch_object_in_place`; DefaultStore owns this state internally."
+note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::StoreState::patch_object_in_place`. Rename private storage helper to `safe-cex-store/src/store.rs::StoreState::patch_object_in_place`; DefaultStore owns this state internally. Omitted option terms now retain the existing Market.option during the same native merge; source worker-refresh evidence is in sdk-rs/parity/OPTION_FIELDS_AUDIT.md."
 
 [[symbol]]
 ts = "DefaultStore#patchTickerInPlace"
@@ -496,7 +496,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/store.rs::DefaultStore::add_or_update_position"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::add_or_update_position`."
+note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::add_or_update_position`. Omitted Position.option retains the prior metadata; a present empty option object still replaces it. Source mutation evidence: sdk-rs/parity/OPTION_FIELDS_AUDIT.md."
 
 [[symbol]]
 ts = "DefaultStore.updatePositions"
@@ -512,7 +512,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-store/src/store.rs::DefaultStore::add_or_update_positions"
 status = "ported"
-note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::add_or_update_positions`."
+note = "Typed store model; borrowed dictionary views retain insertion order. Mapped `safe-cex-store/src/store.rs::DefaultStore::add_or_update_positions`. Omitted Position.option retains the prior metadata through the shared merge, including native Greek number bits. Source mutation evidence: sdk-rs/parity/OPTION_FIELDS_AUDIT.md."
 
 [[symbol]]
 ts = "DefaultStore.createEmptyPositionFrom"
@@ -624,7 +624,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-store/src/store.rs::StoreState::update_in_array", "safe-cex-store/src/model_patch.rs::apply" ]
 status = "divergent"
-note = "CHOSEN: safe-cex-store/src/store.rs::StoreState::update_in_array safe-cex-store/src/model_patch.rs::apply; The partial-update choice and its local reason are declared once at sdk-rs/parity/MANIFEST-SPEC.md#store-typed-patch-choice; ownership cites sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Admitted literal info objects now remain objects through direct patching; patch_info tests the public operation paths. Numeric ingress references sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect."
+note = "CHOSEN: safe-cex-store/src/store.rs::StoreState::update_in_array safe-cex-store/src/model_patch.rs::apply; The partial-update choice and its local reason are declared once at sdk-rs/parity/MANIFEST-SPEC.md#store-typed-patch-choice; ownership cites sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Admitted literal info objects now remain objects through direct patching; patch_info tests the public operation paths. Numeric ingress references sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect. Known Market.option and Position.option patches use their typed nested model rather than unknown-key omission. JS option patches retain native number bits through ModelPatch; other fields keep their existing profile. Evidence: sdk-rs/parity/OPTION_FIELDS_AUDIT.md."
 
 [[symbol]]
 ts = "DefaultStore#notify"
