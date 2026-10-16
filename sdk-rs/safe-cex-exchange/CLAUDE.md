@@ -913,6 +913,11 @@ individual values, so earlier callbacks can change later siblings. Unreplaced
 BigInt and circular structures throw; replacers can convert or omit them.
 Array replacer lists and indentation remain outside this runtime surface.
 
+The JS HTTP client's retry loop resubmits the failed response's effective config,
+including interceptor changes and retry-predicate stamps. Rebuilding from the
+initial input loses one-shot signature-retry guards and can resend more often
+than the venue allows. Request interceptors still run again to refresh signing.
+
 ## Native host (`native` feature)
 
 `native::native_runtime()` is the production `ExchangeRuntime` + `WsRuntime` on a

@@ -110,6 +110,50 @@ fn settle(runtime: &Runtime, value: Js) -> Result<Js, Thrown> {
 }
 
 #[test]
+fn client_retry_preserves_the_failed_config_and_retry_stamp() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    xhr.call_method(
+        "__configureRetry",
+        vec![Js::object(vec![
+            ("retries", Js::Number(3.0)),
+            (
+                "retryCondition",
+                Js::function("retryCondition", |_, a| {
+                    let config = arg(&a, 0).get("config")?;
+                    if config.get("signatureRetried")?.truthy() {
+                        return Ok(Js::Bool(false));
+                    }
+                    config.set("signatureRetried", Js::Bool(true))?;
+                    config.set("data", Js::str("replayed body"))?;
+                    Ok(Js::Bool(true))
+                }),
+            ),
+        ])],
+    )
+    .unwrap();
+    let result = settle(
+        &runtime,
+        xhr.call_method("post", vec![Js::str("/fail"), Js::str("original body")])
+            .unwrap(),
+    );
+    assert!(result.is_err());
+    let sent = http.sent.borrow();
+    assert_eq!(
+        sent.len(),
+        2,
+        "retry predicate stamp survives the next attempt"
+    );
+    assert_eq!(sent[0]["data"], "original body");
+    assert_eq!(sent[1]["data"], "replayed body");
+    assert_eq!(sent[1]["signatureRetried"], true);
+}
+
+#[test]
 fn client_runs_request_interceptors_lifo_and_response_interceptors_fifo() {
     let runtime = Rc::new(Runtime::default());
     let http = Rc::new(Http {
