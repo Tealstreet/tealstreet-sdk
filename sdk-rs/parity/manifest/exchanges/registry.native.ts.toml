@@ -350,9 +350,9 @@ note = "CHOSEN: native_weex selects the actual source module ./weex/weex.exchang
 ts = "exchangeRegistry.woo"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_woo"
+rs = [ "safe-cex-registry/src/loaders.rs::native_woo", "safe-cex-registry/src/rust_venues.rs::woo_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::woo" ]
 status = "divergent"
-note = "CHOSEN: native_woo selects the actual source module ./woo/woo.exchange and export WOOXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_woo. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_woo selects the actual source module ./woo/woo.exchange and export WOOXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_woo. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. ConstructionPath::Rust now calls the existing production WooExchange::new with caller name/options/Store and RustVenueHost::woo dependencies. NativeVenueHost supplies its shared signed HTTP host, runtime and external-data factory. The native registry test constructs WOO and verifies its account read and exact HMAC at a local HTTP server. Native split targets: safe-cex-registry/src/loaders.rs::native_woo, safe-cex-registry/src/rust_venues.rs::woo_constructor, safe-cex-registry/src/rust_venues.rs::RustVenueHost::woo."
 
 [[symbol]]
 ts = "exchangeRegistry.kodiakfi"
