@@ -11,6 +11,8 @@ retained in `SDK_LICENSE.txt`. The production path never launches Node.
 `tests/binding_controls.py` sequentially after that target passes to measure all
 16 entrypoint controls. Those controls must compile, fail their named E2E, then
 pass after restoration. Existing method-body oracles and controls remain in use.
+Measured concrete transport gates and controls are recorded in
+[BINDING_EVIDENCE.md](BINDING_EVIDENCE.md).
 
 FINDING: the shared JS client factory does not yet implement the source
 `safeCexAxiosCreate` proxy/tunnel policy. This binding currently uses the supplied
