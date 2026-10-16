@@ -10,10 +10,9 @@ const fills=load('packages/safe-cex/src/exchanges/bitget/bitget.fills.ts',enums)
 const splitter=load('packages/safe-cex/src/utils/splitTimeRange.ts');
 const source=ast('packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts');
 const klass=source.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='BitgetExchange');
-const member=klass.members.find(n=>n.name?.getText(source)==='fetchHistoricalFills');
-if(!member)throw Error('missing fetchHistoricalFills');
-const constants=source.statements.filter(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>/^BITGET_FILLS_/.test(d.name.getText(source))));
-const {Source}=evaluate(constants.map(n=>n.getText(source)).join('\n')+'\nexport class Source{'+member.getText(source)+'}',{...fills,...splitter});
+const members=['fetchHistoricalFills','_fetchHistoricalUtaFills'].map(name=>{const m=klass.members.find(n=>n.name?.getText(source)===name);if(!m)throw Error('missing '+name);return m.getText(source);});
+const constants=source.statements.filter(n=>ts.isVariableStatement(n)&&n.declarationList.declarations.some(d=>/^BITGET_(UTA_)?FILLS_/.test(d.name.getText(source))));
+const {Source}=evaluate(constants.map(n=>n.getText(source)).join('\n')+'\nexport class Source{'+members.join('\n')+'}',{...fills,...splitter});
 function encode(v){if(v===undefined)return {$undefined:true};if(typeof v==='number'){const b=Buffer.alloc(8);b.writeDoubleBE(Number.isNaN(v)?NaN:v);return {$number:Object.is(v,-0)?'-0':String(v),bits:Number.isNaN(v)?'7ff8000000000000':b.toString('hex')};}if(Array.isArray(v))return v.map(encode);if(v&&typeof v==='object')return Object.fromEntries(Object.entries(v).map(([k,x])=>[k,encode(x)]));return v;}
 const fill=(id='a',extra={})=>({symbol:'BTC',cTime:'1700000000123',baseVolume:'2.5',price:'11.25',side:'sell',tradeSide:'close',profit:'3.75',fee:'-0.125',tradeId:id,...extra});
 const page=(rows=[fill()],endId)=>({rows,endId});
@@ -28,6 +27,8 @@ const span=89*24*60*60*1000;
   Object.defineProperty(instance,'usesUtaRouting',{get(){calls.push(['uta']);return !!config.uta;}});
   instance._resolveMarket=symbol=>{calls.push(['resolve',symbol]);if(symbol==='THROW')throw Error('resolve failure');return symbol==='MISSING'?undefined:{id:symbol==='EMPTY'?'':symbol==='BTC'?'BTCUSDT':symbol,symbol:symbol==='EMPTY'?'':symbol==='BTC'?'BTC/USDT':symbol};};
   Object.defineProperty(instance,'apiProductType',{get(){calls.push(['product',products++]);if(config.productError)throw Error('product failure');return products%2?'USDT-FUTURES':'USDC-FUTURES';}});
+  Object.defineProperty(instance,'apiUtaCategory',{get(){calls.push(['category']);if(config.categoryError)throw Error('category failure');return 'USDT-FUTURES';}});
+  instance._fetchUtaFillsPage=async params=>{calls.push(['utaRead',params]);const current=config.cycle?pages[index++%pages.length]:pages[index++];if(current?.error)throw current.error;return current?{rows:current.rows,cursor:current.endId}:{rows:[]};};
   instance._fetchFillsPage=async params=>{calls.push(['read',params]);const current=config.cycle?pages[index++%pages.length]:pages[index++];if(current?.error)throw current.error;return current||page([]);};
   instance.emitAndLogError=message=>{calls.push(['emit',message]);if(config.reportError)throw Error('report failure');};
   let output;try{output={value:await instance.fetchHistoricalFills(opts)};}catch(e){output={error:{name:e.name,message:e.message}};}
@@ -57,6 +58,43 @@ const span=89*24*60*60*1000;
  for(let i=0;i<values.length;i++)await capture(`raw-catch-message:${i}`,{pages:[{error:{message:values[i]}}]});
  await capture('duplicate-still-maps-before-dedup',{pages:[page([fill('a')],'next'),page([fill('a',{price:{toString:1}})])]});
  await capture('filtered-row-still-advances',{pages:[page([fill('bad',{symbol:'MISSING'})],'next'),page([fill('good')])]});
+ const uta=(id='u1',extra={})=>({symbol:'BTC',createdTime:'1700000000123',execQty:'2.5',execPrice:'11.25',side:'sell',tradeSide:'close',posSide:'long',execPnl:'3.75',feeDetail:[{feeCoin:'USDT',fee:'-0.125'}],tradeScope:'taker',execId:id,orderId:'o1',...extra});
+ const utaSpan=30*24*60*60*1000-1;
+ await capture('uta:baseline',{uta:true,pages:[page([uta()])]});
+ await capture('uta:public-guard',{uta:true,public:true});
+ for(const symbol of ['', 'BTC','EMPTY','MISSING','THROW'])await capture('uta:symbol:'+symbol,{uta:true,opts:{symbol},pages:[page([uta('a'),uta('b',{symbol:'ETH'}),uta('c',{symbol:'BTCUSDT'})])]});
+ for(const orderId of [undefined,'','o9'])await capture('uta:order:'+String(orderId),{uta:true,opts:{orderId}});
+ for(const [from,to] of [[undefined,undefined],[0,undefined],[0,utaSpan],[0,utaSpan+1],[0,utaSpan*2+2],[2,1]])await capture('uta:window:'+String(from)+':'+String(to),{uta:true,opts:{from,to},pages:[page([uta()]),page([uta('b')]),page([uta('c')])]});
+ for(const limit of [undefined,0,1,100,101,NaN])await capture('uta:limit:'+String(limit),{uta:true,opts:{limit},pages:[page([uta()])]});
+ await capture('uta:cursor-continues',{uta:true,pages:[page([uta('a')],'next'),page([uta('b')])]});
+ await capture('uta:cursor-repeat',{uta:true,pages:[page([uta('a')],'same'),page([uta('b')],'same'),page([uta('c')])]});
+ await capture('uta:empty-stops',{uta:true,pages:[page([],'next'),page([uta('b')])]});
+ await capture('uta:cursor-cycle-cap',{uta:true,cycle:true,pages:[page([uta('a')],'x'),page([uta('b')],'y')]});
+ await capture('uta:dedup-and-fallback-id',{uta:true,pages:[page([uta('a'),uta('a',{execPrice:'99'}),uta(undefined,{execId:undefined,execLinkId:'link'}),uta(undefined,{execId:'',execLinkId:''}),uta(undefined,{execId:undefined})])]});
+ for(const [label,extra] of Object.entries({
+  'fee-detail-total':{feeDetail:[{totalFee:'0.5'},{fee:'0.25',totalFee:'9'},{fee:null,totalFee:'0.125'},null,{fee:'x'}]},
+  'fee-detail-none-found':{feeDetail:[{fee:'x'},{}]},
+  'fee-scalar':{feeDetail:undefined,fee:'-0.5'},
+  'fee-absent':{feeDetail:undefined},
+  'fee-coin-object':{feeDetail:{0:{feeCoin:'BGB',fee:'1'}}},
+  'fee-coin-empty':{feeDetail:[{feeCoin:'',fee:'1'}]},
+  'hold-side-short':{posSide:undefined,holdSide:'SHORT',tradeSide:'open'},
+  'trade-side-long':{posSide:'',tradeSide:'close_long'},
+  'buy-open':{posSide:undefined,side:'buy',tradeSide:'open'},
+  'buy-close':{posSide:undefined,side:'BUY',tradeSide:'close'},
+  'sell-open':{posSide:undefined,side:'sell',tradeSide:'open'},
+  'no-leg':{posSide:undefined,tradeSide:'buy_single'},
+  'bad-side':{side:'hold'},
+  'zero-qty':{execQty:'0'},
+  'bad-time':{createdTime:'abc'},
+  'maker':{tradeScope:'MAKER'},
+  'scope-absent':{tradeScope:undefined},
+  'pnl-absent':{execPnl:undefined},
+  'pnl-negative-zero':{execPnl:'-0'},
+ }))await capture('uta:row:'+label,{uta:true,pages:[page([uta(label,extra)])]});
+ await capture('uta:category-error',{uta:true,categoryError:true});
+ await capture('uta:map-failure-keeps-prior',{uta:true,pages:[page([uta('prior')],'next'),page([uta('lost'),uta('bad',{symbol:'THROW'})])]});
+ for(let i=0;i<values.length;i++)for(const reportError of [false,true])await capture(`uta:catch:${i}:${reportError}`,{uta:true,reportError,pages:[page([uta('prior')],'next'),{error:{response:{data:{msg:values[i]}},message:'fallback'}}]});
  const aliases=[];
  const aliased=new Source(),mutableOpts={symbol:'BTC',limit:1};let seen;
  aliased.ensureAccountTypeDetected=async()=>{mutableOpts.symbol='ETH';mutableOpts.limit=7;};
