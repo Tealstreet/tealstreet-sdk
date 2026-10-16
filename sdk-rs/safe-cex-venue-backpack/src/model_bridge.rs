@@ -1,4 +1,5 @@
 //! Typed SDK projection preserves native numeric fields before the wire boundary.
+use crate::native_value::NativeValue;
 use crate::{
     adapter::prepared_json, native_value::Value, order_actions as actions, rest_reads as reads,
 };

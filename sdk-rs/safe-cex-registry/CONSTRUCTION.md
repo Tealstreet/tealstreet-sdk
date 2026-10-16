@@ -5,7 +5,7 @@ Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bit
 Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
-`okxeu`, `okxeudemo`) and `polymarket`, 2026-10-16 (`src/rust_venues.rs`,
+`okxeu`, `okxeudemo`), `polymarket` and `woo`, 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
 (crate layout, "Constructors and loaders live in `safe-cex-registry`"; P4 exit,
 "a tier-1 account on the Rust path behind a flag").
@@ -92,7 +92,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 
 When a venue lane finishes binding its class, it adds that venue in its own small
 follow-up PR. Expected next: `bybitspot`, `bybitinverse`, `hyrotrader`, `kucoin`, `mexc`, `lighter`
-and `woo`.
+and `weex`.
 
 Each follow-up does four things:
 - adds one `RUST_VENUES` entry;
