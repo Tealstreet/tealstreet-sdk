@@ -1,5 +1,6 @@
 //! Crypto.com source mirrors. See the venue manifest for witnessed scope.
 pub mod api;
+pub mod binding;
 pub mod api_envelope_body;
 pub mod api_guards;
 pub mod order_mappings;
