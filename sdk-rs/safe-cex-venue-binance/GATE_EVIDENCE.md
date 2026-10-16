@@ -3520,3 +3520,50 @@ and two live targets execute five passing tests again. This is documented binary
 reuse after input comparison, not a fresh Cargo test build. Controls and Clippy
 keep their pre-merge provenance. Every master contract entry remains unchanged;
 only these three reviewed predicates are added to the Binance shard.
+
+
+### Four observed error-output functions
+
+The Futures and PM response-message wrappers and their private shared body
+preserve object-code presence, source-truthy msg/message/error precedence, shared
+fallible String coercion and the final space join. Non-object/array inputs
+produce empty text rather than an input-refusal error. The rejection-reason
+mapper consumes its actual typed Map input and observes native Some(PostOnly),
+None and coercion errors. Its substring/case behavior is preserved, including
+array String coercion and a leading BOM before an otherwise matching substring.
+
+Three independent public native tests inspect returned strings, actual rejection
+variants/absence and the native TypeError name before any enum serialization.
+They pass with the maintained live response-message and rejection targets: five
+tests, zero ignored, including 11,828 and 5,471 source comparisons. Selected
+`accepted_error_outputs` Clippy passes with warnings denied.
+
+The maintained `error-output-contracts.mjs` completes fresh ordinary native/default
+discovery and four actual production decoder-output results with zero failed
+owners. The private helper is called directly from its own instrumented module;
+its public callers are separate results. These are executed output observations,
+not non-decoder classification receipts. Fixture scope is stock JSON/UTF-8,
+including the declared native fallback and coercion-error names; arbitrary
+getters, prototype mutation and full Error identity are not asserted.
+
+`python3 sdk-rs/safe-cex-venue-binance/scripts/error-output-controls.py` completes
+four compiled wrong-output controls and four restored passes. Each control
+generates fresh compiler metadata for the changed body and executes all four
+actual production APIs. The changed owner's own result must contain native
+function-output mismatches; compilation failures and classification refusals
+cannot count. For the private helper, its own result and the two actual public
+callers fail. Restoring each exact source file passes all four production
+outputs again. The mapper's wrong-None result likewise fails its direct native
+variant witness, then restoration passes. Both production files finally compare
+byte-identical to the original revision.
+
+After the final evidence update, fresh ordinary discovery and all four actual
+production output probes pass again with zero failed owners. The restored
+existing compiled native target and two live targets execute five passing tests
+with zero ignored; this is actual binary execution after exact source
+restoration, not a second Cargo test build. Formatting, frozen dependency
+installation and parity-check pass (7,459 rows; 17,198 public Rust items). All ten
+existing Binance contracts remain unchanged; only four reviewed decoder-output
+entries are added. Discovery counts remain 235 owners, 80 aliases and two
+construction policies. Other owners, aliases, locals and feature/wasm coverage
+remain outside this four-function evidence.
