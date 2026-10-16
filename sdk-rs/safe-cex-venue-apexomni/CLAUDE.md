@@ -275,7 +275,8 @@ The native zkLink host uses safe-cex-crypto's proven ContractBuilder/seed-only
 signer. It performs WASM ToInt32/unsigned narrowing before building the contract.
 No wallet provider or other transaction signing is supplied; unused capability
 kinds return explicit errors. Missing/invalid seeds are visible to account
-validation; hosted signing is explicitly unavailable on this host. External
+validation. Hosted HTTP/private WS signing uses the supplied remote capability;
+L2 contracts still require the source Omni key seed. External
 public data requires an injected factory.
 
 The shared HTTP factory owns default timeout, headers, tunnel routing and adapter
@@ -308,3 +309,18 @@ swaps compile/fail their named assertion; missing registry membership fails the
 real native-host test and restores to pass. Two capability controls independently
 remove callable preservation before initial signing and legacy resend; each
 compiles and fails the custom-adapter witness before restoration passes.
+
+Hosted native accounts now pass the shared account capability to HTTP, core
+canSign and private WS auth. The browser keeps the API secret; the server keeps
+the source-required Omni key seed for L2 contracts. Account-name absence remains
+undefined without falling back to local HMAC. The WS bridge preserves the typed
+request envelope and awaits its response before login/subscription. Relay refusal
+and transport errors reconnect without private frames or an auth-invalid message.
+The open callback runs eagerly to its first suspension, then the host owns its
+continuation so disposal/drop cancels pending signing. This extends the declared
+P4 native cancellation choice to a source Promise that would keep running.
+
+`native_host_apexomni` covers local and hosted HTTP/WS, remote-secret wire HMAC,
+request account/metadata, delayed login, relay failure and pending-auth disposal.
+`scripts/hosted-signing-controls.py` independently removes capability edges and
+callback ownership; each must compile and fail its named native test, then restore.
