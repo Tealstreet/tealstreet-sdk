@@ -3461,3 +3461,19 @@ decoder/API. Discovery remains 235 owners, 80 aliases and two construction
 policies; those counts describe discovery, not completed classification. Run
 accepted probes serially. Other owners, aliases, local scopes and feature/wasm
 coverage are excluded from this focused command.
+
+After the per-crate cutover, the three enum rows share
+`accepted-set/contracts/safe-cex-venue-binance.json` with the four unchanged
+reviewed records. Every other master shard is byte-identical and the obsolete
+monolith stays deleted. The maintained string runner imports shared
+`loadContracts()` and repeats fresh ordinary discovery plus all three production
+probes with zero failed owners.
+
+The enum implementation, eight native dependency sources/manifests, toolchain,
+Cargo lock/config, tests and source-oracle inputs compare byte-identical to the
+validated string revision `1e1836eaa8`. The existing compiled three-enum target
+and live spot-protocol target execute again: four tests pass with zero ignored.
+This reuse is an actual binary execution after input comparison, not a fresh
+Cargo test build. Earlier 17-test, guard-control and Clippy results keep their
+original provenance. Generator freshness, both formatter-toolchain tests,
+formatting and parity-check pass after the cutover (7,459 rows; 17,183 items).
