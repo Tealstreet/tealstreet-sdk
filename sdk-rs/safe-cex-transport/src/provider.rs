@@ -382,6 +382,9 @@ pub struct RestRequest {
     pub query_profile: Option<crate::query::QueryProfile>,
     pub skip_remote_signing: bool,
     pub sign_ms: Option<u64>,
+    /// JSON-data Axios extension properties for terminal adapters. These remain
+    /// separate from HTTP headers: only the selected adapter interprets them.
+    pub config_extensions: indexmap::IndexMap<String, serde_json::Value>,
 }
 impl RestRequest {
     /// Axios request header assembly: defaults first, then request overrides.

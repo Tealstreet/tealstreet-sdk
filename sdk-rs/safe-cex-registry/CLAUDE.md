@@ -102,6 +102,10 @@ The native JSON account surface forwards journal reads (`fetchHistoricalPosition
 to the venue's declared fold/reported path, preserving account and time bounds.
 It must not inherit a TS wrapper's default rejection for a supported venue method.
 
+GRVT is constructed by the Rust table through `RustVenueHost::grvt`, with a fresh
+terminal HTTP host and the common public-data provider. Active GRVT SDK signing
+uses its local wallet; the native hosted-signer host refuses this venue visibly.
+The registry construction test reads actual GRVT public-gateway market data.
 BingX is constructed by `rust_constructor` through its shared-js_runtime binding.
 The native host supplies a fresh HTTP host and the common gateway factory; remote
 signer hosts fail visibly until BingX signing is connected.
@@ -124,9 +128,14 @@ adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
 native request signatures against a local server.
 
 Crypto.com constructs through `cryptocom_constructor` using its bound Js runtime.
-Native inputs share the account's hosted signer between HTTP and private WS auth,
-and supply the existing external-public-data gateway factory. The native host
+Native HTTP inputs carry the account's hosted signer and supply the existing
+external-public-data gateway factory. The native host
 constructor still takes the caller-owned Hyperliquid limiter introduced by the
 shared host API. `tests/native_host_cryptocom.rs` constructs through the registry
 and production native host, then reads markets over real local HTTP and checks
 read purity. The module-host construction path remains the default.
+
+Kraken Futures/Spot native inputs use the shared hosted signer bridge for private
+HTTP and Futures websocket challenges. Both retain the hosted account name with
+empty local secrets. The native witness verifies signed HTTP bytes and challenge
+subscription fields; the account metadata comes from live injected options.
