@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-venue-lighter/src/http_models.rs", "safe-cex-venue-ligh
 ts = "LighterApiClientConfig"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_models.rs::LighterApiClientConfig"
+rs = [ "safe-cex-venue-lighter/src/http_models.rs::LighterApiClientConfig", "safe-cex-venue-lighter/src/http_models.rs::Utf16Record" ]
 status = "ported"
-note = "Native value-level declaration mapping: exact fields, optional effective values, UTF16 strings/record keys, unbounded BigInt, full binary64 and unrestricted generic payloads. Live source schema plus 27 decoded native records pin fields, array order/duplicates and three status variants. No JSON codec, HTTP client adoption, JS alias/property enumeration or reflection claim."
+note = "Native value-level declaration mapping: exact fields, optional effective values, UTF16 strings/record keys, unbounded BigInt, full binary64 and unrestricted generic payloads. Live source schema plus 27 decoded native records pin fields, array order/duplicates and three status variants. No JSON codec, HTTP client adoption, JS alias/property enumeration or reflection claim. Split member `safe-cex-venue-lighter/src/http_models.rs::Utf16Record`. UTF-16 keyed ordered record alias that types the Record<string, string> headers field of LighterApiClientConfig and the other http-types record fields."
 
 [[symbol]]
 ts = "ApiKey"
@@ -30,17 +30,17 @@ note = "Native value-level declaration mapping: exact fields, optional effective
 ts = "TxInfo"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_transactions.rs::TxInfo"
+rs = [ "safe-cex-venue-lighter/src/http_transactions.rs::TxInfo", "safe-cex-venue-lighter/src/http_transactions.rs::TransactionHeader", "safe-cex-venue-lighter/src/http_transactions.rs::TransactionInfo", "safe-cex-venue-lighter/src/http_transactions.rs::TransactionInfo::header", "safe-cex-venue-lighter/src/http_transactions.rs::TransactionInfo::kind", "safe-cex-venue-lighter/src/http_transactions.rs::TransactionKind", "safe-cex-venue-lighter/src/http_transactions.rs::TransactionKind::as_str" ]
 status = "ported"
-note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed."
+note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed. Split member `safe-cex-venue-lighter/src/http_transactions.rs::TransactionHeader`. Holds the common data, signature, accountIndex, apiKeyIndex, nonce and expiredAt fields every L2 tx info inherits from TxInfo. Split member `safe-cex-venue-lighter/src/http_transactions.rs::TransactionInfo`. Trait expressing the extends TxInfo relationship so every L2 tx info exposes its type tag and common header. Split member `safe-cex-venue-lighter/src/http_transactions.rs::TransactionInfo::header`. Accessor for the inherited TxInfo common fields. Split member `safe-cex-venue-lighter/src/http_transactions.rs::TransactionInfo::kind`. Accessor for the inherited TxInfo type discriminant. Split member `safe-cex-venue-lighter/src/http_transactions.rs::TransactionKind`. Enum for the TxInfo type literal union. Split member `safe-cex-venue-lighter/src/http_transactions.rs::TransactionKind::as_str`. Returns the exact TxInfo type literal string for each variant."
 
 [[symbol]]
 ts = "L2CreateOrderTxInfo"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_transactions.rs::L2CreateOrderTxInfo"
+rs = [ "safe-cex-venue-lighter/src/http_transactions.rs::L2CreateOrderTxInfo", "safe-cex-venue-lighter/src/http_transactions.rs::CreateOrderDetails" ]
 status = "ported"
-note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed."
+note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed. Split member `safe-cex-venue-lighter/src/http_transactions.rs::CreateOrderDetails`. Named struct for the inline orderDetails object."
 
 [[symbol]]
 ts = "LighterGroupedOrderDetails"
@@ -54,41 +54,41 @@ note = "Native value-level transaction DTO: exact seven discriminants, unbounded
 ts = "L2CreateGroupedOrdersTxInfo"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_transactions.rs::L2CreateGroupedOrdersTxInfo"
+rs = [ "safe-cex-venue-lighter/src/http_transactions.rs::L2CreateGroupedOrdersTxInfo", "safe-cex-venue-lighter/src/http_transactions.rs::GroupedOrderDetails" ]
 status = "ported"
-note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed."
+note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed. Split member `safe-cex-venue-lighter/src/http_transactions.rs::GroupedOrderDetails`. Named struct for the inline groupedOrderDetails object."
 
 [[symbol]]
 ts = "L2CancelOrderTxInfo"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_transactions.rs::L2CancelOrderTxInfo"
+rs = [ "safe-cex-venue-lighter/src/http_transactions.rs::L2CancelOrderTxInfo", "safe-cex-venue-lighter/src/http_transactions.rs::CancelDetails" ]
 status = "ported"
-note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed."
+note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed. Split member `safe-cex-venue-lighter/src/http_transactions.rs::CancelDetails`. Named struct for the inline cancelDetails object."
 
 [[symbol]]
 ts = "L2TransferTxInfo"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_transactions.rs::L2TransferTxInfo"
+rs = [ "safe-cex-venue-lighter/src/http_transactions.rs::L2TransferTxInfo", "safe-cex-venue-lighter/src/http_transactions.rs::TransferDetails" ]
 status = "ported"
-note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed."
+note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed. Split member `safe-cex-venue-lighter/src/http_transactions.rs::TransferDetails`. Named struct for the inline transferDetails object."
 
 [[symbol]]
 ts = "L2UpdateLeverageTxInfo"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_transactions.rs::L2UpdateLeverageTxInfo"
+rs = [ "safe-cex-venue-lighter/src/http_transactions.rs::L2UpdateLeverageTxInfo", "safe-cex-venue-lighter/src/http_transactions.rs::LeverageDetails" ]
 status = "ported"
-note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed."
+note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed. Split member `safe-cex-venue-lighter/src/http_transactions.rs::LeverageDetails`. Named struct for the inline leverageDetails object."
 
 [[symbol]]
 ts = "L2ApproveIntegratorTxInfo"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_transactions.rs::L2ApproveIntegratorTxInfo"
+rs = [ "safe-cex-venue-lighter/src/http_transactions.rs::L2ApproveIntegratorTxInfo", "safe-cex-venue-lighter/src/http_transactions.rs::ApproveIntegratorDetails" ]
 status = "ported"
-note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed."
+note = "Native value-level transaction DTO: exact seven discriminants, unbounded BigInt, binary64 including signed zero, optional effective values, UTF16 strings including unpaired units, and ordered grouped children. Live source schema plus 44 decoded native record witnesses pin each field and Clone. No JSON codec, HTTP transport or TransactionClient class adoption is claimed. Split member `safe-cex-venue-lighter/src/http_transactions.rs::ApproveIntegratorDetails`. Named struct for the inline approveIntegratorDetails object."
 
 [[symbol]]
 ts = "L2WithdrawalTxInfo"
@@ -142,17 +142,17 @@ note = "Native value-level declaration mapping: exact fields, optional effective
 ts = "SendTxResponse"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_models.rs::SendTxResponse"
+rs = [ "safe-cex-venue-lighter/src/http_models.rs::SendTxResponse", "safe-cex-venue-lighter/src/http_models.rs::SendTxStatus" ]
 status = "ported"
-note = "Native value-level declaration mapping: exact fields, optional effective values, UTF16 strings/record keys, unbounded BigInt, full binary64 and unrestricted generic payloads. Live source schema plus 27 decoded native records pin fields, array order/duplicates and three status variants. No JSON codec, HTTP client adoption, JS alias/property enumeration or reflection claim."
+note = "Native value-level declaration mapping: exact fields, optional effective values, UTF16 strings/record keys, unbounded BigInt, full binary64 and unrestricted generic payloads. Live source schema plus 27 decoded native records pin fields, array order/duplicates and three status variants. No JSON codec, HTTP client adoption, JS alias/property enumeration or reflection claim. Split member `safe-cex-venue-lighter/src/http_models.rs::SendTxStatus`. Enum for the pending, confirmed and failed literal union of the status field."
 
 [[symbol]]
 ts = "SendTxBatchResponse"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_client.rs::SendTxBatchResponse"
+rs = [ "safe-cex-venue-lighter/src/transaction_client.rs::SendTxBatchResponse", "safe-cex-venue-lighter/src/transaction_client.rs::VolumeQuotaRemaining" ]
 status = "ported"
-note = "Native batch response: shared mutable txHashes array retains ordered UTF16 strings and alias identity, optional binary64 execution time, and optional unrestricted number-or-UTF16-string quota. Three live source schema/native records witness absent fields, signed zero/nonfinite numbers, unpaired units, duplicate hashes and independent lengths0/3/2. No JSON codec or HTTP implementation is claimed."
+note = "Native batch response: shared mutable txHashes array retains ordered UTF16 strings and alias identity, optional binary64 execution time, and optional unrestricted number-or-UTF16-string quota. Three live source schema/native records witness absent fields, signed zero/nonfinite numbers, unpaired units, duplicate hashes and independent lengths0/3/2. No JSON codec or HTTP implementation is claimed. Split member `safe-cex-venue-lighter/src/transaction_client.rs::VolumeQuotaRemaining`. Native carrier for the volumeQuotaRemaining number or string union field."
 
 [[symbol]]
 ts = "GetTransferFeeResponse"
