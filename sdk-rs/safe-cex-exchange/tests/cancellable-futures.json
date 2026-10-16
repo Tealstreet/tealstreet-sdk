@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "167 production creator candidates discovered across all potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "205 production creator candidates discovered across all potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1582,9 +1582,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "0d8b4b86c55396eb579bd68f6e155eeb2e6e834cf053216eff00d0950fc001fa",
+      "producer_sha256": "555e6b547366e1e19246bf6fcacf2d4d681c263b130a8251c343c921f8b6ffc2",
       "classification": "no-owned-latch",
-      "reason": "JS BaseExchange callbacks own venue/arguments and delegate snapshot, order and overlay futures to existing core owners. The merged factory now receives the existing base and the privacy getter dispatches through the venue; both are synchronous, with no RefCell borrow across await."
+      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await."
     },
     {
       "owner": "src/js_runtime/builtins.rs::chain_value",
@@ -1638,9 +1638,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "96b7bf3db29e8bec26fdea9c938908fab73acc3181f357abcea1929a48f39f06",
+      "producer_sha256": "757043620aaa7cc03e21928930ffddd500ea4b3af43e7672fbc52f8b0f5a5184",
       "classification": "no-owned-latch",
-      "reason": "Drives the supplied RestAdapter once and projects the response; no registration outlives a drop."
+      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop."
     },
     {
       "owner": "src/js_runtime/client.rs::dispatch",
@@ -1650,9 +1650,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "49255a1bb85843d457056786c2f1858034487d185770e5168e2df529c4fef8ba",
+      "producer_sha256": "23fedfff2d514542fac7b8be7c001113615406f45e8b6fa6e9f80ce47b3878b1",
       "classification": "no-owned-latch",
-      "reason": "Retry loop with a local attempt counter; interceptor lists and the retry condition are cloned out of client state before each await."
+      "reason": "Retry loop owns its current request and attempt counter. Reusing retryCondition error.config retains replay metadata without creating a pending registration; callbacks and child futures retain existing ownership."
     },
     {
       "owner": "src/js_runtime/client.rs::send_once",
@@ -2679,6 +2679,17 @@
       "producer_sha256": "fc6e9d268585e1f3a9e9fbf6ac71d365c0dc0c1e5ec7496be636521845183762",
       "classification": "no-owned-latch",
       "reason": "One caller-owned adapter attempt awaits the existing throttle then the supplied host send. No RefCell borrow spans either await; it publishes no independent in-flight slot. Host sleep failure propagates and response rejection handlers retain the chain settlement."
+    },
+    {
+      "owner": "src/js_runtime/base_exchange.rs::js_remote_signer",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "6e52e28559467ff6077cdacfa9b9aada779148f2e9df4421ebc640f675ec9a95",
+      "classification": "delegated",
+      "delegate": "src/js_runtime/promise.rs::Promise::spawn",
+      "reason": "The capability callback creates an eager runtime-owned Promise around RemoteSigner::sign. Dropping a JS awaiter releases only its Promise wait; the runtime retains the signing task, matching other source async capability callbacks."
     }
   ]
 }
