@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/asterdex/asterdex.types.ts"
-rust_files = [ "safe-cex-venue-asterdex/src/helpers.rs", "safe-cex-venue-asterdex/src/tables.rs", "safe-cex-venue-asterdex/src/types.rs" ]
+rust_files = [ "safe-cex-venue-asterdex/src/helpers.rs", "safe-cex-venue-asterdex/src/tables.rs", "safe-cex-venue-asterdex/src/types.rs", "safe-cex-venue-asterdex/src/order_execution.rs" ]
 
 [[symbol]]
 ts = "ASTERDEX_ENDPOINTS"
@@ -46,9 +46,9 @@ note = "Strict wire contract. "
 ts = "AsterDEXPlaceOrderOpts"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-asterdex/src/types.rs::AsterDEXPlaceOrderOpts"
+rs = [ "safe-cex-venue-asterdex/src/types.rs::AsterDEXPlaceOrderOpts", "safe-cex-venue-asterdex/src/order_execution.rs::ExecutionOrder" ]
 status = "divergent"
-note = "CHOSEN: Source accepts a 140-level extension on this object record; all seven native ingress routes refuse it. Bounded shared capture limits decoder stack work for this input owner. tests/live_types.rs::object_record_depth_cost_is_explicit measures the acceptance cost; see sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Public Deserialize captures JsNumberInput before the private wire companion and keeps exhaustive native output checks. tests/live_types.rs::numeric_ingress_native_bits measures every declared numeric field through ordinary raw str/slice, owned/borrowed Value and shared str/owned/borrowed APIs, preserving signed zero, fractions and overflow. See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect."
+note = "CHOSEN: Source accepts a 140-level extension on this object record; all seven native ingress routes refuse it. Bounded shared capture limits decoder stack work for this input owner. tests/live_types.rs::object_record_depth_cost_is_explicit measures the acceptance cost; see sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Public Deserialize captures JsNumberInput before the private wire companion and keeps exhaustive native output checks. tests/live_types.rs::numeric_ingress_native_bits measures every declared numeric field through ordinary raw str/slice, owned/borrowed Value and shared str/owned/borrowed APIs, preserving signed zero, fractions and overflow. See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect. Split member `safe-cex-venue-asterdex/src/order_execution.rs::ExecutionOrder`. Per-call order carrier flattening AsterDEXPlaceOrderOpts plus postOnly, the argument shape consumed by the mapped AsterDEXExchange.placeOrder, .placeOrders and .updateOrder bodies; record shape only."
 
 [[symbol]]
 ts = "isAsterDEXStpMode"
