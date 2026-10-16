@@ -1,5 +1,4 @@
-//! Standalone inverse receiver. Construction stays gated until the dedicated
-//! write paths and production entrypoint witnesses are complete.
+//! Standalone inverse receiver with dedicated USD-contract writes and mappings.
 use crate::{
     binding::{
         host::{get_key, text},
@@ -51,15 +50,14 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     method(rt, "getCategoryForSymbol", |rt, a| {
         let symbol = text(&arg(&a, 0))?;
         let parent = venue(&rt)?;
-        let markets = parent.base.store.markets();
-        if !markets.is_empty() && !markets.iter().any(|m| m.symbol == symbol) {
-            rt.this.call_method(
-                "log",
-                vec![
-                    Js::str(&format!("Market {symbol} not found")),
-                    Js::str("warning"),
-                ],
-            )?;
+        let missing = {
+            let markets = parent.base.store.markets();
+            !markets.is_empty() && !markets.iter().any(|m| m.symbol == symbol)
+        };
+        if missing {
+            rt.shared
+                .runtime
+                .console("warn", &format!("Market {symbol} not found"));
         }
         Ok(Js::str("inverse"))
     })?;
