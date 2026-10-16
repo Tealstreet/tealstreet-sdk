@@ -1918,11 +1918,13 @@ pub fn call_core_exchange<H: CoreExchangeClassHost>(
         }
         CoreExchangeMethod::CreateLimitOrderWires => {
             let a0 = arg(0);
-            limit_orders::create_limit_order_wires(h, receiver, &a0)
+            let a1 = arg(1);
+            limit_orders::create_limit_order_wires(h, receiver, &a0, &a1)
         }
         CoreExchangeMethod::PlaceLimitOrder => {
             let a0 = arg(0);
-            let promise = limit_orders::place_limit_order(h, receiver, &a0);
+            let a1 = arg(1);
+            let promise = limit_orders::place_limit_order(h, receiver, &a0, &a1);
             Ok(h.observe_exchange_task(promise))
         }
         CoreExchangeMethod::ResolveReduceOnly => {

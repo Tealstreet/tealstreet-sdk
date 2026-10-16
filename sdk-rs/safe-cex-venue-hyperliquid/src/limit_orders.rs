@@ -96,6 +96,7 @@ fn request<H: LimitOrderHost>(
     coin: &H::Value,
     size: &H::Value,
     trigger: Option<(&str, &str)>,
+    cloid: Option<&H::Value>,
 ) -> Result<H::Value, H::Error> {
     let request = h.object()?;
     h.define_data(&request, "coin", coin)?;
@@ -140,13 +141,29 @@ fn request<H: LimitOrderHost>(
         Ok(vec![m.clone(), requested])
     })?;
     h.define_data(&request, "reduce_only", &reduce)?;
+    // The entry wire carries the placement cloid; each TP/SL leg mints its own here.
+    let cloid = match cloid {
+        Some(cloid) => cloid.clone(),
+        None => import_call(h, "mintHyperliquidCloid", |_| Ok(vec![]))?,
+    };
+    h.define_data(&request, "cloid", &cloid)?;
     Ok(request)
+}
+/// `cloid = mintHyperliquidCloid()`: the default runs only for an undefined argument.
+fn default_cloid<H: LimitOrderHost>(h: &mut H, cloid: &H::Value) -> Result<H::Value, H::Error> {
+    if h.is_undefined(cloid) {
+        import_call(h, "mintHyperliquidCloid", |_| Ok(vec![]))
+    } else {
+        Ok(cloid.clone())
+    }
 }
 pub fn create_limit_order_wires<H: LimitOrderHost>(
     h: &mut H,
     e: &H::Value,
     opts: &H::Value,
+    cloid: &H::Value,
 ) -> Result<H::Value, H::Error> {
+    let cloid = default_cloid(h, cloid)?;
     ensure_limit(h, opts)?;
     let m = market(h, e, opts)?;
     if !h.truthy(&m) {
@@ -173,7 +190,7 @@ pub fn create_limit_order_wires<H: LimitOrderHost>(
         Ok(vec![amount, precision])
     })?;
     let wire = import_call(h, "orderRequestToOrderWire", |h| {
-        let request = request(h, e, opts, &m, &coin, &size, None)?;
+        let request = request(h, e, opts, &m, &coin, &size, None, Some(&cloid))?;
         Ok(vec![request, index.clone()])
     })?;
     let wires = h.array(&[wire])?;
@@ -182,7 +199,7 @@ pub fn create_limit_order_wires<H: LimitOrderHost>(
         if h.truthy(&value) {
             method(h, &wires, "push", |h| {
                 let wire = import_call(h, "orderRequestToOrderWire", |h| {
-                    let request = request(h, e, opts, &m, &coin, &size, Some((field, kind)))?;
+                    let request = request(h, e, opts, &m, &coin, &size, Some((field, kind)), None)?;
                     Ok(vec![request, index.clone()])
                 })?;
                 Ok(vec![wire])
@@ -212,9 +229,13 @@ async fn place_body<H: LimitOrderHost>(
     h: &mut H,
     e: &H::Value,
     opts: &H::Value,
+    cloid: &H::Value,
 ) -> Result<H::Value, H::Error> {
+    let cloid = default_cloid(h, cloid)?;
     ensure_limit(h, opts)?;
-    let wires = method(h, e, "createLimitOrderWires", |_| Ok(vec![opts.clone()]))?;
+    let wires = method(h, e, "createLimitOrderWires", |_| {
+        Ok(vec![opts.clone(), cloid.clone()])
+    })?;
     let builder = method(h, e, "getBuilderInfo", |_| Ok(vec![]))?;
     let builder = h.await_value(builder).await?;
     let take = h.get(opts, "takeProfit")?;
@@ -231,7 +252,7 @@ async fn place_body<H: LimitOrderHost>(
         } else {
             "orderWiresToOrderAction"
         },
-        |_| Ok(vec![wires, builder]),
+        |_| Ok(vec![wires.clone(), builder]),
     )?;
     let nonce = method(h, e, "generateNonce", |_| Ok(vec![]))?;
     let signature = import_call(h, "signL1Action", |h| {
@@ -262,7 +283,13 @@ async fn place_body<H: LimitOrderHost>(
         h.define_data(&spread, "vaultAddress", &vault)?;
     }
     h.spread_into(&payload, &spread)?;
+    // Record every wire BEFORE the REST call so the WS handler identifies each order.
     let market = market(h, e, opts)?;
+    if h.truthy(&market) {
+        method(h, e, "recordPlacement", |h| {
+            Ok(vec![wires.clone(), h.get(&market, "symbol")?])
+        })?;
+    }
     if is_hip3(h, &market)? {
         let coin = import_call(h, "symbolToCoin", |h| Ok(vec![h.get(&market, "symbol")?]))?;
         method(h, e, "addToPrePlacementCache", |h| {
@@ -271,7 +298,7 @@ async fn place_body<H: LimitOrderHost>(
             let raw = h.get(opts, "price")?;
             let price = zero_or(h, raw);
             let amount = h.get(opts, "amount")?;
-            Ok(vec![coin, side, kind, price, amount])
+            Ok(vec![coin, side, kind, price, amount, cloid.clone()])
         })?;
     }
     let response = method(h, e, "postOrderAction", |_| Ok(vec![payload]))?;
@@ -340,6 +367,7 @@ pub fn place_limit_order<H: LimitOrderHost + HelperTaskHost<H::Value, H::Error>>
     host: &H,
     e: &H::Value,
     opts: &H::Value,
+    cloid: &H::Value,
 ) -> HelperObserver<H::Value, H::Error>
 where
     H::Value: 'static,
@@ -348,5 +376,6 @@ where
     let mut h = host.clone();
     let e = e.clone();
     let opts = opts.clone();
-    crate::helper_tasks::start(host, async move { place_body(&mut h, &e, &opts).await })
+    let cloid = cloid.clone();
+    crate::helper_tasks::start(host, async move { place_body(&mut h, &e, &opts, &cloid).await })
 }

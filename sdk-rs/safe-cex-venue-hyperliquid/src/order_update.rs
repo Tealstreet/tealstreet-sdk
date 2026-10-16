@@ -301,8 +301,17 @@ async fn body<H: OrderUpdateHost>(
     h.await_value(cancelled).await?;
     let dead = h.get(e, "_deadOrders")?;
     method(h, &dead, "add", |h| Ok(vec![h.get(&order, "id")?]))?;
-    let placed = method(h, e, "placeOrder", |_| Ok(vec![new]))?;
-    h.await_value(placed).await
+    // A fresh cloid for the replacement (a caller's ID stays on the cancelled
+    // order); the result carries it because a positional TP/SL answers no oid.
+    let mint = SpotAccountHost::imported(h, "mintHyperliquidCloid")?;
+    let undefined = SpotAccountHost::undefined(h);
+    let cloid = h.call(&mint, &undefined, &[])?;
+    // The callee binding is read before its awaited argument is evaluated.
+    let wrap = SpotAccountHost::imported(h, "withReplacementClientOrderId")?;
+    let placed = method(h, e, "placeOrderWithCloid", |_| Ok(vec![new, cloid.clone()]))?;
+    let placed = h.await_value(placed).await?;
+    let undefined = SpotAccountHost::undefined(h);
+    h.call(&wrap, &undefined, &[placed, cloid])
 }
 fn warn_sl<H: OrderUpdateHost>(
     h: &mut H,
