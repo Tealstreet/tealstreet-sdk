@@ -26,6 +26,7 @@ use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
+use safe_cex_venue_polymarket::binding::exchange::{PolymarketDependencies, PolymarketExchange};
 use std::rc::Rc;
 
 /// What `BackpackExchange::new` takes besides the BaseExchange the registry builds.
@@ -104,6 +105,15 @@ pub trait RustVenueHost {
     fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
     /// Bitget, Bitget USDC and Bitget inverse share one input set.
     fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
+    fn hyperliquid(
+        &self,
+        options: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError>;
+    fn polymarket(&self) -> Result<PolymarketDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Polymarket host inputs are not configured",
+        ))
+    }
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -132,13 +142,24 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
     (ExchangeName::Coinbasespot, coinbase_constructor),
+    (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Polymarket, polymarket_constructor),
 ];
+
+pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |_, options, store| {
+        let deps = host.hyperliquid(&options)?;
+        let exchange =
+            safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
+        Ok(exchange)
+    })
+}
 
 pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
@@ -303,6 +324,17 @@ pub fn okx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = OkxExchange::new(name, options, store, host.okx()?)?;
         Ok(exchange)
+    })
+}
+
+pub fn polymarket_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(PolymarketExchange::new(
+            name,
+            options,
+            store,
+            host.polymarket()?,
+        )?)
     })
 }
 

@@ -952,6 +952,8 @@ Hosted JS venues receive the signer through JsHttpHost, shared by Scope and Base
 
 The js_runtime typed-value bridge uses the shared native serialization capture and native Serde visitors, preserving NaN, infinities and signed zero in scalar and nested model fields. `to_json` remains the explicit wire projection; do not route typed values through it. Native nonfinite values aimed at opaque serde_json::Value are refused rather than silently projected to null. Typed input retains the shared UTF-8 and bounded-depth choices. `tests/typed_js_values.rs` checks both directions independently, actual order-option fields, enum shapes and optional values; venue E2E tests own their receiver-level effects.
 
+JS socket properties are the source of truth for typed lifecycle grouping. BaseExchange installs weak, lazy lookups for the eight source fields; these create socket cores after venue assembly and observe property replacement/removal on each lookup. The JS runtime regression checks source order, public/private grouping and disposal.
+
 The js_runtime socket terminal preserves Binary as the host binary object: native
 Buffer and wasm Blob, with exact bytes behind ArrayBuffer. Buffer.toString and
 Blob.text perform UTF-8 replacement only when the venue explicitly asks for text;
@@ -964,6 +966,18 @@ JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
 `dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
 cases cover successful cleanup and each throwing socket, shared-cell visibility,
 retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
+
+The js_runtime Object.defineProperty binding retains ordinary-object/function data
+attributes, following ToPropertyDescriptor and ValidateAndApplyPropertyDescriptor
+in ECMA-262. New fields default to undefined/false; omitted fields on an existing
+property retain their value. Read-only writes reject, non-enumerable fields stay
+out of keys/spread/JSON, and non-configurable fields survive deletion and reject
+incompatible redefinition (SameValue preserves NaN and the sign of zero).
+Arrays and accessor descriptors explicitly refuse until a source caller requires
+that representation. Existing host define_accessor remains the host accessor seam.
+The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
+redefinition matrix; the native error test covers Polymarket's enhanced message.
+
 The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
 worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
 completion hook and reconstructed error properties. Arguments/results use the
