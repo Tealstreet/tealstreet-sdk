@@ -2,7 +2,10 @@
 //! extends. Each inherited member the venue bodies use delegates to the Rust
 //! BaseExchange; members the bodies never reach are absent rather than stubbed.
 use super::{Realm, value::*};
-use safe_cex_exchange::{error_reporting::ExchangeErrorInput, exchange::BaseExchange};
+use safe_cex_exchange::{
+    error_reporting::ExchangeErrorInput, exchange::BaseExchange,
+    js_runtime::base_exchange::ExternalPublicDataFactory,
+};
 use safe_cex_types::PlaceOrderOpts;
 use std::rc::Rc;
 
@@ -44,7 +47,11 @@ pub(crate) fn error_input(r: &mut Realm, value: &Value) -> Result<ExchangeErrorI
 
 /// The JS class; instances are allocated with newTarget's prototype and carry
 /// the source constructor's own fields (`options`, `store`, `emitter`).
-pub(crate) fn base_exchange_class(realm: &mut Realm, base: Rc<BaseExchange>) -> Value {
+pub(crate) fn base_exchange_class(
+    realm: &mut Realm,
+    base: Rc<BaseExchange>,
+    external_public_data: Option<ExternalPublicDataFactory>,
+) -> Value {
     let prototype = realm.new_object();
     let construct: NativeConstruct = {
         let fallback = prototype.object().unwrap().clone();
@@ -178,17 +185,25 @@ pub(crate) fn base_exchange_class(realm: &mut Realm, base: Rc<BaseExchange>) -> 
         realm,
         "initExternalPublicData",
         0,
-        Rc::new(|r, b, _, _| {
-            // External public data is a hosted provider the Rust binding does not
-            // attach; a configured account must hear that, not silently go direct.
-            let configured = b.options().external_public_data.is_some();
-            Ok(r.settled_promise(if configured {
-                Err(r.error(
-                    "Hyperliquid (Rust): external public data is not supported by this binding",
-                ))
-            } else {
-                Ok(Value::Bool(false))
-            }))
+        Rc::new(move |r, b, _, _| {
+            let base = b.clone();
+            let owner = base.clone();
+            let factory = external_public_data.clone();
+            let realm = r.clone();
+            Ok(r.spawn_value(Box::pin(async move {
+                if base.options().external_public_data.is_some() && factory.is_none() {
+                    return Err(realm.error(
+                        "externalPublicData is configured but no external public data provider was supplied",
+                    ));
+                }
+                let used = base
+                    .init_external_public_data(move |config| {
+                        factory.expect("configured provider checked above")(config, owner)
+                    })
+                    .await
+                    .map_err(|error| thrown(&realm, error))?;
+                Ok(Value::Bool(used))
+            })))
         }),
     );
     method(

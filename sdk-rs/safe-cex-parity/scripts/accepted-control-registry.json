@@ -19,7 +19,8 @@
       "callable compiler identity refuses missing registry and absent serde dependencies",
       "synthetic compiler Fn IDs resolve to sysroot along with Rc",
       "compiler-selected same-spelling workspace Fn never inherits sysroot permission",
-      "unresolved selected Fn compiler identity refuses before any path-name approval"
+      "unresolved selected Fn compiler identity refuses before any path-name approval",
+      "hosted signer tuple retains its exact native type and compiler roles"
     ],
     "accepted-construction-chain-native.test.mjs": [
       "selected candle-cache inventory closes every construction owner and rejects both error policy mutations"
@@ -288,6 +289,8 @@
     "metadata ExchangeFeatures positional-array widening",
     "metadata ExchangeMetadata positional-array widening",
     "metadata Snapshot positional-array widening",
-    "alias default substitution removed"
+    "alias default substitution removed",
+    "observed typed entrypoint raw compiler role",
+    "hosted signer tuple expanded target"
   ]
 }

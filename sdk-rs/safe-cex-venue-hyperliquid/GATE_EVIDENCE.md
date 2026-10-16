@@ -1317,3 +1317,30 @@ construction13/13; actual-source core snapshots/core REST/rest helpers11/11;
 Hyperliquid venue-oracle39/39; parity:check0; registry48 names and control1/1;
 layers88/88. Native all-target and wasm library strict clippy plus fmt pass for
 the venue and registry. No fixture or manifest regeneration.
+### Native external public data binding (ddi2il-20)
+
+`HyperliquidDependencies.external_public_data` accepts the shared provider factory.
+The realm superclass delegates initialization to the existing native BaseExchange:
+provider creation receives the same Store owner, startup waits for both loaded
+flags, and BaseExchange disposes the retained provider. The registry supplies its
+existing gateway factory. An embedding with configured external data and no
+factory gets the shared explicit diagnostic before network activity.
+
+A new production registry test,
+`native_host_external_data::hyperliquid_starts_on_a_public_data_gateway_over_websocket`,
+was compiled against the old binding and failed at startup with the old explicit
+Hyperliquid refusal (0 passed, 1 failed). After wiring the factory it passes over
+real native websocket IO, receives gateway markets/tickers and makes no venue
+REST request. `binding::external_startup_waits_for_both_loaded_flags_and_disposes_its_provider`
+keeps startup pending with markets alone, completes after ticker hydration,
+checks the exact Store owner, makes no direct public request/socket and observes
+provider disposal once. The companion missing-factory test refuses visibly.
+
+Scoped validation: production binding 16/16; native gateway suite 4/4; native
+Hyperliquid signed HTTP 1/1; registry construction 13/13; Hyperliquid venue-oracle
+39 passing tests across its 11 selected binaries; registry source equivalence
+48 names plus mutation-control test 1/1; layers 88/88; parity:check zero findings.
+Native all-target and wasm library strict clippy cover the venue and registry.
+No manifests or fixture corpora were regenerated. The inherited seed oracle
+hash failure was resolved by merging landed #198, including its one-row
+provenance check, before the passing oracle run.

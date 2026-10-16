@@ -1,10 +1,11 @@
 # Rust venue construction through the registry
 
 Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`), Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
+`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`),
+Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
-`okxeu`, `okxeudemo`) and `polymarket`, 2026-10-16 (`src/rust_venues.rs`,
+`okxeu`, `okxeudemo`), `polymarket` and `woo`, 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
 (crate layout, "Constructors and loaders live in `safe-cex-registry`"; P4 exit,
 "a tier-1 account on the Rust path behind a flag").
@@ -31,6 +32,9 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around
     `BitgetExchange::new`; `BitgetDependencies` carries the runtime and a
     `JsHttpHost` built with js_runtime `rest_http_host`.
+  - `bitrue`, built with `BitrueExchange::new` on the shared js_runtime; the
+    native host supplies signed HTTP and the external-data gateway factory.
+    `tests/native_host_bitrue.rs` independently verifies the request HMAC.
   - `bitunix`, built with `BitunixVenue::new` from a registry-built `BaseExchange`
     and `BitunixDependencies` (runtime, per-lane client builder and transport
     install, optional externalPublicData provider).
@@ -88,7 +92,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 
 When a venue lane finishes binding its class, it adds that venue in its own small
 follow-up PR. Expected next: `bybitspot`, `bybitinverse`, `hyrotrader`, `kucoin`, `mexc`, `lighter`
-and `woo`.
+and `weex`.
 
 Each follow-up does four things:
 - adds one `RUST_VENUES` entry;

@@ -23,6 +23,14 @@ struct Runtime {
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
     hold_sleep: std::cell::Cell<bool>,
+    headers_capable: std::cell::Cell<bool>,
+    dials: RefCell<
+        Vec<(
+            String,
+            Vec<String>,
+            safe_cex_exchange::websocket::WebSocketConnectionOptions,
+        )>,
+    >,
 }
 struct Task;
 impl ExchangeTask for Task {
@@ -1210,15 +1218,16 @@ impl safe_cex_exchange::websocket::WsRuntime for Runtime {
     }
     fn dial(
         &self,
-        _: String,
-        _: Vec<String>,
-        _: safe_cex_exchange::websocket::WebSocketConnectionOptions,
+        url: String,
+        protocols: Vec<String>,
+        options: safe_cex_exchange::websocket::WebSocketConnectionOptions,
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn safe_cex_exchange::websocket::WsSocket>> {
-        panic!("no sockets in js_runtime tests")
+        self.dials.borrow_mut().push((url, protocols, options));
+        Box::pin(async { Err(ExchangeError::new("recorded dial")) })
     }
     fn headers_capable(&self) -> bool {
-        false
+        self.headers_capable.get()
     }
     fn enable_reconnecting(&self) -> bool {
         false
@@ -3349,3 +3358,6 @@ fn disposed_assignment_matches_actual_venue_cleanup_sequence() {
         );
     }
 }
+
+#[path = "support/js_websocket_options.rs"]
+mod ws_options;
