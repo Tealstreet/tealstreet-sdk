@@ -603,6 +603,30 @@ status = "ported"
 note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; default returns an empty vector without becoming an override. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_historical_orders safe-cex-exchange/src/exchange.rs::Exchange::fetch_historical_orders"
 
 [[symbol]]
+ts = "BaseExchange.fetchOptionChain"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_option_chain", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_option_chain" ]
+status = "ported"
+note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; both defaults reject with 'Option chains are not supported on <exchange>' and carry the base-fallback brand, never an empty result. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_option_chain safe-cex-exchange/src/exchange.rs::Exchange::fetch_option_chain"
+
+[[symbol]]
+ts = "BaseExchange.fetchOptionExpiries"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_option_expiries", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_option_expiries" ]
+status = "ported"
+note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; both defaults reject with 'Option expiries are not supported on <exchange>' and carry the base-fallback brand, never an empty result. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_option_expiries safe-cex-exchange/src/exchange.rs::Exchange::fetch_option_expiries"
+
+[[symbol]]
+ts = "BaseExchange.fetchAccountGreeks"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_account_greeks", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_account_greeks" ]
+status = "ported"
+note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; both defaults reject with 'Account greeks are not supported on <exchange>' and carry the base-fallback brand, never an empty result. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_account_greeks safe-cex-exchange/src/exchange.rs::Exchange::fetch_account_greeks"
+
+[[symbol]]
 ts = "BaseExchange.fetchPublicTrades"
 kind = "field-fn"
 layer = "adapted"
