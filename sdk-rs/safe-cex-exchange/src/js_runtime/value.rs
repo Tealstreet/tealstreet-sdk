@@ -325,8 +325,92 @@ impl Js {
         }
     }
 
-    /// ToString for primitives; objects use their default `[object X]` text.
+    /// ToString, with OrdinaryToPrimitive's string hint for live objects.
     pub fn to_js_string(&self) -> Result<Str, Thrown> {
+        if matches!(self, Js::Object(_) | Js::Function(_)) {
+            for name in ["toString", "valueOf"] {
+                let declared = self.has_property(&utf16(name));
+                // None is the value model's implicit stock prototype. An
+                // explicit null prototype contributes no inherited methods.
+                let method = if !declared && self.string_prototype_is_null() {
+                    Js::Undefined
+                } else {
+                    self.get(name)?
+                };
+                if name == "toString"
+                    && !declared
+                    && method.is_undefined()
+                    && self.has_implicit_string_prototype()
+                {
+                    return self.intrinsic_string();
+                }
+                if !method.is_callable() {
+                    continue;
+                }
+                let primitive = match &method {
+                    Js::Builtin(reference)
+                        if reference.member()
+                            == safe_cex_num::BuiltinIdentity::Object(
+                                safe_cex_num::ProtoMember::ToString,
+                            ) =>
+                    {
+                        let tag = match self {
+                            Js::Function(_) => "Function",
+                            Js::Object(object) if object.class == "Buffer" => "Uint8Array",
+                            Js::Object(object)
+                                if matches!(object.class, "Error" | "Blob" | "ArrayBuffer") =>
+                            {
+                                object.class
+                            }
+                            Js::Object(_) => "Object",
+                            _ => unreachable!(),
+                        };
+                        Js::str(&format!("[object {tag}]"))
+                    }
+                    Js::Builtin(reference)
+                        if reference.member()
+                            == safe_cex_num::BuiltinIdentity::Object(
+                                safe_cex_num::ProtoMember::ValueOf,
+                            ) =>
+                    {
+                        self.clone()
+                    }
+                    _ => method.call(self.clone(), vec![])?,
+                };
+                if !primitive.is_object() {
+                    return primitive.to_js_string();
+                }
+            }
+            return Err(Thrown::type_error(
+                "Cannot convert object to primitive value",
+            ));
+        }
+        self.intrinsic_string()
+    }
+    fn has_implicit_string_prototype(&self) -> bool {
+        match self {
+            Js::Object(object) => object
+                .proto
+                .borrow()
+                .as_ref()
+                .is_none_or(Js::has_implicit_string_prototype),
+            Js::Function(_) => true,
+            _ => false,
+        }
+    }
+    fn string_prototype_is_null(&self) -> bool {
+        match self {
+            Js::Object(object) => object
+                .proto
+                .borrow()
+                .as_ref()
+                .is_some_and(Js::string_prototype_is_null),
+            Js::Null => true,
+            _ => false,
+        }
+    }
+    /// Stock intrinsic conversion after primitive coercion dispatch.
+    fn intrinsic_string(&self) -> Result<Str, Thrown> {
         Ok(match self {
             Js::Undefined => utf16("undefined"),
             Js::Null => utf16("null"),
@@ -351,9 +435,7 @@ impl Js {
                 out.into()
             }
             Js::Object(o) => {
-                if o.class == "Buffer" && self.get("toString")?.is_callable() {
-                    self.call_method("toString", vec![])?.to_js_string()?
-                } else if o.class == "Blob" || o.class == "ArrayBuffer" {
+                if o.class == "Blob" || o.class == "ArrayBuffer" {
                     utf16(&format!("[object {}]", o.class))
                 } else if o.class == "Error" {
                     let name = self.get("name")?;
