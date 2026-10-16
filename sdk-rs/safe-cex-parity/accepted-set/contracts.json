@@ -134017,5 +134017,2050 @@
         "where_predicates": []
       }
     }
+  },
+  "safe_cex_crypto::msgpack::json_input": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "json_input",
+      "signature": {
+        "inputs": [
+          [
+            "raw",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_num::json_stringify::JsJsonValue",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "msgpack.rs json_input is the raw JSON parser used before MessagePack encoding, matching JSON.parse input in tests/fixtures/msgpack/generate.cjs. Direct native JsJsonValue matches independently pin all JSON variant payloads, duplicate assignment/insertion order, binary64 rounding, -0, overflow infinities and underflow; malformed JSON refuses. These are native/default parser witnesses, not an arbitrary UTF-16 or full MessagePack acceptance claim.",
+    "call": "{ fn observe(v: safe_cex_num::JsJsonValue) -> serde_json::Value { use safe_cex_num::JsJsonValue as J; match v { J::Null => serde_json::json!([\"null\"]), J::Bool(v) => serde_json::json!([\"bool\",v]), J::Number(v) => serde_json::json!([\"number\",format!(\"{:016x}\",v.to_bits())]), J::String(v) => serde_json::json!([\"text\",v]), J::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), J::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), J::Undefined | J::BigInt(_) => panic!(\"JSON input produced a non-JSON native variant\") } } match $type($value.as_str().expect(\"raw JSON witness\")) { Ok(native) => serde_json::json!({\"ok\":true,\"value\":observe(native)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": "null",
+        "output": {
+          "ok": true,
+          "value": [
+            "null"
+          ]
+        }
+      },
+      {
+        "input": "true",
+        "output": {
+          "ok": true,
+          "value": [
+            "bool",
+            true
+          ]
+        }
+      },
+      {
+        "input": "false",
+        "output": {
+          "ok": true,
+          "value": [
+            "bool",
+            false
+          ]
+        }
+      },
+      {
+        "input": "\"\u96ea\\u0000\"",
+        "output": {
+          "ok": true,
+          "value": [
+            "text",
+            "\u96ea\u0000"
+          ]
+        }
+      },
+      {
+        "input": "[]",
+        "output": {
+          "ok": true,
+          "value": [
+            "array",
+            []
+          ]
+        }
+      },
+      {
+        "input": "{}",
+        "output": {
+          "ok": true,
+          "value": [
+            "object",
+            []
+          ]
+        }
+      },
+      {
+        "input": "[-0,1.5,9007199254740993,1e400,-1e400,1e-400]",
+        "output": {
+          "ok": true,
+          "value": [
+            "array",
+            [
+              [
+                "number",
+                "8000000000000000"
+              ],
+              [
+                "number",
+                "3ff8000000000000"
+              ],
+              [
+                "number",
+                "4340000000000000"
+              ],
+              [
+                "number",
+                "7ff0000000000000"
+              ],
+              [
+                "number",
+                "fff0000000000000"
+              ],
+              [
+                "number",
+                "0000000000000000"
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "input": "{\"z\":1,\"2\":false,\"a\":[null],\"z\":2}",
+        "output": {
+          "ok": true,
+          "value": [
+            "object",
+            [
+              [
+                "z",
+                [
+                  "number",
+                  "4000000000000000"
+                ]
+              ],
+              [
+                "2",
+                [
+                  "bool",
+                  false
+                ]
+              ],
+              [
+                "a",
+                [
+                  "array",
+                  [
+                    [
+                      "null"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "input": "undefined",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "01",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "[",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "null true",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_types::OptionTerms": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionTerms: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "underlying": "BTC",
+      "expiry": 101,
+      "strike": 23,
+      "right": "call",
+      "style": "european",
+      "settlement": "cash",
+      "premiumAsset": "USDC",
+      "settleAsset": "USDT"
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let right = match v.right { super::OptionRight::Call => \"call\", super::OptionRight::Put => \"put\" }; let style = match v.style { super::OptionTermsStyle::European => \"european\" }; let settlement = match v.settlement { super::OptionTermsSettlement::Cash => \"cash\" }; serde_json::json!({\"ok\":true,\"underlying\":v.underlying,\"expiry\":format!(\"{:016x}\",v.expiry.to_bits()),\"strike\":format!(\"{:016x}\",v.strike.to_bits()),\"right\":right,\"style\":style,\"settlement\":settlement,\"premiumAsset\":v.premium_asset,\"settleAsset\":v.settle_asset}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "underlying": "BTC",
+            "expiry": 101,
+            "strike": 23,
+            "right": "call",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "USDC",
+            "settleAsset": "USDT"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "BTC",
+            "expiry": "4059400000000000",
+            "strike": "4037000000000000",
+            "right": "call",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "USDC",
+            "settleAsset": "USDT"
+          }
+        },
+        {
+          "input": {
+            "underlying": "ETH",
+            "expiry": 205,
+            "strike": 47,
+            "right": "put",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "ETH",
+            "settleAsset": "USD"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "ETH",
+            "expiry": "4069a00000000000",
+            "strike": "4047800000000000",
+            "right": "put",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "ETH",
+            "settleAsset": "USD"
+          }
+        },
+        {
+          "input": [
+            "BTC",
+            101,
+            23,
+            "call",
+            "european",
+            "cash",
+            "USDC",
+            "USDT"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionGreeks": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionGreeks: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "delta": 1,
+      "gamma": 2,
+      "vega": 3,
+      "theta": -4,
+      "units": "per-day"
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"ok\":true,\"delta\":format!(\"{:016x}\",v.delta.to_bits()),\"gamma\":format!(\"{:016x}\",v.gamma.to_bits()),\"vega\":format!(\"{:016x}\",v.vega.to_bits()),\"theta\":format!(\"{:016x}\",v.theta.to_bits()),\"units\":v.units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "delta": 1,
+            "gamma": 2,
+            "vega": 3,
+            "theta": -4,
+            "units": "per-day"
+          },
+          "output": {
+            "ok": true,
+            "delta": "3ff0000000000000",
+            "gamma": "4000000000000000",
+            "vega": "4008000000000000",
+            "theta": "c010000000000000",
+            "units": "per-day"
+          }
+        },
+        {
+          "input": {
+            "delta": 5,
+            "gamma": 6,
+            "vega": 7,
+            "theta": -8,
+            "units": "per-year"
+          },
+          "output": {
+            "ok": true,
+            "delta": "4014000000000000",
+            "gamma": "4018000000000000",
+            "vega": "401c000000000000",
+            "theta": "c020000000000000",
+            "units": "per-year"
+          }
+        },
+        {
+          "input": [
+            1,
+            2,
+            3,
+            -4,
+            "per-day"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::MarketLimitsPrice": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts Market.limits.price: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "min": 3
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"ok\":true,\"min\":format!(\"{:016x}\",v.min.to_bits())}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "min": 3
+          },
+          "output": {
+            "ok": true,
+            "min": "4008000000000000"
+          }
+        },
+        {
+          "input": {
+            "min": -5
+          },
+          "output": {
+            "ok": true,
+            "min": "c014000000000000"
+          }
+        },
+        {
+          "input": [
+            3
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::PositionOption": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts Position.option: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "greeks": {
+        "delta": 5,
+        "gamma": 6,
+        "vega": 7,
+        "theta": -8,
+        "units": "per-year"
+      }
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let greeks=v.greeks.map(|g| serde_json::json!({\"delta\":format!(\"{:016x}\",g.delta.to_bits()),\"gamma\":format!(\"{:016x}\",g.gamma.to_bits()),\"vega\":format!(\"{:016x}\",g.vega.to_bits()),\"theta\":format!(\"{:016x}\",g.theta.to_bits()),\"units\":g.units})); serde_json::json!({\"ok\":true,\"greeks\":greeks}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "greeks": null
+          }
+        },
+        {
+          "input": {
+            "greeks": {
+              "delta": 5,
+              "gamma": 6,
+              "vega": 7,
+              "theta": -8,
+              "units": "per-year"
+            }
+          },
+          "output": {
+            "ok": true,
+            "greeks": {
+              "delta": "4014000000000000",
+              "gamma": "4018000000000000",
+              "vega": "401c000000000000",
+              "theta": "c020000000000000",
+              "units": "per-year"
+            }
+          }
+        },
+        {
+          "input": [
+            {
+              "delta": 5,
+              "gamma": 6,
+              "vega": 7,
+              "theta": -8,
+              "units": "per-year"
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionQuote": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionQuote: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "symbol": "ETH-P",
+      "bid": 11,
+      "ask": 12,
+      "mark": 13,
+      "markIv": 14,
+      "bidIv": 15,
+      "askIv": 16,
+      "underlyingPrice": 17,
+      "forwardPrice": 18,
+      "greeks": {
+        "delta": 5,
+        "gamma": 6,
+        "vega": 7,
+        "theta": -8,
+        "units": "per-year"
+      }
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let greeks=v.greeks.map(|g| serde_json::json!({\"delta\":format!(\"{:016x}\",g.delta.to_bits()),\"gamma\":format!(\"{:016x}\",g.gamma.to_bits()),\"vega\":format!(\"{:016x}\",g.vega.to_bits()),\"theta\":format!(\"{:016x}\",g.theta.to_bits()),\"units\":g.units})); serde_json::json!({\"ok\":true,\"symbol\":v.symbol,\"bid\":format!(\"{:016x}\",v.bid.to_bits()),\"ask\":format!(\"{:016x}\",v.ask.to_bits()),\"mark\":format!(\"{:016x}\",v.mark.to_bits()),\"markIv\":format!(\"{:016x}\",v.mark_iv.to_bits()),\"bidIv\":format!(\"{:016x}\",v.bid_iv.to_bits()),\"askIv\":format!(\"{:016x}\",v.ask_iv.to_bits()),\"underlyingPrice\":format!(\"{:016x}\",v.underlying_price.to_bits()),\"forwardPrice\":v.forward_price.map(|n|format!(\"{:016x}\",n.to_bits())),\"greeks\":greeks}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "symbol": "BTC-C",
+            "bid": 1,
+            "ask": 2,
+            "mark": 3,
+            "markIv": 4,
+            "bidIv": 5,
+            "askIv": 6,
+            "underlyingPrice": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "BTC-C",
+            "bid": "3ff0000000000000",
+            "ask": "4000000000000000",
+            "mark": "4008000000000000",
+            "markIv": "4010000000000000",
+            "bidIv": "4014000000000000",
+            "askIv": "4018000000000000",
+            "underlyingPrice": "401c000000000000",
+            "forwardPrice": null,
+            "greeks": null
+          }
+        },
+        {
+          "input": {
+            "symbol": "ETH-P",
+            "bid": 11,
+            "ask": 12,
+            "mark": 13,
+            "markIv": 14,
+            "bidIv": 15,
+            "askIv": 16,
+            "underlyingPrice": 17,
+            "forwardPrice": 18,
+            "greeks": {
+              "delta": 5,
+              "gamma": 6,
+              "vega": 7,
+              "theta": -8,
+              "units": "per-year"
+            }
+          },
+          "output": {
+            "ok": true,
+            "symbol": "ETH-P",
+            "bid": "4026000000000000",
+            "ask": "4028000000000000",
+            "mark": "402a000000000000",
+            "markIv": "402c000000000000",
+            "bidIv": "402e000000000000",
+            "askIv": "4030000000000000",
+            "underlyingPrice": "4031000000000000",
+            "forwardPrice": "4032000000000000",
+            "greeks": {
+              "delta": "4014000000000000",
+              "gamma": "4018000000000000",
+              "vega": "401c000000000000",
+              "theta": "c020000000000000",
+              "units": "per-year"
+            }
+          }
+        },
+        {
+          "input": [
+            "ETH-P",
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            {
+              "delta": 5,
+              "gamma": 6,
+              "vega": 7,
+              "theta": -8,
+              "units": "per-year"
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionChainQuery": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionChainQuery: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "underlying": "ETH",
+      "expiry": 901,
+      "right": "put",
+      "strikeMin": 41,
+      "strikeMax": 99
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let right=v.right.map(|r| match r { super::OptionRight::Call=>\"call\",super::OptionRight::Put=>\"put\" }); serde_json::json!({\"ok\":true,\"underlying\":v.underlying,\"expiry\":v.expiry.map(|n|format!(\"{:016x}\",n.to_bits())),\"right\":right,\"strikeMin\":v.strike_min.map(|n|format!(\"{:016x}\",n.to_bits())),\"strikeMax\":v.strike_max.map(|n|format!(\"{:016x}\",n.to_bits()))}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "underlying": "BTC"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "BTC",
+            "expiry": null,
+            "right": null,
+            "strikeMin": null,
+            "strikeMax": null
+          }
+        },
+        {
+          "input": {
+            "underlying": "ETH",
+            "expiry": 901,
+            "right": "put",
+            "strikeMin": 41,
+            "strikeMax": 99
+          },
+          "output": {
+            "ok": true,
+            "underlying": "ETH",
+            "expiry": "408c280000000000",
+            "right": "put",
+            "strikeMin": "4044800000000000",
+            "strikeMax": "4058c00000000000"
+          }
+        },
+        {
+          "input": [
+            "ETH",
+            901,
+            "put",
+            41,
+            99
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::AccountGreeks": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts AccountGreeks: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "underlying": "BTC",
+      "delta": 1,
+      "gamma": 2,
+      "vega": 3,
+      "theta": -4,
+      "units": "per-day"
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"ok\":true,\"underlying\":v.underlying,\"delta\":format!(\"{:016x}\",v.delta.to_bits()),\"gamma\":format!(\"{:016x}\",v.gamma.to_bits()),\"vega\":format!(\"{:016x}\",v.vega.to_bits()),\"theta\":format!(\"{:016x}\",v.theta.to_bits()),\"units\":v.units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "underlying": "BTC",
+            "delta": 1,
+            "gamma": 2,
+            "vega": 3,
+            "theta": -4,
+            "units": "per-day"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "BTC",
+            "delta": "3ff0000000000000",
+            "gamma": "4000000000000000",
+            "vega": "4008000000000000",
+            "theta": "c010000000000000",
+            "units": "per-day"
+          }
+        },
+        {
+          "input": {
+            "underlying": "ETH",
+            "delta": 5,
+            "gamma": 6,
+            "vega": 7,
+            "theta": -8,
+            "units": "per-year"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "ETH",
+            "delta": "4014000000000000",
+            "gamma": "4018000000000000",
+            "vega": "401c000000000000",
+            "theta": "c020000000000000",
+            "units": "per-year"
+          }
+        },
+        {
+          "input": [
+            "BTC",
+            1,
+            2,
+            3,
+            -4,
+            "per-day"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionChainRow": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionChainRow: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "market": {
+        "id": "m1",
+        "symbol": "BTC-C",
+        "base": "BTC",
+        "quote": "USD",
+        "active": true,
+        "precision": {
+          "amount": 1,
+          "price": 2
+        },
+        "limits": {
+          "amount": {
+            "min": 3,
+            "max": 4
+          },
+          "leverage": {
+            "min": 5,
+            "max": 6
+          }
+        }
+      },
+      "quote": {
+        "symbol": "BTC-C",
+        "bid": 1,
+        "ask": 2,
+        "mark": 3,
+        "markIv": 4,
+        "bidIv": 5,
+        "askIv": 6,
+        "underlyingPrice": 7
+      }
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let m=v.market; let q=v.quote; serde_json::json!({\"ok\":true,\"marketId\":m.id,\"marketSymbol\":m.symbol,\"marketBase\":m.base,\"marketQuote\":m.quote,\"marketActive\":m.active,\"amountPrecision\":format!(\"{:016x}\",m.precision.amount.to_bits()),\"pricePrecision\":format!(\"{:016x}\",m.precision.price.to_bits()),\"amountMin\":format!(\"{:016x}\",m.limits.amount.min.to_bits()),\"amountMax\":format!(\"{:016x}\",m.limits.amount.max.to_bits()),\"leverageMin\":format!(\"{:016x}\",m.limits.leverage.min.to_bits()),\"leverageMax\":format!(\"{:016x}\",m.limits.leverage.max.to_bits()),\"quoteSymbol\":q.symbol,\"bid\":format!(\"{:016x}\",q.bid.to_bits()),\"ask\":format!(\"{:016x}\",q.ask.to_bits()),\"mark\":format!(\"{:016x}\",q.mark.to_bits()),\"markIv\":format!(\"{:016x}\",q.mark_iv.to_bits()),\"bidIv\":format!(\"{:016x}\",q.bid_iv.to_bits()),\"askIv\":format!(\"{:016x}\",q.ask_iv.to_bits()),\"underlyingPrice\":format!(\"{:016x}\",q.underlying_price.to_bits()),\"forwardPrice\":q.forward_price.map(|n|format!(\"{:016x}\",n.to_bits())),\"greeks\":q.greeks.map(|g| serde_json::json!({\"delta\":format!(\"{:016x}\",g.delta.to_bits()),\"gamma\":format!(\"{:016x}\",g.gamma.to_bits()),\"vega\":format!(\"{:016x}\",g.vega.to_bits()),\"theta\":format!(\"{:016x}\",g.theta.to_bits()),\"units\":g.units}))}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "market": {
+              "id": "m1",
+              "symbol": "BTC-C",
+              "base": "BTC",
+              "quote": "USD",
+              "active": true,
+              "precision": {
+                "amount": 1,
+                "price": 2
+              },
+              "limits": {
+                "amount": {
+                  "min": 3,
+                  "max": 4
+                },
+                "leverage": {
+                  "min": 5,
+                  "max": 6
+                }
+              }
+            },
+            "quote": {
+              "symbol": "BTC-C",
+              "bid": 1,
+              "ask": 2,
+              "mark": 3,
+              "markIv": 4,
+              "bidIv": 5,
+              "askIv": 6,
+              "underlyingPrice": 7
+            }
+          },
+          "output": {
+            "ok": true,
+            "marketId": "m1",
+            "marketSymbol": "BTC-C",
+            "marketBase": "BTC",
+            "marketQuote": "USD",
+            "marketActive": true,
+            "amountPrecision": "3ff0000000000000",
+            "pricePrecision": "4000000000000000",
+            "amountMin": "4008000000000000",
+            "amountMax": "4010000000000000",
+            "leverageMin": "4014000000000000",
+            "leverageMax": "4018000000000000",
+            "quoteSymbol": "BTC-C",
+            "bid": "3ff0000000000000",
+            "ask": "4000000000000000",
+            "mark": "4008000000000000",
+            "markIv": "4010000000000000",
+            "bidIv": "4014000000000000",
+            "askIv": "4018000000000000",
+            "underlyingPrice": "401c000000000000",
+            "forwardPrice": null,
+            "greeks": null
+          }
+        },
+        {
+          "input": {
+            "market": {
+              "id": "m2",
+              "symbol": "ETH-P",
+              "base": "ETH",
+              "quote": "USDC",
+              "active": false,
+              "precision": {
+                "amount": 7,
+                "price": 8
+              },
+              "limits": {
+                "amount": {
+                  "min": 9,
+                  "max": 10
+                },
+                "leverage": {
+                  "min": 11,
+                  "max": 12
+                }
+              }
+            },
+            "quote": {
+              "symbol": "ETH-P",
+              "bid": 11,
+              "ask": 12,
+              "mark": 13,
+              "markIv": 14,
+              "bidIv": 15,
+              "askIv": 16,
+              "underlyingPrice": 17,
+              "forwardPrice": 18,
+              "greeks": {
+                "delta": 5,
+                "gamma": 6,
+                "vega": 7,
+                "theta": -8,
+                "units": "per-year"
+              }
+            }
+          },
+          "output": {
+            "ok": true,
+            "marketId": "m2",
+            "marketSymbol": "ETH-P",
+            "marketBase": "ETH",
+            "marketQuote": "USDC",
+            "marketActive": false,
+            "amountPrecision": "401c000000000000",
+            "pricePrecision": "4020000000000000",
+            "amountMin": "4022000000000000",
+            "amountMax": "4024000000000000",
+            "leverageMin": "4026000000000000",
+            "leverageMax": "4028000000000000",
+            "quoteSymbol": "ETH-P",
+            "bid": "4026000000000000",
+            "ask": "4028000000000000",
+            "mark": "402a000000000000",
+            "markIv": "402c000000000000",
+            "bidIv": "402e000000000000",
+            "askIv": "4030000000000000",
+            "underlyingPrice": "4031000000000000",
+            "forwardPrice": "4032000000000000",
+            "greeks": {
+              "delta": "4014000000000000",
+              "gamma": "4018000000000000",
+              "vega": "401c000000000000",
+              "theta": "c020000000000000",
+              "units": "per-year"
+            }
+          }
+        },
+        {
+          "input": [
+            {
+              "id": "m1",
+              "symbol": "BTC-C",
+              "base": "BTC",
+              "quote": "USD",
+              "active": true,
+              "precision": {
+                "amount": 1,
+                "price": 2
+              },
+              "limits": {
+                "amount": {
+                  "min": 3,
+                  "max": 4
+                },
+                "leverage": {
+                  "min": 5,
+                  "max": 6
+                }
+              }
+            },
+            {
+              "symbol": "BTC-C",
+              "bid": 1,
+              "ask": 2,
+              "mark": 3,
+              "markIv": 4,
+              "bidIv": 5,
+              "askIv": 6,
+              "underlyingPrice": 7
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionRight": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/types.ts exact OptionRight union literal domain. Private strict string front guard; native enum variants are matched directly, not serialized to derive expected labels. Raw-text and borrowed qualified calls compare actual enum identity; each valid literal also has explicit tagged-object rejection, alongside gate owned/qualified paths.",
+    "entrypoints": [],
+    "literals": [
+      "call",
+      "put"
+    ],
+    "observation": {
+      "call": "{ match (serde_json::from_str::<$type>(&$value.to_string()), <$type as serde::Deserialize>::deserialize($value)) { (Ok(v), Ok(borrowed)) => { assert_eq!(v,borrowed,\"raw/borrowed native enum identity\"); let literal=match v { $type::Call => \"call\", $type::Put => \"put\" }; serde_json::json!({\"ok\":true,\"literal\":literal}) }, (Err(_), Err(_)) => serde_json::json!({\"ok\":false}), _ => panic!(\"raw/borrowed enum shape admission differs\") } }",
+      "cases": [
+        {
+          "input": "call",
+          "output": {
+            "ok": true,
+            "literal": "call"
+          }
+        },
+        {
+          "input": "put",
+          "output": {
+            "ok": true,
+            "literal": "put"
+          }
+        },
+        {
+          "input": "invalid",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "call": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "put": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionTermsStyle": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/types.ts exact OptionTerms.style literal domain. Private strict string front guard; native enum variants are matched directly, not serialized to derive expected labels. Raw-text and borrowed qualified calls compare actual enum identity; each valid literal also has explicit tagged-object rejection, alongside gate owned/qualified paths.",
+    "entrypoints": [],
+    "literals": [
+      "european"
+    ],
+    "observation": {
+      "call": "{ match (serde_json::from_str::<$type>(&$value.to_string()), <$type as serde::Deserialize>::deserialize($value)) { (Ok(v), Ok(borrowed)) => { assert_eq!(v,borrowed,\"raw/borrowed native enum identity\"); let literal=match v { $type::European => \"european\" }; serde_json::json!({\"ok\":true,\"literal\":literal}) }, (Err(_), Err(_)) => serde_json::json!({\"ok\":false}), _ => panic!(\"raw/borrowed enum shape admission differs\") } }",
+      "cases": [
+        {
+          "input": "european",
+          "output": {
+            "ok": true,
+            "literal": "european"
+          }
+        },
+        {
+          "input": "invalid",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "european": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionTermsSettlement": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/types.ts exact OptionTerms.settlement literal domain. Private strict string front guard; native enum variants are matched directly, not serialized to derive expected labels. Raw-text and borrowed qualified calls compare actual enum identity; each valid literal also has explicit tagged-object rejection, alongside gate owned/qualified paths.",
+    "entrypoints": [],
+    "literals": [
+      "cash"
+    ],
+    "observation": {
+      "call": "{ match (serde_json::from_str::<$type>(&$value.to_string()), <$type as serde::Deserialize>::deserialize($value)) { (Ok(v), Ok(borrowed)) => { assert_eq!(v,borrowed,\"raw/borrowed native enum identity\"); let literal=match v { $type::Cash => \"cash\" }; serde_json::json!({\"ok\":true,\"literal\":literal}) }, (Err(_), Err(_)) => serde_json::json!({\"ok\":false}), _ => panic!(\"raw/borrowed enum shape admission differs\") } }",
+      "cases": [
+        {
+          "input": "cash",
+          "output": {
+            "ok": true,
+            "literal": "cash"
+          }
+        },
+        {
+          "input": "invalid",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "cash": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::CurrencyBalance": {
+    "shape": "union",
+    "evidence": "Crypto.com fetchBalance source currencies are exactly available/locked; types.ts Balance uses used/free/total/upnl. Reviewed strict object front and untagged selection retain both native variants without normalization. Exact decoded fields and as_balance result are observed. Typed From<Balance> is separately executed; no arbitrary untyped runtime currency-shape claim. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "positive": [
+      {
+        "used": 2,
+        "free": 9,
+        "total": 11,
+        "upnl": -3
+      },
+      {
+        "available": 9,
+        "locked": 6
+      }
+    ],
+    "negative": [
+      null,
+      "x",
+      [],
+      [
+        9,
+        6
+      ],
+      {
+        "available": 9
+      },
+      {
+        "used": 2,
+        "free": 9
+      }
+    ],
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let declared=v.as_balance().is_some(); match v { $type::Declared(b)=>serde_json::json!({\"kind\":\"declared\",\"asBalance\":declared,\"used\":format!(\"{:016x}\",b.used.to_bits()),\"free\":format!(\"{:016x}\",b.free.to_bits()),\"total\":format!(\"{:016x}\",b.total.to_bits()),\"upnl\":format!(\"{:016x}\",b.upnl.to_bits())}), $type::AvailableLocked{available,locked}=>serde_json::json!({\"kind\":\"available-locked\",\"asBalance\":declared,\"available\":format!(\"{:016x}\",available.to_bits()),\"locked\":format!(\"{:016x}\",locked.to_bits())}) } }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "used": 2,
+            "free": 9,
+            "total": 11,
+            "upnl": -3
+          },
+          "output": {
+            "kind": "declared",
+            "asBalance": true,
+            "used": "4000000000000000",
+            "free": "4022000000000000",
+            "total": "4026000000000000",
+            "upnl": "c008000000000000"
+          }
+        },
+        {
+          "input": {
+            "available": 9,
+            "locked": 6
+          },
+          "output": {
+            "kind": "available-locked",
+            "asBalance": false,
+            "available": "4022000000000000",
+            "locked": "4018000000000000"
+          }
+        },
+        {
+          "input": [
+            9,
+            6
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_balance",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Balance",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the borrowed declared-row accessor on both actual decoded native variants; available/locked stays absent and is never normalized.",
+        "nativeFields": [
+          "hasBalance",
+          "free"
+        ],
+        "call": "{ let v: $type=serde_json::from_value($value.clone()).expect(\"native currency fixture\"); let b=v.as_balance(); serde_json::json!({\"ok\":true,\"hasBalance\":b.is_some(),\"free\":b.map(|b|format!(\"{:016x}\",b.free.to_bits()))}) }",
+        "cases": [
+          {
+            "input": {
+              "used": 2,
+              "free": 9,
+              "total": 11,
+              "upnl": -3
+            },
+            "output": {
+              "ok": true,
+              "hasBalance": true,
+              "free": "4022000000000000"
+            }
+          },
+          {
+            "input": {
+              "available": 9,
+              "locked": 6
+            },
+            "output": {
+              "ok": true,
+              "hasBalance": false,
+              "free": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Balance",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Native typed Balance conversion must preserve Declared identity/fields and never construct the REST alternate variant. Fixture parsing constructs only the typed source operand; the actual From implementation is called.",
+        "nativeFields": [
+          "free",
+          "used"
+        ],
+        "call": "{ let source: super::Balance=serde_json::from_value($value.clone()).expect(\"typed Balance fixture\"); let v=$type::from(source); match v { $type::Declared(b)=>serde_json::json!({\"ok\":true,\"used\":format!(\"{:016x}\",b.used.to_bits()),\"free\":format!(\"{:016x}\",b.free.to_bits()),\"total\":format!(\"{:016x}\",b.total.to_bits()),\"upnl\":format!(\"{:016x}\",b.upnl.to_bits())}), $type::AvailableLocked{..}=>panic!(\"typed Balance converted to a REST alternate shape\") } }",
+        "cases": [
+          {
+            "input": {
+              "used": 2,
+              "free": 9,
+              "total": 11,
+              "upnl": -3
+            },
+            "output": {
+              "ok": true,
+              "used": "4000000000000000",
+              "free": "4022000000000000",
+              "total": "4026000000000000",
+              "upnl": "c008000000000000"
+            }
+          },
+          {
+            "input": {
+              "used": 5,
+              "free": 4,
+              "total": 9,
+              "upnl": 6
+            },
+            "output": {
+              "ok": true,
+              "used": "4014000000000000",
+              "free": "4010000000000000",
+              "total": "4022000000000000",
+              "upnl": "4018000000000000"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_types::ExchangeOptionsPolymarket": {
+    "shape": "map",
+    "evidence": "polymarket.types.ts optional polymarket account carrier has five independently optional fields. Shared UTF-8 account carrier is distinct from venue retained UTF-16 source record; typed numeric runtime projection is tested separately. Strict object front and present-null refusal apply; native field observation preserves exact names, optional presence and signerType numeric value. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "apiKey": "key-one",
+      "apiSecret": "secret-two",
+      "apiPassphrase": "pass-three",
+      "signerType": 3,
+      "funderAddress": "funder-four"
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"apiKey\":v.api_key,\"apiSecret\":v.api_secret,\"apiPassphrase\":v.api_passphrase,\"signerType\":v.signer_type.map(|n|format!(\"{:016x}\",n.to_bits())),\"funderAddress\":v.funder_address}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {},
+          "output": {
+            "apiKey": null,
+            "apiSecret": null,
+            "apiPassphrase": null,
+            "signerType": null,
+            "funderAddress": null
+          }
+        },
+        {
+          "input": {
+            "apiKey": "key-one",
+            "apiSecret": "secret-two",
+            "apiPassphrase": "pass-three",
+            "signerType": 3,
+            "funderAddress": "funder-four"
+          },
+          "output": {
+            "apiKey": "key-one",
+            "apiSecret": "secret-two",
+            "apiPassphrase": "pass-three",
+            "signerType": "4008000000000000",
+            "funderAddress": "funder-four"
+          }
+        },
+        {
+          "input": [
+            "key-one",
+            "secret-two",
+            "pass-three",
+            3,
+            "funder-four"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_crypto::zklink::contract::decimal": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "decimal",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u128"
+                    }
+                  },
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed imported zkLink post-WASM ABI decimal parser: native u128 values, optional plus/underscores, unsigned grammar and checked-overflow errors. Expectations are independently specified numeric values/error strings, not reserialized decoded records.",
+    "call": "{ match $type($value.as_str().expect(\"raw decimal fixture\")) { Ok(v)=>serde_json::json!({\"ok\":true,\"value\":v.to_string()}), Err(e)=>serde_json::json!({\"ok\":false,\"error\":e}) } }",
+    "cases": [
+      {
+        "input": "0",
+        "output": {
+          "ok": true,
+          "value": "0"
+        }
+      },
+      {
+        "input": "+1_2_",
+        "output": {
+          "ok": true,
+          "value": "12"
+        }
+      },
+      {
+        "input": "340282366920938463463374607431768211455",
+        "output": {
+          "ok": true,
+          "value": "340282366920938463463374607431768211455"
+        }
+      },
+      {
+        "input": "-1",
+        "output": {
+          "ok": false,
+          "error": "zkLink invalid unsigned decimal"
+        }
+      },
+      {
+        "input": "0x1",
+        "output": {
+          "ok": false,
+          "error": "zkLink invalid unsigned decimal"
+        }
+      },
+      {
+        "input": "340282366920938463463374607431768211456",
+        "output": {
+          "ok": false,
+          "error": "zkLink decimal exceeds u128"
+        }
+      }
+    ]
+  },
+  "safe_cex_crypto::zklink::contract::closest_packable_amount": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "closest_packable_amount",
+      "signature": {
+        "inputs": [
+          [
+            "amount",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed raw decimal parse plus35-bit SDK amount packing. Independent small and mantissa-edge expectations supplement tests/fixtures/zklink/contracts.json npm SDK oracle; direct native canonical amount strings and refusal errors are observed.",
+    "call": "{ match $type($value.as_str().expect(\"raw decimal fixture\")) { Ok(v)=>serde_json::json!({\"ok\":true,\"value\":v}), Err(e)=>serde_json::json!({\"ok\":false,\"error\":e}) } }",
+    "cases": [
+      {
+        "input": "0",
+        "output": {
+          "ok": true,
+          "value": "0"
+        }
+      },
+      {
+        "input": "1",
+        "output": {
+          "ok": true,
+          "value": "1"
+        }
+      },
+      {
+        "input": "34359738368",
+        "output": {
+          "ok": true,
+          "value": "34359738367"
+        }
+      },
+      {
+        "input": "-1",
+        "output": {
+          "ok": false,
+          "error": "zkLink invalid unsigned decimal"
+        }
+      }
+    ]
+  },
+  "safe_cex_crypto::zklink::contract::closest_packable_fee": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "closest_packable_fee",
+      "signature": {
+        "inputs": [
+          [
+            "fee",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed raw decimal parse plus11-bit SDK fee packing. Independent2048->2047 and2050->2050 expectations agree with pinned npm SDK oracle; actual native canonical strings and invalid-decimal errors are observed.",
+    "call": "{ match $type($value.as_str().expect(\"raw decimal fixture\")) { Ok(v)=>serde_json::json!({\"ok\":true,\"value\":v}), Err(e)=>serde_json::json!({\"ok\":false,\"error\":e}) } }",
+    "cases": [
+      {
+        "input": "0",
+        "output": {
+          "ok": true,
+          "value": "0"
+        }
+      },
+      {
+        "input": "2048",
+        "output": {
+          "ok": true,
+          "value": "2047"
+        }
+      },
+      {
+        "input": "2050",
+        "output": {
+          "ok": true,
+          "value": "2050"
+        }
+      },
+      {
+        "input": "-1",
+        "output": {
+          "ok": false,
+          "error": "zkLink invalid unsigned decimal"
+        }
+      }
+    ]
+  },
+  "safe_cex_crypto::zklink::contract::Contract": {
+    "shape": "map",
+    "evidence": "Reviewed imported zkLink SDK Contract post-WASM ABI ten-field record (contract.rs source provenance). Raw JSON must preserve bounded integer fields, exact decimal strings and fixed two-byte fee array; venue owns prior WASM coercion. Direct native field and independently authored36-byte preimage observations. Complete declaration-order positional array proved accepted before the concrete object guard; named-object fields and signing preimage witnesses remain independent. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "sample": {
+      "accountId": 16909060,
+      "subAccountId": 5,
+      "slotId": 1543,
+      "nonce": 526602,
+      "pairId": 11,
+      "size": "1",
+      "price": "2",
+      "direction": true,
+      "feeRates": [
+        12,
+        13
+      ],
+      "hasSubsidy": false
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"accountId\":v.account_id,\"subAccountId\":v.sub_account_id,\"slotId\":v.slot_id,\"nonce\":v.nonce,\"pairId\":v.pair_id,\"size\":v.size,\"price\":v.price,\"direction\":v.direction,\"feeRates\":v.fee_rates,\"hasSubsidy\":v.has_subsidy}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "accountId": 16909060,
+            "subAccountId": 5,
+            "slotId": 1543,
+            "nonce": 526602,
+            "pairId": 11,
+            "size": "1",
+            "price": "2",
+            "direction": true,
+            "feeRates": [
+              12,
+              13
+            ],
+            "hasSubsidy": false
+          },
+          "output": {
+            "accountId": 16909060,
+            "subAccountId": 5,
+            "slotId": 1543,
+            "nonce": 526602,
+            "pairId": 11,
+            "size": "1",
+            "price": "2",
+            "direction": true,
+            "feeRates": [
+              12,
+              13
+            ],
+            "hasSubsidy": false
+          }
+        },
+        {
+          "input": {
+            "accountId": 286397204,
+            "subAccountId": 21,
+            "slotId": 5655,
+            "nonce": 1579290,
+            "pairId": 27,
+            "size": "2",
+            "price": "3",
+            "direction": false,
+            "feeRates": [
+              28,
+              29
+            ],
+            "hasSubsidy": true
+          },
+          "output": {
+            "accountId": 286397204,
+            "subAccountId": 21,
+            "slotId": 5655,
+            "nonce": 1579290,
+            "pairId": 27,
+            "size": "2",
+            "price": "3",
+            "direction": false,
+            "feeRates": [
+              28,
+              29
+            ],
+            "hasSubsidy": true
+          }
+        },
+        {
+          "input": [
+            16909060,
+            5,
+            1543,
+            526602,
+            11,
+            "1",
+            "2",
+            true,
+            [
+              12,
+              13
+            ],
+            false
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "signing_bytes",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "array": {
+                            "type": {
+                              "primitive": "u8"
+                            },
+                            "len": "36"
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual typed Contract::signing_bytes is executed on independently specified post-WASM ABI records; inspect real bytes and length rather than re-encoding the decoded owner.",
+        "nativeFields": [
+          "length",
+          "bytes"
+        ],
+        "call": "{ let v: $type=serde_json::from_value($value.clone()).expect(\"native preimage fixture\"); let bytes=v.signing_bytes().expect(\"valid native contract\"); serde_json::json!({\"ok\":true,\"length\":bytes.len(),\"bytes\":bytes.as_slice()}) }",
+        "cases": [
+          {
+            "input": {
+              "accountId": 16909060,
+              "subAccountId": 5,
+              "slotId": 1543,
+              "nonce": 526602,
+              "pairId": 11,
+              "size": "1",
+              "price": "2",
+              "direction": true,
+              "feeRates": [
+                12,
+                13
+              ],
+              "hasSubsidy": false
+            },
+            "output": {
+              "ok": true,
+              "length": 36,
+              "bytes": [
+                254,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                1,
+                0,
+                0,
+                0,
+                0,
+                32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                2,
+                12,
+                13,
+                0
+              ]
+            }
+          },
+          {
+            "input": {
+              "accountId": 286397204,
+              "subAccountId": 21,
+              "slotId": 5655,
+              "nonce": 1579290,
+              "pairId": 27,
+              "size": "2",
+              "price": "3",
+              "direction": false,
+              "feeRates": [
+                28,
+                29
+              ],
+              "hasSubsidy": true
+            },
+            "output": {
+              "ok": true,
+              "length": 36,
+              "bytes": [
+                254,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+                25,
+                26,
+                27,
+                0,
+                0,
+                0,
+                0,
+                0,
+                64,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                3,
+                28,
+                29,
+                1
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_crypto::zklink::contract::ContractSigner": {
+    "shape": "observed",
+    "evidence": "Native seed-only signer import is bounded exact65-byte hex, optional lowercase0x. Direct constructor witnesses sign the same known typed Contract and compare public key/signature against independently captured pinned npm SDK cases base and seed-v-0, with exact oracle package/artifact provenance in existing fixture. No secret export or Serde wrapper is added; typed signing API executes inside both successful constructor witnesses.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_signature",
+          "signature": {
+            "inputs": [
+              [
+                "signature",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute actual hex seed constructor, then observe its public signing result on an existing independent SDK oracle Contract; malformed seed cases observe its native refusal.",
+        "call": "{ let signature=$value.as_str().expect(\"public SDK signature-seed fixture\"); match $type::from_signature(signature) { Ok(signer)=>{ let c=super::Contract { account_id:16909060,sub_account_id:5,slot_id:1543,nonce:526602,pair_id:11,size:\"1234567890123456789\".into(),price:\"987654321098765432109876543210\".into(),direction:true,fee_rates:[12,13],has_subsidy:false }; let wire=signer.sign_contract(&c).expect(\"valid public SDK fixture\"); serde_json::json!({\"ok\":true,\"pubKey\":wire[\"signature\"][\"pubKey\"],\"signature\":wire[\"signature\"][\"signature\"]}) }, Err(e)=>serde_json::json!({\"ok\":false,\"error\":e}) } }",
+        "cases": [
+          {
+            "input": "010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101011b",
+            "output": {
+              "ok": true,
+              "pubKey": "0x2b1250c65c5bdce6e8e19b9f6ae44172c2c90100d9917379f536ba3c2be60325",
+              "signature": "dcc270665aa43972713ad56d738bcf45d44fbc96631367567e69699be8e1a627a40ac7769c713f822cdd04b12afee4aa134b8bfe4930a9222ad6302a65db0c04"
+            }
+          },
+          {
+            "input": "0202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200",
+            "output": {
+              "ok": true,
+              "pubKey": "0xef0bdd0f9f323a499a9971cb05891769044bbdbe0568ab7e6dac1fb319d22026",
+              "signature": "c2d95c115d79e812a2cda0cfe96d61946c0b35617ea446f4e6a8e64ec8e54c2b2faf6b9012aaa01d10fb1f919ca3da931ed0901464aabb90793169fcce6f8202"
+            }
+          },
+          {
+            "input": "",
+            "output": {
+              "ok": false,
+              "error": "zkLink signature seed must contain exactly 65 bytes"
+            }
+          },
+          {
+            "input": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+            "output": {
+              "ok": false,
+              "error": "zkLink invalid signature seed hex"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "sign_contract",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "contract",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_crypto::zklink::contract::Contract",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Receives only typed Contract, no raw JSON/string decoder input; actual signing method executes in both successful from_signature witnesses and existing24-case npm SDK production tests."
+      }
+    ]
   }
 }

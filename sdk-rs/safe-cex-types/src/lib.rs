@@ -614,23 +614,6 @@ impl From<Balance> for CurrencyBalance {
         Self::Declared(balance)
     }
 }
-impl<'de> Deserialize<'de> for CurrencyBalance {
-    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(untagged)]
-        enum Wire {
-            Declared(Balance),
-            AvailableLocked { available: f64, locked: f64 },
-        }
-        match Wire::deserialize(crate::strict_decode::object(deserializer))? {
-            Wire::Declared(balance) => Ok(Self::Declared(balance)),
-            Wire::AvailableLocked { available, locked } => {
-                Ok(Self::AvailableLocked { available, locked })
-            }
-        }
-    }
-}
-
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -3904,6 +3887,19 @@ mod strict_codecs {
     impl<'de> serde::Deserialize<'de> for super::CoinBalance {
         fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
             WireCoinBalance::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
+    #[serde(remote = "super::CurrencyBalance", untagged)]
+    enum WireCurrencyBalance {
+        Declared(super::Balance),
+        AvailableLocked { available: f64, locked: f64 },
+    }
+
+    impl<'de> serde::Deserialize<'de> for super::CurrencyBalance {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireCurrencyBalance::deserialize(crate::strict_decode::object(deserializer))
         }
     }
 
