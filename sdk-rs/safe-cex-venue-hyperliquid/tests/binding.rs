@@ -55,6 +55,18 @@ fn fixture_with_signers(
     options: Value,
     signers: ExchangeSigners,
 ) -> Fixture {
+    fixture_with_provider(routes, options, signers, None)
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn fixture_with_provider(
+    routes: Vec<(&str, Value)>,
+    options: Value,
+    signers: ExchangeSigners,
+    external_public_data: Option<
+        safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
+    >,
+) -> Fixture {
     let host = Rc::new(Host::default());
     let routes = Routes::new(routes);
     let clock = Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
@@ -66,6 +78,7 @@ fn fixture_with_signers(
         Rc::new(DefaultStore::new()),
         HyperliquidDependencies {
             runtime: host.clone(),
+            external_public_data,
             http: routes.clone(),
             limiter: Rc::new(RateLimiter::new(clock, 1200.0, 60_000.0)),
             signers,
@@ -77,6 +90,131 @@ fn fixture_with_signers(
         routes,
         exchange,
     }
+}
+
+#[derive(Default)]
+struct ExternalProvider {
+    connects: Cell<usize>,
+    disposes: Cell<usize>,
+}
+impl safe_cex_exchange::external::ExternalPublicData for ExternalProvider {
+    fn connect(&self) {
+        self.connects.set(self.connects.get() + 1);
+    }
+    fn dispose(&self) {
+        self.disposes.set(self.disposes.get() + 1);
+    }
+    fn is_initialized(&self) -> bool {
+        true
+    }
+    fn is_healthy(&self) -> bool {
+        true
+    }
+    fn last_message_timestamp(&self) -> Option<f64> {
+        Some(0.0)
+    }
+    fn listen_ohlcv(
+        &self,
+        _: safe_cex_types::OHLCVOptions,
+        _: Rc<dyn Fn(safe_cex_types::Candle)>,
+    ) -> Result<
+        safe_cex_exchange::runtime::ListenerCleanup,
+        safe_cex_exchange::runtime::ExchangeError,
+    > {
+        panic!("startup does not subscribe to candles")
+    }
+    fn listen_order_book(
+        &self,
+        _: String,
+        _: Rc<dyn Fn(safe_cex_types::OrderBook)>,
+    ) -> Result<
+        safe_cex_exchange::runtime::ListenerCleanup,
+        safe_cex_exchange::runtime::ExchangeError,
+    > {
+        panic!("startup does not subscribe to order books")
+    }
+}
+
+fn external_options() -> Value {
+    json!({"key":"", "secret":"", "publicDataOnly":true,
+        "externalPublicData":{"type":"websocket", "url":"ws://gateway.local", "exchangeId":"hyperliquid"}})
+}
+
+#[test]
+fn external_startup_waits_for_both_loaded_flags_and_disposes_its_provider() {
+    use std::task::Context;
+    let provider = Rc::new(ExternalProvider::default());
+    let supplied = provider.clone();
+    let parent = Rc::new(RefCell::new(None));
+    let observed = parent.clone();
+    let f = fixture_with_provider(
+        vec![],
+        external_options(),
+        ExchangeSigners::default(),
+        Some(Rc::new(move |_, owner| {
+            *observed.borrow_mut() = Some(owner);
+            supplied.clone()
+        })),
+    );
+    let mut start = f.exchange.start();
+    let mut context = Context::from_waker(std::task::Waker::noop());
+    assert!(start.as_mut().poll(&mut context).is_pending());
+    f.host.settle();
+    assert_eq!(provider.connects.get(), 1);
+    assert!(Rc::ptr_eq(
+        &parent.borrow().as_ref().unwrap().store,
+        &f.exchange.base().store,
+    ));
+    let store = &f.exchange.base().store;
+    let mut loaded = store.loaded().clone();
+    loaded.markets = true;
+    store
+        .update(
+            safe_cex_store::StoreUpdate {
+                loaded: Some(loaded.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+    f.host.advance(100.0);
+    assert!(
+        start.as_mut().poll(&mut context).is_pending(),
+        "tickers must also hydrate"
+    );
+    loaded.tickers = true;
+    store
+        .update(
+            safe_cex_store::StoreUpdate {
+                loaded: Some(loaded),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+    f.host.block_on(start).unwrap();
+    assert!(
+        f.routes.requests.borrow().is_empty(),
+        "external startup skips venue public REST"
+    );
+    assert!(
+        f.host.sockets.borrow().is_empty(),
+        "external startup skips venue public sockets"
+    );
+    f.exchange.dispose().unwrap();
+    assert_eq!(provider.disposes.get(), 1);
+}
+
+#[test]
+fn external_configuration_without_a_provider_fails_visibly_before_network() {
+    let f = fixture_with_options(vec![], external_options());
+    let error = f.host.block_on(f.exchange.start()).unwrap_err();
+    assert_eq!(
+        error.message,
+        "externalPublicData is configured but no external public data provider was supplied"
+    );
+    assert!(f.routes.requests.borrow().is_empty());
+    assert!(f.host.sockets.borrow().is_empty());
 }
 
 #[derive(Default)]

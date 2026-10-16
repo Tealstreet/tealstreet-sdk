@@ -103,6 +103,12 @@ pub trait RustVenueHost {
     }
 
     /// Optional hosted account capability; no host-local secret is required.
+    fn bitrue(&self) -> Result<safe_cex_venue_bitrue::BitrueDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "bitrue inputs are unavailable on this host",
+        ))
+    }
+
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
     }
@@ -170,6 +176,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitget, bitget_constructor),
     (ExchangeName::Bitgetinverse, bitget_constructor),
     (ExchangeName::Bitgetusdc, bitget_constructor),
+    (ExchangeName::Bitrue, bitrue_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Grvt, grvt_constructor),
@@ -383,6 +390,17 @@ pub fn bitget_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = BitgetExchange::new(name, options, store, host.bitget()?)?;
         Ok(exchange)
+    })
+}
+
+pub fn bitrue_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(safe_cex_venue_bitrue::BitrueExchange::new(
+            name,
+            options,
+            store,
+            host.bitrue()?,
+        )?)
     })
 }
 
