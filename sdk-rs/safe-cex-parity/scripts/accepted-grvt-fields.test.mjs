@@ -39,10 +39,11 @@ async function nativeProbe(mode){
  const probesUrl=new URL('./accepted-probes.mjs',import.meta.url).href;
  const helperUrl=new URL('./accepted-grvt-fields.mjs',import.meta.url).href;
  const aliasUrl=new URL('./accepted-aliases.mjs',import.meta.url).href;
- const hook=registerHooks({load(url,ctx,next){const result=next(url,ctx);let source=String(result.source);
-  if(url===probesUrl && mode==='identity'){const anchor="  if (contract.aliasProbeKind === 'reviewed-grvt-fields') return";assert.equal(source.split(anchor).length,2);source=source.replace(anchor,"  if (contract.aliasProbeKind === 'reviewed-grvt-fields') contract.canonical = 'wrong-native-fields';\n"+anchor);}
-  if(url===helperUrl && mode==='members'){const anchor='fields.iter().map(|(key, value)|';assert.equal(source.split(anchor).length,2);source=source.replace(anchor,'fields.iter().rev().map(|(key, value)|');}
-  if(url===aliasUrl && mode==='route'){const anchor='  if (borrowed) return borrowed;';assert.equal(source.split(anchor).length,2);source=source.replace(anchor,'');}
+ let injected=0;
+ const hook=registerHooks({load(url,ctx,next){const result=next(url,ctx);if(![probesUrl,helperUrl,aliasUrl].includes(url))return result;let source=String(result.source);
+  if(url===probesUrl && mode==='identity'){const anchor="  if (contract.aliasProbeKind === 'reviewed-grvt-fields') return";assert.equal(source.split(anchor).length,2);source=source.replace(anchor,"  if (contract.aliasProbeKind === 'reviewed-grvt-fields') contract.canonical = 'wrong-native-fields';\n"+anchor);injected++;}
+  if(url===helperUrl && mode==='members'){const anchor='fields.iter().map(|(key, value)|';assert.equal(source.split(anchor).length,2);source=source.replace(anchor,'fields.iter().rev().map(|(key, value)|');injected++;}
+  if(url===aliasUrl && mode==='route'){const anchor='  if (borrowed) return borrowed;';assert.equal(source.split(anchor).length,2);source=source.replace(anchor,'');injected++;}
   return {...result,source};
  }});
  try{
@@ -51,9 +52,11 @@ async function nativeProbe(mode){
   const metadata=JSON.parse(cargo(['metadata','--locked','--format-version=1']));
   const pkg=metadata.packages.find(pkg=>pkg.name==='safe-cex-venue-grvt');assert.ok(pkg&&metadata.workspace_members.includes(pkg.id));
   const target=pkg.targets.find(target=>target.kind.includes('lib'));
-  cargo(['rustdoc','--locked','-p',pkg.name,'--lib','--jobs=1','--','-Z','unstable-options','--output-format=json','--document-private-items','--document-hidden-items','-A','rustdoc::all']);
-  const doc=JSON.parse(fs.readFileSync(path.join(metadata.target_directory,'doc',target.name+'.json')));
-  const artifacts=cargo(['check','--locked','-p',pkg.name,'--lib','--jobs=1','--message-format=json']).trim().split('\n').map(line=>JSON.parse(line)).filter(row=>row.reason==='compiler-artifact');
+  const selectedTarget=process.env.FIELDS_TEST_TARGET??'native';assert.ok(['native','wasm32-unknown-unknown'].includes(selectedTarget));
+  const targetArgs=selectedTarget==='native'?[]:['--target',selectedTarget];
+  cargo(['rustdoc','--locked','-p',pkg.name,'--lib','--jobs=1',...targetArgs,'--','-Z','unstable-options','--output-format=json','--document-private-items','--document-hidden-items','-A','rustdoc::all']);
+  const doc=JSON.parse(fs.readFileSync(path.join(metadata.target_directory,...(targetArgs.length?[selectedTarget]:[]),'doc',target.name+'.json')));
+  const artifacts=cargo(['check','--locked','-p',pkg.name,'--lib','--jobs=1',...targetArgs,'--message-format=json']).trim().split('\n').map(line=>JSON.parse(line)).filter(row=>row.reason==='compiler-artifact');
   const sysroot=spawnSync('rustc',['--print','sysroot'],{cwd:root,encoding:'utf8'});assert.equal(sysroot.status,0);
   const found=inventory(doc,{defaultTraits:loadPolicy('default-traits'),receiverTraits:loadPolicy('receiver-traits'),readSource:file=>fs.readFileSync(path.resolve(root,file))});
   const aliases=found.publicAliases.filter(alias=>alias.name===name);assert.equal(aliases.length,1);
@@ -61,7 +64,8 @@ async function nativeProbe(mode){
   const externalTypeAliases=found.externalTypeAliases.filter(row=>row.name===name).map(row=>({...row,artifact:aliasTargetIdentity(row,artifacts,members,sysroot.stdout.trim())}));
   const macroOrigins=verifiedMacroOrigins(doc,pkg,metadata,artifacts,sysroot.stdout.trim());
   const {runProbes}=await import('./accepted-probes.mjs');
-  const rows=runProbes(root,metadata,[{package:pkg.name,target,types:[],publicAliases:aliases,externalTypeAliases,macroOrigins,locals:[]}],{[name]:contract(aliases[0],grvtFieldsWitnesses)},{target:process.env.FIELDS_TEST_TARGET??'native',features:[],jobs:1});
+  assert.equal(injected,mode==='baseline'?0:1,'Fields mutation hook must execute before production compilation');
+  const rows=runProbes(root,metadata,[{package:pkg.name,target,types:[],publicAliases:aliases,externalTypeAliases,macroOrigins,locals:[]}],{[name]:contract(aliases[0],grvtFieldsWitnesses)},{target:selectedTarget,features:[],jobs:1});
   console.log('GRVT_FIELDS_NATIVE '+JSON.stringify({mode,rows}));
   assert.equal(rows.length,1);assert.equal(rows[0].name,name);assert.ok(!rows[0].classificationOnly);
   assert.deepEqual(rows[0].failures,[],'actual Fields routes native keys identity and trait observations');
