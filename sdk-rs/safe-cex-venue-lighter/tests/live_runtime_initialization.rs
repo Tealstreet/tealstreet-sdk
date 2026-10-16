@@ -1344,7 +1344,7 @@ fn actual_runtime_initialization_native_floor() {
         assert_eq!(counts[name], n, "independent method floor");
     }
     assert_eq!(
-        corpus["contentHash"], "0fb904d487ed2e6529c2620d232ed0085c585766e3ebd19380d7e90bc64e933f",
+        corpus["contentHash"], "4e7120804ede912c85ea15f5471d1b501ec5435b1ee4839db8efcfa9ec382f1b",
         "actual source/import pin after native assertions"
     );
     eprintln!(

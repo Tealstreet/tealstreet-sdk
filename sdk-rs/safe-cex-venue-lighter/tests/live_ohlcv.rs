@@ -1246,7 +1246,7 @@ fn actual_ohlcv_native_floor() {
         assert_eq!(counts[name], n, "independent method floor");
     }
     assert_eq!(
-        corpus["contentHash"], "ab33922dfb763645289b9c016b61e9160c5cb9634dad08cc552cd873559cd147",
+        corpus["contentHash"], "96d71c8e8205b84bf2db72a779fbaba72bda07b57875db66ae3d017efccc7ac0",
         "actual source/import pin after native assertions"
     );
     eprintln!("69 native cases; stopped at iteration68; bounded OHLCV/Map/timer/Promise hosts");

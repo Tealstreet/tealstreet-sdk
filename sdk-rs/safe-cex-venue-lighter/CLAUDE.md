@@ -332,3 +332,18 @@ Ordinary order-query slice: sdk_order_queries maps seven pending native value de
 Market-data SDK slice: `sdk_market_api.rs` maps CandlestickApi, FundingApi and InfoApi plus eight value-level DTOs. Methods use `AccountApi::request_handled` so response checks and returning data occur in the original await continuation. `MarketApiErrors` is a required source LighterApiError constructor host: evaluate message and code first (including two separate response.error accesses), then construct/coerce. It is not itself a native implementation of the still-pending LighterApiError class. Native classes require explicit runtime/semantics hosts; prototype/reflection is CHOSEN divergent. `live_market_api` uses the actual TypeScript source oracle, asserts native values/identity/query fields/read order before the authored corpus pin, and stops at 120 method cases and 32 model cases. No network or JSON codec claim.
 
 Public ingress bodies use `public_ingress::IngressOps` with live opaque values and mandatory host operations. See `PUBLIC_INGRESS_EVIDENCE.md` for the nine-row mapping, iterator/callback contracts and finite proof scope.
+
+Production `binding::exchange::LighterNativeExchange::new` assembles the ported
+class on the shared js_runtime over `LighterDependencies` (socket/runtime, HTTP,
+transport registry and optional signing entropy). Leave `signing_entropy` absent
+for the host CSPRNG; deterministic sources are for scripted transport proofs.
+The typed Exchange surface retains the five inherited BaseExchange rejections.
+`tests/exchange_binding.rs` drives all sixteen methods plus batch placement;
+`scripts/binding-controls.py` proves every binding with a compiling mutation and
+restored pass. Run the control script exclusively, without another Cargo process.
+Builder-fee options come from `options.extra`, with the exchange name as the
+second argument; invalid present overrides must not select the default index.
+Signer validation has a separate nine-case live TransactionClient precedence
+oracle. That bounded proof does not establish arbitrary SDK input, constructor
+reflection or typed-array crypto parity. The archived signing-preimage fixture
+remains immutable; source-only corpus provenance is checked after native values.
