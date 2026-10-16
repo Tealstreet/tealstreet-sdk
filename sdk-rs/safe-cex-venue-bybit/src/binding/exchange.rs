@@ -397,8 +397,24 @@ impl Exchange for BybitExchange {
     fn start(&self) -> ExchangeFuture<'_, ()> {
         self.invoke_unit("start", vec![])
     }
+    // Bybit sends userID/inviterID as numbers, which ExchangeAccount's open-String
+    // fields carry as their interpolated text (MANIFEST-SPEC closed typed output boundary).
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        self.invoke("getAccount", vec![])
+        let this = self.rt().this.clone();
+        Box::pin(async move {
+            let account = await_js(this.call_method("getAccount", vec![]).map_err(err)?)
+                .await
+                .map_err(err)?;
+            for key in ["userId", "affiliateId"] {
+                let value = account.get(key).map_err(err)?;
+                if !value.is_nullish() && !value.is_string() {
+                    account
+                        .set(key, Js::String(value.to_js_string().map_err(err)?))
+                        .map_err(err)?;
+                }
+            }
+            to_typed(&account).map_err(err)
+        })
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
         self.invoke("validateAccount", vec![])

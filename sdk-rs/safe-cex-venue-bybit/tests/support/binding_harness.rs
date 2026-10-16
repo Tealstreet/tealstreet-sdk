@@ -281,7 +281,10 @@ impl RestAdapter for Wire {
             body,
             headers: json!(request.headers),
         });
-        let params = request.params.clone().unwrap_or_else(|| query(&request.url));
+        let params = request
+            .params
+            .clone()
+            .unwrap_or_else(|| query(&request.url));
         let matched = self
             .param_routes
             .borrow()

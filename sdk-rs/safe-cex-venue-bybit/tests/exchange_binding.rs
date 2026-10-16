@@ -154,7 +154,10 @@ fn fetch_markets_joins_fees_and_prelaunch_markets() {
     });
     let markets = h.drive(h.venue().fetch_markets()).expect("fetchMarkets");
     assert_eq!(
-        markets.iter().map(|m| m.symbol.as_str()).collect::<Vec<_>>(),
+        markets
+            .iter()
+            .map(|m| m.symbol.as_str())
+            .collect::<Vec<_>>(),
         ["BTCUSDT", "NEWUSDT"],
         "Trading first, then PreLaunch"
     );
@@ -201,7 +204,11 @@ fn fetch_tickers_parses_rows_for_known_markets() {
     )
     .unwrap();
     let tickers = h.drive(h.venue().fetch_tickers()).expect("fetchTickers");
-    assert_eq!(tickers.len(), 1, "rows without a market are skipped: {tickers:?}");
+    assert_eq!(
+        tickers.len(),
+        1,
+        "rows without a market are skipped: {tickers:?}"
+    );
     let t = &tickers[0];
     assert_eq!(t.symbol, "BTCUSDT");
     assert_eq!(t.last, 25000.0);
@@ -214,5 +221,89 @@ fn fetch_tickers_parses_rows_for_known_markets() {
     assert_eq!(
         h.wire.calls("/v5/market/tickers")[0].params["category"],
         "linear"
+    );
+}
+
+#[test]
+fn get_account_reads_user_and_inviter_ids() {
+    let h = harness(options(), |w| {
+        w.ok(
+            "GET",
+            "/v5/user/query-api",
+            json!({"userID": 12345, "inviterID": 678, "vipLevel": "No VIP"}),
+        );
+    });
+    let account = h.drive(h.venue().get_account()).expect("getAccount");
+    let account = serde_json::to_value(&account).unwrap();
+    assert_eq!(
+        account["userId"], "12345",
+        "numeric userID crosses as its text"
+    );
+    assert_eq!(account["affiliateId"], "678");
+
+    let rejected = harness(options(), |w| {
+        w.route(
+            "GET",
+            "/v5/user/query-api",
+            200,
+            json!({"retCode": 10003, "retMsg": "API key is invalid.", "result": {}}),
+        );
+    });
+    let error = rejected
+        .drive(rejected.venue().get_account())
+        .expect_err("a non-zero retCode rejects");
+    assert_eq!(error.message, "API key is invalid.");
+}
+
+fn wallet() -> serde_json::Value {
+    json!({"list": [{
+        "accountType": "UNIFIED", "totalEquity": "1000.5", "totalWalletBalance": "990",
+        "totalMarginBalance": "995", "totalAvailableBalance": "800",
+        "totalInitialMargin": "150", "totalMaintenanceMargin": "20",
+        "coin": [{"coin": "USDT", "equity": "1000.5", "walletBalance": "990", "usdValue": "1000.4"}]
+    }]})
+}
+
+#[test]
+fn validate_account_checks_the_key_then_reads_balance() {
+    let h = harness(options(), |w| {
+        w.ok(
+            "GET",
+            "/v5/account/info",
+            json!({"marginMode": "REGULAR_MARGIN", "unifiedMarginStatus": 6}),
+        );
+        w.ok("GET", "/v5/account/wallet-balance", wallet());
+    });
+    let result = h
+        .drive(h.venue().validate_account())
+        .expect("validateAccount");
+    let result = serde_json::to_value(&result).unwrap();
+    assert_eq!(result["error"], "");
+    assert_eq!(
+        result["balance"]["total"], 1000.5,
+        "no positions: total is equity"
+    );
+    assert_eq!(result["balance"]["free"], 800.0);
+    assert_eq!(result["balance"]["used"], 170.0, "IM + MM");
+    assert_eq!(result["balance"]["coins"]["USDT"]["notional"], 1000.4);
+    let wallet = h.wire.calls("/v5/account/wallet-balance");
+    assert_eq!(wallet[0].params["accountType"], "UNIFIED");
+
+    let bad = harness(options(), |w| {
+        w.route(
+            "GET",
+            "/v5/account/info",
+            200,
+            json!({"retCode": 10002, "retMsg": "invalid request, please check your timestamp and recv_window param", "result": {}}),
+        );
+    });
+    let result = bad
+        .drive(bad.venue().validate_account())
+        .expect("validateAccount");
+    let result = serde_json::to_value(&result).unwrap();
+    assert_eq!(result["error"], "Check your computer time and date");
+    assert!(
+        bad.wire.calls("/v5/account/wallet-balance").is_empty(),
+        "a rejected key reads no balance"
     );
 }

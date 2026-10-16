@@ -279,6 +279,23 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(Js::Undefined)
     });
 
+    // Account (members/account.rs).
+    method(&this, rt, "getAccount", |rt, _| {
+        members::account::get_account(rt)
+    });
+    method(&this, rt, "fetchMarginAccountInfos", |rt, _| {
+        members::account::fetch_margin_account_infos(rt)
+    });
+    method(&this, rt, "validateAccount", |rt, _| {
+        members::account::validate_account(rt)
+    });
+    method(&this, rt, "fetchBalance", |rt, _| {
+        members::account::fetch_balance(rt)
+    });
+    method(&this, rt, "formatBalance", |rt, a| {
+        members::account::format_balance(rt, arg(&a, 0))
+    });
+
     // Public data (members/markets.rs).
     method(&this, rt, "fetchFees", |rt, a| {
         members::markets::fetch_fees(rt, arg(&a, 0))
