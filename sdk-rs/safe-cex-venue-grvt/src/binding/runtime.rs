@@ -11,6 +11,7 @@ use safe_cex_exchange::js_runtime::{
 use std::rc::Rc;
 
 pub(super) struct Extra {
+    pub(super) create_api_client: Option<super::exchange::CreateApiClient>,
     pub(super) builder_error_proto: Js,
     pub(super) nonce_ids: std::cell::RefCell<Option<crate::composition::NonceIds>>,
     pub(super) nonce_times: std::cell::RefCell<Option<crate::composition::NonceTimes>>,

@@ -18,8 +18,18 @@ impl ApiHost for Host {
                 .collect(),
         )
     }
-    fn create_axios(&self, config: Js, _options: Js, _exchange: Js) -> JsResult<Js> {
-        Ok(client::create(self.0.shared.http.clone(), config))
+    fn create_axios(&self, config: Js, options: Js, _exchange: Js) -> JsResult<Js> {
+        // safeCexAxiosCreate overrides every venue's requested timeout.
+        value(config.set("timeout", Js::Number(20_000.0)))?;
+        if let Some(factory) = &self.0.shared.extra.create_api_client {
+            let options =
+                value(safe_cex_exchange::js_runtime::base_exchange::exchange_options(&options))?;
+            factory(config, &options).map_err(|e| {
+                safe_cex_exchange::js_runtime::value::error_object("Error", &e.message)
+            })
+        } else {
+            Ok(client::create(self.0.shared.http.clone(), config))
+        }
     }
     fn read_retry_condition(&self) -> JsResult<Js> {
         Ok(Js::function("networkErrorOnGrvtRead", move |_, args| {

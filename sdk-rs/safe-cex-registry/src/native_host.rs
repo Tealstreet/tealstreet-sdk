@@ -142,12 +142,19 @@ impl RustVenueHost for NativeVenueHost {
                 "remoteSigner is not wired for grvt on the native host",
             ));
         }
+        let runtime = self.runtime.clone();
+        let terminal = (self.adapter)()?;
+        let retained = terminal.clone();
+        let adapters: AdapterFactory = Rc::new(move || Ok(retained.clone()));
         Ok(safe_cex_venue_grvt::binding::exchange::GrvtDependencies {
             runtime: self.runtime.clone(),
             http: safe_cex_exchange::js_runtime::client::rest_http_host(
                 self.runtime.clone(),
-                (self.adapter)()?,
+                terminal,
             ),
+            create_api_client: Some(Rc::new(move |config, options| {
+                grvt_api_client(&runtime, &adapters, config, options)
+            })),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
@@ -266,6 +273,71 @@ impl RustVenueHost for NativeVenueHost {
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
+    }
+}
+
+// GRVT's three source factories call safeCexAxiosCreate. Keep transport selection
+// at factory creation, including direct-routing refusals, proxy headers and the
+// common timeout. The source GRVT adapter installations are commented out, so
+// this does not install HOW unless it is the caller-supplied terminal adapter.
+#[expect(clippy::arc_with_non_send_sync)]
+fn grvt_api_client(
+    runtime: &Rc<dyn WsRuntime>,
+    adapters: &AdapterFactory,
+    config: safe_cex_exchange::js_runtime::value::Js,
+    options: &safe_cex_types::ExchangeOptions,
+) -> Result<safe_cex_exchange::js_runtime::value::Js, ExchangeError> {
+    use safe_cex_exchange::js_runtime::{
+        client,
+        value::{Js, Thrown},
+    };
+    let build = || -> Result<Js, Thrown> {
+        let base = config.get("baseURL")?;
+        let request = safe_cex_transport::RestRequest {
+            base_url: base.as_str().map(|text| String::from_utf16_lossy(text)),
+            headers: config
+                .get("headers")?
+                .own_entries()?
+                .into_iter()
+                .map(|(key, value)| {
+                    Ok((
+                        String::from_utf16_lossy(&key),
+                        String::from_utf16_lossy(&value.to_js_string()?),
+                    ))
+                })
+                .collect::<Result<_, Thrown>>()?,
+            ..Default::default()
+        };
+        let common = native_client(
+            runtime,
+            adapters,
+            safe_cex_types::ExchangeName::Grvt,
+            options,
+            request,
+            None,
+        )?;
+        let host = client::rest_http_host(runtime.clone(), Arc::new(GrvtApiRest(common)));
+        Ok(client::create(host, config))
+    };
+    build().map_err(|error| error.to_exchange_error())
+}
+
+struct GrvtApiRest(safe_cex_exchange::http::HttpClient);
+impl RestAdapter for GrvtApiRest {
+    fn execute(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        // The common factory owns the resolved default URL, including proxy routing.
+        request.base_url = None;
+        Box::pin(self.0.execute(request))
+    }
+    fn execute_with_receipt(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestExecution> {
+        request.base_url = None;
+        Box::pin(self.0.execute_with_receipt(request))
     }
 }
 

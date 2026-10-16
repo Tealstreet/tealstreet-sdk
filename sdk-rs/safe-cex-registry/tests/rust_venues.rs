@@ -502,6 +502,7 @@ impl RustVenueHost for Venues {
                 self.runtime.clone(),
                 self.wire.clone(),
             ),
+            create_api_client: None,
             external_public_data: None,
         })
     }

@@ -240,3 +240,12 @@ arbitrary executable host-object or third-party SDK conformance. The five missin
 source Exchange methods retain their inherited `Not implemented` rejection.
 Hosted remote signing is explicitly refused by the native registry host because
 the active GRVT SDK order signer requires the local wallet.
+
+The production native registry supplies `CreateApiClient` over the existing common
+HTTP factory for each of the three API clients. This retains eager routing
+refusals, transport authorization, standard headers and the common 20-second
+timeout. The source GRVT HOW installations remain commented out; this binding
+preserves that choice. A caller-supplied HOW terminal still receives cookie/account
+config extensions. `safe-cex-registry/tests/native_host_grvt.rs` exercises real
+local HTTP, one-login SDK validation and direct header semantics; dropping the
+proxy routing options compiles and fails the construction-time routing-refusal test.
