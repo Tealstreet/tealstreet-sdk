@@ -2765,6 +2765,19 @@ pub struct AsterDEXPlaceOrderOpts {
     )]
     pub stp_mode: Option<AsterDEXStpMode>,
 }
+impl std::borrow::Borrow<safe_cex_types::PlaceOrderOpts> for AsterDEXPlaceOrderOpts {
+    fn borrow(&self) -> &safe_cex_types::PlaceOrderOpts {
+        &self.order
+    }
+}
+impl From<safe_cex_types::PlaceOrderOpts> for AsterDEXPlaceOrderOpts {
+    fn from(order: safe_cex_types::PlaceOrderOpts) -> Self {
+        Self {
+            order,
+            stp_mode: None,
+        }
+    }
+}
 
 #[derive(serde::Serialize)]
 struct AsterDEXPlaceOrderNumbers {

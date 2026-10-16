@@ -8,6 +8,34 @@
   },
   "delegations": [
     {
+      "file": "safe-cex-venue-hyperliquid/src/binding.rs",
+      "finding": "dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-hyperliquid/src/binding.rs",
+          "contains": "Err(_) => self.base.dispose(),"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-hyperliquid/src/binding.rs",
+          "contains": ".call_method(&instance, \"dispose\", &[])"
+        }
+      ]
+    },
+    {
+      "file": "safe-cex-venue-bybit/src/binding/exchange.rs",
+      "finding": "dispose bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {"file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts", "contains": "super.dispose();"},
+        {"file": "sdk-rs/safe-cex-venue-bybit/src/binding/exchange.rs", "contains": "|| self.base.dispose(),"}
+      ]
+    },
+    {
       "file": "safe-cex-venue-woo/src/binding/hosts/fill_recovery.rs",
       "finding": "invoke bypasses dynamic hook dispose through base",
       "kind": "source-super",

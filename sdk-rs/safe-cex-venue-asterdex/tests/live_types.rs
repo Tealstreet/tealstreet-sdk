@@ -255,7 +255,7 @@ fn native_identity_fields(name: &str, value: &dyn Any) -> Vec<(&'static str, Val
         "AsterDEXPlaceOrderOpts" => {
             let v = value.downcast_ref::<AsterDEXPlaceOrderOpts>().unwrap();
             let mut fields = vec![("stp_mode", serde_json::to_value(&v.stp_mode).unwrap())];
-            fields.extend(identity_fields!(v.order; symbol, r#type, side, amount, price, trigger_price, stop_loss, take_profit, reduce_only, time_in_force, trigger_type, tp_trigger_type, sl_trigger_type, client_order_id, max_slippage_pct, close));
+            fields.extend(identity_fields!(v.order; symbol, r#type, side, amount, price, trigger_price, stop_loss, take_profit, reduce_only, time_in_force, trigger_type, tp_trigger_type, sl_trigger_type, client_order_id, max_slippage_pct, close, implied_volatility));
             fields
         }
         _ => Vec::new(),
@@ -453,7 +453,7 @@ fn source_record_counts(name: &str) -> (usize, usize) {
         "AsterDEXAccountUpdate" => (204, 38),
         "AsterDEXOrderUpdate" => (340, 68),
         "AsterDEXListenKeyResponse" => (17, 3),
-        "AsterDEXPlaceOrderOpts" => (316, 49),
+        "AsterDEXPlaceOrderOpts" => (325, 52),
         "AsterDEXMarketResponseFiltersItem" => (117, 36),
         "AsterDEXAccountResponseAssetsItem" => (133, 28),
         "AsterDEXAccountResponsePositionsItem" => (160, 34),
@@ -504,7 +504,7 @@ fn source_record_field_count(name: &str) -> usize {
         "AsterDEXStreamMarkPrice" => 8,
         "AsterDEXAccountUpdate" | "AsterDEXOrderUpdate" => 4,
         "AsterDEXListenKeyResponse" => 1,
-        "AsterDEXPlaceOrderOpts" => 17,
+        "AsterDEXPlaceOrderOpts" => 18,
         "AsterDEXMarketResponseFiltersItem" => 12,
         "AsterDEXAccountResponseAssetsItem" => 14,
         "AsterDEXAccountResponsePositionsItem" => 17,
@@ -1156,6 +1156,11 @@ fn numeric_ingress_native_bits() {
         "maxSlippagePct",
         |v| v.order.max_slippage_pct.unwrap(),
     ));
+    covered.insert(audit_number::<AsterDEXPlaceOrderOpts>(
+        "AsterDEXPlaceOrderOpts",
+        "impliedVolatility",
+        |v| v.order.implied_volatility.unwrap(),
+    ));
     covered.insert(audit_number::<AsterDEXMarketResponse>(
         "AsterDEXMarketResponse",
         "deliveryDate",
@@ -1501,6 +1506,7 @@ fn place_order_numeric_ingress_acceptance() {
         "stopLoss",
         "takeProfit",
         "maxSlippagePct",
+        "impliedVolatility",
     ] {
         for literal in ["-0", "-0.0", "1", "1.25", "1e400", "-1e400"] {
             let expected =
@@ -1533,6 +1539,7 @@ fn place_order_numeric_ingress_acceptance() {
                     "stopLoss" => decoded.order.stop_loss.unwrap(),
                     "takeProfit" => decoded.order.take_profit.unwrap(),
                     "maxSlippagePct" => decoded.order.max_slippage_pct.unwrap(),
+                    "impliedVolatility" => decoded.order.implied_volatility.unwrap(),
                     _ => unreachable!(),
                 };
                 assert_eq!(

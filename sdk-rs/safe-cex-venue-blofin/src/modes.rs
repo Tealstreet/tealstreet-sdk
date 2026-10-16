@@ -76,6 +76,56 @@ fn prepare_confirmed_mode_update(
     }
 }
 
+// ts: applyConfirmedMarginType. Flat positions and fetched leverage follow the
+// confirmed type so the margin selector does not snap back.
+pub fn apply_confirmed_margin_type(
+    modes: &AccountModes,
+    store: &dyn Store,
+    margin_type: MarginType,
+) -> Result<(), StoreMutationError> {
+    modes.margin_type.set(Some(margin_type));
+    let mut update = StoreUpdate::default();
+    {
+        let leverage = store.fetched_leverage();
+        if !leverage.is_empty() {
+            update.fetched_leverage = Some(
+                leverage
+                    .iter()
+                    .map(|(symbol, leverage)| {
+                        let mut leverage = leverage.clone();
+                        leverage.margin_type = Some(margin_type);
+                        (symbol.clone(), leverage)
+                    })
+                    .collect(),
+            );
+        }
+    }
+    {
+        let positions = store.positions();
+        let flat_update = positions
+            .iter()
+            .any(|position| position.contracts == 0.0 && position.margin_type != Some(margin_type));
+        if flat_update {
+            update.positions = Some(
+                positions
+                    .iter()
+                    .map(|position| {
+                        let mut position = position.clone();
+                        if position.contracts == 0.0 {
+                            position.margin_type = Some(margin_type);
+                        }
+                        position
+                    })
+                    .collect(),
+            );
+        }
+    }
+    if update.fetched_leverage.is_none() && update.positions.is_none() {
+        return Ok(());
+    }
+    store.update(update, false)
+}
+
 pub fn after_method_called_in_worker(
     modes: &AccountModes,
     store: &dyn Store,
@@ -105,11 +155,15 @@ pub fn after_method_called_in_worker(
         };
         apply_confirmed_position_mode(modes, store, mode)?;
     } else if method == "changeMarginType" {
-        modes.margin_type.set(Some(if enabled {
-            MarginType::Isolated
-        } else {
-            MarginType::Cross
-        }));
+        apply_confirmed_margin_type(
+            modes,
+            store,
+            if enabled {
+                MarginType::Isolated
+            } else {
+                MarginType::Cross
+            },
+        )?;
     }
     Ok(())
 }
