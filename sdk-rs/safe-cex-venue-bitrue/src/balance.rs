@@ -123,7 +123,12 @@ pub fn parse_balance<'a>(
             currencies: None,
             coins: None,
         });
-    balance.currencies = Some(currencies);
+    balance.currencies = Some(
+        currencies
+            .into_iter()
+            .map(|(key, balance)| (key, balance.into()))
+            .collect(),
+    );
     balance.info = Some(data.clone());
     Ok(Cow::Owned(balance))
 }

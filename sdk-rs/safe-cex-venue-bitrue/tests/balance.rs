@@ -66,7 +66,7 @@ fn balance_matches_actual_typescript() {
         let actual = match parse_balance(input.as_ref(), &stored) {
             Err(e) => json!({"type":"error","name":e.name,"message":e.message}),
             Ok(b) => {
-                json!({"type":"balance","stored":std::ptr::eq(b.as_ref(),&*stored),"fields":fields(&b),"currencies":b.currencies.as_ref().map(|c|c.iter().map(|(k,v)|json!([k,fields(v)])).collect::<Vec<_>>()),"info":b.info.as_ref().map(native)})
+                json!({"type":"balance","stored":std::ptr::eq(b.as_ref(),&*stored),"fields":fields(&b),"currencies":b.currencies.as_ref().map(|c|c.iter().map(|(k,v)|json!([k,fields(v.as_balance().unwrap())])).collect::<Vec<_>>()),"info":b.info.as_ref().map(native)})
             }
         };
         native_cardinality(&row["result"], &actual, "balance");

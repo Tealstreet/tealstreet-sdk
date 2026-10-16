@@ -328,3 +328,5 @@ wire assertions, and pin independent feeder/compared counts. The scripts use
 `SAFE_CEX_TYPESCRIPT_PATH` with the existing source loader. Deliberate compiled
 regressions are restored by `scripts/order-policy-controls.py`; failures must
 include the named native assertion, never only a compiler diagnostic.
+
+get_balance_slice returns a borrowed BalanceSlice containing the source account or exact currency row. An available/locked row remains that shape; get_total_balance_from_balance sees its absent total and applies the source zero default. Do not fall back to the account total merely because a present currency row has a different runtime shape.
