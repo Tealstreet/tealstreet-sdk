@@ -260,3 +260,14 @@ preserves that choice. A caller-supplied HOW terminal still receives cookie/acco
 config extensions. `safe-cex-registry/tests/native_host_grvt.rs` exercises real
 local HTTP, one-login SDK validation and direct header semantics; dropping the
 proxy routing options compiles and fails the construction-time routing-refusal test.
+
+The first accepted-input contract batch reviews 52 owners individually in the
+per-crate contract file. Retain the 25 complete positional-array controls and
+five native alias tests; a passing subset does not clear unreviewed compiler
+owners or the borrowed-alias probe refusal. Exact scope and reproduction commands
+are in [ACCEPTED_CONTRACTS.md](ACCEPTED_CONTRACTS.md).
+
+Private numeric comparison preserves BigInt equality across both Number zero
+signs. Native trait-method tests pin coercion effects, original thrown-object
+identity and the source error-code comparisons to 1000. Current TypeScript call
+sites use 1000; zero cases exercise the broader native comparison helper.

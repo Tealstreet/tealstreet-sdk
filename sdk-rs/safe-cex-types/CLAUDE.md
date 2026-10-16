@@ -87,11 +87,23 @@ is None and present null is Some(Null). Existing numeric lexemes, including
 overflow and signed zero, survive; native NaN is refused. This is JSON capture,
 not JavaScript wire projection; Num owns typed ingress and output eligibility.
 
+Stock Serde F64Deserializer can ignore the raw-token newtype hint and emit its
+float directly. Capture accepts that event using the same Float path as the
+newtype buffer, preserving signed zero, infinities and NaN payload bits. JSON
+projection still refuses NaN and carries infinities as valid overflow lexemes;
+the raw-token map protocol remains strict. The retained_native_f64 and Num
+passthrough_native_f64 targets cover both direct capture and public projection.
+
 OrderRiskProfile serialization follows its source construction branch. The
 loss-side limit branch places positionSize before fee; all other risk branches
 place it last. Rust-only position_size_before_fee metadata selects the order,
 is omitted from TypeScript bindings and wire output, and defaults false on
 record decode. Numeric values and optional-field nullability are unchanged.
+
+CurrencyBalance uses the same private remote-companion pattern as the records
+below, with the object guard at its concrete Deserialize implementation. It
+retains declared Balance and available/locked payloads without normalization and
+has no hidden function-local decoder.
 
 The field checker refuses interface heritage in both dependency discovery and
 shape enumeration. Required inherited fields must never disappear behind a
@@ -151,3 +163,11 @@ JSON syntax and surviving-value refusals remain separate negative cases.
 ExchangeOptions.polymarket carries the five runtime account fields consumed by the Polymarket constructor. Its typed ExchangeOptionsPolymarket record uses existing UTF-8 credential strings and native f64 signerType; do not coerce numeric signature modes or replace the venue retained UTF-16 Text record with it. The source root declaration lacks this opts-as-any extension, so the field is skipped only in generated static TS, never in native serialization or source projection.
 
 Balance.currencies stores CurrencyBalance: either the declared recursive Balance or the actual Crypto.com REST available/locked row. Serialization preserves the selected source field names; there is no computed free/used/total normalization. The static TypeScript declaration still names Balance, so its generated annotation remains unchanged while the runtime violation is recorded on the owning manifest row. Both runtime shapes require objects; available/locked are required non-null numbers.
+
+DisplayedPosition decodes its flattened Position through the original MapAccess.
+The private streaming filter consumes display-only fields and forwards payload
+seeds unchanged, preserving raw decimal/-0 numbers and retained info lexemes
+without Serde Content buffering. The remote serializer companion keeps exact
+canonical field/serde metadata; optional null and duplicate-field rejection remain
+explicit. Direct raw JSON, private-companion and bounded map-seed witnesses cover
+this seam; plain serde numeric decoding still has its ordinary overflow policy.

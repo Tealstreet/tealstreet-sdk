@@ -176,3 +176,20 @@ The native registry supplies the shared default tunnel adapter when requested.
 The registry tunnel witness verifies public/private reads over real rpc.http,
 proxy-token authentication, signed query bytes and zero direct HTTP. Missing
 and no-op installer mutations must compile and fail before exact restoration.
+
+`PhemexApiResponse<T>` streams `code`/`msg` directly from the original map and
+forwards payload fields to `T` through a filtering MapAccess. This avoids Serde
+flatten's intermediate Content buffer, which misreads arbitrary-precision JSON
+number tokens in a typed payload. The flat serialization schema and original
+`T: Deserialize<'de>` bound remain intact, including borrowed payloads. Metadata
+is checked even if a custom payload finishes early. Existing numeric-ingress
+frontdoors retain their ECMAScript Number and nonfinite-output checks.
+
+The original 44-owner native/default accepted-contract census has a closed
+compiler-selected runner, `scripts/accepted-census-contracts.mjs`, backed by the
+per-crate Phemex contract shard. It executes 30 decoder results and 14 individual
+classifications; independent native witnesses and mutation controls accompany
+non-decoder/typed roles. See safe-cex-parity/accepted-set/PHEMEX-REVIEW.md for the
+scope and commands. This is not full current discovery: post-census binding
+owners, aliases, local scopes, feature combinations and WASM remain explicit
+obligations rather than inheriting the selected contracts.

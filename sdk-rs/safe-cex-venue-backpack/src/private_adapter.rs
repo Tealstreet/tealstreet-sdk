@@ -333,10 +333,19 @@ impl auth::AuthHost for AuthFrame {
                     &secret,
                 );
                 Ok::<_, ExchangeError>(async move {
-                    response
-                        .await
-                        .map(|s| units(&s))
-                        .map_err(ExchangeError::new)
+                    response.await.map(|s| units(&s)).map_err(|message| {
+                        // The crypto adapter retains the source error name in its text.
+                        // Reconstruct that error before String(error), avoiding an extra
+                        // Error prefix in the source's catch-and-log path.
+                        match message.split_once(": ") {
+                            Some((name @ ("Error" | "RangeError" | "TypeError"), text)) => {
+                                let mut error = ExchangeError::new(text);
+                                error.name = name.into();
+                                error
+                            }
+                            _ => ExchangeError::new(message),
+                        }
+                    })
                 })
             },
         );

@@ -106,17 +106,23 @@ info are live source aliases but owned Rust snapshots; generated extra is also
 shared across source primary/SL/TP while each Rust OrderExtra is independent; non-finite info loss is a
 separate FINDING. Source numeric outputs are tagged before JSON erases their bits.
 
-**Numeric ingress:** the five declared requestTime leaves use shared
+**Numeric ingress:** the six declared requestTime leaves use shared
 JsNumberInput::decode::<f64> before serde_json's strict numeric decoder. Their
 existing direct struct path reaches these fields before the flattened extras
 buffer; this is a scalar opt-in, not whole-record eligibility. Unknown fields
 retain the existing Value path and are never fed through the shared numeric
 adapter. This avoids both dropping extras and changing the separate ECMAScript
-JSON output projection. Ninety maintained source cases compare pre-serialization
+JSON output projection. One hundred eight maintained source cases compare pre-serialization
 bits for raw, owned, borrowed and native Values, including overflow, negative
 underflow and signed zero. Do not use this leaf adapter to claim repair of an
 upstream tagged/flattened buffer: an erased sign cannot be recovered downstream;
 any future buffered envelope needs whole-entry shared ingress and its own proof.
+
+`ApiCode` captures the whole scalar before selecting its number/string arm.
+Both arms reuse checked `JsNumberInput` scalar decoders; the error-code enum gains
+no serialization API. Direct text, owned/borrowed Value and qualified decoder
+witnesses inspect native variant identity and numeric bits, including decimal,
+signed zero, wide rounding and overflow.
 
 **Public ticker helpers:** both public socket source members map to `ticker`.
 Select nullish aliases before finite validation: a present invalid value blocks
