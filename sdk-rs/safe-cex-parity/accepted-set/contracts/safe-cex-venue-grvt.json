@@ -10813,5 +10813,1488 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_grvt::builder::get_eip712_domain": {
+    "api": {
+      "kind": "function",
+      "name": "get_eip712_domain",
+      "signature": {
+        "inputs": [
+          [
+            "testnet",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed getEIP712Domain in grvt.builder.ts: typed network bool selects chainId 325 or 326, retaining name GRVT Exchange and version string 0. Observations inspect the native object field count/order, string fields and chain Number bits before projection. Actual-source builder_domain tests independently cover both networks. This contract does not admit arbitrary raw objects or establish signing execution.",
+    "call": "{let d=$type($value.as_bool().unwrap());let object=d.as_object().expect(\"GRVT DOMAIN object\");serde_json::json!({\"keys\":object.keys().collect::<Vec<_>>(),\"count\":object.len(),\"name\":d[\"name\"].as_str().unwrap(),\"version\":d[\"version\"].as_str().unwrap(),\"chain_bits\":format!(\"{:016x}\",d[\"chainId\"].as_f64().unwrap().to_bits())})}",
+    "cases": [
+      {
+        "input": false,
+        "output": {
+          "keys": [
+            "name",
+            "version",
+            "chainId"
+          ],
+          "count": 3,
+          "name": "GRVT Exchange",
+          "version": "0",
+          "chain_bits": "4074500000000000"
+        }
+      },
+      {
+        "input": true,
+        "output": {
+          "keys": [
+            "name",
+            "version",
+            "chainId"
+          ],
+          "count": 3,
+          "name": "GRVT Exchange",
+          "version": "0",
+          "chain_bits": "4074600000000000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::public_subscriptions::map_interval_to_grvt": {
+    "api": {
+      "kind": "function",
+      "name": "map_interval_to_grvt",
+      "signature": {
+        "inputs": [
+          [
+            "interval",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_num::table_lookup::TableHit",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed actual GrvtPublicWebSocket.mapIntervalToGrvt: eighteen own string mappings; ordinary Object.prototype inherited members retain native ProtoMember identity/arity/string interpolation; every other key falls back to the original string. Expected mappings and all twelve inherited identities are independent literals. Native source interval_native covers mapping and identity; these exact production observations retain UTF-8 inputs and the existing stock-prototype boundary, without admitting executable/prototype-mutated hosts.",
+    "call": "{match $type($value.as_str().unwrap()){safe_cex_num::TableHit::Mapped(d)=>serde_json::json!({\"mapped\":d}),safe_cex_num::TableHit::Inherited(d)=>serde_json::json!({\"inherited\":match d{safe_cex_num::ProtoMember::Constructor=>\"Constructor\",safe_cex_num::ProtoMember::DefineGetter=>\"DefineGetter\",safe_cex_num::ProtoMember::DefineSetter=>\"DefineSetter\",safe_cex_num::ProtoMember::HasOwnProperty=>\"HasOwnProperty\",safe_cex_num::ProtoMember::LookupGetter=>\"LookupGetter\",safe_cex_num::ProtoMember::LookupSetter=>\"LookupSetter\",safe_cex_num::ProtoMember::IsPrototypeOf=>\"IsPrototypeOf\",safe_cex_num::ProtoMember::PropertyIsEnumerable=>\"PropertyIsEnumerable\",safe_cex_num::ProtoMember::ToString=>\"ToString\",safe_cex_num::ProtoMember::ValueOf=>\"ValueOf\",safe_cex_num::ProtoMember::Prototype=>\"Prototype\",safe_cex_num::ProtoMember::ToLocaleString=>\"ToLocaleString\"},\"arity\":d.length(),\"text\":d.js_string()}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"missing\":true})}}",
+    "cases": [
+      {
+        "input": "1m",
+        "output": {
+          "mapped": "CI_1_M"
+        }
+      },
+      {
+        "input": "3m",
+        "output": {
+          "mapped": "CI_3_M"
+        }
+      },
+      {
+        "input": "5m",
+        "output": {
+          "mapped": "CI_5_M"
+        }
+      },
+      {
+        "input": "15m",
+        "output": {
+          "mapped": "CI_15_M"
+        }
+      },
+      {
+        "input": "30m",
+        "output": {
+          "mapped": "CI_30_M"
+        }
+      },
+      {
+        "input": "1h",
+        "output": {
+          "mapped": "CI_1_H"
+        }
+      },
+      {
+        "input": "2h",
+        "output": {
+          "mapped": "CI_2_H"
+        }
+      },
+      {
+        "input": "4h",
+        "output": {
+          "mapped": "CI_4_H"
+        }
+      },
+      {
+        "input": "6h",
+        "output": {
+          "mapped": "CI_6_H"
+        }
+      },
+      {
+        "input": "8h",
+        "output": {
+          "mapped": "CI_8_H"
+        }
+      },
+      {
+        "input": "12h",
+        "output": {
+          "mapped": "CI_12_H"
+        }
+      },
+      {
+        "input": "1d",
+        "output": {
+          "mapped": "CI_1_D"
+        }
+      },
+      {
+        "input": "3d",
+        "output": {
+          "mapped": "CI_3_D"
+        }
+      },
+      {
+        "input": "5d",
+        "output": {
+          "mapped": "CI_5_D"
+        }
+      },
+      {
+        "input": "1w",
+        "output": {
+          "mapped": "CI_1_W"
+        }
+      },
+      {
+        "input": "2w",
+        "output": {
+          "mapped": "CI_2_W"
+        }
+      },
+      {
+        "input": "3w",
+        "output": {
+          "mapped": "CI_3_W"
+        }
+      },
+      {
+        "input": "4w",
+        "output": {
+          "mapped": "CI_4_W"
+        }
+      },
+      {
+        "input": "CI_5_M",
+        "output": {
+          "mapped": "CI_5_M"
+        }
+      },
+      {
+        "input": "unknown",
+        "output": {
+          "mapped": "unknown"
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "mapped": ""
+        }
+      },
+      {
+        "input": "1M",
+        "output": {
+          "mapped": "1M"
+        }
+      },
+      {
+        "input": "\ud83d\udca0_1m",
+        "output": {
+          "mapped": "\ud83d\udca0_1m"
+        }
+      },
+      {
+        "input": "constructor",
+        "output": {
+          "inherited": "Constructor",
+          "arity": 1,
+          "text": "function Object() { [native code] }"
+        }
+      },
+      {
+        "input": "__defineGetter__",
+        "output": {
+          "inherited": "DefineGetter",
+          "arity": 2,
+          "text": "function __defineGetter__() { [native code] }"
+        }
+      },
+      {
+        "input": "__defineSetter__",
+        "output": {
+          "inherited": "DefineSetter",
+          "arity": 2,
+          "text": "function __defineSetter__() { [native code] }"
+        }
+      },
+      {
+        "input": "hasOwnProperty",
+        "output": {
+          "inherited": "HasOwnProperty",
+          "arity": 1,
+          "text": "function hasOwnProperty() { [native code] }"
+        }
+      },
+      {
+        "input": "__lookupGetter__",
+        "output": {
+          "inherited": "LookupGetter",
+          "arity": 1,
+          "text": "function __lookupGetter__() { [native code] }"
+        }
+      },
+      {
+        "input": "__lookupSetter__",
+        "output": {
+          "inherited": "LookupSetter",
+          "arity": 1,
+          "text": "function __lookupSetter__() { [native code] }"
+        }
+      },
+      {
+        "input": "isPrototypeOf",
+        "output": {
+          "inherited": "IsPrototypeOf",
+          "arity": 1,
+          "text": "function isPrototypeOf() { [native code] }"
+        }
+      },
+      {
+        "input": "propertyIsEnumerable",
+        "output": {
+          "inherited": "PropertyIsEnumerable",
+          "arity": 1,
+          "text": "function propertyIsEnumerable() { [native code] }"
+        }
+      },
+      {
+        "input": "toString",
+        "output": {
+          "inherited": "ToString",
+          "arity": 0,
+          "text": "function toString() { [native code] }"
+        }
+      },
+      {
+        "input": "valueOf",
+        "output": {
+          "inherited": "ValueOf",
+          "arity": 0,
+          "text": "function valueOf() { [native code] }"
+        }
+      },
+      {
+        "input": "__proto__",
+        "output": {
+          "inherited": "Prototype",
+          "arity": null,
+          "text": "[object Object]"
+        }
+      },
+      {
+        "input": "toLocaleString",
+        "output": {
+          "inherited": "ToLocaleString",
+          "arity": 0,
+          "text": "function toLocaleString() { [native code] }"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::binding::schema::fields": {
+    "api": {
+      "kind": "function",
+      "name": "fields",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed the internal schema declaration lookup against actual vendored codegen maps: this returns full:lite:child metadata tokens, not an admitted protocol record. It is executed here as a strict text helper rather than skipped. The separate actual-source mapping oracle covers all thirteen consumed roots and nested maps in fifty-three cases. All three complete helpers pass production probes on native and wasm; all twenty-four independently authored case expectations match the actual vendored SDK. Separate compiling metadata-selector, BigInt-padding and unknown-key controls fail their named native outputs; exact restoration passes. Whole-crate source discovery and remaining owners retain their independent obligations.",
+    "call": "{serde_json::json!($type($value.as_str().unwrap()).split_whitespace().collect::<Vec<_>>())}",
+    "cases": [
+      {
+        "input": "scope",
+        "output": [
+          "sub_account_id:sa",
+          "kind:k",
+          "base:b",
+          "quote:q"
+        ]
+      },
+      {
+        "input": "cancel",
+        "output": [
+          "sub_account_id:sa",
+          "order_id:oi",
+          "client_order_id:co",
+          "time_to_live_ms:tt"
+        ]
+      },
+      {
+        "input": "set_leverage",
+        "output": [
+          "sub_account_id:sa",
+          "instrument:i",
+          "leverage:l"
+        ]
+      },
+      {
+        "input": "signature",
+        "output": [
+          "signer:s",
+          "r:r",
+          "s:s1",
+          "v:v",
+          "expiration:e",
+          "nonce:n",
+          "chain_id:ci"
+        ]
+      },
+      {
+        "input": "unknown",
+        "output": []
+      },
+      {
+        "input": "",
+        "output": []
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::binding::schema::cover_bigint": {
+    "api": {
+      "kind": "function",
+      "name": "cover_bigint",
+      "signature": {
+        "inputs": [
+          [
+            "field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed Utils.coverBigInt plus the exact HexStringMap field selector. Native BigInt values become decimal or even-width hexadecimal text; non-BigInt native values retain identity. Preserve the source negative hexadecimal spelling rather than repairing it in audit. The explicit tagged test carrier constructs native Js values; it is not an external JSON admission contract. All three complete helpers pass production probes on native and wasm; all twenty-four independently authored case expectations match the actual vendored SDK. Separate compiling metadata-selector, BigInt-padding and unknown-key controls fail their named native outputs; exact restoration passes. Whole-crate source discovery and remaining owners retain their independent obligations.",
+    "call": "{fn native(v:&serde_json::Value)->safe_cex_exchange::js_runtime::value::Js {use safe_cex_exchange::js_runtime::value::{Js,from_json};if let Some(text)=v.get(\"$bigint\").and_then(serde_json::Value::as_str){return Js::BigInt(std::rc::Rc::new(text.parse().unwrap()));}if v.get(\"$undefined\").and_then(serde_json::Value::as_bool)==Some(true){return Js::Undefined;}match v {serde_json::Value::Array(items)=>Js::array(items.iter().map(native).collect()),serde_json::Value::Object(fields)=>Js::object(fields.iter().map(|(key,value)|(key.as_str(),native(value))).collect()),_=>from_json(v)}}fn observed(v:&safe_cex_exchange::js_runtime::value::Js)->serde_json::Value {use safe_cex_exchange::js_runtime::value::Js;match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),Js::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),Js::String(v)=>serde_json::json!({\"kind\":\"string\",\"units\":v.as_ref()}),Js::BigInt(v)=>serde_json::json!({\"kind\":\"bigint\",\"text\":v.to_string()}),_=>{if let Some(items)=v.array_values(){serde_json::json!({\"kind\":\"array\",\"items\":items.iter().map(observed).collect::<Vec<_>>()})}else{let fields=v.own_entries().unwrap().into_iter().map(|(key,value)|serde_json::json!([key.as_ref(),observed(&value)])).collect::<Vec<_>>();serde_json::json!({\"kind\":\"object\",\"fields\":fields})}}}}let input=native(&$value[\"value\"]);let d=$type($value[\"field\"].as_str().unwrap(),input.clone());serde_json::json!({\"native\":observed(&d),\"same_identity\":d.same_value_zero(&input)})}",
+    "cases": [
+      {
+        "input": {
+          "field": "signer",
+          "value": {
+            "$bigint": "1"
+          }
+        },
+        "output": {
+          "native": {
+            "kind": "string",
+            "units": [
+              48,
+              120,
+              48,
+              49
+            ]
+          },
+          "same_identity": false
+        }
+      },
+      {
+        "input": {
+          "field": "order_id",
+          "value": {
+            "$bigint": "257"
+          }
+        },
+        "output": {
+          "native": {
+            "kind": "string",
+            "units": [
+              48,
+              120,
+              48,
+              49,
+              48,
+              49
+            ]
+          },
+          "same_identity": false
+        }
+      },
+      {
+        "input": {
+          "field": "builder",
+          "value": {
+            "$bigint": "15"
+          }
+        },
+        "output": {
+          "native": {
+            "kind": "string",
+            "units": [
+              48,
+              120,
+              48,
+              102
+            ]
+          },
+          "same_identity": false
+        }
+      },
+      {
+        "input": {
+          "field": "signer",
+          "value": {
+            "$bigint": "-1"
+          }
+        },
+        "output": {
+          "native": {
+            "kind": "string",
+            "units": [
+              48,
+              120,
+              45,
+              49
+            ]
+          },
+          "same_identity": false
+        }
+      },
+      {
+        "input": {
+          "field": "nonce",
+          "value": {
+            "$bigint": "-1"
+          }
+        },
+        "output": {
+          "native": {
+            "kind": "string",
+            "units": [
+              45,
+              49
+            ]
+          },
+          "same_identity": false
+        }
+      },
+      {
+        "input": {
+          "field": "client_order_id",
+          "value": {
+            "$bigint": "9007199254740993"
+          }
+        },
+        "output": {
+          "native": {
+            "kind": "string",
+            "units": [
+              57,
+              48,
+              48,
+              55,
+              49,
+              57,
+              57,
+              50,
+              53,
+              52,
+              55,
+              52,
+              48,
+              57,
+              57,
+              51
+            ]
+          },
+          "same_identity": false
+        }
+      },
+      {
+        "input": {
+          "field": "signer",
+          "value": 1
+        },
+        "output": {
+          "native": {
+            "kind": "number",
+            "bits": "3ff0000000000000"
+          },
+          "same_identity": true
+        }
+      },
+      {
+        "input": {
+          "field": "nonce",
+          "value": {
+            "marker": true
+          }
+        },
+        "output": {
+          "native": {
+            "kind": "object",
+            "fields": [
+              [
+                [
+                  109,
+                  97,
+                  114,
+                  107,
+                  101,
+                  114
+                ],
+                {
+                  "kind": "bool",
+                  "value": true
+                }
+              ]
+            ]
+          },
+          "same_identity": true
+        }
+      },
+      {
+        "input": {
+          "field": "signer",
+          "value": {
+            "$undefined": true
+          }
+        },
+        "output": {
+          "native": {
+            "kind": "undefined"
+          },
+          "same_identity": true
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::binding::schema::map": {
+    "api": {
+      "kind": "function",
+      "name": "map",
+      "signature": {
+        "inputs": [
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "schema",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "to_lite",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed actual Utils.schemaMap and consumed codegen tables in both directions. Native observations inspect ordered own UTF16 keys, recursive array cardinality, distinct field identities, booleans, Number bits, original primitive BigInt and own undefined before serialization. Independent expectations include full/lite nested order metadata, outbound BigInt coverage, last unknown-key overwrite, array order and explicit signed zero. The carrier-only tags construct native values; executable getters, sparse arrays and mutated prototypes remain outside this bounded corpus. This does not establish every SDK method or transport binding. All three complete helpers pass production probes on native and wasm; all twenty-four independently authored case expectations match the actual vendored SDK. Separate compiling metadata-selector, BigInt-padding and unknown-key controls fail their named native outputs; exact restoration passes. Whole-crate source discovery and remaining owners retain their independent obligations.",
+    "call": "{fn native(v:&serde_json::Value)->safe_cex_exchange::js_runtime::value::Js {use safe_cex_exchange::js_runtime::value::{Js,from_json};if let Some(text)=v.get(\"$bigint\").and_then(serde_json::Value::as_str){return Js::BigInt(std::rc::Rc::new(text.parse().unwrap()));}if v.get(\"$undefined\").and_then(serde_json::Value::as_bool)==Some(true){return Js::Undefined;}if v.get(\"$negative_zero\").and_then(serde_json::Value::as_bool)==Some(true){return Js::Number(-0.0);}match v {serde_json::Value::Array(items)=>Js::array(items.iter().map(native).collect()),serde_json::Value::Object(fields)=>Js::object(fields.iter().map(|(key,value)|(key.as_str(),native(value))).collect()),_=>from_json(v)}}fn observed(v:&safe_cex_exchange::js_runtime::value::Js)->serde_json::Value {use safe_cex_exchange::js_runtime::value::Js;match v {Js::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),Js::Null=>serde_json::json!({\"kind\":\"null\"}),Js::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),Js::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),Js::String(v)=>serde_json::json!({\"kind\":\"string\",\"units\":v.as_ref()}),Js::BigInt(v)=>serde_json::json!({\"kind\":\"bigint\",\"text\":v.to_string()}),_=>{if let Some(items)=v.array_values(){serde_json::json!({\"kind\":\"array\",\"items\":items.iter().map(observed).collect::<Vec<_>>()})}else{let fields=v.own_entries().unwrap().into_iter().map(|(key,value)|serde_json::json!([key.as_ref(),observed(&value)])).collect::<Vec<_>>();serde_json::json!({\"kind\":\"object\",\"fields\":fields})}}}}let input=native(&$value[\"payload\"]);let d=$type(&input,$value[\"schema\"].as_str().unwrap(),$value[\"lite\"].as_bool().unwrap()).unwrap();observed(&d)}",
+    "cases": [
+      {
+        "input": {
+          "schema": "scope",
+          "lite": false,
+          "payload": {
+            "sa": "acct",
+            "k": [
+              "PERPETUAL"
+            ],
+            "b": "BTC",
+            "q": "USD"
+          }
+        },
+        "output": {
+          "kind": "object",
+          "fields": [
+            [
+              [
+                115,
+                117,
+                98,
+                95,
+                97,
+                99,
+                99,
+                111,
+                117,
+                110,
+                116,
+                95,
+                105,
+                100
+              ],
+              {
+                "kind": "string",
+                "units": [
+                  97,
+                  99,
+                  99,
+                  116
+                ]
+              }
+            ],
+            [
+              [
+                107,
+                105,
+                110,
+                100
+              ],
+              {
+                "kind": "array",
+                "items": [
+                  {
+                    "kind": "string",
+                    "units": [
+                      80,
+                      69,
+                      82,
+                      80,
+                      69,
+                      84,
+                      85,
+                      65,
+                      76
+                    ]
+                  }
+                ]
+              }
+            ],
+            [
+              [
+                98,
+                97,
+                115,
+                101
+              ],
+              {
+                "kind": "string",
+                "units": [
+                  66,
+                  84,
+                  67
+                ]
+              }
+            ],
+            [
+              [
+                113,
+                117,
+                111,
+                116,
+                101
+              ],
+              {
+                "kind": "string",
+                "units": [
+                  85,
+                  83,
+                  68
+                ]
+              }
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "schema": "cancel",
+          "lite": true,
+          "payload": {
+            "sub_account_id": "7",
+            "client_order_id": "8",
+            "time_to_live_ms": {
+              "$negative_zero": true
+            }
+          }
+        },
+        "output": {
+          "kind": "object",
+          "fields": [
+            [
+              [
+                115,
+                97
+              ],
+              {
+                "kind": "string",
+                "units": [
+                  55
+                ]
+              }
+            ],
+            [
+              [
+                99,
+                111
+              ],
+              {
+                "kind": "string",
+                "units": [
+                  56
+                ]
+              }
+            ],
+            [
+              [
+                116,
+                116
+              ],
+              {
+                "kind": "number",
+                "bits": "8000000000000000"
+              }
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "schema": "order_response",
+          "lite": false,
+          "payload": {
+            "r": {
+              "oi": "0x01",
+              "l": [
+                {
+                  "i": "BTC",
+                  "s": "2",
+                  "lp": "3",
+                  "ib": true
+                }
+              ],
+              "m": {
+                "co": "client",
+                "t": {
+                  "tt": "STOP_LOSS",
+                  "t": {
+                    "tp": "12",
+                    "tb": "LAST"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "output": {
+          "kind": "object",
+          "fields": [
+            [
+              [
+                114,
+                101,
+                115,
+                117,
+                108,
+                116
+              ],
+              {
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      111,
+                      114,
+                      100,
+                      101,
+                      114,
+                      95,
+                      105,
+                      100
+                    ],
+                    {
+                      "kind": "string",
+                      "units": [
+                        48,
+                        120,
+                        48,
+                        49
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      108,
+                      101,
+                      103,
+                      115
+                    ],
+                    {
+                      "kind": "array",
+                      "items": [
+                        {
+                          "kind": "object",
+                          "fields": [
+                            [
+                              [
+                                105,
+                                110,
+                                115,
+                                116,
+                                114,
+                                117,
+                                109,
+                                101,
+                                110,
+                                116
+                              ],
+                              {
+                                "kind": "string",
+                                "units": [
+                                  66,
+                                  84,
+                                  67
+                                ]
+                              }
+                            ],
+                            [
+                              [
+                                115,
+                                105,
+                                122,
+                                101
+                              ],
+                              {
+                                "kind": "string",
+                                "units": [
+                                  50
+                                ]
+                              }
+                            ],
+                            [
+                              [
+                                108,
+                                105,
+                                109,
+                                105,
+                                116,
+                                95,
+                                112,
+                                114,
+                                105,
+                                99,
+                                101
+                              ],
+                              {
+                                "kind": "string",
+                                "units": [
+                                  51
+                                ]
+                              }
+                            ],
+                            [
+                              [
+                                105,
+                                115,
+                                95,
+                                98,
+                                117,
+                                121,
+                                105,
+                                110,
+                                103,
+                                95,
+                                97,
+                                115,
+                                115,
+                                101,
+                                116
+                              ],
+                              {
+                                "kind": "bool",
+                                "value": true
+                              }
+                            ]
+                          ]
+                        }
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      109,
+                      101,
+                      116,
+                      97,
+                      100,
+                      97,
+                      116,
+                      97
+                    ],
+                    {
+                      "kind": "object",
+                      "fields": [
+                        [
+                          [
+                            99,
+                            108,
+                            105,
+                            101,
+                            110,
+                            116,
+                            95,
+                            111,
+                            114,
+                            100,
+                            101,
+                            114,
+                            95,
+                            105,
+                            100
+                          ],
+                          {
+                            "kind": "string",
+                            "units": [
+                              99,
+                              108,
+                              105,
+                              101,
+                              110,
+                              116
+                            ]
+                          }
+                        ],
+                        [
+                          [
+                            116,
+                            114,
+                            105,
+                            103,
+                            103,
+                            101,
+                            114
+                          ],
+                          {
+                            "kind": "object",
+                            "fields": [
+                              [
+                                [
+                                  116,
+                                  114,
+                                  105,
+                                  103,
+                                  103,
+                                  101,
+                                  114,
+                                  95,
+                                  116,
+                                  121,
+                                  112,
+                                  101
+                                ],
+                                {
+                                  "kind": "string",
+                                  "units": [
+                                    83,
+                                    84,
+                                    79,
+                                    80,
+                                    95,
+                                    76,
+                                    79,
+                                    83,
+                                    83
+                                  ]
+                                }
+                              ],
+                              [
+                                [
+                                  116,
+                                  112,
+                                  115,
+                                  108
+                                ],
+                                {
+                                  "kind": "object",
+                                  "fields": [
+                                    [
+                                      [
+                                        116,
+                                        114,
+                                        105,
+                                        103,
+                                        103,
+                                        101,
+                                        114,
+                                        95,
+                                        112,
+                                        114,
+                                        105,
+                                        99,
+                                        101
+                                      ],
+                                      {
+                                        "kind": "string",
+                                        "units": [
+                                          49,
+                                          50
+                                        ]
+                                      }
+                                    ],
+                                    [
+                                      [
+                                        116,
+                                        114,
+                                        105,
+                                        103,
+                                        103,
+                                        101,
+                                        114,
+                                        95,
+                                        98,
+                                        121
+                                      ],
+                                      {
+                                        "kind": "string",
+                                        "units": [
+                                          76,
+                                          65,
+                                          83,
+                                          84
+                                        ]
+                                      }
+                                    ]
+                                  ]
+                                }
+                              ]
+                            ]
+                          }
+                        ]
+                      ]
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "schema": "create_request",
+          "lite": true,
+          "payload": {
+            "order": {
+              "builder": {
+                "$bigint": "15"
+              },
+              "signature": {
+                "r": {
+                  "$bigint": "2"
+                },
+                "nonce": {
+                  "$bigint": "4"
+                }
+              },
+              "metadata": {
+                "client_order_id": {
+                  "$bigint": "5"
+                }
+              }
+            }
+          }
+        },
+        "output": {
+          "kind": "object",
+          "fields": [
+            [
+              [
+                111
+              ],
+              {
+                "kind": "object",
+                "fields": [
+                  [
+                    [
+                      98
+                    ],
+                    {
+                      "kind": "string",
+                      "units": [
+                        48,
+                        120,
+                        48,
+                        102
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      115
+                    ],
+                    {
+                      "kind": "object",
+                      "fields": [
+                        [
+                          [
+                            114
+                          ],
+                          {
+                            "kind": "string",
+                            "units": [
+                              48,
+                              120,
+                              48,
+                              50
+                            ]
+                          }
+                        ],
+                        [
+                          [
+                            110
+                          ],
+                          {
+                            "kind": "string",
+                            "units": [
+                              52
+                            ]
+                          }
+                        ]
+                      ]
+                    }
+                  ],
+                  [
+                    [
+                      109
+                    ],
+                    {
+                      "kind": "object",
+                      "fields": [
+                        [
+                          [
+                            99,
+                            111
+                          ],
+                          {
+                            "kind": "string",
+                            "units": [
+                              53
+                            ]
+                          }
+                        ]
+                      ]
+                    }
+                  ]
+                ]
+              }
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "schema": "account",
+          "lite": true,
+          "payload": {
+            "unknownFirst": 17,
+            "unknownLast": 29
+          }
+        },
+        "output": {
+          "kind": "object",
+          "fields": [
+            [
+              [
+                117,
+                110,
+                100,
+                101,
+                102,
+                105,
+                110,
+                101,
+                100
+              ],
+              {
+                "kind": "number",
+                "bits": "403d000000000000"
+              }
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "schema": "account",
+          "lite": true,
+          "payload": {
+            "sub_account_id": {
+              "$undefined": true
+            }
+          }
+        },
+        "output": {
+          "kind": "object",
+          "fields": [
+            [
+              [
+                115,
+                97
+              ],
+              {
+                "kind": "undefined"
+              }
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "schema": "account",
+          "lite": true,
+          "payload": null
+        },
+        "output": {
+          "kind": "null"
+        }
+      },
+      {
+        "input": {
+          "schema": "account",
+          "lite": true,
+          "payload": {
+            "$bigint": "4"
+          }
+        },
+        "output": {
+          "kind": "bigint",
+          "text": "4"
+        }
+      },
+      {
+        "input": {
+          "schema": "account",
+          "lite": true,
+          "payload": [
+            {
+              "sub_account_id": "first"
+            },
+            {
+              "sub_account_id": "second"
+            }
+          ]
+        },
+        "output": {
+          "kind": "array",
+          "items": [
+            {
+              "kind": "object",
+              "fields": [
+                [
+                  [
+                    115,
+                    97
+                  ],
+                  {
+                    "kind": "string",
+                    "units": [
+                      102,
+                      105,
+                      114,
+                      115,
+                      116
+                    ]
+                  }
+                ]
+              ]
+            },
+            {
+              "kind": "object",
+              "fields": [
+                [
+                  [
+                    115,
+                    97
+                  ],
+                  {
+                    "kind": "string",
+                    "units": [
+                      115,
+                      101,
+                      99,
+                      111,
+                      110,
+                      100
+                    ]
+                  }
+                ]
+              ]
+            }
+          ]
+        }
+      }
+    ]
   }
 }

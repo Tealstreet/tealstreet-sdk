@@ -131,3 +131,40 @@ comparison test executes nineteen trait calls, including signed zero, the source
 code1000 cases, object coercion count and original thrown-object identity. The
 complete Private owner retains its separate API obligations. This batch does not
 claim whole-crate gate completion.
+
+## Domain and interval helpers
+
+The domain and websocket interval contracts add two separately executed helper
+reviews. The EIP-712 domain observes both network choices, the three native
+object fields in order, string identity and chain-id Number bits. The websocket
+interval mapper observes all eighteen own mappings, five unchanged fallbacks and
+all twelve stock inherited members by native ProtoMember identity, arity and
+interpolation text. The existing builder_domain and public_subscriptions tests
+compare the actual TypeScript functions independently. These two contracts do
+not establish the caller's signing, subscription, or arbitrary host behavior.
+
+Swapping only the two production domain chain IDs compiled and failed the two
+network output expectations. Changing only the production 1m mapping to CI_3_M
+compiled and failed that exact interval output expectation. Each control retained
+the other helper's passing result; exact source restoration passed both owners.
+Selected production execution also passes on wasm. No new classification-only
+skip or historical debt row is introduced by these two helper reviews.
+
+## SDK schema helpers
+
+Three SDK schema-helper contracts execute twenty-four independently authored
+cases against the native functions and actual vendored SDK. Metadata lookup
+returns exact full/lite declaration tokens. BigInt conversion retains decimal
+versus even-width hexadecimal formatting and non-BigInt identity, including the
+source's negative hexadecimal spelling. Bidirectional mapping observes native
+variants, ordered UTF-16 keys and strings, nested array lengths, Number bits,
+primitive identity and own undefined fields before serialization. Carrier tags
+construct these test values; they do not change the external input domain.
+
+All three complete APIs pass separately on native and wasm. Isolated production
+mutations of a metadata selector, hexadecimal padding and the unknown-key target
+each compile and fail the corresponding output expectations. Restoring the
+source exactly passes all three again. The existing fifty-three-case source
+oracle covers the consumed root and nested SDK maps. No shared decoder guard,
+borrowed lifetime rule or historical debt entry changes. Remaining compiler
+owners and local scopes retain their review obligations.
