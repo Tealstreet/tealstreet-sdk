@@ -7,19 +7,44 @@ const vm = require('node:vm');
 assert(path.isAbsolute(process.env.SAFE_CEX_TYPESCRIPT_PATH || ''), 'absolute isolated TypeScript compiler required');
 const ts = require(process.env.SAFE_CEX_TYPESCRIPT_PATH);
 const mode = process.argv[2];
-assert([undefined, 'id-boundary', 'cache-limit'].includes(mode), 'unknown source control');
+assert([undefined, 'id-boundary', 'cache-limit', 'duplicate-validator'].includes(mode), 'unknown source control');
 const sourcePath = path.resolve(__dirname, '../../../packages/safe-cex/src/exchanges/grvt/grvt.exchange.ts');
-const tree = ts.createSourceFile(sourcePath, fs.readFileSync(sourcePath, 'utf8'), ts.ScriptTarget.Latest, true);
-const owner = tree.statements.find(node => ts.isClassDeclaration(node) && node.name.text === 'GrvtExchange');
-assert(owner, 'actual GRVT source class');
+const sourceText = fs.readFileSync(sourcePath, 'utf8');
+let tree = ts.createSourceFile(sourcePath, sourceText, ts.ScriptTarget.Latest, true);
+function owningClass(tree) {
+  assert.equal(tree.parseDiagnostics.length, 0, 'maintained source parses');
+  const owners = tree.statements.filter(node => ts.isClassDeclaration(node) && node.name?.text === 'GrvtExchange');
+  assert.equal(owners.length, 1, 'unique actual GRVT source class');
+  return owners[0];
+}
+let owner = owningClass(tree);
+function declaredName(name) {
+  assert(ts.isIdentifier(name) || ts.isStringLiteral(name) || ts.isPrivateIdentifier(name), 'static maintained member name');
+  return ts.isPrivateIdentifier(name) ? name.getText(tree) : name.text;
+}
 function member(name) {
-  const selected = owner.members.filter(node => node.name?.getText(tree) === name);
+  const selected = owner.members.filter(node => node.name && declaredName(node.name) === name);
   assert.equal(selected.length, 1, `unique maintained member ${name}`);
   return selected[0];
 }
+if (mode === 'duplicate-validator') {
+  const original = member('clientOrderIdRule').initializer;
+  assert(ts.isObjectLiteralExpression(original), 'control rule object');
+  const at = original.end - 1;
+  assert.equal(sourceText[at], '}', 'control object closing brace');
+  // A quoted late override also defeats matching raw identifier text.
+  const changed = sourceText.slice(0, at) + "'isValid': () => true," + sourceText.slice(at);
+  tree = ts.createSourceFile(sourcePath, changed, ts.ScriptTarget.Latest, true);
+  owner = owningClass(tree);
+}
 const rule = member('clientOrderIdRule').initializer;
 assert(ts.isObjectLiteralExpression(rule), 'actual client rule object');
-const validator = rule.properties.find(node => node.name?.getText(tree) === 'isValid').initializer;
+assert(rule.properties.every(node => ts.isPropertyAssignment(node) && !ts.isComputedPropertyName(node.name)), 'plain rule properties without spreads or overrides');
+const propertyNames = rule.properties.map(node => declaredName(node.name));
+assert.equal(new Set(propertyNames).size, propertyNames.length, 'unique rule properties');
+const validators = rule.properties.filter(node => declaredName(node.name) === 'isValid');
+assert.equal(validators.length, 1, 'unique actual validator');
+const validator = validators[0].initializer;
 assert(ts.isArrowFunction(validator), 'actual validation arrow');
 let validatorText = validator.getText(tree);
 let limitText = member('MAX_NONCE_MAPPINGS').initializer.getText(tree);

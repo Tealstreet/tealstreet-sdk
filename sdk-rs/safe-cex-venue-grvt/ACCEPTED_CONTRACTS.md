@@ -214,7 +214,21 @@ They retain both Rc handles and inspect native time bits, unknown times, real-ID
 sentinels, insertion order, earliest valid time and paired eviction at 200 entries.
 The actual maintained TypeScript validation arrow and recordNonce body match
 the corresponding 33 expectations. The source controls widen the reserved range
-and cache limit in memory, require named failures and rerun the original source.
+and cache limit in memory and introduce a late duplicate validator; each requires
+a named failure and passes again with the original source.
 
 The 57 cases execute production Rust before projecting selected observations.
 Remaining owners and generic instantiations still need their own reviews.
+
+Six separately compiled native production controls widen the reserved client-ID
+boundary, remove each of the three member lookups, drop the real-ID delegate
+argument and overwrite the retained earliest timestamp. Each fails the intended
+owner with an observed-output mismatch; exact restoration passes all four owners.
+The production files are restored unchanged.
+
+The current 92-row stored union passes on native and target-specific Wasm: 79
+production runtime results and 13 explicit classifications per target, including
+all nineteen aliases. All 184 receipts pass the scoped ratchet without changing
+the standing defect ledger. Both maintained source tests, strict host/Wasm clippy,
+formatting and parity checks pass. The 109 remaining indexed nominal/function
+owners still need individual review.

@@ -29,6 +29,7 @@ fn composition_source_boundary_controls_fail_and_restore() {
     for (mode, label) in [
         ("id-boundary", "CLIENT-ID actual source"),
         ("cache-limit", "NONCE actual source"),
+        ("duplicate-validator", "unique rule properties"),
     ] {
         let output = source(Some(mode));
         assert!(!output.status.success(), "source control accepted {mode}");
