@@ -174,11 +174,9 @@ where
 }
 
 #[cfg(test)]
-#[path = "../tests/support/accepted_record_shapes.rs"]
-mod accepted_record_shapes_support;
-#[cfg(test)]
 mod accepted_shape {
-    use super::{Options, accepted_record_shapes_support as support};
+    use super::Options;
+    use crate::accepted_record_shapes_support as support;
     #[test]
     fn spot_options_rejects_complete_positional_array() {
         support::positive::<Options>(

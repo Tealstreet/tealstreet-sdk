@@ -1727,3 +1727,30 @@ runner refusal happened before runtime probes and is excluded from passing proof
 These are four concrete native/default record contracts. Other owners, aliases,
 local functions, construction, 25 receiver refusals and feature/wasm accepted
 behavior remain independent obligations under the maintained host profiles.
+
+
+Private-record readiness after integrating master `51015dc5f9` as `858950c865`:
+all eleven existing master Kraken contracts remain exactly preserved, with only
+the four reviewed record rows added. The test-only fixture module is loaded once
+at the crate root and shared by the three native unit modules; this fixes
+all-target Clippy's duplicate-module finding without changing the production
+schemas, guards, observations or control anchors.
+
+Fresh full scoped Kraken tests pass **155 / zero failures / zero ignored** across
+30 target receipts including docs. Separate native and wasm32 all-targets Clippy
+pass with warnings denied. Frozen install and workspace format pass. The scoped
+structural gate passes **134 rows / 539 public items / zero exemptions**; the global
+gate passes **7459 rows / 17206 public items**. Both reuse the maintained compiled
+indexer after comparing its actual Rust/Cargo/lock/config inputs. The maintained
+TS extractor checks **83 symbols across seven slice files**. Fresh production
+verification after the test-wiring fix again passes **four actual runtime results /
+zero classifications / zero failed owners**. Guard-removal/restoration controls
+remain the independently executed four-owner receipts described above.
+
+The additional shared cancellation inventory audit passes with CI's required
+`--all-features` profile: **one passed / zero failed / zero ignored** for
+`production_cancellable_future_classifications_are_current`. An earlier
+no-features invocation could not see its feature-gated health witness and is
+excluded from proof; no cancellation source or classification was changed.
+Independent review of the test-wiring fix is clean. CodeRabbit's manual request
+returned a rate limit, rather than an executed review.

@@ -321,11 +321,9 @@ pub async fn fetch_historical_positions(
 }
 
 #[cfg(test)]
-#[path = "../tests/support/accepted_record_shapes.rs"]
-mod accepted_record_shapes_support;
-#[cfg(test)]
 mod accepted_shape {
-    use super::{AccountLogParams, HistoricalOptions, accepted_record_shapes_support as support};
+    use super::{AccountLogParams, HistoricalOptions};
+    use crate::accepted_record_shapes_support as support;
     #[test]
     fn account_log_params_rejects_complete_positional_array() {
         support::positive::<AccountLogParams>(

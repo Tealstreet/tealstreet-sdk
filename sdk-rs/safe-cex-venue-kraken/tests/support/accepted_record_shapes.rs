@@ -20,7 +20,7 @@ fn decode<T: DeserializeOwned + Serialize + JsNumberOutput>(
         _ => unreachable!(),
     }
 }
-pub(super) fn positive<T: DeserializeOwned + Serialize + JsNumberOutput>(
+pub(crate) fn positive<T: DeserializeOwned + Serialize + JsNumberOutput>(
     raw: &str,
     inspect: impl Fn(T),
 ) {
@@ -28,7 +28,7 @@ pub(super) fn positive<T: DeserializeOwned + Serialize + JsNumberOutput>(
         inspect(decode::<T>(raw, route).unwrap());
     }
 }
-pub(super) fn rejects<T: DeserializeOwned + Serialize + JsNumberOutput>(
+pub(crate) fn rejects<T: DeserializeOwned + Serialize + JsNumberOutput>(
     complete_array: &str,
     invalid_objects: &[&str],
 ) {
