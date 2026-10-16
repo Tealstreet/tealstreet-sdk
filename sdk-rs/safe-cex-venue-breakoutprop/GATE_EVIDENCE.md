@@ -604,3 +604,26 @@ only the derived host Clone with an implementation that detaches the parent slot
 it compiles and fails the named live-account assertion at exit101. Exact source
 restoration then passes the same native test. This proves the attachment boundary
 without changing production Clone or adding any validation authority.
+
+# Five indexed inherited refusals: native proposal evidence
+
+The fresh compiler inventory indexes fetch_symbol_max_leverage, set_leverage,
+change_position_mode, change_margin_type and fetch_public_trades on the production
+Exchange implementation. get_account and schedule_cancel are absent from that
+indexed owner; no contract entries or unit-input permission are proposed for them.
+
+Each indexed method now has a native observer that calls the actual production
+Exchange method for two independently authored cases: empty state and seeded
+session/account/cache/balance state with different symbol/numeric/boolean inputs.
+The observations retain the exact refusal message/name/default metadata, zero HTTP,
+unchanged store/native balance bits/options/session/cache/disposal state, unchanged
+clock/tasks/reports and client/socket/login identities, and no store/error events.
+The binding target passes all 20 tests. Each of five independent dispatch-target
+controls compiles and fails its named native witness at exit 101; restoring exact
+production bytes passes that witness.
+
+The five exact proposed adapter expressions also compile and execute all ten cases
+in a native example against this library. That temporary example is removed; logs
+and proposed policy rows remain outside the repository. This proves the adapters,
+not accepted-set policy permission or a complete package gate. The ordinary gate
+and the binding-integrated inventory expansion remain separate work.
