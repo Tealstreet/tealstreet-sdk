@@ -1,8 +1,7 @@
-//! Linear exchange composition. Concrete API/protocol factories remain explicit
-//! while their lifecycle implementations are completed; this is not yet exported.
+//! Linear exchange composition: the typed core, its signed clients and sockets, plus the
+//! js_runtime receiver the ported bodies run on (`crate::binding`).
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
-    client_order_id::{ClientOrderIdRuleOverrides, pattern_client_order_id_rule},
     exchange::{BaseExchange, Exchange},
     socket_lifecycle::SocketSlot,
     websocket::{BaseWebSocket, WsProtocol, WsRuntime},
@@ -34,10 +33,12 @@ impl Network {
     }
 }
 #[derive(Clone, Copy)]
+#[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
 pub(crate) enum PublicCategory {
     Linear,
     Inverse,
 }
+#[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
 impl PublicCategory {
     fn key(self) -> &'static str {
         match self {
@@ -47,11 +48,19 @@ impl PublicCategory {
     }
 }
 
-pub(crate) struct BybitExchange {
-    base: BaseExchange,
-    capabilities: ExchangeCapabilities,
-    pub(crate) xhr: Rc<SecondaryKeyClients>,
-    pub(crate) unlimited_xhr: Arc<dyn RestAdapter>,
+pub struct BybitExchange {
+    pub(crate) base: Rc<BaseExchange>,
+    pub(crate) capabilities: ExchangeCapabilities,
+    xhr: std::cell::OnceCell<Rc<SecondaryKeyClients>>,
+    unlimited_xhr: std::cell::OnceCell<Arc<dyn RestAdapter>>,
+    pub(crate) js: std::cell::OnceCell<crate::binding::rt::Rt>,
+    pub(crate) order_state: crate::primary_order_lifecycle::PrimaryOrderState<
+        safe_cex_exchange::js_runtime::value::Js,
+    >,
+    /// ts: BybitExchange#debouncedPrivateSnapshotRefresh, over the receiver.
+    pub(crate) snapshot_refresh: std::cell::OnceCell<
+        Rc<crate::private_snapshot_refresh::PrivateSnapshotRefresh<crate::binding::rt::Rt>>,
+    >,
     // fetchMarginAccountInfos assigns this wire field without coercion. Keep
     // absence and nonnumeric values: only the numeric value 1 means CONTRACT.
     pub(crate) unified_margin_status: RefCell<Option<serde_json::Value>>,
@@ -64,11 +73,22 @@ pub(crate) struct BybitExchange {
     pub(crate) api_key_info: RefCell<Option<crate::types::BybitApiKeyInfo>>,
     pub(crate) batch_limit: Cell<f64>,
     pub(crate) force_unified_balance: Cell<bool>,
+    #[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
     pub(crate) execution_query_max_range_ms: f64,
+    #[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
     pub(crate) default_executions_lookback_ms: f64,
 }
 
+#[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
 impl BybitExchange {
+    pub(crate) fn xhr(&self) -> &Rc<SecondaryKeyClients> {
+        self.xhr.get().expect("Bybit clients are created during construction")
+    }
+    pub(crate) fn unlimited_xhr(&self) -> &Arc<dyn RestAdapter> {
+        self.unlimited_xhr
+            .get()
+            .expect("Bybit clients are created during construction")
+    }
     pub(crate) async fn reinit_on_throw<T, E>(
         &self,
         request: impl std::future::Future<Output = Result<T, E>>,
@@ -328,46 +348,28 @@ impl BybitExchange {
         reason = "RestAdapter supports browser-local hosts"
     )]
     pub(crate) fn new(
-        mut base: BaseExchange,
+        base: Rc<BaseExchange>,
         runtime: Rc<dyn WsRuntime>,
         clock: Arc<dyn RateLimitClock>,
         create_api: impl Fn(
             &ExchangeOptions,
             &BaseExchange,
+            Weak<dyn Exchange>,
         ) -> Result<Arc<dyn RestAdapter>, TransportError>,
         public_protocol: impl Fn(Weak<Self>, &str) -> Rc<dyn WsProtocol>,
         private_protocol: impl FnOnce(Weak<Self>) -> Rc<dyn WsProtocol>,
     ) -> Result<Rc<Self>, TransportError> {
-        base.settings.client_order_id_rule = Some(pattern_client_order_id_rule(
-            "Bybit".into(),
-            "/^[A-Za-z0-9_-]{1,36}$/".into(),
-            Rc::new(|id| {
-                (1..=36).contains(&id.len())
-                    && id
-                        .bytes()
-                        .all(|b| b.is_ascii_alphanumeric() || matches!(b, b'_' | b'-'))
-            }),
-            ClientOrderIdRuleOverrides::default(),
-        ));
         let limit = |adapter| -> Arc<dyn RestAdapter> {
             Arc::new(RateLimitedAdapter::new(adapter, clock.clone(), 5, 1000))
         };
-        let xhr = base.create_xhr_with_secondary_key(
-            &base.options(),
-            runtime.transport().as_ref(),
-            None,
-            |options| create_api(options, &base),
-            Some(&limit),
-            None,
-        )?;
-        let unlimited_xhr = create_api(&base.options(), &base)?;
         let venue = Rc::new(Self {
             base,
-            // Placement registration follows the implementation of the handlers;
-            // an absent implementation must retain the core's fallback brand.
-            capabilities: ExchangeCapabilities::default(),
-            xhr,
-            unlimited_xhr,
+            capabilities: crate::binding::exchange::capabilities(),
+            xhr: std::cell::OnceCell::new(),
+            unlimited_xhr: std::cell::OnceCell::new(),
+            js: std::cell::OnceCell::new(),
+            order_state: Default::default(),
+            snapshot_refresh: std::cell::OnceCell::new(),
             unified_margin_status: RefCell::new(Some(serde_json::json!(6))),
             margin_type: Cell::new(safe_cex_types::MarginType::Cross),
             needs_reinit: Cell::new(false),
@@ -382,6 +384,19 @@ impl BybitExchange {
             default_executions_lookback_ms: 7. * 24. * 60. * 60. * 1000.,
         });
         let erased: Rc<dyn Exchange> = venue.clone();
+        let owner = Rc::downgrade(&erased);
+        let base = &venue.base;
+        let xhr = base.create_xhr_with_secondary_key(
+            &base.options(),
+            runtime.transport().as_ref(),
+            None,
+            |options| create_api(options, base, owner.clone()),
+            Some(&limit),
+            None,
+        )?;
+        let unlimited_xhr = create_api(&base.options(), base, owner)?;
+        let _ = venue.xhr.set(xhr);
+        let _ = venue.unlimited_xhr.set(unlimited_xhr);
         let parent = WsExchangeParent::new(&erased);
         let public = BaseWebSocket::new(
             1,
@@ -410,12 +425,13 @@ impl BybitExchange {
     /// Production private protocol binding; the public protocol and HTTP factory
     /// remain explicit while their remaining implementation is completed.
     pub(crate) fn with_private_protocol(
-        base: BaseExchange,
+        base: Rc<BaseExchange>,
         runtime: Rc<dyn WsRuntime>,
         clock: Arc<dyn RateLimitClock>,
         create_api: impl Fn(
             &ExchangeOptions,
             &BaseExchange,
+            Weak<dyn Exchange>,
         ) -> Result<Arc<dyn RestAdapter>, TransportError>,
         public_protocol: impl Fn(Weak<Self>, &str) -> Rc<dyn WsProtocol>,
         private: crate::ws_private::protocol::PrivateProtocolConfig,
@@ -447,7 +463,7 @@ impl BybitExchange {
         crate::submission::submit_create_orders(
             payloads,
             |payload| {
-                self.xhr.request(RestRequest {
+                self.xhr().request(RestRequest {
                     method: "post".into(),
                     url: crate::types::ENDPOINTS["CREATE_ORDER"]
                         .as_str()
@@ -460,25 +476,5 @@ impl BybitExchange {
             report_failure,
         )
         .await
-    }
-}
-
-impl Exchange for BybitExchange {
-    type PlaceOpts = crate::order_params::BybitPlaceOrderOpts;
-    fn validate_order_capabilities(
-        &self,
-        options: &Self::PlaceOpts,
-    ) -> Result<(), safe_cex_exchange::runtime::ExchangeError> {
-        BybitExchange::validate_order_capabilities(self, options)
-    }
-
-    fn base(&self) -> &BaseExchange {
-        &self.base
-    }
-    fn capabilities(&self) -> &ExchangeCapabilities {
-        &self.capabilities
-    }
-    fn class_name(&self) -> &'static str {
-        "BybitExchange"
     }
 }

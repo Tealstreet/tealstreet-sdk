@@ -1,0 +1,314 @@
+//! The JS receiver the ported bodies run on: the js_runtime BaseExchange instance
+//! extended with BybitExchange's fields (bridged to the typed core) and members.
+use super::{
+    host::text,
+    http::{TypedHttpHost, Wire},
+    members,
+    promise::await_js,
+    rt::{Rt, venue},
+    value::{Getter, Js, Setter, Thrown, arg, from_json, from_typed, to_json, to_typed},
+};
+use crate::{core_snapshot_readers as snapshot, exchange::BybitExchange};
+use safe_cex_exchange::{js_runtime::client, socket_lifecycle::SocketSlot};
+use std::{cell::Cell, rc::Rc};
+
+fn bool_cell(this: &Js, rt: &Rt, name: &str, cell: fn(&BybitExchange) -> &Cell<bool>) {
+    let (get_rt, set_rt) = (rt.clone(), rt.clone());
+    let get: Getter = Rc::new(move |_| Ok(Js::Bool(cell(&*venue(&get_rt)?).get())));
+    let set: Setter = Rc::new(move |_, v| {
+        cell(&*venue(&set_rt)?).set(v.truthy());
+        Ok(())
+    });
+    this.define_accessor(name, Some(get), Some(set));
+}
+
+fn number_cell(this: &Js, rt: &Rt, name: &str, cell: fn(&BybitExchange) -> &Cell<f64>) {
+    let (get_rt, set_rt) = (rt.clone(), rt.clone());
+    let get: Getter = Rc::new(move |_| Ok(Js::Number(cell(&*venue(&get_rt)?).get())));
+    let set: Setter = Rc::new(move |_, v| {
+        cell(&*venue(&set_rt)?).set(v.to_number()?);
+        Ok(())
+    });
+    this.define_accessor(name, Some(get), Some(set));
+}
+
+fn method(this: &Js, rt: &Rt, name: &'static str, body: fn(&Rt, Vec<Js>) -> Result<Js, Thrown>) {
+    let rt = rt.clone();
+    let _ = this.define(name, Js::function(name, move |_, a| body(&rt, a)));
+}
+
+fn h(rt: &Rt) -> Rc<Rt> {
+    Rc::new(rt.clone())
+}
+
+/// A facade over one typed socket slot: the members the exchange bodies call.
+fn socket(rt: &Rt, slot: SocketSlot) -> Result<Js, Thrown> {
+    let venue = venue(rt)?;
+    let Some(typed) = venue.base.get_socket(slot) else {
+        return Ok(Js::Undefined);
+    };
+    let facade = Js::object_with_class("BybitWebsocket", vec![]);
+    let connect = typed.clone();
+    let _ = facade.define(
+        "connectAndSubscribe",
+        Js::function("connectAndSubscribe", move |_, _| {
+            connect.connect_and_subscribe(false)?;
+            Ok(Js::Undefined)
+        }),
+    );
+    let dispose = typed.clone();
+    let _ = facade.define(
+        "dispose",
+        Js::function("dispose", move |_, _| {
+            dispose.dispose();
+            Ok(Js::Undefined)
+        }),
+    );
+    facade.define_accessor(
+        "isConnected",
+        Some(Rc::new(move |_| Ok(Js::Bool(typed.is_connected())))),
+        None,
+    );
+    Ok(facade)
+}
+
+pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
+    let this = rt.this.clone();
+    let typed = venue(rt)?;
+
+    // Constructor fields: the signed clients and the three sockets.
+    let runtime = rt.exchange_runtime();
+    this.define(
+        "xhr",
+        client::create(
+            Rc::new(TypedHttpHost {
+                wire: Wire::Split(typed.xhr().clone()),
+                runtime: runtime.clone(),
+            }),
+            Js::object(vec![]),
+        ),
+    )?;
+    this.define(
+        "unlimitedXHR",
+        client::create(
+            Rc::new(TypedHttpHost {
+                wire: Wire::Single(typed.unlimited_xhr().clone()),
+                runtime,
+            }),
+            Js::object(vec![]),
+        ),
+    )?;
+    this.define("publicWebsocket", socket(rt, SocketSlot::Public)?)?;
+    this.define("privateWebsocket", socket(rt, SocketSlot::Private)?)?;
+    // ts: BybitExchange.get inversePublicWebsocket — the secondary public slot.
+    this.define("inversePublicWebsocket", socket(rt, SocketSlot::PublicSecondary)?)?;
+
+    // Fields owned by the typed core; reads and writes go straight through.
+    bool_cell(&this, rt, "needsReinit", |v| &v.needs_reinit);
+    bool_cell(&this, rt, "forceUnifiedBalance", |v| &v.force_unified_balance);
+    number_cell(&this, rt, "lastReinitAt", |v| &v.last_reinit_at);
+    number_cell(&this, rt, "reinitRetryMs", |v| &v.reinit_retry_ms);
+    number_cell(&this, rt, "batchLimit", |v| &v.batch_limit);
+    {
+        let (g, s) = (rt.clone(), rt.clone());
+        this.define_accessor(
+            "unifiedMarginStatus",
+            Some(Rc::new(move |_| {
+                Ok(match &*venue(&g)?.unified_margin_status.borrow() {
+                    Some(v) => from_json(v),
+                    None => Js::Undefined,
+                })
+            })),
+            Some(Rc::new(move |_, v| {
+                *venue(&s)?.unified_margin_status.borrow_mut() =
+                    (!v.is_undefined()).then(|| to_json(&v)).transpose()?;
+                Ok(())
+            })),
+        );
+    }
+    {
+        let (g, s) = (rt.clone(), rt.clone());
+        this.define_accessor(
+            "lastWebsocketPositionsUpdate",
+            Some(Rc::new(move |_| {
+                Ok(venue(&g)?
+                    .last_websocket_positions_update
+                    .get()
+                    .map_or(Js::Undefined, Js::Number))
+            })),
+            Some(Rc::new(move |_, v| {
+                let value = if v.is_undefined() { None } else { Some(v.to_number()?) };
+                venue(&s)?.last_websocket_positions_update.set(value);
+                Ok(())
+            })),
+        );
+    }
+    {
+        let (g, s) = (rt.clone(), rt.clone());
+        this.define_accessor(
+            "marginType",
+            Some(Rc::new(move |_| from_typed(&venue(&g)?.margin_type.get()))),
+            Some(Rc::new(move |_, v| {
+                venue(&s)?.margin_type.set(to_typed(&v)?);
+                Ok(())
+            })),
+        );
+    }
+    {
+        let (g, s) = (rt.clone(), rt.clone());
+        this.define_accessor(
+            "positionMode",
+            Some(Rc::new(move |_| match venue(&g)?.position_mode.get() {
+                Some(mode) => from_typed(&mode),
+                None => Ok(Js::Undefined),
+            })),
+            Some(Rc::new(move |_, v| {
+                let mode = if v.is_undefined() { None } else { Some(to_typed(&v)?) };
+                venue(&s)?.position_mode.set(mode);
+                Ok(())
+            })),
+        );
+    }
+    {
+        let (g, s) = (rt.clone(), rt.clone());
+        this.define_accessor(
+            "apiKeyInfo",
+            Some(Rc::new(move |_| match &*venue(&g)?.api_key_info.borrow() {
+                Some(info) => from_typed(info),
+                None => Ok(Js::Undefined),
+            })),
+            Some(Rc::new(move |_, v| {
+                *venue(&s)?.api_key_info.borrow_mut() =
+                    (!v.is_nullish()).then(|| to_typed(&v)).transpose()?;
+                Ok(())
+            })),
+        );
+    }
+    {
+        let g = rt.clone();
+        this.define_accessor(
+            "accountType",
+            Some(Rc::new(move |_| Ok(Js::str(venue(&g)?.account_type())))),
+            None,
+        );
+    }
+    {
+        let g = rt.clone();
+        this.define_accessor(
+            "isDemo",
+            Some(Rc::new(move |_| Ok(Js::Bool(venue(&g)?.base.is_demo)))),
+            None,
+        );
+    }
+
+    // ts: BybitExchange.getSettleCoinsForCategory
+    method(&this, rt, "getSettleCoinsForCategory", |rt, a| {
+        let coins = venue(rt)?.get_settle_coins_for_category(&text(&arg(&a, 0))?)?;
+        Ok(Js::array(coins.into_iter().map(Js::str).collect()))
+    });
+    // ts: BybitExchange.getCategoryForSymbol
+    method(&this, rt, "getCategoryForSymbol", |rt, a| {
+        Ok(Js::str(venue(rt)?.get_category_for_symbol(&text(&arg(&a, 0))?)))
+    });
+    method(&this, rt, "inverseEnabled", |rt, _| {
+        Ok(Js::Bool(venue(rt)?.inverse_enabled()))
+    });
+    method(&this, rt, "optionsEnabled", |rt, _| {
+        Ok(Js::Bool(venue(rt)?.options_enabled()))
+    });
+    // ts: BybitExchange#inferProtectiveOrderSide
+    method(&this, rt, "inferProtectiveOrderSide", |rt, a| {
+        match venue(rt)?
+            .infer_protective_order_side(&to_json(&arg(&a, 0))?)
+            .map_err(|m| Thrown::error("TypeError", &m))?
+        {
+            Some(side) => from_typed(&side),
+            None => Ok(Js::Undefined),
+        }
+    });
+    // ts: BybitExchange.dedupePositionsById
+    method(&this, rt, "dedupePositionsById", |_, a| {
+        let positions: Vec<safe_cex_types::Position> = to_typed(&arg(&a, 0))?;
+        let deduped = crate::exchange_state::dedupe_positions_by_id(positions)
+            .map_err(|m| Thrown::error("Error", m))?;
+        from_typed(&deduped)
+    });
+    // ts: BybitExchange#reinitOnThrow
+    method(&this, rt, "reinitOnThrow", |rt, a| {
+        let request = arg(&a, 0);
+        let rt = rt.clone();
+        Ok(rt.clone().spawn(Box::pin(async move {
+            match await_js(request).await {
+                Ok(value) => Ok(value),
+                Err(error) => {
+                    venue(&rt)?.needs_reinit.set(true);
+                    Err(error)
+                }
+            }
+        })))
+    });
+    method(&this, rt, "mapOrder", |rt, a| {
+        members::mapping::map_order(rt, &rt.this, &arg(&a, 0))
+    });
+    method(&this, rt, "mapPosition", |rt, a| {
+        members::mapping::map_position(rt, &rt.this, &arg(&a, 0))
+    });
+    method(&this, rt, "preserveRecentlyPlacedOrders", |rt, a| {
+        members::lifecycle::preserve_recently_placed_orders(rt, &arg(&a, 0))
+    });
+    method(&this, rt, "markOrderSeen", |rt, a| {
+        members::lifecycle::mark_order_seen(rt, &text(&arg(&a, 0))?)?;
+        Ok(Js::Undefined)
+    });
+
+    // Snapshot readers (core_snapshot_readers.rs).
+    method(&this, rt, "fetchOrders", |rt, _| {
+        Ok(snapshot::fetch_orders(h(rt), rt.this.clone()))
+    });
+    method(&this, rt, "fetchOrdersHelper", |rt, a| {
+        Ok(snapshot::fetch_orders_helper(
+            h(rt),
+            rt.this.clone(),
+            arg(&a, 0),
+            arg(&a, 1),
+        ))
+    });
+    method(&this, rt, "fetchPositions", |rt, a| {
+        Ok(snapshot::fetch_positions(h(rt), rt.this.clone(), arg(&a, 0)))
+    });
+    method(&this, rt, "fetchPositionsHelper", |rt, a| {
+        Ok(snapshot::fetch_positions_helper(
+            h(rt),
+            rt.this.clone(),
+            arg(&a, 0),
+            arg(&a, 1),
+            arg(&a, 2),
+            arg(&a, 3),
+        ))
+    });
+    method(&this, rt, "fetchOrdersPositionsAndBalance", |rt, _| {
+        Ok(snapshot::fetch_orders_positions_and_balance(
+            h(rt),
+            rt.this.clone(),
+        ))
+    });
+    method(&this, rt, "fetchAndSetPrivateSnapshot", |rt, _| {
+        Ok(snapshot::fetch_and_set_private_snapshot(h(rt), rt.this.clone()))
+    });
+    method(&this, rt, "fetchAndSetPrivateSnapshotHelper", |rt, a| {
+        Ok(snapshot::fetch_and_set_private_snapshot_helper(
+            h(rt),
+            rt.this.clone(),
+            arg(&a, 0).truthy(),
+        ))
+    });
+    method(&this, rt, "tick", |rt, _| Ok(snapshot::tick(h(rt), rt.this.clone())));
+    method(&this, rt, "fetchRawBalance", |rt, _| {
+        Ok(snapshot::fetch_raw_balance(h(rt), rt.this.clone()))
+    });
+    method(&this, rt, "syncBalanceUpnlFromPositions", |rt, _| {
+        snapshot::sync_balance_upnl_from_positions(rt, &rt.this)?;
+        Ok(Js::Undefined)
+    });
+    Ok(())
+}
