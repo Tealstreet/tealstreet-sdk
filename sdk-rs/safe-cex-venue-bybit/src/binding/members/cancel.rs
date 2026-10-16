@@ -4,7 +4,7 @@ use crate::{
     binding::{
         host::text,
         promise::await_js,
-        rt::{Rt, venue},
+        rt::Rt,
         value::{Js, Thrown, error_object, to_json},
     },
     exchange_helpers::is_bybit_order_already_gone_cancel_message,
@@ -112,12 +112,12 @@ pub(crate) fn cancel_orders(rt: &Rt, orders: Js) -> Result<Js, Thrown> {
         if kept.is_empty() {
             return Ok(Js::Undefined);
         }
-        let venue = venue(&rt)?;
         let mut by_category: Vec<(String, Vec<Js>)> = vec![];
         for order in kept {
-            let category: String = venue
-                .get_category_for_symbol(&text(&order.get("symbol")?)?)
-                .into();
+            let category = text(
+                &rt.this
+                    .call_method("getCategoryForSymbol", vec![order.get("symbol")?])?,
+            )?;
             match by_category.iter_mut().find(|(c, _)| *c == category) {
                 Some((_, list)) => list.push(order),
                 None => by_category.push((category, vec![order])),

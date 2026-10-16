@@ -861,6 +861,33 @@
           "super_call": true
         }
       ]
+    },
+    {
+      "file": "safe-cex-venue-bybit/src/binding/exchange.rs",
+      "finding": "dispose_inverse_binding bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/bybit/bybitinverse.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-bybit/src/binding/exchange.rs",
+          "contains": "|| venue.base.dispose(),"
+        }
+      ],
+      "dispose_source": [
+        {
+          "file": "packages/safe-cex/src/exchanges/bybit/bybitinverse.exchange.ts",
+          "class": "BybitInverseExchange",
+          "definition_file": "packages/safe-cex/src/exchanges/bybit/bybitinverse.exchange.ts",
+          "definition_class": "BybitInverseExchange",
+          "start_line": 260,
+          "end_line": 264,
+          "own": true,
+          "super_call": true
+        }
+      ]
     }
   ]
 }

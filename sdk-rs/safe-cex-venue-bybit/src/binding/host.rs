@@ -141,6 +141,9 @@ fn dispatch_callback(
     captures: Vec<Js>,
     args: Vec<Js>,
 ) -> Result<Js, Thrown> {
+    if matches!(code, "inverse-pnl" | "inverse-coin" | "inverse-null-market") {
+        return crate::inverse_read_surface::dispatch(h.as_ref(), code, args);
+    }
     if matches!(
         code,
         "account-orders"

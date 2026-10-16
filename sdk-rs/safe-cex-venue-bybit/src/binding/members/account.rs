@@ -93,7 +93,10 @@ fn value_error(error: Thrown) -> Rc<Value> {
 // ts: BybitExchange.validateAccount
 pub(crate) fn validate_account(rt: &Rt) -> Result<Js, Thrown> {
     let (get_rt, balance_rt, emit_rt) = (rt.clone(), rt.clone(), rt.clone());
-    let derived = venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitspot;
+    let derived = matches!(
+        venue(rt)?.base.name,
+        safe_cex_types::ExchangeName::Bybitspot | safe_cex_types::ExchangeName::Bybitinverse
+    );
     let body = async move {
         let get = move |endpoint: &str| {
             let request = get_data(get_rt, endpoint.into());

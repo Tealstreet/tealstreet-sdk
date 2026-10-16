@@ -7,6 +7,7 @@ import { fileURLToPath } from 'node:url';
 import { inventory } from '../../safe-cex-parity/scripts/accepted-inventory.mjs';
 import { runProbes } from '../../safe-cex-parity/scripts/accepted-probes.mjs';
 import { loadContracts } from '../../safe-cex-parity/scripts/accepted-contract-files.mjs';
+import { loadPolicy } from '../../safe-cex-parity/scripts/accepted-policy-files.mjs';
 
 const workspace = fileURLToPath(new URL('../../', import.meta.url));
 function cargo(args, env = {}) {
@@ -32,9 +33,8 @@ cargo(['rustdoc', '--locked', '-p', pkg.name, '--jobs=1', '--lib', '--',
   '-Z', 'unstable-options', '--output-format=json', '--document-private-items',
   '--document-hidden-items', '-A', 'rustdoc::all'], { RUSTC_BOOTSTRAP: '1' });
 const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, 'doc/safe_cex_venue_binance.json'), 'utf8'));
-const read = name => JSON.parse(fs.readFileSync(path.join(workspace, 'safe-cex-parity/accepted-set', `${name}.json`), 'utf8'));
 const found = inventory(doc, {
-  defaultTraits: read('default-traits'), receiverTraits: read('receiver-traits'),
+  defaultTraits: loadPolicy('default-traits'), receiverTraits: loadPolicy('receiver-traits'),
   readSource: file => fs.readFileSync(path.join(workspace, file)),
 });
 const types = found.types.filter(value => selected.includes(value.name));

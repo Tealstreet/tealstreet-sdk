@@ -531,8 +531,8 @@ clears recently-placed snapshot grace on sighting, maintains one canonical
 incremental-fill tracker per protocol, publishes terminal rows, and updates
 positions/balance in source order. Primary/Demo filter categories by the account
 switches. Dedicated Spot omits positions; dedicated Inverse preserves its
-qty/value fill pricing and [position, position] Store update pairs. The Spot constructor is now bound; dedicated Inverse and HyroTrader
-constructor/session bindings remain separately owned work. Execution and wallet
+qty/value fill pricing and [position, position] Store update pairs. Spot and dedicated Inverse constructors are now bound; HyroTrader
+constructor/session binding remains separate work. Execution and wallet
 topics are ignored in maintained TS and remain ignored here.
 `tests/private_event_delivery.rs` feeds the actual core socket pump. Its source
 oracle executes maintained handler, mapper, fill helper, selectors and Store
@@ -572,7 +572,7 @@ special orders before regular category groups, preserve TP/SL on every request,
 and keep the original batch for individual fallback. Successful result indices
 refer to the filtered formatter entries. The pure formatter receives the awaited
 canonical 0/1/2 position index; other request numerics are source string fields.
-Spot keeps its own `placeOrders` override. Inverse construction remains pending.
+Spot and dedicated Inverse keep their own `placeOrders` overrides.
 Native promise tails belong to Scope and stop on disposal. The batch source
 oracle executes the actual five member bodies with maintained helpers; the
 physical transport tests separately cover BBO/options, fallback and disposal.
@@ -586,3 +586,32 @@ and NaN/-0 fetched leverage must survive mode discovery during placement.
 requires runtime failures plus exact restoration. The older public JSON helper
 APIs retain their separately scoped contracts. Primary not-modified responses
 remain accepted; the dedicated Inverse source's stricter policy is separate.
+
+
+The dedicated Inverse constructor selects `BybitInverseExchange` on the shared
+retained receiver, with typed is_spot/is_demo both false before publication.
+Its separate `publicInverseWebsocket` occupies PublicSecondary; startup dials
+that socket and private only. Public active-topic selection and both change
+callbacks retain the source union and duplicate additions. Disposal follows the
+source super call, then secondary/private sockets, using weak ownership.
+
+Inverse writes use integer USD contracts and retain coin `remaining` alongside
+USD remainingNative/remainingNotional. Do not reuse primary/Demo sizing, generated
+client IDs, reconciliation timers or options classification. Its single-write
+filtered-response/original-payload index behavior is preserved. Position mode
+changes intentionally send linear/USDT irrespective of the caller's symbol;
+110043 leverage responses reject here, unlike primary/Demo. Position mappings
+retain raw BTC PnL and native NaN/-0 leverage. Real private position events update
+existing rows without inserting absent positions, through the shared native
+ModelPatch number bridge. Execution and wallet topics remain source no-ops.
+
+`tests/inverse_binding.rs` contains nine native facade/socket E2Es.
+`tests/inverse_batch_binding.rs` compares 36 actual-source batch/cache
+compositions, including four independently tagged nonfinite/signed-zero inputs.
+The consumer control runner disables 17 trait methods, disposal and constructor
+admission in turn; all 19 compile before failing assertions, then exact restored
+bytes pass. The separate registry-entry removal control rejects both local and
+hosted constructions before its restored native-host tests pass. Both runners
+bound Cargo subprocesses and print their private log directories. History,
+candle/book and recovery class wiring retain their separate pending rows;
+these construction and trading witnesses do not claim their completion.

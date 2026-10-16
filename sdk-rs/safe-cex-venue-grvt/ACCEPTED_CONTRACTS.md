@@ -71,3 +71,63 @@ python3 sdk-rs/safe-cex-venue-grvt/scripts/accepted-record-controls.py
 ```
 
 No historical debt entry or production decoder is changed by this batch.
+
+## Data helper batch
+
+Eleven additional contracts execute the actual order status, creation-time, TIF,
+trigger metadata, nullish field selection, instrument suffix and interval
+functions, signing metadata validation, builder info construction, string field
+admission and ordered Ethereum-address selection. Each raw API has independently
+authored input/output expectations; observations inspect native enum identity,
+optional presence, binary64 bits, borrowed-pointer identity and returned fields
+before JSON projection. The alias selector distinguishes Some(null) from None.
+Signing metadata reads raw JSON text to preserve negative zero. Builder info
+retains an explicitly empty address, original fee text and numeric conversion.
+
+All eleven production runtime receipts pass separately on native and wasm. The
+maintained actual-source tests for order helpers, order semantics, intervals,
+instrument symbols and signing metadata pass all thirteen tests, including named
+source mutation controls. These results supplement the first batch's 52 owners;
+they leave 119 of the fresh 182 nominal/function owners and nineteen aliases
+under review. No private constructor or compiler alias is cleared by these
+helper receipts.
+
+Two additional private construction rows review the actual Key and Host Clone
+capabilities. Native tests assert retained Js receiver/object identity, shared
+mutation and nonce state, signed-zero bits and SameValueZero behavior. These
+construction rows do not classify the types' raw APIs. The alias suite now has
+eleven tests covering all nineteen actual aliases, including callback errors,
+polled futures, handler holes/undefined slots, ordered string/nonce containers
+and native Market fields. The production alias gate obligations remain separate.
+
+Ordinary discovery originally refused records.rs because its glob import made
+attribute origins uncertain. Its eight explicit enum imports remove that
+ambiguity without changing any decoder body or widening the shared scanner.
+
+## Fixed alias batch
+
+Eighteen alias contracts retain exact compiler source/expanded targets, generics
+and actual root identity. Twelve individually reviewed callback, handler and
+future capabilities have native decoder/conversion absence probes. Six real data
+decoders execute independent native observations: AddedMarkets<bool>, StreamFeed,
+JsResult<bool,bool>, NonceIds, NonceTimes and MarketRef. Their ordered contents,
+variant identity, optional presence, binary64 bits and native fields remain
+visible before JSON projection. Each complete alias passes production probes
+on native and wasm (six runtime and twelve explicit classifications per target).
+
+The actual borrowed Fields<bool> decoder is excluded from these eighteen rows.
+Its expanded native tests preserve static text key pointers, retained escaped
+Value key pointers, owned nonempty refusals, empty-map admission and bool-domain
+refusal. The uninstalled route proposal is with the shared tooling owner; no
+general borrowed guard, key ownership or lifetime has changed.
+
+The stored total is 81 keys: 63 nominal/function owners and eighteen aliases.
+Remaining GRVT work is 119 nominal/function owners and Fields, with nested/local
+discovery tracked separately. The nested equality function in binding/private.rs
+has an exact non-decoder comparison classification, pinned to the reviewed whole
+file. It returns boolean equality or the original coercion error for already
+supplied native operands; it does not admit a protocol model. The native numeric
+comparison test executes nineteen trait calls, including signed zero, the source
+code1000 cases, object coercion count and original thrown-object identity. The
+complete Private owner retains its separate API obligations. This batch does not
+claim whole-crate gate completion.
