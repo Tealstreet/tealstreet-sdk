@@ -106,3 +106,7 @@ pub mod exchange_order_mapping;
 pub mod exchange_order_snapshot;
 pub mod exchange_runtime_initialization;
 pub mod exchange_single_placement;
+pub mod signer_adapter;
+pub mod ws_private_class;
+pub mod ws_public_class;
+mod binding;

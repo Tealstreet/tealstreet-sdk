@@ -29,6 +29,11 @@ pub struct LighterSignerRuntime<H, V> {
     pub invalid_nonce: fn(&H, &TransactionSigningError) -> SigningResult<bool>,
     pub delay: fn(&H, u32) -> SigningResult<NativePromise<V>>,
     pub new_error: fn(&H, &'static str) -> TransactionSigningError,
+    pub number: fn(f64) -> V,
+    /// JavaScript binary `+`, including ToPrimitive and string concatenation.
+    pub add: fn(&H, V, V) -> SigningResult<V>,
+    /// Global `BigInt(value)` call, including its RangeError/SyntaxError/TypeError throws.
+    pub big_int: fn(&H, V) -> SigningResult<V>,
 }
 
 pub struct TealstreetLighterSignerAdapter<H, V> {
@@ -367,5 +372,39 @@ impl<H: 'static, V: Clone + 'static> TealstreetLighterSignerAdapter<H, V> {
     }
     pub fn approve_integrator(self: &Rc<Self>, request: V) -> NativePromise<V> {
         self.submit("getApproveIntegratorTransaction", request, false)
+    }
+
+    // ts: TealstreetLighterSignerAdapter.getAuthToken
+    pub fn get_auth_token(self: &Rc<Self>, ttl_seconds: V) -> NativePromise<V> {
+        let (promise, out) = NativePromise::pending(self.runtime.promise_runtime.clone());
+        if self.has_client() {
+            self.clone().auth_token_ready(ttl_seconds, out);
+        } else {
+            let this = self.clone();
+            self.initialize().subscribe(move |value| match value {
+                Err(error) => out.settle(Err(error)),
+                Ok(_) => this.auth_token_ready(ttl_seconds, out),
+            });
+        }
+        promise
+    }
+
+    fn auth_token_ready(self: Rc<Self>, ttl_seconds: V, out: PromiseResolver<V>) {
+        let r = &self.runtime;
+        let h = &r.host;
+        let token = (|| {
+            if !self.has_client() {
+                return Err((r.new_error)(h, "Signer not initialized"));
+            }
+            let seconds = (r.number)((r.promise_runtime.now_millis() / 1000.0).floor());
+            let deadline = (r.big_int)(h, (r.add)(h, seconds, ttl_seconds)?)?;
+            let client = self.transaction_client.borrow().clone();
+            let callable = (r.method)(h, client, "getAuthToken")?;
+            (r.call_async)(h, callable, vec![deadline])
+        })();
+        match token {
+            Err(error) => out.settle(Err(error)),
+            Ok(token) => token.subscribe(move |value| out.settle_shared(value)),
+        }
     }
 }
