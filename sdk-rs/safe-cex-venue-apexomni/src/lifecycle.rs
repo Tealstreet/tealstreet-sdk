@@ -200,7 +200,7 @@ impl ApexOmniExchange {
             }
             Ok::<_, ExchangeError>(())
         };
-        let result = futures::try_join!(positions, self.fetch_raw_balance());
+        let result = futures::future::try_join(positions, self.fetch_raw_balance()).await;
         match result.map(|(_, balance)| balance) {
             Ok(balance) => {
                 if self.base.is_disposed() {
@@ -231,7 +231,7 @@ impl ApexOmniExchange {
     pub async fn fetch_and_set_private_snapshot_helper(&self) -> Result<(), ExchangeError> {
         let result = async {
             let (mut positions, orders) =
-                futures::try_join!(self.fetch_positions(), self.fetch_orders())?;
+                futures::future::try_join(self.fetch_positions(), self.fetch_orders()).await?;
             if self.base.is_disposed() {
                 return Ok(());
             }

@@ -26,7 +26,7 @@ use crate::{
 use safe_cex_exchange::{
     build_records::{BuildRecordsOptions, FoldableExchange, build_folded_position_records},
     http::{
-        HttpClient, HttpClientOptions, HttpHost, safe_cex_axios_create,
+        HttpClient, HttpClientOptions, HttpHost, install_transport_adapter, safe_cex_axios_create,
         safe_cex_axios_create_no_proxy,
     },
     income_paging::{IncomePageParams, IncomeRangeOptions, paginate_income_range},
@@ -38,7 +38,8 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{
-    RestAdapter, RestBody, RestFailure, RestRequest, RestResponse, TransportRegistry,
+    RestAdapter, RestAdapterVariant, RestBody, RestFailure, RestRequest, RestResponse,
+    TransportRegistry,
     signature_rejection::is_binance_style_signature_rejection,
     signing::{RemoteSignerRequest, RemoteSignerResponse},
     socket::SocketFrame,
@@ -645,6 +646,18 @@ impl ResponseBindings for NativeResponseBindings {
     }
 }
 
+fn typed_options(options: &EventValue) -> Result<safe_cex_types::ExchangeOptions, Failure> {
+    // The signer is host-held (`imports.remote`); typed options cannot name it.
+    let view = match options {
+        EventValue::Object(object) => {
+            let mut record = object.borrow().clone();
+            record.fields.remove("remoteSigner");
+            EventValue::Object(Rc::new(RefCell::new(record)))
+        }
+        other => other.clone(),
+    };
+    crate::class_decode::decode(view).map_err(|e| failure(e.to_string()))
+}
 /// FactoryBindings: each factory call builds one NativeClient.
 struct Factorizer<'a> {
     imports: &'a NativeImports,
@@ -659,17 +672,7 @@ impl FactoryBindings for Factorizer<'_> {
         options: EventValue,
         exchange: EventValue,
     ) -> Result<EventValue, Failure> {
-        // The signer is host-held (`imports.remote`); typed options cannot name it.
-        let view = match &options {
-            EventValue::Object(object) => {
-                let mut record = object.borrow().clone();
-                record.fields.remove("remoteSigner");
-                EventValue::Object(Rc::new(RefCell::new(record)))
-            }
-            other => other.clone(),
-        };
-        let typed: safe_cex_types::ExchangeOptions =
-            crate::class_decode::decode(view).map_err(|e| failure(e.to_string()))?;
+        let typed = typed_options(&options)?;
         let name: safe_cex_types::ExchangeName =
             serde_json::from_value(Value::String(exchange.get("name")?.text()?))
                 .map_err(|e| failure(e.to_string()))?;
@@ -759,16 +762,31 @@ impl FactoryBindings for Factorizer<'_> {
         client.request.borrow_mut().push(handler);
         Ok(())
     }
+    // ts: installTransportAdapter(xhr, options, exchange.name, 'bigInt' | default)
     fn install(
         &mut self,
         _client: EventValue,
-        _options: EventValue,
+        options: EventValue,
         _name: EventValue,
-        _transform: ResponseTransform,
+        transform: ResponseTransform,
     ) -> Result<(), Failure> {
-        Err(failure(
-            "tealstreetTunnel needs the Tealstreet transport; the native direct host has no HOW tunnel",
-        ))
+        let http = self
+            .pending
+            .as_ref()
+            .and_then(|client| client.http.as_ref())
+            .ok_or_else(|| failure("install before create"))?;
+        let variant = match transform {
+            ResponseTransform::BigInt => RestAdapterVariant::BigInt,
+            ResponseTransform::Default => RestAdapterVariant::Default,
+        };
+        install_transport_adapter(
+            http,
+            &self.imports.registry,
+            &typed_options(&options)?,
+            Some(&self.imports.runtime.transport()),
+            variant,
+        );
+        Ok(())
     }
     fn response_use(
         &mut self,
