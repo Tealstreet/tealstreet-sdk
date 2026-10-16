@@ -10,8 +10,7 @@ export const families = [
   ['woo', 'legacy_data_reads', 'Host', 47, 'woo.exchange', 'WOOXExchange#startFundingRatesRefresh', 'interval'],
   ['kraken', 'rest_account', 'ReadHost', 46, 'krakenspot.exchange', 'KrakenSpotExchange.refreshBalance', 'update_balance'],
   ['woo', 'legacy_order_control', 'Host', 40, 'woo.exchange', 'WOOXExchange.fetchAlgoOrders', 'map_algo'],
-  // No production algorithm caller established for nullish; its invention diagnostic stays required.
-  ['woo', 'legacy_market_reads', 'Host', 38, 'woo.exchange', 'WOOXExchange.parseTickers', 'normalize_symbol', ['nullish']],
+  ['woo', 'legacy_market_reads', 'Host', 38, 'woo.exchange', 'WOOXExchange.parseTickers', 'normalize_symbol'],
   ['grvt', 'public_feeds', 'PublicFeedHost', 38, 'grvt.ws-public', 'GrvtPublicWebSocket#handleTickerUpdate', 'update_ticker'],
   ['grvt', 'account_runtime', 'AccountHost', 31, 'grvt.exchange', 'GrvtExchange#mapOrder', 'trigger_metadata'],
   ['grvt', 'private_lifecycle', 'PrivateLifecycleHost', 28, 'grvt.ws-private', 'GrvtPrivateWebSocket.connectAndSubscribe', 'routing_host'],
@@ -21,8 +20,7 @@ export const families = [
   ['bybit', 'core_snapshot_readers', 'SnapshotHost', 26, 'bybit.exchange', 'BybitExchange.tick', 'set'],
   ['hyperliquid', 'spot_account_reads', 'SpotAccountHost', 26, 'hyperliquidspot.exchange', 'HyperliquidSpotExchange.fetchOHLCV', 'candle_binding'],
   ['backpack', 'public_listeners', 'Host', 23, 'backpack.ws-public', 'BackpackPublicWebSocket.listenOrderBook', 'cancel_throttle'],
-  // array has no production consumer in exchange_runtime; its diagnostic stays required.
-  ['mexc', 'exchange_runtime', 'ExchangeRuntimeHost', 23, 'mexc.exchange', 'MexcExchange.fetchBalanceAndPositions', 'destructure_pair', ['array']],
+  ['mexc', 'exchange_runtime', 'ExchangeRuntimeHost', 23, 'mexc.exchange', 'MexcExchange.fetchBalanceAndPositions', 'destructure_pair'],
   ['orderly', 'ws_controls', 'WsHost', 23, 'orderly.ws-private', 'OrderlyPrivateWebSocket.connectAndSubscribe', 'Error'],
   ['bitrue', 'trading_rest', 'TradingHost', 22, 'bitrue.exchange', 'BitrueExchange#formatCreateOrder', 'uuid'],
   ['orderly', 'runtime_actions', 'RuntimeHost', 22, 'orderly.exchange', 'OrderlyExchange.tick', 'add'],
