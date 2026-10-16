@@ -21,6 +21,7 @@ pub(super) struct PublicTopics {
     parent: Weak<BybitExchange>,
     runtime: Rc<dyn WsRuntime>,
     category: &'static str,
+    active_symbols: bool,
     current: Topics,
     active_listener: Option<String>,
     markets_listener: RefCell<Option<String>>,
@@ -92,8 +93,12 @@ impl PublicTopics {
         base: &BaseExchange,
     ) -> Self {
         let current = Rc::new(RefCell::new(json!([])));
-        // Source Spot registers this in its constructor, including before first dial.
-        let active_listener = if category == "spot" {
+        // Dedicated Spot and Inverse register this before their first dial.
+        // The primary optional inverse socket remains category-wide.
+        let dedicated_inverse =
+            category == "inverse" && base.name == safe_cex_types::ExchangeName::Bybitinverse;
+        let active_symbols = category == "spot" || dedicated_inverse;
+        let active_listener = if active_symbols {
             let parent = parent.clone();
             let topics = current.clone();
             Some(base.on(
@@ -102,7 +107,11 @@ impl PublicTopics {
                     let Some(parent) = parent.upgrade() else {
                         return Ok(());
                     };
-                    let Some(socket) = parent.base.get_socket(SocketSlot::Public) else {
+                    let Some(socket) = parent.base.get_socket(if dedicated_inverse {
+                        SocketSlot::PublicSecondary
+                    } else {
+                        SocketSlot::Public
+                    }) else {
                         return Ok(());
                     };
                     ticker::handle_active_ticker_symbols_changed(
@@ -124,6 +133,7 @@ impl PublicTopics {
             parent,
             runtime,
             category,
+            active_symbols,
             current,
             active_listener,
             markets_listener: RefCell::new(None),
@@ -147,6 +157,7 @@ impl PublicTopics {
         let topics = self.current.clone();
         let runtime = self.runtime.clone();
         let category = self.category;
+        let active_symbols = self.active_symbols;
         Rc::new(move |_, payload| {
             let Some(socket) = weak.upgrade() else {
                 return Ok(());
@@ -160,7 +171,7 @@ impl PublicTopics {
             let disposed = socket.is_disposed();
             let sender = weak.clone();
             let clock = runtime.clone();
-            let operation: ExchangeFuture<'static, ()> = if category == "spot" {
+            let operation: ExchangeFuture<'static, ()> = if active_symbols {
                 Box::pin(ticker::on_markets_changed(
                     added
                         .iter()
@@ -213,7 +224,7 @@ impl PublicTopics {
             *self.markets_listener.borrow_mut() = Some(parent.base.on(event, handler));
             Ok(())
         };
-        if self.category == "spot" {
+        if self.active_symbols {
             lifecycle::on_open(
                 || Ok(socket.is_disposed()),
                 || sync(&parent, &self.current),

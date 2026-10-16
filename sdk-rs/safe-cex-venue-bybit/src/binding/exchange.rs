@@ -114,7 +114,10 @@ impl BybitExchange {
     ) -> Result<Rc<Self>, ExchangeError> {
         if !matches!(
             name,
-            ExchangeName::Bybit | ExchangeName::Bybitdemo | ExchangeName::Bybitspot
+            ExchangeName::Bybit
+                | ExchangeName::Bybitdemo
+                | ExchangeName::Bybitspot
+                | ExchangeName::Bybitinverse
         ) {
             return Err(ExchangeError::new(format!(
                 "BybitExchange cannot construct {}",
@@ -149,6 +152,13 @@ impl BybitExchange {
                 .as_mut()
                 .expect("Bybit rule")
                 .label = "Bybit spot".into();
+        }
+        if name == ExchangeName::Bybitinverse {
+            class_settings
+                .client_order_id_rule
+                .as_mut()
+                .expect("Bybit rule")
+                .label = "Bybit inverse".into();
         }
         let (receiver, core) = base_exchange::create(
             &shared.sockets,
@@ -376,12 +386,17 @@ impl Exchange for BybitExchange {
     fn class_name(&self) -> &'static str {
         if self.base.name == ExchangeName::Bybitspot {
             "BybitSpotExchange"
+        } else if self.base.name == ExchangeName::Bybitinverse {
+            "BybitInverseExchange"
         } else {
             "BybitExchange"
         }
     }
     // ts: BybitExchange.dispose
     fn dispose(&self) -> Result<(), ExchangeError> {
+        if self.base.name == ExchangeName::Bybitinverse {
+            return dispose_inverse_binding(self);
+        }
         crate::stream_delegation::dispose_primary_exchange(
             || {
                 if let Some(refresh) = self.snapshot_refresh.get() {
@@ -515,4 +530,26 @@ impl Exchange for BybitExchange {
     ) -> ExchangeFuture<'_, Vec<PublicTrade>> {
         not_implemented()
     }
+}
+
+// ts: BybitInverseExchange.dispose — source super, dedicated inverse socket,
+// private socket; no primary reconciliation-timer phase.
+fn dispose_inverse_binding(venue: &BybitExchange) -> Result<(), ExchangeError> {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    crate::stream_delegation::dispose_inverse_exchange(
+        || venue.base.dispose(),
+        |name| {
+            Ok(venue.base.get_socket(if name == "privateWebsocket" {
+                SocketSlot::Private
+            } else {
+                SocketSlot::PublicSecondary
+            }))
+        },
+        |socket| {
+            if let Some(socket) = socket {
+                socket.dispose();
+            }
+            Ok(())
+        },
+    )
 }

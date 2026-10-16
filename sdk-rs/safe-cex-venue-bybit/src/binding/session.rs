@@ -176,6 +176,44 @@ impl SessionHost for Rt {
                 selected.define(NAME, Js::str("map"))?;
                 Ok(selected)
             }
+            "Array.isArray" => self
+                .shared
+                .globals
+                .get("Array")?
+                .call_method("isArray", args),
+            "destructure first" => {
+                let values = arg(&args, 0)
+                    .array_values()
+                    .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
+                Ok(values.first().cloned().unwrap_or(Js::Undefined))
+            }
+            "iterator" => {
+                // Read helpers spread decoded transport arrays. Retain the array
+                // and read its current length/index at each next(), preserving
+                // native values instead of projecting the batch through JSON.
+                let array = arg(&args, 0);
+                if !array.is_array() {
+                    return Err(Thrown::type_error("value is not iterable"));
+                }
+                let index = std::cell::Cell::new(0usize);
+                Ok(Js::object(vec![(
+                    "next",
+                    Js::function("wireArrayNext", move |_, _| {
+                        let at = index.get();
+                        if at as f64 >= array.get("length")?.to_number()? {
+                            return Ok(Js::object(vec![
+                                ("done", Js::Bool(true)),
+                                ("value", Js::Undefined),
+                            ]));
+                        }
+                        index.set(at + 1);
+                        Ok(Js::object(vec![
+                            ("done", Js::Bool(false)),
+                            ("value", array.get(&at.to_string())?),
+                        ]))
+                    }),
+                )]))
+            }
             "destructure2" => {
                 let values = arg(&args, 0)
                     .array_values()
@@ -194,7 +232,7 @@ impl SessionHost for Rt {
                 &[],
             ),
             "missingMarket" => Js::Undefined.get("limits"),
-            "virtualClock" | "Date" | "Math" | "ENDPOINTS" | "JSON" => {
+            "virtualClock" | "Date" | "Math" | "ENDPOINTS" | "JSON" | "LogSeverity" => {
                 self.shared.globals.get(name)
             }
             // Object.assign(target, source) over own enumerable data properties.

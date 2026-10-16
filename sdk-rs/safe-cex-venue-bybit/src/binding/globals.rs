@@ -101,6 +101,7 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
     for (key, value) in [
         ("INTERVAL", &*crate::types::INTERVAL),
         ("ORDER_SIDE", &*crate::types::ORDER_SIDE),
+        ("POSITION_SIDE", &*crate::types::POSITION_SIDE),
         ("ORDER_STATUS", &*crate::types::ORDER_STATUS),
         ("ORDER_TYPE", &*crate::types::ORDER_TYPE),
         ("ORDER_TIME_IN_FORCE", &*crate::types::ORDER_TIME_IN_FORCE),
