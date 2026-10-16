@@ -791,7 +791,7 @@ fn ws_handle(core: &Rc<SocketCore>) -> Js {
             "close",
             Js::function("close", move |_, _| {
                 if let Some(base) = core.base.get() {
-                    base.force_close();
+                    base.close_current_websocket();
                 }
                 Ok(Js::Undefined)
             }),

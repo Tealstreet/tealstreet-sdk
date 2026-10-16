@@ -721,13 +721,13 @@
   },
   {
     "function": "new",
-    "body": "c023da4e81457c3c",
+    "body": "f60cc96a14949a71",
     "call": "v . start ()",
     "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
   },
   {
     "function": "new",
-    "body": "c023da4e81457c3c",
+    "body": "f60cc96a14949a71",
     "call": "v . fetch_historical_fills (o)",
     "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
   },
@@ -1273,19 +1273,13 @@
   },
   {
     "function": "dispose",
-    "body": "3a88dc6401d4fa45",
-    "call": "self . base . dispose ()",
-    "file": "safe-cex-venue-backpack/src/adapter.rs"
-  },
-  {
-    "function": "dispose",
-    "body": "3a88dc6401d4fa45",
+    "body": "81769b39f01b3fc2",
     "call": "self . public_websocket . get () . expect (\"constructed public socket\") . dispose ()",
     "file": "safe-cex-venue-backpack/src/adapter.rs"
   },
   {
     "function": "dispose",
-    "body": "3a88dc6401d4fa45",
+    "body": "81769b39f01b3fc2",
     "call": "self . private_websocket . get () . expect (\"constructed private socket\") . dispose ()",
     "file": "safe-cex-venue-backpack/src/adapter.rs"
   },
@@ -1524,12 +1518,6 @@
     "file": "safe-cex-venue-backpack/src/adapter_runtime.rs"
   },
   {
-    "function": "dispose",
-    "body": "23549a99593343b4",
-    "call": "self . base . dispose ()",
-    "file": "safe-cex-venue-backpack/src/private_adapter.rs"
-  },
-  {
     "function": "fetch",
     "body": "db2ace7ef48511bc",
     "call": "o . fetch_positions ()",
@@ -1551,12 +1539,6 @@
     "function": "listen_order_book",
     "body": "b27dc6d412556e92",
     "reference": "listeners :: listen_order_book",
-    "file": "safe-cex-venue-backpack/src/public_adapter.rs"
-  },
-  {
-    "function": "dispose",
-    "body": "9d36ce6004cab194",
-    "call": "self . base . dispose ()",
     "file": "safe-cex-venue-backpack/src/public_adapter.rs"
   },
   {
@@ -4633,7 +4615,7 @@
   },
   {
     "function": "base_websocket_class",
-    "body": "98b2e6c011ff88a4",
+    "body": "4a6e54ae7b9b544a",
     "call": "h . socket . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_socket.rs"
   },
@@ -5932,6 +5914,132 @@
     "body": "74c5ee279d5b5127",
     "call": "h . start (poll)",
     "file": "safe-cex-venue-paradex/src/runtime_assembly.rs"
+  },
+  {
+    "function": "capabilities",
+    "body": "50ab6d5389df161e",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-phemex/src/binding/exchange.rs"
+  },
+  {
+    "function": "capabilities",
+    "body": "50ab6d5389df161e",
+    "call": "venue . fetch_historical_fills (opts)",
+    "file": "safe-cex-venue-phemex/src/binding/exchange.rs"
+  },
+  {
+    "function": "install",
+    "body": "c6523323dcff2333",
+    "reference": "session :: dispose",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "order :: start",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_markets",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_positions",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_orders",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_historical_fills",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_ohlcv",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "order :: update_order",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "cancel :: cancel_orders",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "cancel :: cancel_orders",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "settings :: change_position_mode",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "settings :: change_margin_type",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "settings :: set_leverage",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "base_dispose",
+    "body": "14be89e65b3fa365",
+    "call": "self . rt . base () . dispose ()",
+    "file": "safe-cex-venue-phemex/src/binding/session.rs"
+  },
+  {
+    "function": "create",
+    "body": "b39b38507183f79b",
+    "reference": "private :: dispose",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
+  },
+  {
+    "function": "listen_candles",
+    "body": "83edf18fcf59a9b5",
+    "reference": "ws :: listen_ohlcv",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
+  },
+  {
+    "function": "listen_candles",
+    "body": "83edf18fcf59a9b5",
+    "call": "s . dispose (& mut host . clone ())",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
+  },
+  {
+    "function": "listen_book",
+    "body": "76ac6d3a34cebd5a",
+    "reference": "ws :: listen_order_book",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
+  },
+  {
+    "function": "listen_book",
+    "body": "76ac6d3a34cebd5a",
+    "call": "s . dispose (& mut host . clone ())",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
   },
   {
     "function": "change_position_mode",
