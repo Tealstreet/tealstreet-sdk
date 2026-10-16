@@ -1582,7 +1582,7 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "e4a29fc5c563362803c5e8b42f23bf803143c818b03170fc22bca98085755c05",
+      "producer_sha256": "bdfff0622bbc2474864c1989ccd6ef8c4737e827adfa9809e809c49c3e5cb825",
       "classification": "no-owned-latch",
       "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Combined source socket lookup registration retains only weak synchronous callbacks; lazy core lookup installs no pending reservation."
     },
