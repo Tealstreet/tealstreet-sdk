@@ -139,6 +139,14 @@ status = "ported"
 note = "Owns optional exchange/default Axios creation, production/testnet config, tunnel selection, shared read-only retry installation and 10/1000 rate limiter. RuntimeHost binds the existing shared/library transport/retry owners; no venue retry engine or concrete network backend is substituted."
 
 [[symbol]]
+ts = "withoutSigningFields"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "createAPI"
 kind = "const-fn"
 layer = "adapted"

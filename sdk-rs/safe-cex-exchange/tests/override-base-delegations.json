@@ -92,6 +92,18 @@
       "evidence": [{"file": "packages/safe-cex/src/exchanges/bingx/bingx.exchange.ts", "contains": "super.dispose();"}]
     },
     {
+      "file": "safe-cex-venue-bitunix/src/adapter.rs",
+      "finding": "dispose_venue bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [{"file": "packages/safe-cex/src/exchanges/bitunix/bitunix.exchange.ts", "contains": "super.dispose();"}]
+    },
+    {
+      "file": "safe-cex-venue-bitunix/src/sockets.rs",
+      "finding": "dispose bypasses dynamic hook dispose through base",
+      "kind": "socket-receiver",
+      "evidence": [{"file": "sdk-rs/safe-cex-venue-bitunix/src/sockets.rs", "contains": "pub(crate) base: Rc<BaseWebSocket>,"}]
+    },
+    {
       "file": "safe-cex-venue-breakoutprop/src/lifecycle.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",

@@ -1,6 +1,8 @@
 # Rust venue construction through the registry
 
-Status: implemented for `backpack` and `binance`, 2026-10-16 (`src/rust_venues.rs`,
+Status: implemented for `backpack`, `bitunix`, `blofin`, the Binance family (`binance`, `binancepm`,
+`binancespot`) and the OKX family (`okx`, `okxdemo`,
+`okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
 (crate layout, "Constructors and loaders live in `safe-cex-registry`"; P4 exit,
 "a tier-1 account on the Rust path behind a flag").
@@ -19,9 +21,18 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 - **Initial members:**
   - `backpack`, built with `BackpackExchange::new`.
   - `binance`, built with `BinanceExchange::new`.
-  - `binancepm` and `binancespot` stay on the module host. They are in the same
-    crate but less bound (13/16 and 9/16), so they join the table only when their
-    own lane binds them.
+  - `bitunix`, built with `BitunixVenue::new` from a registry-built `BaseExchange`
+    and `BitunixDependencies` (runtime, per-lane client builder and transport
+    install, optional externalPublicData provider).
+  - `blofin`, built with `BlofinNativeExchange::new` from a registry-built
+    `BaseExchange` and `BlofinDependencies` (runtime, the common HTTP builder,
+    optional externalPublicData provider, remote-signer account name).
+  - `okx`, `okxdemo`, `okxeu` and `okxeudemo`, one shared constructor around
+    `OkxExchange::new`; the name picks the class. `OkxDependencies` carries the
+    runtime and a `JsHttpHost`; the native host builds it with js_runtime
+    `rest_http_host` over a fresh terminal adapter.
+  - `binancepm` and `binancespot`, built with `BinancePMExchange::new` and
+    `BinanceSpotExchange::new` on the same `RustVenueHost::binance` inputs.
 - **Dependencies:** `safe-cex-registry` gains direct dependencies on those venue
   crates. The edges go downward (registry is above venues), but layering alone
   does not allow them: `layers.json` `registryConstructors` lists exactly the
@@ -37,6 +48,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   pub trait RustVenueHost {
       fn binance(&self) -> Result<binance::ExchangeDependencies, ExchangeError>;
       fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
+      fn okx(&self) -> Result<OkxDependencies, ExchangeError>;
   }
   ```
 
@@ -52,8 +64,8 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `binancepm`, `binancespot`, `bitget`, `okx`, `blofin`,
-`bitunix` and `bybit`.
+follow-up PR. Expected next: `bitget`, `bybit`, `kraken`, `kucoin`, `mexc`, `lighter`
+and `woo`.
 
 Each follow-up does four things:
 - adds one `RUST_VENUES` entry;
