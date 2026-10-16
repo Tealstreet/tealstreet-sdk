@@ -300,3 +300,13 @@ it does not own a second value enum. Shared native numbers and UTF-16 strings st
 intact until that explicit projection. The constructed throttle regression in
 `tests/adapter_classes.rs` checks deferred reads of runtime-mutated aliases, native
 numeric bits, nested spread identity, holes and lone-surrogate projection refusal.
+
+Concrete disposal adapters follow their source overrides rather than invoking
+superclass disposal. The exchange sets the shared disposed flag before public
+then private cleanup. Public disposal clears subscriptions, book state/fetchers
+and depth throttles; private disposal clears subscriptions and the orders timer.
+Other handlers, ticker throttles, position/balance state, Store subscriptions and
+source-uncancelled work remain live. `BaseWebSocket::close_current_websocket`
+forwards only the current transport close. Three native regressions prove-fail
+against the old adapters and pass against the actual source disposal arrows;
+`tests/disposal_binding.rs` also checks flag timing and close ordering.

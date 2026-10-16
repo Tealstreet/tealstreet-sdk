@@ -25,19 +25,15 @@ struct TableView {
 impl Exotic for TableView {
     fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Option<Value> {
         let key = String::from_utf16_lossy(key.units()?);
-        let json = match self.table {
-            Table::MarketsBySymbol => {
-                serde_json::to_value(self.store.markets_by_symbol().get(&key)?)
-            }
-            Table::MarketsById => serde_json::to_value(self.store.markets_by_id().get(&key)?),
-            Table::TickersBySymbol => {
-                serde_json::to_value(self.store.tickers_by_symbol().get(&key)?)
-            }
-            Table::TickersById => serde_json::to_value(self.store.tickers_by_id().get(&key)?),
+        match self.table {
+            Table::MarketsBySymbol => realm.from_typed(self.store.markets_by_symbol().get(&key)?),
+            Table::MarketsById => realm.from_typed(self.store.markets_by_id().get(&key)?),
+            Table::TickersBySymbol => realm.from_typed(self.store.tickers_by_symbol().get(&key)?),
+            Table::TickersById => realm.from_typed(self.store.tickers_by_id().get(&key)?),
         }
-        .ok()?;
-        Some(realm.from_serde(&json))
+        .ok()
     }
+
     fn keys(&self) -> Vec<PropKey> {
         let keys: Vec<String> = match self.table {
             Table::MarketsBySymbol => self.store.markets_by_symbol().keys().cloned().collect(),
@@ -120,9 +116,7 @@ pub(crate) fn store_object(realm: &Realm, store: Rc<dyn Store>) -> Value {
         "update",
         2,
         Rc::new(|r, s, a| {
-            let json = r.to_serde(&arg(a, 0))?;
-            let changes: StoreUpdate = serde_json::from_value(json)
-                .map_err(|e| r.type_error(&format!("store.update: {e}")))?;
+            let changes: StoreUpdate = r.to_typed(&arg(a, 0))?;
             let from_worker = arg(a, 1).truthy();
             mutation(r, s.update(changes, from_worker))
         }),

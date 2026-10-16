@@ -92,7 +92,8 @@ fn json_stringify(
             out.push(b']' as u16);
             Ok(Some(out))
         }
-        Js::Object(_) => {
+        Js::Builtin(reference) if reference.is_callable() => Ok(None),
+        Js::Object(_) | Js::Builtin(_) => {
             let mut out = vec![b'{' as u16];
             let mut first = true;
             // Key enumeration precedes traversal; getters/replacers can alter later values.

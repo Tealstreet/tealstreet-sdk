@@ -346,6 +346,13 @@ pub(crate) fn base_exchange_class(
         });
     }
     let b = base.clone();
+    let public_only = realm.native("get isPublicDataOnly", 0, move |_, _, _| {
+        Ok(Value::Bool(
+            b.options().public_data_only == Some(true) || !b.can_sign(),
+        ))
+    });
+    realm.define_getter(&prototype, PropKey::str("isPublicDataOnly"), public_only);
+    let b = base.clone();
     let name = realm.native("get name", 0, move |r, _, _| r.from_typed(b.name()));
     realm.define_getter(&prototype, PropKey::str("name"), name);
     class

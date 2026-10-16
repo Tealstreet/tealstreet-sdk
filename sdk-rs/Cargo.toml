@@ -95,6 +95,7 @@ safe-cex-transport = { path = "safe-cex-transport" }
 safe-cex-crypto = { path = "safe-cex-crypto" }
 safe-cex-exchange = { path = "safe-cex-exchange" }
 safe-cex-registry = { path = "safe-cex-registry" }
+safe-cex-venue-apexomni = { path = "safe-cex-venue-apexomni" }
 safe-cex-venue-asterdex = { path = "safe-cex-venue-asterdex" }
 safe-cex-venue-kucoin = { path = "safe-cex-venue-kucoin" }
 safe-cex-venue-mexc = { path = "safe-cex-venue-mexc" }

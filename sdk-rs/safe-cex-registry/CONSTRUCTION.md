@@ -1,9 +1,9 @@
 # Rust venue construction through the registry
 
-Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitrue`, `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`),
 Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
-`hyperliquid`, the Binance family (`binance`, `binancepm`,
+`hyperliquid` and `hyperliquidspot`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), `polymarket` and `woo`, 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
@@ -61,7 +61,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     `rest_http_host` over a fresh terminal adapter.
   - `binancepm` and `binancespot`, built with `BinancePMExchange::new` and
     `BinanceSpotExchange::new` on the same `RustVenueHost::binance` inputs.
-- `hyperliquid` calls its existing production constructor with `RustVenueHost::hyperliquid(options)`: the host resolves the API origin through the selected transport, composes hosted HTTP signing and supplies signer metadata plus the shared weight limiter. HyperliquidSpot remains outside this table.
+- `hyperliquid` and `hyperliquidspot` call their respective production constructors with `RustVenueHost::hyperliquid(name, options)`: the host resolves the API origin through the selected transport, composes hosted HTTP signing and supplies signer metadata plus the shared weight limiter. Source Spot order signing retains its local-wallet requirement.
 - **Dependencies:** `safe-cex-registry` gains direct dependencies on those venue
   crates. The edges go downward (registry is above venues), but layering alone
   does not allow them: `layers.json` `registryConstructors` lists exactly the
@@ -260,3 +260,18 @@ findings, live-source registry equivalence and all 88 layer assertions. Strict
 host all-target and wasm library clippy passed. Independently removing each of
 the three production table entries compiled and failed its native construction
 test with exit 101; exact source restoration passed both native test functions.
+
+Hyperliquid Spot is independently constructed as `Hyperliquidspot` through
+`hyperliquidspot_constructor`, using the Spot production class and the shared
+Hyperliquid dependency method. That method takes the selected name so native
+transport and hosted-signing metadata retain the correct registry name. Both
+names require the same caller-owned limiter and expose the configured public-data
+factory. `native_host_hyperliquidspot` verifies native local HTTP/WS startup,
+real action signatures, the caller cloid, shifted spot asset IDs and cancellation;
+`native_host_external_data` separately verifies gateway startup.
+
+ApexOmni is assembled through its shared js_runtime binding with a real
+OmniKey-seeded zkLink contract signer. Its native proof observes HTTP/WS startup,
+wire HMAC over the transmitted order form, caller ID, private WS order delivery
+and cancellation. Unsupported hosted signing/wallet-provider operations reject
+visibly. The module-host path remains the default.

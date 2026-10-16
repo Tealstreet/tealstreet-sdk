@@ -25,7 +25,7 @@ use safe_cex_venue_binance::{
         CapturedAction, NativePrivateSocket, PrivateBase, PrivateCallback, PrivateParent,
         PrivateTimers,
     },
-    private_event_value::{EventValue, record, string},
+    private_event_value::{EventOps, EventValue, record, string},
     private_rest::{SnapshotCompletion, SnapshotRequestFuture},
     private_session::{Factory, Venue},
     protocol_types::BinanceOrderBookApplyResult,
@@ -329,11 +329,11 @@ impl ExchangeImports for Imports {
         _: Rc<dyn Fn(EventValue) -> Result<EventValue, Failure>>,
         _: Option<safe_cex_venue_binance::private_session::RateHook>,
     ) -> Result<EventValue, Failure> {
-        Ok(EventValue::Array(Rc::new(RefCell::new(vec![
+        Ok(EventValue::array(vec![
             client("route"),
             client("primary"),
             client("secondary"),
-        ]))))
+        ]))
     }
     fn rate_limit(&self, client: EventValue, _: f64) -> Result<EventValue, Failure> {
         Ok(client)
@@ -526,6 +526,7 @@ impl RustVenueHost for Venues {
     #[allow(clippy::arc_with_non_send_sync)]
     fn hyperliquid(
         &self,
+        _: ExchangeName,
         _: &ExchangeOptions,
     ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError> {
         self.calls.borrow_mut().push("hyperliquid");
@@ -749,6 +750,7 @@ fn table_members_are_exactly_the_bound_venues() {
     assert_eq!(
         names,
         [
+            ExchangeName::Apexomni,
             ExchangeName::Asterdex,
             ExchangeName::Backpack,
             ExchangeName::Binance,
@@ -768,6 +770,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Coinbase,
             ExchangeName::Coinbasespot,
             ExchangeName::Hyperliquid,
+            ExchangeName::Hyperliquidspot,
             ExchangeName::Kraken,
             ExchangeName::Krakenspot,
             ExchangeName::Lighter,

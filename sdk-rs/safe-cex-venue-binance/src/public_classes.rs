@@ -697,20 +697,23 @@ fn core_json(value: &EventValue) -> Result<serde_json::Value, Failure> {
     Ok(match value {
         EventValue::Null => V::Null,
         EventValue::Bool(v) => V::Bool(*v),
-        EventValue::String(v) => V::String(v.clone()),
+        EventValue::String(_) => V::String(value.text()?),
         EventValue::Number(v) => V::Number(serde_json::Number::from_f64(*v).ok_or_else(|| {
             crate::request_weight::type_error(
                 "core JSON callback cannot represent nonfinite native number",
             )
         })?),
-        EventValue::Array(v) => {
-            V::Array(v.borrow().iter().map(core_json).collect::<Result<_, _>>()?)
-        }
-        EventValue::Object(v) => V::Object(
+        EventValue::Array(v) => V::Array(
             v.borrow()
-                .fields
                 .iter()
-                .map(|(key, value)| Ok((key.clone(), core_json(value)?)))
+                .map(|v| core_json(v.as_ref().unwrap_or(&EventValue::Undefined)))
+                .collect::<Result<_, _>>()?,
+        ),
+        EventValue::Object(_) => V::Object(
+            value
+                .spread()
+                .into_iter()
+                .map(|(key, value)| Ok((key, core_json(&value)?)))
                 .collect::<Result<_, Failure>>()?,
         ),
         _ => {
