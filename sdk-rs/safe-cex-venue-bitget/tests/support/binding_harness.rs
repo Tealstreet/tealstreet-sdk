@@ -203,6 +203,7 @@ pub struct Http {
     pub runtime: RefCell<Option<Rc<Runtime>>>,
     pub routes: RefCell<Vec<(String, String, VecDeque<(f64, Value)>)>>,
     pub requests: RefCell<Vec<Request>>,
+    pub advance_after_send_ms: Cell<f64>,
 }
 impl Http {
     pub fn route(&self, method: &str, path: &str, status: f64, body: Value) {
@@ -250,6 +251,11 @@ impl JsHttpHost for Http {
             data: read("data"),
             headers: read("headers"),
         });
+        if let Some(runtime) = self.runtime.borrow().as_ref() {
+            runtime
+                .now
+                .set(runtime.now.get() + self.advance_after_send_ms.get());
+        }
         let response = {
             let mut routes = self.routes.borrow_mut();
             routes

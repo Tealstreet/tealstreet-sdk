@@ -1103,6 +1103,27 @@ compares four form/empty/JSON-looking/scalar strings against the actual source
 remote adapter with installed Axios on both sides of the relay, including
 signer inputs and final transmitted text.
 
+Shared `Js::to_js_string` converts ordinary live objects with a string hint:
+`toString` precedes `valueOf`, each method is looked up when reached, and a
+primitive result ends conversion. Non-callable properties are skipped; failure
+to produce a primitive throws. The 31-case Node witness compares native UTF-16
+units and getter/callback order, including inherited methods and null prototypes.
+Stock intrinsic string forms remain the value model's default prototype methods.
+
+The single `js_runtime::base_exchange::create` factory takes a synchronous source
+field initializer as its sixth argument. It initializes the JS receiver, reads
+`isSpot` and `isDemo` using shared property access/truthiness, then publishes the
+immutable typed base and installs its callbacks. Venue adapters own subclass
+field values; core contains no venue-name classification. Empty initializers keep
+the source base defaults. The hook must only initialize fields, without starting
+work or retaining the unpublished receiver. Typed flags are construction snapshots;
+later JS field changes do not rewrite them.
+Kraken/KuCoin Spot and Bybit/OKX Demo construction tests exercise actual facades.
+`tests/source_identity_controls.py` removes each projection, requires compiled
+assertion failures in both affected families, restores exact factory bytes and
+requires all four witnesses to pass. The runtime test also covers source getters,
+truthiness, inherited false defaults and original getter-error identity.
+
 The shared BigInt `toString` member honors radix 2 through 36, defaults omitted
 or undefined radix to decimal, truncates numeric radix arguments, and rejects
 out-of-range values with RangeError. Radix conversion uses the existing shared

@@ -49,6 +49,36 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
             ),
         ]),
     );
+    def(
+        "isBybitOrderAlreadyGoneCancelMessage",
+        Js::function("isBybitOrderAlreadyGoneCancelMessage", |_, args| {
+            let value = arg(&args, 0);
+            let value = if value.is_undefined() {
+                None
+            } else {
+                Some(super::value::to_json(&value)?)
+            };
+            Ok(Js::Bool(
+                crate::exchange_helpers::is_bybit_order_already_gone_cancel_message(value.as_ref())
+                    .map_err(|message| super::value::Thrown::error("TypeError", &message))?,
+            ))
+        }),
+    );
+    def(
+        "isUnknownOutcome",
+        Js::function("isUnknownOutcome", |_, args| {
+            let value = arg(&args, 0);
+            if !value.is_object() && !value.is_array() {
+                return Ok(Js::Bool(false));
+            }
+            Ok(Js::Bool(
+                safe_cex_store::remaining_utils::is_unknown_outcome(&super::value::to_json(
+                    &value,
+                )?)
+                .map_err(|message| super::value::Thrown::error("TypeError", &message))?,
+            ))
+        }),
+    );
     // ts: bybitFeeOverlay — null when no rate was returned, else (markets) => markets.
     def(
         "bybitFeeOverlay",
@@ -68,5 +98,23 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
         "ENDPOINTS",
         super::value::from_json(&crate::types::ENDPOINTS),
     );
+    for (key, value) in [
+        ("INTERVAL", &*crate::types::INTERVAL),
+        ("ORDER_SIDE", &*crate::types::ORDER_SIDE),
+        ("ORDER_STATUS", &*crate::types::ORDER_STATUS),
+        ("ORDER_TYPE", &*crate::types::ORDER_TYPE),
+        ("ORDER_TIME_IN_FORCE", &*crate::types::ORDER_TIME_IN_FORCE),
+        (
+            "ORDER_TIME_IN_FORCE_OUTBOUND",
+            &*crate::types::ORDER_TIME_IN_FORCE_OUTBOUND,
+        ),
+        ("ORDER_TRIGGER_TYPE", &*crate::types::ORDER_TRIGGER_TYPE),
+        (
+            "POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE",
+            &*crate::types::POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
+        ),
+    ] {
+        def(key, super::value::from_json(value));
+    }
     g
 }
