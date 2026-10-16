@@ -69,58 +69,6 @@ fn in_operator(obj: &Js, key: &str) -> bool {
     }
 }
 
-/// lodash `words` over ASCII: alphanumeric runs split at case and digit edges.
-fn words(s: &str) -> Vec<String> {
-    let mut out = vec![];
-    for run in s.split(|c: char| !c.is_ascii_alphanumeric()) {
-        let chars: Vec<char> = run.chars().collect();
-        let mut current = String::new();
-        for (i, c) in chars.iter().copied().enumerate() {
-            if i > 0 {
-                let p = chars[i - 1];
-                let next_lower = chars.get(i + 1).is_some_and(char::is_ascii_lowercase);
-                if (p.is_ascii_lowercase() && c.is_ascii_uppercase())
-                    || (p.is_ascii_digit() != c.is_ascii_digit())
-                    || (p.is_ascii_uppercase() && c.is_ascii_uppercase() && next_lower)
-                {
-                    out.push(std::mem::take(&mut current));
-                }
-            }
-            current.push(c);
-        }
-        if !current.is_empty() {
-            out.push(current);
-        }
-    }
-    out
-}
-
-fn snake_case(s: &str) -> String {
-    words(s)
-        .iter()
-        .map(|w| w.to_lowercase())
-        .collect::<Vec<_>>()
-        .join("_")
-}
-
-fn camel_case(s: &str) -> String {
-    words(s)
-        .iter()
-        .enumerate()
-        .map(|(i, w)| {
-            let lower = w.to_lowercase();
-            if i == 0 {
-                return lower;
-            }
-            let mut chars = lower.chars();
-            chars
-                .next()
-                .map(|c| c.to_ascii_uppercase().to_string() + chars.as_str())
-                .unwrap_or_default()
-        })
-        .collect()
-}
-
 /// lodash compareAscending: undefined, then null, then NaN sort last.
 fn compare_ascending(a: &Js, b: &Js) -> Result<Ordering, Thrown> {
     if a.strict_equals(b) {
@@ -1121,7 +1069,11 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             if obj.is_nullish() {
                 return Ok(Js::Undefined);
             }
-            for k in [key.clone(), snake_case(&key), camel_case(&key)] {
+            for k in [
+                key.clone(),
+                safe_cex_num::lodash_snake_case(&key),
+                safe_cex_num::lodash_camel_case(&key),
+            ] {
                 if in_operator(&obj, &k) {
                     return obj.get(&k);
                 }
@@ -1532,8 +1484,6 @@ mod tests {
             "8"
         );
         assert!(run(&g, "v", vec![record, Js::str("missing")]).is_undefined());
-        assert_eq!(snake_case("HTTPServer2Go"), "http_server_2_go");
-        assert_eq!(camel_case("order_id"), "orderId");
         let finite = g.get("Number").unwrap().get("isFinite").unwrap();
         assert!(!call(&finite, vec![Js::str("1")]).unwrap().truthy());
         let hmac = run(&g, "createHmac", vec![Js::str("sha256"), Js::str("key")])
