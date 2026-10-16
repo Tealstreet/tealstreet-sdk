@@ -14415,5 +14415,2913 @@
         }
       }
     }
+  },
+  "safe_cex_venue_bitunix::order_state::strict_equal": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "strict_equal",
+      "signature": {
+        "inputs": [
+          [
+            "a",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "b",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let a=&$value[\"a\"];let b=if $value[\"same\"]==true{a}else{&$value[\"b\"]};serde_json::json!({\"equal\":$type(a,b)})}",
+    "cases": [
+      {
+        "input": {
+          "a": {
+            "x": 1
+          },
+          "b": {
+            "x": 1
+          }
+        },
+        "output": {
+          "equal": false
+        }
+      },
+      {
+        "input": {
+          "a": {
+            "x": 1
+          },
+          "same": true
+        },
+        "output": {
+          "equal": true
+        }
+      },
+      {
+        "input": {
+          "a": 1,
+          "b": 1.0
+        },
+        "output": {
+          "equal": true
+        }
+      },
+      {
+        "input": {
+          "a": 1,
+          "b": "1"
+        },
+        "output": {
+          "equal": false
+        }
+      }
+    ],
+    "evidence": "This specific position/order strict-equality body observes scalar binary64 equality and object pointer identity. Separate equal-content objects refuse equality while the same borrow succeeds; string/numeric values are never conflated."
+  },
+  "safe_cex_venue_bitunix::ohlcv_subscription::interval": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "interval",
+      "signature": {
+        "inputs": [
+          [
+            "input",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!({\"interval\":$type($value.as_str().unwrap())})",
+    "cases": [
+      {
+        "input": "1h",
+        "output": {
+          "interval": "60min"
+        }
+      },
+      {
+        "input": "1d",
+        "output": {
+          "interval": "1day"
+        }
+      },
+      {
+        "input": "unknown",
+        "output": {
+          "interval": "undefined"
+        }
+      }
+    ],
+    "evidence": "The actual candle websocket selector reads the maintained interval table and uses source undefined text for unknown keys. Distinct hour/day conversions and unknown fallback execute the concrete native return path."
+  },
+  "safe_cex_venue_bitunix::rest_reads::error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "error",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::js_coercion::JsCoercionError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let e=$type(if $value[\"first\"]==true{\"first error\"}else{\"second error\"});serde_json::json!({\"name\":e.name,\"message\":e.message})}",
+    "cases": [
+      {
+        "input": {
+          "first": true
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "first error"
+        }
+      },
+      {
+        "input": {
+          "first": false
+        },
+        "output": {
+          "name": "TypeError",
+          "message": "second error"
+        }
+      }
+    ],
+    "evidence": "This concrete REST shape-error carrier preserves exact static message input and TypeError class. Two differentiated native error payloads execute its real constructor; this gives no permission to neighboring parsers."
+  },
+  "safe_cex_venue_bitunix::rest_reads::key": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "key",
+      "signature": {
+        "inputs": [
+          [
+            "row",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let row=&$value[\"row\"];let out=$type(row,$value[\"key\"].as_str().unwrap());serde_json::json!({\"present\":out.is_some(),\"value\":out})}",
+    "cases": [
+      {
+        "input": {
+          "row": {
+            "x": false
+          },
+          "key": "x"
+        },
+        "output": {
+          "present": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "row": {},
+          "key": "constructor"
+        },
+        "output": {
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "row": [
+            17
+          ],
+          "key": "0"
+        },
+        "output": {
+          "present": false,
+          "value": null
+        }
+      }
+    ],
+    "evidence": "The actual market raw-key bridge requires a JSON object own value; inherited Object members and array indexing do not become retained JSON fields. Native Option presence distinguishes an own false from absence."
+  },
+  "safe_cex_venue_bitunix::rest_reads::first": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "first",
+      "signature": {
+        "inputs": [
+          [
+            "row",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "fields",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_num::table_lookup::TableHit",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let keys=$value[\"keys\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap()).collect::<Vec<_>>();match $type($value.get(\"row\"),&keys){safe_cex_num::TableHit::Missing=>serde_json::json!({\"kind\":\"missing\"}),safe_cex_num::TableHit::Mapped(v)=>serde_json::json!({\"kind\":\"mapped\",\"value\":v}),safe_cex_num::TableHit::Inherited(v)=>serde_json::json!({\"kind\":\"inherited\",\"text\":v.js_string()})}}",
+    "cases": [
+      {
+        "input": {
+          "row": {
+            "a": null,
+            "b": false
+          },
+          "keys": [
+            "a",
+            "b"
+          ]
+        },
+        "output": {
+          "kind": "mapped",
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "row": {},
+          "keys": [
+            "__proto__"
+          ]
+        },
+        "output": {
+          "kind": "inherited",
+          "text": "[object Object]"
+        }
+      },
+      {
+        "input": {
+          "row": [],
+          "keys": [
+            "x"
+          ]
+        },
+        "output": {
+          "kind": "missing"
+        }
+      }
+    ],
+    "evidence": "The specific REST first-alias bridge retains the underlying table-hit identity, including inherited prototype versus missing. Null falls through but false remains a mapped value. Actual native TableHit variants and payloads are inspected."
+  },
+  "safe_cex_venue_bitunix::adapter_rest::dayjs_subtract": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "dayjs_subtract",
+      "signature": {
+        "inputs": [
+          [
+            "end",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "f64"
+                }
+              }
+            }
+          ],
+          [
+            "amount",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "unit",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let n=$type(&$value[\"end\"].as_f64().unwrap(),$value[\"amount\"].as_f64().unwrap(),$value[\"unit\"].as_str()).unwrap();serde_json::json!({\"bits\":format!(\"{:016x}\",n.to_bits())})}",
+    "cases": [
+      {
+        "input": {
+          "end": 10000,
+          "amount": 2,
+          "unit": "s"
+        },
+        "output": {
+          "bits": "40bf400000000000"
+        }
+      },
+      {
+        "input": {
+          "end": 10000,
+          "amount": 0.5,
+          "unit": "m"
+        },
+        "output": {
+          "bits": "c0d3880000000000"
+        }
+      },
+      {
+        "input": {
+          "end": 10,
+          "amount": 0.25,
+          "unit": "ms"
+        },
+        "output": {
+          "bits": "4023800000000000"
+        }
+      }
+    ],
+    "evidence": "This actual native OHLCV dayjs capability converts source unit abbreviations to fixed millisecond factors before subtraction. Independently computed positive, negative and fractional results are inspected bit-for-bit at supported units; unsupported units remain the explicit error path."
+  },
+  "safe_cex_venue_bitunix::adapter::to_value": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "to_value",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "T"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::ser::Serialize",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!({\"value\":$type(&$value).unwrap()})",
+    "cases": [
+      {
+        "input": {
+          "a": false
+        },
+        "output": {
+          "value": {
+            "a": false
+          }
+        }
+      },
+      {
+        "input": [
+          1,
+          null
+        ],
+        "output": {
+          "value": [
+            1,
+            null
+          ]
+        }
+      }
+    ],
+    "evidence": "This concrete generic serializer bridge executes only at retained serde_json::Value. It returns actual Value results for object and heterogeneous array inputs; no arbitrary Serialize implementation or decoder claim follows from this bounded adapter."
+  },
+  "safe_cex_venue_bitunix::adapter_orders::get": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_num::json_stringify::JsJsonValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let input=safe_cex_num::JsJsonValue::from($value[\"row\"].clone());match $type(&input,$value[\"key\"].as_str().unwrap()){safe_cex_num::JsJsonValue::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),safe_cex_num::JsJsonValue::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),safe_cex_num::JsJsonValue::Null=>serde_json::json!({\"kind\":\"null\"}),_=>panic!(\"unexpected selected native value\")}}",
+    "cases": [
+      {
+        "input": {
+          "row": {
+            "x": false
+          },
+          "key": "x"
+        },
+        "output": {
+          "kind": "bool",
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "row": {
+            "x": null
+          },
+          "key": "x"
+        },
+        "output": {
+          "kind": "null"
+        }
+      },
+      {
+        "input": {
+          "row": {},
+          "key": "x"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      },
+      {
+        "input": {
+          "row": [
+            false
+          ],
+          "key": "0"
+        },
+        "output": {
+          "kind": "undefined"
+        }
+      }
+    ],
+    "evidence": "This actual order adapter getter requires a native retained Object and preserves missing Undefined separately from present Null/Bool. Nonobject array indexing does not silently create an object field."
+  },
+  "safe_cex_venue_bitunix::adapter_orders::order_of": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "order_of",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::Order",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let o=$type($value).unwrap();serde_json::json!({\"id\":o.id,\"symbol\":o.symbol,\"conditional\":o.r#type==safe_cex_types::OrderType::Conditional,\"limit\":o.r#type==safe_cex_types::OrderType::Limit,\"amountBits\":format!(\"{:016x}\",o.amount.to_bits()),\"priceBits\":format!(\"{:016x}\",o.price.to_bits()),\"reduceOnly\":o.reduce_only,\"buy\":o.side==safe_cex_types::OrderSide::Buy})}",
+    "cases": [
+      {
+        "input": {
+          "id": "one",
+          "symbol": "BTC",
+          "amount": 2.5,
+          "type": "limit",
+          "price": 1.25,
+          "side": "sell",
+          "reduceOnly": true
+        },
+        "output": {
+          "id": "one",
+          "symbol": "BTC",
+          "conditional": false,
+          "limit": true,
+          "amountBits": "4004000000000000",
+          "priceBits": "3ff4000000000000",
+          "reduceOnly": true,
+          "buy": false
+        }
+      },
+      {
+        "input": {
+          "id": null,
+          "type": "unrecognized",
+          "amount": null
+        },
+        "output": {
+          "id": "",
+          "symbol": "",
+          "conditional": true,
+          "limit": false,
+          "amountBits": "0000000000000000",
+          "priceBits": "0000000000000000",
+          "reduceOnly": false,
+          "buy": true
+        }
+      }
+    ],
+    "evidence": "The actual native raw-order capability overlays non-null own fields on the source-compatible minimal Order context, normalizing unsupported type to Conditional. Direct native IDs, enum identity, amount/price bits and flags witness the overlay, null skip and fallback without serializing the decoded Order."
+  },
+  "safe_cex_venue_bitunix::event_models::ms": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "ms",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let n=$type($value.get(\"v\"));serde_json::json!({\"bits\":n.map(|n|format!(\"{:016x}\",n.to_bits()))})}",
+    "cases": [
+      {
+        "input": {
+          "v": 1.5
+        },
+        "output": {
+          "bits": "408f400000000000"
+        }
+      },
+      {
+        "input": {
+          "v": 1000000000000
+        },
+        "output": {
+          "bits": "426d1a94a2000000"
+        }
+      },
+      {
+        "input": {
+          "v": 1000000000000000
+        },
+        "output": {
+          "bits": "426d1a94a2000000"
+        }
+      },
+      {
+        "input": {
+          "v": 1000000000000000000
+        },
+        "output": {
+          "bits": "426d1a94a2000000"
+        }
+      },
+      {
+        "input": {
+          "v": "12"
+        },
+        "output": {
+          "bits": null
+        }
+      }
+    ],
+    "evidence": "This exact event timestamp helper accepts native numeric Values, floors before source unit thresholds and returns milliseconds. Second/milli/micro/nanosecond magnitudes and numeric-string refusal have independent native bit expectations."
+  },
+  "safe_cex_venue_bitunix::event_models::seconds": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "seconds",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "local",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "primitive": "f64"
+                            }
+                          ],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "f64"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce(f64) -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "primitive": "f64"
+                              }
+                            ],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let n=$type($value.get(\"v\"),|n|n).unwrap();serde_json::json!({\"bits\":n.map(|n|format!(\"{:016x}\",n.to_bits()))})}",
+    "cases": [
+      {
+        "input": {
+          "v": "123.9"
+        },
+        "output": {
+          "bits": "405ec00000000000"
+        }
+      },
+      {
+        "input": {
+          "v": 1000000000000
+        },
+        "output": {
+          "bits": "41cdcd6500000000"
+        }
+      },
+      {
+        "input": {
+          "v": 1000000000000000
+        },
+        "output": {
+          "bits": "41cdcd6500000000"
+        }
+      },
+      {
+        "input": {
+          "v": 1000000000000000000
+        },
+        "output": {
+          "bits": "41cdcd6500000000"
+        }
+      },
+      {
+        "input": {
+          "v": "1970-01-01T00:00:01.500Z"
+        },
+        "output": {
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "bits": null
+        }
+      }
+    ],
+    "evidence": "The actual event seconds helper preserves Number coercion and magnitude thresholds before its date-parser fallback. Numeric text, milli/micro/nanoseconds and an explicit-zone ISO date observe native seconds; local-time resolver is fixed identity with no ambient timezone claim."
+  },
+  "safe_cex_venue_bitunix::event_models::date": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "date",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "local",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "primitive": "f64"
+                            }
+                          ],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce(f64) -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "primitive": "f64"
+                              }
+                            ],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let n=$type($value.get(\"v\"),|n|n).unwrap();serde_json::json!({\"bits\":format!(\"{:016x}\",n.to_bits())})}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "bits": "7ff8000000000000"
+        }
+      },
+      {
+        "input": {
+          "v": null
+        },
+        "output": {
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "v": true
+        },
+        "output": {
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "v": 1.75
+        },
+        "output": {
+          "bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "v": "1970-01-01T00:00:01.500Z"
+        },
+        "output": {
+          "bits": "4097700000000000"
+        }
+      }
+    ],
+    "evidence": "This exact private-event Date projection distinguishes undefined NaN, null epoch, boolean/numeric TimeClip and explicit-zone string parsing. Native bits are inspected before wire conversion; the selected local-time resolver is identity, not ambient timezone coverage."
+  },
+  "safe_cex_venue_bitunix::order_state::info": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "info",
+      "signature": {
+        "inputs": [
+          [
+            "order",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::Order",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let order:safe_cex_types::Order=serde_json::from_value($value[\"order\"].clone()).unwrap();let value=$type(&order,\"positionId\");serde_json::json!({\"present\":value.is_some(),\"value\":value})}",
+    "cases": [
+      {
+        "input": {
+          "order": {
+            "id": "o",
+            "status": "open",
+            "symbol": "BTC",
+            "type": "limit",
+            "side": "buy",
+            "price": 1,
+            "amount": 2,
+            "filled": 0,
+            "remaining": 2,
+            "reduceOnly": false,
+            "lastUpdate": 0,
+            "info": {
+              "positionId": false
+            }
+          }
+        },
+        "output": {
+          "present": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "o",
+            "status": "open",
+            "symbol": "BTC",
+            "type": "limit",
+            "side": "buy",
+            "price": 1,
+            "amount": 2,
+            "filled": 0,
+            "remaining": 2,
+            "reduceOnly": false,
+            "lastUpdate": 0,
+            "info": {
+              "positionId": null
+            }
+          }
+        },
+        "output": {
+          "present": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "o",
+            "status": "open",
+            "symbol": "BTC",
+            "type": "limit",
+            "side": "buy",
+            "price": 1,
+            "amount": 2,
+            "filled": 0,
+            "remaining": 2,
+            "reduceOnly": false,
+            "lastUpdate": 0
+          }
+        },
+        "output": {
+          "present": false,
+          "value": null
+        }
+      }
+    ],
+    "evidence": "This exact standalone-protection Order accessor reads only its native retained info field. Direct Option presence distinguishes false, null and absent info before position-id matching; no owner serialization is used."
+  },
+  "safe_cex_venue_bitunix::order_state::get_position_id": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_position_id",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "side",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::PositionSide",
+                "args": null
+              }
+            }
+          ],
+          [
+            "positions",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Position",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "cache",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "std::collections::hash::map::HashMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let positions:Vec<safe_cex_types::Position>=serde_json::from_value($value[\"positions\"].clone()).unwrap();let cache:std::collections::HashMap<String,serde_json::Value>=serde_json::from_value($value[\"cache\"].clone()).unwrap();let value=$type(\"BTC\",safe_cex_types::PositionSide::Long,&positions,&cache);serde_json::json!({\"present\":value.is_some(),\"value\":value})}",
+    "cases": [
+      {
+        "input": {
+          "positions": [
+            {
+              "id": "BTC:long",
+              "symbol": "BTC",
+              "side": "long",
+              "entryPrice": 1.25,
+              "notional": 10,
+              "leverage": 3,
+              "unrealizedPnl": 0.5,
+              "contracts": 2,
+              "liquidationPrice": 0.125,
+              "positionMode": "hedged",
+              "marginType": "cross",
+              "info": {
+                "positionId": "live-id"
+              }
+            }
+          ],
+          "cache": {
+            "BTC:long": "cached"
+          }
+        },
+        "output": {
+          "present": true,
+          "value": "live-id"
+        }
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "id": "BTC:long",
+              "symbol": "BTC",
+              "side": "long",
+              "entryPrice": 1.25,
+              "notional": 10,
+              "leverage": 3,
+              "unrealizedPnl": 0.5,
+              "contracts": 2,
+              "liquidationPrice": 0.125,
+              "positionMode": "hedged",
+              "marginType": "cross",
+              "info": {
+                "positionId": 0
+              }
+            }
+          ],
+          "cache": {
+            "BTC:long": false
+          }
+        },
+        "output": {
+          "present": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "id": "BTC:long",
+              "symbol": "BTC",
+              "side": "long",
+              "entryPrice": 1.25,
+              "notional": 10,
+              "leverage": 3,
+              "unrealizedPnl": 0.5,
+              "contracts": 0,
+              "liquidationPrice": 0.125,
+              "positionMode": "hedged",
+              "marginType": "cross",
+              "info": {
+                "positionId": "live-id"
+              }
+            }
+          ],
+          "cache": {}
+        },
+        "output": {
+          "present": false,
+          "value": null
+        }
+      }
+    ],
+    "evidence": "The actual position-id selector prefers the first positive-contract same-symbol/side position truthy ID, then its source cache key. Native false cache values remain present; zero live ID and flat positions distinguish source truthiness/filtering from nullish selection."
+  },
+  "safe_cex_venue_bitunix::order_state::hydrate_position_id_before_formatting": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "hydrate_position_id_before_formatting",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "order_type",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::OrderType",
+                "args": null
+              }
+            }
+          ],
+          [
+            "side",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::OrderSide",
+                "args": null
+              }
+            }
+          ],
+          [
+            "amount",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "reduce_only",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "positions",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Position",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "cache",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "std::collections::hash::map::HashMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "fetch_positions",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "generic": "F1"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "update_positions",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "generic": "P"
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "fetch_orders",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "generic": "F2"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "update_orders",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "generic": "O"
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "P",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "O",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F1",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F2",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> F1",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "generic": "F1"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(P) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "generic": "P"
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> F2",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "generic": "F2"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(O) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "generic": "O"
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F1"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "generic": "P"
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          },
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F2"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "generic": "O"
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without an external scheduler\")} let positions:Vec<safe_cex_types::Position>=serde_json::from_value($value[\"positions\"].clone()).unwrap();let cache:std::collections::HashMap<String,serde_json::Value>=serde_json::from_value($value[\"cache\"].clone()).unwrap();let trace=std::cell::RefCell::new(Vec::<String>::new());let result=run($type(\"BTC\",if $value[\"protective\"]==true{safe_cex_types::OrderType::StopLoss}else{safe_cex_types::OrderType::Limit},safe_cex_types::OrderSide::Sell,$value[\"amount\"].as_f64().unwrap(),$value.get(\"reduce\").and_then(serde_json::Value::as_bool),&positions,&cache,||{trace.borrow_mut().push(\"fetch_positions\".into());async{Ok::<_,String>(17)}},|v|{trace.borrow_mut().push(format!(\"positions:{v}\"));Ok(())},||{trace.borrow_mut().push(\"fetch_orders\".into());async{Ok::<_,String>(23)}},|v|{trace.borrow_mut().push(format!(\"orders:{v}\"));Ok(())}));serde_json::json!({\"ok\":result.is_ok(),\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {
+          "positions": [
+            {
+              "id": "BTC:long",
+              "symbol": "BTC",
+              "side": "long",
+              "entryPrice": 1.25,
+              "notional": 10,
+              "leverage": 3,
+              "unrealizedPnl": 0.5,
+              "contracts": 2,
+              "liquidationPrice": 0.125,
+              "positionMode": "hedged",
+              "marginType": "cross",
+              "info": {}
+            }
+          ],
+          "cache": {},
+          "protective": true,
+          "amount": 0
+        },
+        "output": {
+          "ok": true,
+          "trace": [
+            "fetch_positions",
+            "positions:17",
+            "fetch_orders",
+            "orders:23"
+          ]
+        }
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "id": "BTC:long",
+              "symbol": "BTC",
+              "side": "long",
+              "entryPrice": 1.25,
+              "notional": 10,
+              "leverage": 3,
+              "unrealizedPnl": 0.5,
+              "contracts": 2,
+              "liquidationPrice": 0.125,
+              "positionMode": "hedged",
+              "marginType": "cross",
+              "info": {
+                "positionId": "live-id"
+              }
+            }
+          ],
+          "cache": {},
+          "reduce": true,
+          "amount": 2
+        },
+        "output": {
+          "ok": true,
+          "trace": []
+        }
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "id": "BTC:long",
+              "symbol": "BTC",
+              "side": "long",
+              "entryPrice": 1.25,
+              "notional": 10,
+              "leverage": 3,
+              "unrealizedPnl": 0.5,
+              "contracts": 2,
+              "liquidationPrice": 0.125,
+              "positionMode": "hedged",
+              "marginType": "cross",
+              "info": {}
+            }
+          ],
+          "cache": {},
+          "amount": 0
+        },
+        "output": {
+          "ok": true,
+          "trace": []
+        }
+      },
+      {
+        "input": {
+          "positions": [
+            {
+              "id": "BTC:long",
+              "symbol": "BTC",
+              "side": "long",
+              "entryPrice": 1.25,
+              "notional": 10,
+              "leverage": 3,
+              "unrealizedPnl": 0.5,
+              "contracts": 0,
+              "liquidationPrice": 0.125,
+              "positionMode": "hedged",
+              "marginType": "cross",
+              "info": {}
+            }
+          ],
+          "cache": {},
+          "protective": true,
+          "amount": 0
+        },
+        "output": {
+          "ok": true,
+          "trace": []
+        }
+      }
+    ],
+    "evidence": "The actual pre-format hydration future checks protective/reduce-only eligibility, inverted order side and positive contracts before callbacks. Full-position protective requests fetch/update positions before orders only when needed; native callback arguments/order and skipped branches execute the concrete generic API at integer snapshot payloads and String errors."
+  },
+  "safe_cex_venue_bitunix::position_reads::position": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "position",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "side",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::PositionSide",
+                "args": null
+              }
+            }
+          ],
+          [
+            "mode",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::PositionMode",
+                "args": null
+              }
+            }
+          ],
+          [
+            "margin",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::MarginType",
+                "args": null
+              }
+            }
+          ],
+          [
+            "leverage",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::Position",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let p=$type($value[\"symbol\"].as_str().unwrap().into(),if $value[\"long\"]==true{safe_cex_types::PositionSide::Long}else{safe_cex_types::PositionSide::Short},if $value[\"oneway\"]==true{safe_cex_types::PositionMode::OneWay}else{safe_cex_types::PositionMode::Hedged},if $value[\"isolated\"]==true{safe_cex_types::MarginType::Isolated}else{safe_cex_types::MarginType::Cross},$value[\"leverage\"].as_f64().unwrap());serde_json::json!({\"id\":p.id,\"symbol\":p.symbol,\"long\":p.side==safe_cex_types::PositionSide::Long,\"oneway\":p.position_mode==Some(safe_cex_types::PositionMode::OneWay),\"isolated\":p.margin_type==Some(safe_cex_types::MarginType::Isolated),\"bits\":([p.entry_price,p.notional,p.leverage,p.unrealized_pnl,p.contracts,p.liquidation_price].map(|n|format!(\"{:016x}\",n.to_bits()))),\"optionalAbsent\":[p.realized_pnl.is_none(),p.margin_size.is_none(),p.info.is_none(),p.extra.is_none(),p.last_update.is_none(),p.option.is_none()]})}",
+    "cases": [
+      {
+        "input": {
+          "symbol": "BTC",
+          "long": true,
+          "oneway": false,
+          "isolated": true,
+          "leverage": 3
+        },
+        "output": {
+          "id": "BTC:long",
+          "symbol": "BTC",
+          "long": true,
+          "oneway": false,
+          "isolated": true,
+          "bits": [
+            "0000000000000000",
+            "0000000000000000",
+            "4008000000000000",
+            "0000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "optionalAbsent": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        }
+      },
+      {
+        "input": {
+          "symbol": "ETH",
+          "long": false,
+          "oneway": true,
+          "isolated": false,
+          "leverage": 4.5
+        },
+        "output": {
+          "id": "ETH",
+          "symbol": "ETH",
+          "long": false,
+          "oneway": true,
+          "isolated": false,
+          "bits": [
+            "0000000000000000",
+            "0000000000000000",
+            "4012000000000000",
+            "0000000000000000",
+            "0000000000000000",
+            "0000000000000000"
+          ],
+          "optionalAbsent": [
+            true,
+            true,
+            true,
+            true,
+            true,
+            true
+          ]
+        }
+      }
+    ],
+    "evidence": "The concrete native position-context constructor sets source mode-dependent ID, side/margin/leverage and zero projection defaults. Direct canonical native enum flags, all six numeric bits and every unused optional field are observed; this is specific context construction, not a blanket Position decoder exemption."
+  },
+  "safe_cex_venue_bitunix::rest_reads::fetch_position_mode": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "fetch_position_mode",
+      "signature": {
+        "inputs": [
+          [
+            "read",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, Value) -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "E"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::From",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          },
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "core::option::Option",
+                                                  "args": {
+                                                    "angle_bracketed": {
+                                                      "args": [
+                                                        {
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "serde_json::value::Value",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      ],
+                                                      "constraints": []
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without an external scheduler\")} let trace=std::cell::RefCell::new(Vec::new());let response=$value.get(\"response\").cloned();let result=run($type(|url,params|{trace.borrow_mut().push(serde_json::json!({\"url\":url,\"params\":params}));async move{Ok::<_,safe_cex_num::JsCoercionError>(response)}})).unwrap();serde_json::json!({\"hedged\":result,\"requests\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {
+          "response": {
+            "data": {
+              "marginCoin": "USDT",
+              "positionMode": "ONE_WAY"
+            }
+          }
+        },
+        "output": {
+          "hedged": false,
+          "requests": [
+            {
+              "url": "/api/v1/futures/account",
+              "params": {
+                "params": {
+                  "marginCoin": "USDT"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "response": {
+            "data": {
+              "marginCoin": "USDT",
+              "positionMode": "hedged"
+            }
+          }
+        },
+        "output": {
+          "hedged": true,
+          "requests": [
+            {
+              "url": "/api/v1/futures/account",
+              "params": {
+                "params": {
+                  "marginCoin": "USDT"
+                }
+              }
+            }
+          ]
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "hedged": true,
+          "requests": [
+            {
+              "url": "/api/v1/futures/account",
+              "params": {
+                "params": {
+                  "marginCoin": "USDT"
+                }
+              }
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "The actual asynchronous account-mode reader requests the source USDT account query exactly once, runs real account-row extraction and returns whether the source mode differs from ONE_WAY. Native boolean and exact request trace include unknown/absent source fallback; String transport fixtures are not substituted for actual Value decoding."
   }
 }

@@ -133,3 +133,35 @@ Together with the preceding batch-side repair, 50 of the original 163 Blofin
 owners now have these selected native contracts, leaving 113. All thirteen
 Blofin aliases and both Bitunix aliases have bounded native classifications.
 The remaining 78 Bitunix owners and complete package/matrix gates remain owed.
+
+## Retained inputs, selectors and native state
+
+A further 66 native/default owner contracts cover 17 Bitunix and 49 Blofin
+owners. Forty concrete helper functions observe timestamp units, number bits,
+property selection, first-match order, query fields, native order overlays and
+reference equality. Cursor expectations preserve the maintained source's
+length-then-lexical ordering without normalizing leading zeros. Query numbers
+are inspected through their native binary64 bits.
+
+Six Blofin retained-input owners inspect actual Value variants, nested payloads,
+property order and number bits. Their borrowed accessors execute separately.
+The topic owner observes its actual ordered keys and values; three error owners
+execute coercion conversions at String host errors. These specific open-JSON
+contracts do not grant the downstream mappers an open schema.
+
+Eleven Blofin mapper/store owners observe actual income, closed-position and
+historical-order native fields and enum variants, resolver/raw-symbol fallback,
+production Store indices, lot-size truthiness and mode callbacks. Five Bitunix
+state owners observe retained info, live-ID/cache precedence, pre-format callback
+ordering, canonical zero-position defaults and account-mode REST requests.
+Native callback futures use bounded deterministic fixtures, without a claim
+about real transport scheduling.
+
+All 66 selected native owner receipts pass. Four compiled copied-production
+controls change event timestamp units, the strict history threshold, live-ID
+truthiness and closed-position absolute fees. Each fails its named owner; exact
+restoration passes all four, with real production sources unchanged.
+
+This leaves 61 original Bitunix owners and 64 Blofin owners for subsequent
+review. Complete discovery, locals, features and WASM matrix coverage remain
+separate obligations; none of the 66 receipts is classification-only.
