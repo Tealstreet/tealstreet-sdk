@@ -10,7 +10,7 @@ export const families = [
   ['woo', 'legacy_data_reads', 'Host', 47, 'woo.exchange', 'WOOXExchange#startFundingRatesRefresh', 'interval'],
   ['kraken', 'rest_account', 'ReadHost', 46, 'krakenspot.exchange', 'KrakenSpotExchange.refreshBalance', 'update_balance'],
   ['woo', 'legacy_order_control', 'Host', 40, 'woo.exchange', 'WOOXExchange.fetchAlgoOrders', 'map_algo'],
-  ['woo', 'legacy_market_reads', 'Host', 37, 'woo.exchange', 'WOOXExchange.parseTickers', 'normalize_symbol'],
+  ['woo', 'legacy_market_reads', 'Host', 38, 'woo.exchange', 'WOOXExchange.parseTickers', 'normalize_symbol'],
   ['grvt', 'public_feeds', 'PublicFeedHost', 38, 'grvt.ws-public', 'GrvtPublicWebSocket#handleTickerUpdate', 'update_ticker'],
   ['grvt', 'account_runtime', 'AccountHost', 31, 'grvt.exchange', 'GrvtExchange#mapOrder', 'trigger_metadata'],
   ['grvt', 'private_lifecycle', 'PrivateLifecycleHost', 28, 'grvt.ws-private', 'GrvtPrivateWebSocket.connectAndSubscribe', 'routing_host'],
