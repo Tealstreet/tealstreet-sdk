@@ -17,6 +17,12 @@ const callableKinds = new Set(['function', 'method', 'field-fn', 'accessor', 'co
 const expectedAuditedCallableRows = 262;
 const review = JSON.parse(fs.readFileSync(new URL('./store-notification-reviewed-roots.json', import.meta.url), 'utf8'));
 const reviewedRoots = review.roots;
+// #148 deliberately classifies the production primitive's platform-error and
+// nonce output choices. Keep these exact roots in the complete notification walk.
+const reviewedCryptoChoices = new Set([
+  'packages/safe-cex/src/exchanges/coinbase/coinbase.utils.ts::getSigningKey',
+  'packages/safe-cex/src/exchanges/coinbase/coinbase.utils.ts::sign',
+]);
 const reviewedNotificationRows = new Set([
   'CoinbasePrivateWebsocket.applyOrderSnapshotBatch',
   'CoinbaseExchange.markPrivateUserStreamMessageReceived',
@@ -150,7 +156,10 @@ const roots = reviewedRoots.map((reviewed) => {
   assert.equal(row.kind, reviewed.kind, `reviewed callable kind: ${reviewed.name}`);
   assert(callableKinds.has(row.kind), `reviewed row is callable: ${reviewed.name}`);
   assert.equal(row.status, reviewed.review === 'ported' ? 'ported' : 'divergent', `reviewed callable status: ${reviewed.name}`);
-  if (reviewed.review !== 'ported') {
+  if (reviewed.review === 'crypto-choice') {
+    assert(reviewedCryptoChoices.has(rowKey(row)), `only reviewed crypto roots use crypto-choice: ${reviewed.name}`);
+    assert(row.note.startsWith('CHOSEN: MANIFEST-SPEC.md#closed-typed-output-boundary.'), `reviewed crypto choice: ${reviewed.name}`);
+  } else if (reviewed.review !== 'ported') {
     assert.equal(reviewed.review, 'notification-finding', 'only explicit notification findings extend the ported cohort');
     assert(row.note.startsWith('FINDING: Coinbase notification audit.'), `reviewed notification finding: ${reviewed.name}`);
     assert(row.note.includes('NOTIFICATION_REACHABILITY_REVIEW.md'), `notification finding review: ${reviewed.name}`);
@@ -249,6 +258,7 @@ assert.equal(unhandledReachable.length, 0, 'ported Coinbase call graph reaches a
 console.log(JSON.stringify({
   portedCallableRows: portedCallables.length,
   auditedCallableRows: roots.length,
+  reviewedCryptoChoiceRoots: roots.filter((item) => item.reviewed.review === 'crypto-choice').map((item) => item.row.name),
   directCallInventory,
   matchedSourceDeclarations,
   injectedCallableProperties: roots.filter((item) => item.declaration.kind === 'injected-function-property').map((item) => item.row.name),

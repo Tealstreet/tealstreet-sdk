@@ -23,8 +23,10 @@ use safe_cex_venue_binance::exchange_classes::{
 use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
+use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
+use safe_cex_venue_polymarket::binding::exchange::{PolymarketDependencies, PolymarketExchange};
 use std::rc::Rc;
 
 /// What `BackpackExchange::new` takes besides the BaseExchange the registry builds.
@@ -86,6 +88,11 @@ pub trait RustVenueHost {
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
     }
+    fn coinbase(&self) -> Result<CoinbaseDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Coinbase dependencies were not supplied by this RustVenueHost",
+        ))
+    }
     fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "BingX dependencies are unavailable on this host",
@@ -101,6 +108,11 @@ pub trait RustVenueHost {
     fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
     /// Bitget, Bitget USDC and Bitget inverse share one input set.
     fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
+    fn polymarket(&self) -> Result<PolymarketDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Polymarket host inputs are not configured",
+        ))
+    }
     fn hyperliquid(
         &self,
         options: &ExchangeOptions,
@@ -130,6 +142,8 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Coinbase, coinbase_constructor),
+    (ExchangeName::Coinbasespot, coinbase_constructor),
     (ExchangeName::Cryptocom, cryptocom_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Kraken, kraken_constructor),
@@ -138,6 +152,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Polymarket, polymarket_constructor),
 ];
 
 pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -241,6 +256,13 @@ fn external_factory(
     }
 }
 
+pub fn coinbase_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = CoinbaseExchange::new(name, options, store, host.coinbase()?)?;
+        Ok(exchange)
+    })
+}
+
 pub fn bitget_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = BitgetExchange::new(name, options, store, host.bitget()?)?;
@@ -307,6 +329,17 @@ pub fn okx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = OkxExchange::new(name, options, store, host.okx()?)?;
         Ok(exchange)
+    })
+}
+
+pub fn polymarket_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(PolymarketExchange::new(
+            name,
+            options,
+            store,
+            host.polymarket()?,
+        )?)
     })
 }
 
