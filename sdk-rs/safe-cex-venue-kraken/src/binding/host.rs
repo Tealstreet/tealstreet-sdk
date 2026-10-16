@@ -166,38 +166,6 @@ fn qs_parse_form(value: &Js) -> Result<Js, Thrown> {
     Ok(result)
 }
 
-#[cfg(test)]
-mod form_tests {
-    use super::*;
-
-    #[test]
-    fn spot_form_replays_match_the_actual_qs_dependency() {
-        let path =
-            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/spot_form_oracle.cjs");
-        let output = std::process::Command::new("node")
-            .arg(path)
-            .output()
-            .unwrap();
-        assert!(
-            output.status.success(),
-            "{}",
-            String::from_utf8_lossy(&output.stderr)
-        );
-        let cases: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
-        assert_eq!(cases.len(), 6, "replay input inventory");
-        for case in cases {
-            let parsed = qs_parse_form(&Js::str(case["input"].as_str().unwrap())).unwrap();
-            parsed.delete(&units("nonce"));
-            parsed.define("nonce", Js::str("next")).unwrap();
-            assert_eq!(
-                qs_stringify(&parsed, false, false).unwrap(),
-                case["expected"].as_str().unwrap(),
-                "{case}"
-            );
-        }
-    }
-}
-
 /// `qs.stringify(value, { arrayFormat: 'repeat', sort?, format? })`.
 pub(crate) fn qs_stringify(value: &Js, sorted: bool, rfc1738: bool) -> Result<String, Thrown> {
     let collator = if sorted {
@@ -1102,5 +1070,37 @@ impl ConstructorHost for Rt {
             vec![Js::object(vec![("maxRPS", Js::Number(max_rps))])],
         )?;
         Ok(client)
+    }
+}
+
+#[cfg(test)]
+mod form_tests {
+    use super::*;
+
+    #[test]
+    fn spot_form_replays_match_the_actual_qs_dependency() {
+        let path =
+            std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/spot_form_oracle.cjs");
+        let output = std::process::Command::new("node")
+            .arg(path)
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cases: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(cases.len(), 6, "replay input inventory");
+        for case in cases {
+            let parsed = qs_parse_form(&Js::str(case["input"].as_str().unwrap())).unwrap();
+            parsed.delete(&units("nonce"));
+            parsed.define("nonce", Js::str("next")).unwrap();
+            assert_eq!(
+                qs_stringify(&parsed, false, false).unwrap(),
+                case["expected"].as_str().unwrap(),
+                "{case}"
+            );
+        }
     }
 }
