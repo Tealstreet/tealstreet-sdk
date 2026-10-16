@@ -72,7 +72,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/utils.rs::decimals_from_scale"
 status = "ported"
-note = "Typed optional binary64 input uses shared V8 math_log10 after source finite/positive guards, accepting only integer logarithms. Oracle probes +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Shared math_log10 pins the measured darwin-arm64 Node profile, not universal engine parity."
+note = "Typed optional binary64 input uses shared V8 math_log10 after source finite/positive guards, accepting only integer logarithms. Oracle probes +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Shared math_log10 selects measured darwin-arm64 contraction or uncontracted Linux-x64 arithmetic; it does not claim universal engine parity."
 
 [[symbol]]
 ts = "parseLighterApiKeyIndex"
@@ -128,7 +128,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/utils.rs::get_lighter_amount_decimals"
 status = "ported"
-note = "Uses shared fallible Number(any) and measured V8 math_log10. Scale oracle covers +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Source key precedence, null-to-zero acceptance, throw ordering and precision fallback remain unchanged; math_log10 follows the shared measured darwin-arm64 Node profile, not a universal engine claim."
+note = "Uses shared fallible Number(any) and measured V8 math_log10. Scale oracle covers +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Source key precedence, null-to-zero acceptance, throw ordering and precision fallback remain unchanged; math_log10 follows the shared measured native arithmetic profiles (darwin-arm64 contraction, Linux-x64 separate operations), not a universal engine claim."
 
 [[symbol]]
 ts = "getLighterPriceDecimals"
@@ -136,7 +136,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-lighter/src/utils.rs::get_lighter_price_decimals"
 status = "ported"
-note = "Uses shared fallible Number(any) and measured V8 math_log10. Scale oracle covers +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Source key precedence, null-to-zero acceptance, throw ordering and precision fallback remain unchanged; math_log10 follows the shared measured darwin-arm64 Node profile, not a universal engine claim."
+note = "Uses shared fallible Number(any) and measured V8 math_log10. Scale oracle covers +/-256 ULP around every decimal power and pins both prior platform-libm mismatches. Source key precedence, null-to-zero acceptance, throw ordering and precision fallback remain unchanged; math_log10 follows the shared measured native arithmetic profiles (darwin-arm64 contraction, Linux-x64 separate operations), not a universal engine claim."
 
 [[symbol]]
 ts = "normalizeNonNegativeNumber"
