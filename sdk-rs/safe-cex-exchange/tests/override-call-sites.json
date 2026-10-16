@@ -5964,6 +5964,114 @@
     "file": "safe-cex-venue-okx/src/binding/typed_members.rs"
   },
   {
+    "function": "sync",
+    "body": "56d16d1e30503abd",
+    "reference": "crate :: lifecycle :: dispose",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: market_data :: start",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: market_data :: fetch_markets",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: market_data :: fetch_tickers",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: market_data :: fetch_positions",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: market_data :: fetch_ohlcv",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: account_rest :: set_leverage",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: order_execution :: update_order",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: order_commands :: cancel_orders",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: order_commands :: cancel_all_orders",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: order_commands :: cancel_symbol_orders",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: auth_initialization :: validate_account",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "18ea081b1d3c55f1",
+    "reference": "crate :: account :: get_account",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "orders",
+    "body": "6e9f64b36fda5535",
+    "reference": "crate :: order_reads :: fetch_orders",
+    "file": "safe-cex-venue-paradex/src/binding/members.rs"
+  },
+  {
+    "function": "sync",
+    "body": "358d585b83879874",
+    "reference": "crate :: ws_private_lifecycle :: dispose",
+    "file": "safe-cex-venue-paradex/src/binding/sockets.rs"
+  },
+  {
+    "function": "sync",
+    "body": "358d585b83879874",
+    "reference": "crate :: ws_public_lifecycle :: dispose",
+    "file": "safe-cex-venue-paradex/src/binding/sockets.rs"
+  },
+  {
+    "function": "new",
+    "body": "0c8434ab88b12604",
+    "call": "v . start ()",
+    "file": "safe-cex-venue-paradex/src/native_exchange.rs"
+  },
+  {
+    "function": "drop",
+    "body": "9b1e592293461c7e",
+    "call": "self . dispose ()",
+    "file": "safe-cex-venue-paradex/src/native_exchange.rs"
+  },
+  {
     "function": "listen_ohlcv",
     "body": "74c5ee279d5b5127",
     "call": "h . start (poll)",

@@ -113,6 +113,14 @@ pub trait RustVenueHost {
         ))
     }
 
+    fn paradex(
+        &self,
+    ) -> Result<safe_cex_venue_paradex::native_exchange::ParadexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Paradex dependencies were not supplied by this host",
+        ))
+    }
+
     fn phemex(
         &self,
     ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
@@ -178,6 +186,14 @@ pub trait RustVenueHost {
             "Lighter dependencies are unavailable on this host",
         ))
     }
+    fn breakoutprop(
+        &self,
+        _options: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_breakoutprop::host::BreakoutDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Breakout Prop dependencies are unavailable on this host",
+        ))
+    }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
@@ -226,6 +242,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitrue, bitrue_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Breakoutprop, breakoutprop_constructor),
     (ExchangeName::Grvt, grvt_constructor),
     (ExchangeName::Bybit, bybit_constructor),
     (ExchangeName::Bybitdemo, bybit_constructor),
@@ -246,6 +263,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Paradex, paradex_constructor),
     (ExchangeName::Phemex, phemex_constructor),
     (ExchangeName::Polymarket, polymarket_constructor),
     (ExchangeName::Txflow, txflow_constructor),
@@ -656,6 +674,18 @@ pub fn apexomni_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
     })
 }
 
+pub fn paradex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        safe_cex_venue_paradex::native_exchange::ParadexExchange::new(
+            name,
+            options,
+            store,
+            host.paradex()?,
+        )
+        .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
+}
+
 /// Construct the existing scaffold without widening its Phase-0 capabilities.
 pub fn txflow_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
@@ -671,5 +701,19 @@ pub fn txflow_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
                 &safe_cex_transport::TransportRegistry::default(),
             )?,
         ))
+    })
+}
+
+/// Construct DXtrade with the same shared core and source API/polling lifecycle.
+pub fn breakoutprop_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.breakoutprop(&options)?;
+        safe_cex_venue_breakoutprop::lifecycle::BreakoutpropExchange::new(
+            safe_cex_venue_breakoutprop::host::ProductionHost::new(deps),
+            name,
+            options,
+            store,
+        )
+        .map(|exchange| exchange as Rc<dyn safe_cex_exchange::exchange::Exchange>)
     })
 }
