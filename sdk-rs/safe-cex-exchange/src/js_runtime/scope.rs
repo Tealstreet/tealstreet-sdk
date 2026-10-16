@@ -193,10 +193,12 @@ impl<X> Scope<X> {
         handle
     }
     pub fn clear_timeout(&self, handle: &Js) {
-        self.shared
-            .timers
-            .borrow_mut()
-            .retain(|(h, _)| !h.same_reference(handle));
+        let mut timers = self.shared.timers.borrow_mut();
+        if let Some(at) = timers.iter().position(|(h, _)| h.same_reference(handle)) {
+            let (_, task) = timers.remove(at);
+            drop(timers);
+            task.cancel();
+        }
     }
     pub fn report(&self, error: &Thrown, source: &str) {
         self.shared.runtime.report_exception(
