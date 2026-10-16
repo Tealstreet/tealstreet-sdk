@@ -338,6 +338,13 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     Balance::export_all(&config)?;
     Ticker::export_all(&config)?;
     PublicTrade::export_all(&config)?;
+    OptionRight::export_all(&config)?;
+    OptionTerms::export_all(&config)?;
+    OptionGreeks::export_all(&config)?;
+    OptionQuote::export_all(&config)?;
+    OptionChainQuery::export_all(&config)?;
+    OptionChainRow::export_all(&config)?;
+    AccountGreeks::export_all(&config)?;
     Candle::export_all(&config)?;
     Execution::export_all(&config)?;
     OrderBookOrders::export_all(&config)?;

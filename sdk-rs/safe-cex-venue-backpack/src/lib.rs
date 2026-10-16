@@ -37,6 +37,8 @@ pub mod public_listeners;
 
 pub mod native_value;
 
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod native_host;
 pub mod native_http;
 
 pub mod adapter;

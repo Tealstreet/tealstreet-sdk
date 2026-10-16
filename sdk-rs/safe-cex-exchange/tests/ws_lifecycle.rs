@@ -819,3 +819,172 @@ fn root_base_offline_recovery_eager_dispatch_identity_and_throw_prefix() {
     assert_eq!(source["eager"], 3);
     assert_eq!(source["throwPrefix"], 2);
 }
+
+mod js_sockets {
+    use super::*;
+    use safe_cex_exchange::js_runtime::{
+        sockets::{JsSocketContext, base_websocket, base_websocket_class},
+        value::Js,
+    };
+    use safe_cex_transport::socket::SocketFrame;
+
+    fn counter(count: &Rc<Cell<usize>>) -> Js {
+        let count = count.clone();
+        Js::function("listener", move |_, _| {
+            count.set(count.get() + 1);
+            Ok(Js::Undefined)
+        })
+    }
+
+    fn live_socket(runtime: &Rc<Runtime>) -> Rc<Io> {
+        runtime.pump();
+        runtime.io.borrow().last().expect("dialed").clone()
+    }
+
+    #[test]
+    fn redial_drops_the_replaced_handles_listeners_so_one_frame_dispatches_once() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = JsSocketContext::new(runtime.clone());
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let (messages, closures) = (Rc::new(Cell::new(0)), Rc::new(Cell::new(0)));
+        let on_message = counter(&messages);
+        // A venue re-registering the same member, plus a fresh closure, per (re)connect.
+        for _ in 0..3 {
+            let ws = socket
+                .call_method("createWebsocket", vec![Js::str("wss://venue")])
+                .unwrap();
+            for _ in 0..2 {
+                ws.call_method(
+                    "addEventListener",
+                    vec![Js::str("message"), on_message.clone()],
+                )
+                .unwrap();
+            }
+            ws.call_method(
+                "addEventListener",
+                vec![Js::str("message"), counter(&closures)],
+            )
+            .unwrap();
+        }
+        let io = live_socket(&runtime);
+        io.events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text("frame".into())));
+        runtime.pump();
+        assert_eq!(
+            messages.get(),
+            1,
+            "same listener registered twice dispatches once"
+        );
+        assert_eq!(
+            closures.get(),
+            1,
+            "replaced handles' listeners do not dispatch"
+        );
+    }
+
+    #[test]
+    fn listeners_are_removed_by_identity_and_errors_reach_them() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = JsSocketContext::new(runtime.clone());
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let ws = socket
+            .call_method("createWebsocket", vec![Js::str("wss://venue")])
+            .unwrap();
+        let (kept, removed, errors) = (
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+            Rc::new(Cell::new(0)),
+        );
+        let (kept_fn, removed_fn) = (counter(&kept), counter(&removed));
+        for f in [&kept_fn, &removed_fn] {
+            ws.call_method("addEventListener", vec![Js::str("message"), f.clone()])
+                .unwrap();
+        }
+        ws.call_method("addEventListener", vec![Js::str("error"), counter(&errors)])
+            .unwrap();
+        ws.call_method("removeEventListener", vec![Js::str("message"), removed_fn])
+            .unwrap();
+        let io = live_socket(&runtime);
+        io.events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text("frame".into())));
+        io.events
+            .borrow_mut()
+            .push_back(WsEvent::Error("boom".into()));
+        runtime.pump();
+        assert_eq!((kept.get(), removed.get(), errors.get()), (1, 0, 1));
+    }
+
+    #[test]
+    fn base_surface_has_field_initializers_close_diagnostics_and_prototype_dispose() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = JsSocketContext::new(runtime.clone());
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let socket = base_websocket(&context, Js::object(vec![]));
+        for (field, expected) in [
+            ("lastCloseTime", "0"),
+            ("onCloseCount", "0"),
+            ("reconnecting", "false"),
+            ("pingSent", "false"),
+        ] {
+            assert_eq!(socket.get(field).unwrap().to_display(), expected, "{field}");
+        }
+        assert!(socket.get("pingTimeoutId").unwrap().is_undefined());
+        socket
+            .call_method("createWebsocket", vec![Js::str("wss://venue")])
+            .unwrap();
+        socket
+            .call_method(
+                "recordCloseDiagnostics",
+                vec![
+                    Js::Number(1006.0),
+                    Js::object(vec![("syntheticIfNoSocket", Js::Bool(true))]),
+                ],
+            )
+            .unwrap();
+        // A derived arrow field shadows dispose; the class prototype still reaches it.
+        assert!(!socket.has_own("dispose"));
+        let class = base_websocket_class(&context);
+        let dispose = class.get("prototype").unwrap().get("dispose").unwrap();
+        dispose.call(socket.clone(), vec![]).unwrap();
+        assert!(!socket.get("isConnected").unwrap().truthy());
+    }
+
+    #[test]
+    fn retry_failed_connect_drives_the_close_path_backoff_into_a_fresh_dial() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = JsSocketContext::new(runtime.clone());
+        *context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let connects = Rc::new(Cell::new(0));
+        {
+            // The venue's own connect, which the core's reconnect path calls back into.
+            let (connects, this) = (connects.clone(), socket.clone());
+            socket
+                .define(
+                    "connectAndSubscribe",
+                    Js::function("connectAndSubscribe", move |_, _| {
+                        connects.set(connects.get() + 1);
+                        this.call_method("createWebsocket", vec![Js::str("wss://venue")])
+                    }),
+                )
+                .unwrap();
+        }
+        socket
+            .call_method(
+                "retryFailedConnect",
+                vec![Js::str("listen key fetch failed")],
+            )
+            .unwrap();
+        for _ in 0..10 {
+            runtime.advance(10_000.0);
+        }
+        assert!(
+            connects.get() >= 1,
+            "a failed connect is retried through connectAndSubscribe"
+        );
+    }
+}
