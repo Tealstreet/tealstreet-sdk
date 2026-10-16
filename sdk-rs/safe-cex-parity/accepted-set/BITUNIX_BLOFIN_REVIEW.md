@@ -105,3 +105,31 @@ invert fee sign, replace notional's close price with quantity, and invert the
 market-order test. Each fails its named owner; exact restoration passes all
 three. Real production source bytes are unchanged. This leaves 78 original
 Bitunix owners, alongside the previously listed pointer and Blofin scope.
+
+## Blofin wire records and concrete helpers
+
+Another 49 Blofin native/default owners execute directly: twelve response/data
+records and 37 private numeric, property, error, response and stream helpers.
+Record observations inspect every native field individually, including nested
+row order, distinct string fields, optional omission versus null, and all three
+batch-side enum variants. Complete valid arrays in Serde declaration order
+refuse the map-only boundary. These classify the maintained schema; erased TS
+types do not validate arbitrary runtime values.
+
+Helper observations distinguish number bits, nullish and truthy selection,
+error class/message, first-element selection, stream sequence/level fields and
+nonempty book levels. All 49 runtime owner receipts pass with fresh compiler
+inventory and jobs1. Compiled copied-production controls drop the parsed levels
+and remove only FetchMarginModeResponseData's map guard. Both fail their native
+owner; exact restoration passes both. Real production source bytes are unchanged.
+
+Two additional receipts classify the exact Bitunix RetryCondition and Blofin
+BlofinApiFactory pointers as nondecoders. The shared reviewed pointer registry
+checks their compiler signatures, authenticated roots and invariant native type
+equality, plus actual Serde/conversion traits. This makes no callback-execution,
+generic, local, feature or WASM claim.
+
+Together with the preceding batch-side repair, 50 of the original 163 Blofin
+owners now have these selected native contracts, leaving 113. All thirteen
+Blofin aliases and both Bitunix aliases have bounded native classifications.
+The remaining 78 Bitunix owners and complete package/matrix gates remain owed.
