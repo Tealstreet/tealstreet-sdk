@@ -11,6 +11,11 @@ the Kraken family (`kraken`, `krakenspot`),
 (crate layout, "Constructors and loaders live in `safe-cex-registry`"; P4 exit,
 "a tier-1 account on the Rust path behind a flag").
 
+TxFlow (`txflow`) is also constructible as its existing **Phase-0 scaffold**.
+Its `start` emits and returns the exact source refusal before any IO; this entry
+does not enable REST, WebSocket or trading support. `native_host_txflow` verifies
+the production constructor and both network guards.
+
 ## Today
 
 `loaders.rs` forwards a TypeScript module specifier and export name to a host
@@ -303,3 +308,12 @@ account query over an authenticated local tradetunnel, with no direct HTTP.
 The independent query HMAC, distinct precision steps and default frame format
 are checked. `scripts/phemex-tunnel-controls.py` proves missing/no-op native
 provider mutations compile and fail this witness, then restores exact bytes.
+
+
+AsterDEX native hosts now share their hosted account with the source receiver
+and signed HTTP clients through the common signer bridge, retaining per-lane
+post-sign routing. V1 and V3 account reads and validation work without local
+secrets; the source's nonempty API-key rule remains. Its raw clock HTTP bypasses
+hosted signing. `native_host_asterdex` covers metadata, exact returned wire
+configuration and the key refusal; its four compiled controls live in
+`scripts/asterdex-hosted-controls.py`.

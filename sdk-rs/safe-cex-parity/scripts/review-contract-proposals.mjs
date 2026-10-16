@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { inventory } from './accepted-inventory.mjs';
+import { loadContracts } from './accepted-contract-files.mjs';
 
 // Review documents deliberately have no contract-shaped `category` field. They
 // are not inputs to accepted-set.mjs and confer no discovery/runtime permission.
@@ -170,7 +171,7 @@ export function main(args) {
   assert.equal(packages.length, 1, 'one actual workspace compiler package required');
   const pkg = packages[0];
   const references = testIndex(path.dirname(pkg.manifest_path), repository);
-  const contracts = JSON.parse(fs.readFileSync(path.join(workspace, 'safe-cex-parity/accepted-set/contracts.json'), 'utf8'));
+  const contracts = loadContracts(path.join(workspace, 'safe-cex-parity/accepted-set/contracts'));
   const construction = JSON.parse(fs.readFileSync(path.join(workspace, 'safe-cex-parity/accepted-set/construction.json'), 'utf8'));
   const targets = [];
   for (const row of rows) {
@@ -186,7 +187,7 @@ export function main(args) {
     format: 'accepted-contract-review-proposals-v1', status: 'needs-human-review', gatePermission: false,
     head: command('git', ['rev-parse', 'HEAD'], repository).trim(), censusHead: census.head,
     compiler: command('rustc', ['-Vv'], workspace).trim(), configuration: 'native/default', cargoJobs: Number(jobs), package: pkg.name, targets,
-    instructions: 'Review the TS/tooling input contract and each source body. Author expected outputs independently. Execute actual native witnesses before copying a reviewed classification into contracts.json. This report is not a contract, exemption, runtime receipt or passing gate.',
+    instructions: 'Review the TS/tooling input contract and each source body. Author expected outputs independently. Execute actual native witnesses before copying a reviewed classification into its per-crate contracts/<compiler-crate>.json file. This report is not a contract, exemption, runtime receipt or passing gate.',
   };
   const text = JSON.stringify(report, null, 2) + '\n';
   if (output) fs.writeFileSync(output, text, { flag: 'wx' }); else process.stdout.write(text);
