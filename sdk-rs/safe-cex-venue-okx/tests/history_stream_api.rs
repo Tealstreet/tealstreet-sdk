@@ -418,6 +418,31 @@ fn invoke(t: Rc<State>, f: V, args: Vec<V>) -> Result<V, E> {
                 t.xhr.clone()
             }
             "networkErrorOnRead" => Rc::new(Native::Call("readCondition".into())),
+            "signatureRejectedResponse" => {
+                assert!(
+                    matches!(args[0].as_ref(), Native::Call(name) if name == "isOkxSignatureRejection")
+                );
+                Rc::new(Native::Call("signatureCondition".into()))
+            }
+            // Retry probes carry no response, so the real condition declines them.
+            "signatureCondition" => {
+                assert!(
+                    null(&get(&args[0], "response")),
+                    "retry probes carry no response"
+                );
+                b(false)
+            }
+            "resendOnSignatureRejection" => {
+                assert!(
+                    matches!(args[2].as_ref(), Native::Call(name) if name == "isOkxSignatureRejection")
+                );
+                let data = get(&args[1], "data");
+                assert!(
+                    !safe_cex_venue_okx::api::is_okx_signature_rejection(&wire(&data)).unwrap(),
+                    "no factory fixture is a signature rejection"
+                );
+                u()
+            }
             "retry" => {
                 effect(&t, "retryInstall", vec![get(&args[1], "retries")])?;
                 put(&t.xhr, "condition", get(&args[1], "retryCondition"));
@@ -532,6 +557,7 @@ fn invoke(t: Rc<State>, f: V, args: Vec<V>) -> Result<V, E> {
                 s("2023-11-14T22:13:20.000Z")
             }
             (Native::S(_), "includes") => b(text(o).contains(&text(&args[0]))),
+            (Native::S(_), "trim") => s(safe_cex_num::js_trim(&text(o))),
             (Native::S(_), "toUpperCase") => s(&text(o).to_uppercase()),
             (Native::Mac(key, _), "update") => Rc::new(Native::Mac(key.clone(), text(&args[0]))),
             (Native::Mac(key, message), "digest") => {
@@ -659,7 +685,8 @@ fn host(t: Rc<State>) -> Rc<RuntimeOps<V, E>> {
                 "market-error-message" => {
                     concat(&[s("Market "), a[0].clone(), s(" not found on OKX")])
                 }
-                "api-error-message" => concat(&[s("OKX API error (code "), a[0].clone(), s(")")]),
+                "is-array" => b(matches!(a[0].as_ref(), Native::A(_))),
+                "string" => s(&text(&a[0])),
                 "bills-cap-message" => s(&format!(
                     "OKX bills paging hit the 200-page cap after {} rows; older rows in this window were not fetched",
                     text(&a[0])
@@ -1234,6 +1261,10 @@ fn inputs(method: &str, cases: &[&str]) -> Vec<Value> {
             if *case=="empty-query"{f["request"]["params"]=json!({});}
             if *case=="code-number"{f["response"]=json!({"data":{"code":1}});}
             if *case=="code-message"{f["response"]=json!({"data":{"code":"7","msg":"bad"}});}
+            if *case=="row-error"{f["response"]=json!({"data":{"code":"1","msg":"All operations failed","data":[{"sCode":"0","sMsg":""},{"sCode":"51000","sMsg":" Parameter error "}]}});}
+            if *case=="row-message"{f["response"]=json!({"data":{"code":"1","msg":"","data":[{"sCode":"0","sMsg":"partial"}]}});}
+            if *case=="row-trimmed-msg"{f["response"]=json!({"data":{"code":"2","msg":"  spaced  ","data":[null,{"sCode":"0"}]}});}
+            if *case=="row-code-only"{f["response"]=json!({"data":{"code":"3","msg":"","data":[{"sCode":51001}]}});}
             if *case=="code-zero"{f["response"]=json!({"data":{"code":0}});}
             if *case=="null-response"{f["response"]=json!({"data":null});}
         }
@@ -1381,6 +1412,10 @@ fn factory_native() {
             "empty-query",
             "code-number",
             "code-message",
+            "row-error",
+            "row-message",
+            "row-trimmed-msg",
+            "row-code-only",
             "code-zero",
             "null-response",
             "fail:factory",

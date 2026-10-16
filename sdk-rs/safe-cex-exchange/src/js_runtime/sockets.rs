@@ -2,6 +2,7 @@
 //! dialing, close handling and reconnects; its protocol callbacks dispatch to the
 //! JS object's ported members (connectAndSubscribe, onOpen, onMessage, ping).
 use super::{
+    promise::Promise,
     value::arg,
     value::{Getter, Js, Thrown},
 };
@@ -127,6 +128,66 @@ impl JsProtocol {
     }
 }
 
+// Preserve the host binary object until a venue explicitly consumes its bytes
+// or asks for text. Node ws delivers Buffer; browser WebSocket defaults to Blob.
+fn binary_data(bytes: &[u8], runtime: Rc<dyn crate::runtime::ExchangeRuntime>) -> Js {
+    let values = Js::array(
+        bytes
+            .iter()
+            .map(|byte| Js::Number(f64::from(*byte)))
+            .collect(),
+    );
+    let buffer = Js::object_with_class(
+        "ArrayBuffer",
+        vec![
+            ("bytes", values.clone()),
+            ("byteLength", Js::Number(bytes.len() as f64)),
+        ],
+    );
+    if cfg!(target_arch = "wasm32") {
+        let size = bytes.len() as f64;
+        let text = String::from_utf8_lossy(bytes).into_owned();
+        let text_runtime = runtime.clone();
+        Js::object_with_class(
+            "Blob",
+            vec![
+                ("size", Js::Number(size)),
+                (
+                    "arrayBuffer",
+                    Js::function("arrayBuffer", move |_, _| {
+                        Ok(Js::Promise(Promise::settled(&runtime, Ok(buffer.clone()))))
+                    }),
+                ),
+                (
+                    "text",
+                    Js::function("text", move |_, _| {
+                        Ok(Js::Promise(Promise::settled(
+                            &text_runtime,
+                            Ok(Js::str(&text)),
+                        )))
+                    }),
+                ),
+            ],
+        )
+    } else {
+        let text = String::from_utf8_lossy(bytes).into_owned();
+        Js::object_with_class(
+            "Buffer",
+            vec![
+                ("bytes", values),
+                ("buffer", buffer),
+                ("byteOffset", Js::Number(0.0)),
+                ("byteLength", Js::Number(bytes.len() as f64)),
+                ("length", Js::Number(bytes.len() as f64)),
+                (
+                    "toString",
+                    Js::function("toString", move |_, _| Ok(Js::str(&text))),
+                ),
+            ],
+        )
+    }
+}
+
 impl WsProtocol for JsProtocol {
     fn ping(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         let core = self.core()?;
@@ -198,7 +259,10 @@ impl WsProtocol for JsProtocol {
     ) -> Result<(), ExchangeError> {
         let data = match frame {
             SocketFrame::Text(text) => Js::str(text),
-            SocketFrame::Binary(bytes) => Js::str(&String::from_utf8_lossy(bytes)),
+            SocketFrame::Binary(bytes) => {
+                let runtime = self.core()?.context.runtime.clone();
+                binary_data(bytes, runtime)
+            }
             SocketFrame::Close {
                 code,
                 reason,
