@@ -1290,3 +1290,30 @@ Historical survivor status made explicit: **3 resolved /0 current survivors** wi
 The earlier tests missed, respectively, the fixed-to-user composition edge because topics were empty on fixed calls; the native dispose edge because only its descriptor was inspected; and own interval:undefined because Get and JSON text cannot distinguish it from absence. The current native test invokes installed fixed with populated topics, invokes installed prototype dispose with original receiver/effect observations, and compares exact own key/descriptors before wire. FINDINGS_11_REVALIDATION.json records each cause, named assertion and broken/restored exit. This is a finite three-recipe repeat; the other twenty unique recipes are not re-run in this unit. No discarded-duplicate capture file is edited.
 
 Pinned read-only sub-agent closure review is appended to FINDINGS_11_REVIEWS.md. Final local gates remain only workspace fmt --check and locked workspace build at the delivered commit, with exits bound in the local receipt. Clippy, wasm, wiring, layers and routing are centrally owned and not run locally; full suites/static/extractor/live/CI checks also are not run. No push.
+
+
+### Production journal fold binding (ddi2il-20)
+
+`Exchange::fetch_historical_positions` now dispatches the existing source arrow,
+whose superclass helper uses the shared `build_records` engine. The engine reads
+the same realm instance's source income-range and historical-fill methods; income
+mapper/pager imports bind to `income.rs`, and asynchronous REST callbacks use the
+existing owned task dispatcher. The shared typed output boundary still applies.
+
+Compiled negative controls used the new round-trip production test: the original
+trait default failed with `no journal records path declared`; enabling only trait
+dispatch failed with `fetchHistoricalPositions is not bound by this realm`. Both
+are runtime failures after successful compilation. The restored implementation
+returns a real closed round trip (PnL1000, fees3) with requested account, bounds
+and market settlement currency. A separate default-window test pins integer
+Date.now, the source30-day range and the shared14-day straddle lookback. A native
+registry test obtains the same closed record through real reqwest HTTP without
+starting sockets. Empty results or bypassing symbol-scoped execution reads fail
+the nonempty-record assertion. The source `deriveClosedPositions` axis remains
+separate from this shared journal fold.
+
+Scoped gates: production binding16/16; native Hyperliquid HTTP2/2; registry
+construction13/13; actual-source core snapshots/core REST/rest helpers11/11;
+Hyperliquid venue-oracle39/39; parity:check0; registry48 names and control1/1;
+layers88/88. Native all-target and wasm library strict clippy plus fmt pass for
+the venue and registry. No fixture or manifest regeneration.

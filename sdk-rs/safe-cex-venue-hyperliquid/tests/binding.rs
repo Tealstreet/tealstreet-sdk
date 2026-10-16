@@ -160,6 +160,92 @@ fn constructs_through_the_ported_class_constructor() {
 }
 
 #[test]
+fn historical_positions_fold_real_fills_with_account_bounds_and_settlement() {
+    let f = started();
+    f.routes.routes.borrow_mut().extend([
+        ("info:userFillsByTime".into(), json!([
+            {"coin":"BTC","tid":1,"oid":10,"time":1699999998000u64,"side":"B","px":"61000","sz":"1","fee":"1","feeToken":"USDC","closedPnl":"0","dir":"Open Long","startPosition":"0"},
+            {"coin":"BTC","tid":2,"oid":11,"time":1699999999000u64,"side":"A","px":"62000","sz":"1","fee":"2","feeToken":"USDC","closedPnl":"1000","dir":"Close Long","startPosition":"1"}
+        ])),
+        ("info:userFunding".into(), json!([])),
+    ]);
+    let records = f
+        .host
+        .block_on(f.exchange.fetch_historical_positions(
+            safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "audit-account".into(),
+                from: Some(1_699_999_000_000.0),
+                to: Some(1_700_000_000_000.0),
+            },
+        ))
+        .unwrap();
+    assert_eq!(
+        records.len(),
+        1,
+        "a real closed round trip must be returned; requests {:?}; console {:?}; reports {:?}",
+        f.routes.requests.borrow(),
+        f.host.console.borrow(),
+        f.host.reports.borrow()
+    );
+    let record: safe_cex_types::PositionRecord =
+        serde_json::from_value(records[0].clone()).unwrap();
+    assert_eq!(record.account, "audit-account");
+    assert_eq!(record.symbol, "BTC-PERP");
+    assert_eq!(
+        record.settle_currency,
+        f.exchange.base().store.markets_by_symbol()["BTC-PERP"].quote
+    );
+    assert_eq!(record.realized_pnl, 1000.0);
+    assert_eq!(record.fees, 3.0);
+    let requests = f.routes.requests.borrow();
+    let income = requests
+        .iter()
+        .find(|(route, _)| route == "info:userFillsByTime")
+        .unwrap();
+    assert_eq!(
+        income.1["startTime"].as_f64(),
+        Some(1_699_999_000_000.0 - 14.0 * 86400000.0)
+    );
+    assert_eq!(income.1["endTime"], json!(1_700_000_000_000u64));
+    assert_eq!(income.1["user"], MASTER);
+    assert!(
+        f.routes.count("info:userFillsByTime") > 1,
+        "symbol-scoped fold fetches executions after income discovery"
+    );
+}
+
+#[test]
+fn historical_positions_default_window_uses_integer_date_now_and_shared_lookback() {
+    let f = fixture(vec![
+        ("info:userFillsByTime", json!([])),
+        ("info:userFunding", json!([])),
+    ]);
+    f.host.now.set(0.75);
+    let records = f
+        .host
+        .block_on(f.exchange.fetch_historical_positions(
+            safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "empty-account".into(),
+                from: None,
+                to: None,
+            },
+        ))
+        .unwrap();
+    assert!(records.is_empty());
+    let requests = f.routes.requests.borrow();
+    let first = &requests[0].1;
+    assert_eq!(first["type"], "userFillsByTime");
+    assert_eq!(first["endTime"].as_f64(), Some(1_700_000_000_000.0));
+    assert_eq!(
+        first["startTime"].as_f64(),
+        Some(1_700_000_000_000.0 - 44.0 * 86400000.0)
+    );
+    assert_eq!(f.routes.count("info:userFunding"), 1);
+    assert!(f.host.console.borrow().is_empty());
+    assert!(f.host.reports.borrow().is_empty());
+}
+
+#[test]
 fn fetch_orders_reads_frontend_open_orders() {
     let f = fixture(vec![("info:frontendOpenOrders", json!([]))]);
     let orders = f

@@ -307,3 +307,14 @@ fabricated user-only feeder row to valid funding plus user. Collection identity
 pins the repaired feeder hash and reconstructs the old excluded row to verify
 that every other feeder byte is unchanged. Neither numeric goldens nor native
 production behavior are rewritten to reconcile this source-corpus boundary.
+
+
+The production `fetch_historical_positions` trait method invokes the source
+`fetchHistoricalPositions` arrow. Its realm superclass fold calls the existing
+shared `build_records` engine through the source instance's income-range and
+execution readers. Income mapper/pager imports use the existing `income` ports;
+async REST callbacks must use `start_rest_callback`, never the synchronous
+callback dispatcher. Default journal bounds use realm Date.now (integer ms) and
+the source 30-day window, with shared 14-day straddle lookback. Returned journal
+records retain the shared typed output boundary. This is distinct from the
+venue's `deriveClosedPositions` and `fetchClosedPnl` capability.

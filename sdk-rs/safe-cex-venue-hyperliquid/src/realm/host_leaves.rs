@@ -758,7 +758,13 @@ impl PrivatePositionHost for Realm {
 impl RestReadHost for Realm {
     fn rest_callback(&mut self, callback: RestCallback<Value>) -> Result<Value, Value> {
         Ok(self.native("", 1, move |r, _, args| {
-            core_rest_reads::run_rest_callback(r, &callback, args)
+            if callback.is_async() {
+                let observer =
+                    core_rest_reads::start_rest_callback(r, callback.clone(), args.to_vec());
+                Ok(r.spawn_value(Box::pin(observer)))
+            } else {
+                core_rest_reads::run_rest_callback(r, &callback, args)
+            }
         }))
     }
     fn rest_exception(&self, value: Value) -> Value {
