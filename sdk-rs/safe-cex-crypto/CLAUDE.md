@@ -38,6 +38,14 @@ being re-keyed; each scheme tests raw two-key wire order and signature-last,
 and the transmitted authenticated input is checked against its signing preimage.
 The output-format match remains exhaustive with no wildcard.
 
+Encoding and WsOutputFormat represent the maintained inline string unions.
+Their concrete deserializers admit String before private Serde remote enums;
+valid tagged maps are not source inputs. Serialize metadata and native variants
+remain unchanged. The string_enum_ingress target checks all nine variants and
+raw/owned/borrowed/qualified refusals. scripts/string-enum-controls.py removes
+each frontdoor independently, requires a compiled named tagged-map failure,
+then restores exact bytes and requires both tests to pass.
+
 See [GATE_EVIDENCE.md](GATE_EVIDENCE.md) for actual mutation outcomes and any
 pending integration gates; a fixture count alone does not prove corpus coverage.
 

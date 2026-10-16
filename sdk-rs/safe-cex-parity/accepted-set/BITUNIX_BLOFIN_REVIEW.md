@@ -245,3 +245,62 @@ production source bytes remain unchanged throughout the controls.
 These rows leave 42 original
 Bitunix owners and 49 Blofin owners for subsequent review. Complete-package
 runtime, local-owner and feature/WASM matrix gates remain separate obligations.
+
+## REST and historical-read orchestration
+
+Six more Bitunix owners execute native/default contracts with bounded immediately
+ready futures and explicit callbacks. OHLCV observes request order, date callback
+inputs, optional limit presence and complete ordered Candle fields as native
+number bits, including signed zero. Its two distinct candles also detect partial
+output loss. Account validation retains strict numeric-code admission, original
+error variants, account-before-balance order and balance-failure presence. Symbol
+metadata retains set-before-read order, margin/leverage presence, matching-only
+overlays and null-response short circuits.
+
+The three history wrappers observe the actual selector function pointers, native
+UTF-16 ID and timestamp results, exact endpoint/options, public-only short circuits
+and propagated errors. Income preserves one-to-many mapping and empty results;
+closed PnL reads each account value before mapping, including a skipped row.
+Complete native result vectors retain descending order and number bits. These
+bounded callbacks do not replace the separately mapped pagination, REST, Store
+or mapper implementations.
+
+All six native owners pass. Five compiled copied-production mutations alter a
+candle field, strict validation code, margin mode, history selector precedence
+and descending sorting: all six observations fail and all restored owners pass.
+An additional keep-first candle mutation fails the full two-row observation,
+then passes after restoration. Real production bytes remain unchanged.
+
+This batch leaves 36 original Bitunix owners and the previously measured
+49 Blofin owners. The original Blofin census stopped at receiver drift, so its
+empty missing-owner array does not prove runtime completeness. Full-package,
+local-owner and feature/WASM matrices remain separate obligations.
+
+## REST read and write hosts
+
+Another six Bitunix owners execute native/default witnesses. The three writes
+retain both position-mode literals, complete position preflight before warning,
+POST-before-setting order, full UTF-16 symbols including isolated surrogates,
+leverage clamp bits and updates to both long/short IDs after successful POST.
+Transport, setting, warning, rejection and report failures remain distinct.
+
+Market and ticker reads independently inspect two complete native outputs,
+including every declared number bit and optional-field absence. Unknown and
+filtered rows remain distinct. Their fallback fixtures return two distinct
+cached rows and inspect the full vectors. Balance checks native arithmetic,
+account-mode updates, zero-value precedence and the complete two-position
+borrowed slice, including pointer identity. Ready callback hosts bound this
+profile; arbitrary transport scheduling and executable host objects remain
+separate obligations.
+
+All six actual native owners pass, with no classification-only receipts. Eight
+compiled copied-production mutations alter the mode literal, UTF-16 symbol,
+short-position update ID, market amount precision, ticker ask, frozen-balance
+arithmetic, both cached fallback vectors and the returned position slice. Each
+fails the intended native observation, then passes after exact restoration.
+The two cached-vector and position truncation gaps were found by independent
+review and repaired before publication. Production source bytes are unchanged.
+
+After the six earlier REST/history owners, this batch leaves 30 original
+Bitunix owners and the previously measured 49 Blofin owners. Complete-package,
+local-owner and feature/WASM matrices remain separate obligations.
