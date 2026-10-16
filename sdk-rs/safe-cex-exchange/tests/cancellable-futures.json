@@ -1867,9 +1867,9 @@
         "opaque-macro-review",
         "opaque-macro-review"
       ],
-      "producer_sha256": "7dd5aab614e42d777c7284b4d9b3865367bb5d81067d4389a3e2331049cb1694",
+      "producer_sha256": "b9798f457464f9c2ac70ceb92270684184664cab1cbaf400f766dac7833a034a",
       "classification": "immediate",
-      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed."
+      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed descriptor value formatting: the new DataDescriptor match arm passes its value to the same synchronous debug-map entry, with no task, waiter, or future."
     },
     {
       "owner": "src/js_runtime/value.rs::Thrown as fmt :: Debug::fmt",

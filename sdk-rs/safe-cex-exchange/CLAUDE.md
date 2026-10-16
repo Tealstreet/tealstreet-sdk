@@ -961,6 +961,17 @@ compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
 checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
 
+The js_runtime Object.defineProperty binding retains ordinary-object/function data
+attributes, following ToPropertyDescriptor and ValidateAndApplyPropertyDescriptor
+in ECMA-262. New fields default to undefined/false; omitted fields on an existing
+property retain their value. Read-only writes reject, non-enumerable fields stay
+out of keys/spread/JSON, and non-configurable fields survive deletion and reject
+incompatible redefinition (SameValue preserves NaN and the sign of zero).
+Arrays and accessor descriptors explicitly refuse until a source caller requires
+that representation. Existing host define_accessor remains the host accessor seam.
+The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
+redefinition matrix; the native error test covers Polymarket's enhanced message.
+
 The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
 worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
 completion hook and reconstructed error properties. Arguments/results use the
