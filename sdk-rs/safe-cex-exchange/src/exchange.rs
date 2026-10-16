@@ -145,12 +145,14 @@ pub struct ExchangeSettings {
 pub(crate) enum SocketRegistration {
     Owned(Rc<BaseWebSocket>),
     Borrowed(std::rc::Weak<BaseWebSocket>),
+    Lookup(Rc<dyn Fn() -> Option<Rc<BaseWebSocket>>>),
 }
 impl SocketRegistration {
     fn upgrade(&self) -> Option<Rc<BaseWebSocket>> {
         match self {
             Self::Owned(socket) => Some(socket.clone()),
             Self::Borrowed(socket) => socket.upgrade(),
+            Self::Lookup(lookup) => lookup(),
         }
     }
 }
@@ -1956,6 +1958,15 @@ impl BaseExchange {
     pub fn set_borrowed_socket(&self, slot: SocketSlot, socket: &Rc<BaseWebSocket>) {
         self.sockets.borrow_mut()[slot as usize] =
             Some(SocketRegistration::Borrowed(Rc::downgrade(socket)));
+    }
+    /// Resolve a source-owned socket lazily, including replacement and removal.
+    /// The lookup must hold weak owner references to avoid a parent/child cycle.
+    pub fn set_socket_lookup(
+        &self,
+        slot: SocketSlot,
+        lookup: Rc<dyn Fn() -> Option<Rc<BaseWebSocket>>>,
+    ) {
+        self.sockets.borrow_mut()[slot as usize] = Some(SocketRegistration::Lookup(lookup));
     }
     pub fn get_socket(&self, slot: SocketSlot) -> Option<Rc<BaseWebSocket>> {
         self.sockets.borrow()[slot as usize]

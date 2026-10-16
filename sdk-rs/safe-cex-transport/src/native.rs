@@ -77,16 +77,30 @@ pub fn reqwest_adapter() -> Result<ReqwestAdapter, TransportError> {
         .map_err(|e| TransportError::Host(format!("HTTP client: {e}")))
 }
 fn request_url(request: &RestRequest) -> String {
-    if request.url.starts_with("http") {
+    // Axios buildFullPath/isAbsoluteURL and combineURLs: join at one slash,
+    // preserve absolute (including protocol-relative) URLs and an empty path.
+    let absolute = request.url.starts_with("//")
+        || request.url.split_once("://").is_some_and(|(scheme, _)| {
+            let mut bytes = scheme.bytes();
+            bytes.next().is_some_and(|c| c.is_ascii_alphabetic())
+                && bytes.all(|c| c.is_ascii_alphanumeric() || matches!(c, b'+' | b'-' | b'.'))
+        });
+    let Some(base) = request.base_url.as_deref().filter(|base| !base.is_empty()) else {
+        return request.url.clone();
+    };
+    if absolute {
         request.url.clone()
+    } else if request.url.is_empty() {
+        base.to_owned()
     } else {
         format!(
-            "{}{}",
-            request.base_url.as_deref().unwrap_or(""),
-            request.url
+            "{}/{}",
+            base.trim_end_matches('/'),
+            request.url.trim_start_matches('/')
         )
     }
 }
+
 /// Axios buildURL's default params encoding for params no factory codec consumed.
 fn axios_default_query(params: &serde_json::Value) -> String {
     fn encode(text: &str) -> String {
@@ -438,4 +452,58 @@ impl TunnelHost for NativeTunnelHost {
         true
     }
     fn sync_server_time(&self, _server_time: u64) {}
+}
+
+#[cfg(test)]
+mod url_tests {
+    use super::*;
+
+    #[test]
+    fn native_url_joins_base_and_relative_paths_like_axios() {
+        for (base, path, expected) in [
+            (
+                Some("https://dx.test/dxsca-web"),
+                "accounts/A/orders",
+                "https://dx.test/dxsca-web/accounts/A/orders",
+            ),
+            (
+                Some("https://dx.test/dxsca-web///"),
+                "/login",
+                "https://dx.test/dxsca-web/login",
+            ),
+            (
+                Some("https://dx.test/dxsca-web"),
+                "http-price",
+                "https://dx.test/dxsca-web/http-price",
+            ),
+            (
+                Some("https://dx.test/dxsca-web/"),
+                "",
+                "https://dx.test/dxsca-web/",
+            ),
+            (
+                Some("https://dx.test"),
+                "HTTPS://other.test/orders",
+                "HTTPS://other.test/orders",
+            ),
+            (
+                Some("https://dx.test"),
+                "//other.test/orders",
+                "//other.test/orders",
+            ),
+            (None, "https://dx.test/orders", "https://dx.test/orders"),
+            (Some(""), "/login", "/login"),
+        ] {
+            let request = RestRequest {
+                base_url: base.map(str::to_owned),
+                url: path.into(),
+                ..Default::default()
+            };
+            assert_eq!(
+                request_url(&request),
+                expected,
+                "AXIOS URL JOIN {base:?} {path}"
+            );
+        }
+    }
 }
