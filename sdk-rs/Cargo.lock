@@ -3968,6 +3968,7 @@ dependencies = [
  "safe-cex-venue-bitunix",
  "safe-cex-venue-blofin",
  "safe-cex-venue-coinbase",
+ "safe-cex-venue-hyperliquid",
  "safe-cex-venue-kraken",
  "safe-cex-venue-okx",
  "serde",

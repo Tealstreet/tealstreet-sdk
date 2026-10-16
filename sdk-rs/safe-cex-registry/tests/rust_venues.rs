@@ -490,6 +490,28 @@ struct Venues {
     kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
 }
 impl RustVenueHost for Venues {
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn hyperliquid(
+        &self,
+        _: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("hyperliquid");
+        Ok(
+            safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
+                runtime: self.runtime.clone(),
+                http: self.wire.clone(),
+                limiter: Rc::new(safe_cex_venue_hyperliquid::rate_limit::RateLimiter::new(
+                    Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
+                        self.runtime.clone(),
+                    )),
+                    1200.0,
+                    60_000.0,
+                )),
+                signers: Default::default(),
+            },
+        )
+    }
+
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
         self.calls.borrow_mut().push("kraken");
         Ok(safe_cex_venue_kraken::KrakenDependencies {
@@ -691,6 +713,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Blofin,
             ExchangeName::Coinbase,
             ExchangeName::Coinbasespot,
+            ExchangeName::Hyperliquid,
             ExchangeName::Kraken,
             ExchangeName::Krakenspot,
             ExchangeName::Okx,
@@ -1027,7 +1050,9 @@ fn kraken_family_constructs_through_the_registry_and_reads_its_markets() {
 #[cfg(not(target_arch = "wasm32"))]
 #[test]
 fn native_kraken_dependencies_retain_module_state_per_host() {
-    let host = safe_cex_registry::native_host::native_venue_host();
+    let host = safe_cex_registry::native_host::native_venue_host(
+        safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+    );
     let first = host.kraken().unwrap();
     let second = host.kraken().unwrap();
     assert!(
@@ -1045,9 +1070,11 @@ fn native_kraken_dependencies_retain_module_state_per_host() {
         first.external_public_data.is_some(),
         "REGISTRY Kraken native gateway factory"
     );
-    let other = safe_cex_registry::native_host::native_venue_host()
-        .kraken()
-        .unwrap();
+    let other = safe_cex_registry::native_host::native_venue_host(
+        safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+    )
+    .kraken()
+    .unwrap();
     assert!(
         !Rc::ptr_eq(&first.futures_nonces, &other.futures_nonces),
         "REGISTRY separate native runtimes have separate module state"
