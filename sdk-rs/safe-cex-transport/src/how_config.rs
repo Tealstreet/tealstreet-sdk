@@ -175,10 +175,23 @@ pub(crate) fn configured_token_expired(token: &str) -> Option<Result<bool, Trans
     callback.map(|callback| callback(token))
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum HOWRegion {
     JA,
     SG,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "HOWRegion")]
+enum HOWRegionWire {
+    JA,
+    SG,
+}
+impl<'de> Deserialize<'de> for HOWRegion {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(d)?;
+        HOWRegionWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+    }
 }
 impl From<HOWRegion> for crate::routing::HowEgress {
     fn from(value: HOWRegion) -> Self {
@@ -195,7 +208,7 @@ pub struct CreateAxiosHttpOverWebsocketAdapterOptions {
     pub region: Option<HOWRegion>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct LatencyEntry {
     pub latency_ms: Value,
@@ -204,6 +217,22 @@ pub struct LatencyEntry {
     pub sample_count: Value,
     pub measured_at: Value,
     pub updated_at: u64,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "LatencyEntry", rename_all = "camelCase")]
+struct LatencyEntryWire {
+    latency_ms: Value,
+    source: Value,
+    cached: Value,
+    sample_count: Value,
+    measured_at: Value,
+    updated_at: u64,
+}
+impl<'de> Deserialize<'de> for LatencyEntry {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        LatencyEntryWire::deserialize(safe_cex_types::strict_decode::object(d))
+    }
 }
 
 #[cfg(test)]
