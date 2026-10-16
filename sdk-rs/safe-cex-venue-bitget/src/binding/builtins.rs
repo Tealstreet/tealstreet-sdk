@@ -3,7 +3,7 @@
 use super::{
     globals::arg,
     promise::{Promise, await_js},
-    value::{Js, Str, Thrown, utf16},
+    value::{Js, Str, Thrown},
 };
 use safe_cex_exchange::runtime::ExchangeRuntime;
 use std::{cell::RefCell, rc::Rc};
@@ -459,11 +459,38 @@ fn promise_member(p: Promise, name: &str) -> Option<Js> {
     Some(match name {
         "then" => method(name, move |a| chain(arg(&a, 0), arg(&a, 1))),
         "catch" => method(name, move |a| chain(Js::Undefined, arg(&a, 0))),
+        "finally" => method(name, move |a| {
+            let f = arg(&a, 0);
+            let g = f.clone();
+            let on_ok = Js::function("", move |_, v| {
+                if f.is_callable() {
+                    let p = f.call(Js::Undefined, vec![])?;
+                    let value = arg(&v, 0);
+                    return Ok(chain_value(p, Ok(value)));
+                }
+                Ok(arg(&v, 0))
+            });
+            let on_err = Js::function("", move |_, v| {
+                if g.is_callable() {
+                    let p = g.call(Js::Undefined, vec![])?;
+                    return Ok(chain_value(p, Err(Thrown::new(arg(&v, 0)))));
+                }
+                Err(Thrown::new(arg(&v, 0)))
+            });
+            chain(on_ok, on_err)
+        }),
         _ => return None,
     })
 }
 
-#[allow(dead_code)]
-fn key(name: &str) -> Str {
-    utf16(name)
+/// Await `p`, then settle with `outcome` (finally keeps the original result).
+fn chain_value(p: Js, outcome: Result<Js, Thrown>) -> Js {
+    let Ok(rt) = runtime() else { return Js::Undefined };
+    Js::Promise(Promise::spawn(
+        &rt,
+        Box::pin(async move {
+            await_js(p).await?;
+            outcome
+        }),
+    ))
 }

@@ -227,6 +227,47 @@ pub fn base_websocket(rt: &Rt, parent: Js) -> Js {
     {
         let core = core.clone();
         def(
+            "trackLastReceived",
+            Js::function("trackLastReceived", move |_, _| {
+                core.base()?.track_last_received().map_err(ex)?;
+                Ok(Js::Undefined)
+            }),
+        );
+    }
+    {
+        let core = core.clone();
+        def(
+            "emitWsDiagnosticReceive",
+            Js::function("emitWsDiagnosticReceive", move |_, a| {
+                let data = super::value::to_json(&arg(&a, 0))?;
+                core.base()?.emit_ws_diagnostic_receive(&data, &Default::default()).map_err(ex)?;
+                Ok(Js::Undefined)
+            }),
+        );
+    }
+    {
+        let core = core.clone();
+        def(
+            "emitWsReconnected",
+            Js::function("emitWsReconnected", move |_, _| {
+                core.base()?.emit_ws_reconnected().map_err(ex)?;
+                Ok(Js::Undefined)
+            }),
+        );
+    }
+    {
+        let core = core.clone();
+        def(
+            "cleanupMessageHandlerStats",
+            Js::function("cleanupMessageHandlerStats", move |_, a| {
+                core.base()?.cleanup_message_handler_stats(&arg(&a, 0).to_display()).map_err(ex)?;
+                Ok(Js::Undefined)
+            }),
+        );
+    }
+    {
+        let core = core.clone();
+        def(
             "handlePongEvent",
             Js::function("handlePongEvent", move |_, a| {
                 let next = arg(&a, 0);

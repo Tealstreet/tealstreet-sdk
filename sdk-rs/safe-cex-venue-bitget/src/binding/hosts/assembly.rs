@@ -542,7 +542,11 @@ pub fn register(g: &Js, weak: Weak<Shared>) {
                     );
                     Ok(Js::object(vec![(
                         "digest",
-                        Js::function("digest", move |_, _| {
+                        Js::function("digest", move |_, d| {
+                            // digest('base64') returns the string; digest() a Buffer-like.
+                            if !arg(&d, 0).is_undefined() {
+                                return Ok(Js::str(&digest));
+                            }
                             let digest = digest.clone();
                             Ok(Js::object(vec![(
                                 "toString",
