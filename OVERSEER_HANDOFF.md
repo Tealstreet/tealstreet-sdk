@@ -46,6 +46,21 @@ the path set is encoded (`TEALSTREET_SDK_FILES`, the two `paths:` blocks in
 `copybara-mirror-sync.sh` — `yarn check:mirror-paths` fails until they agree).
 Confirm the file is present at this repo's root before pushing a seed branch.
 
+**The second thing the seed hits is this repo's `.gitignore`.** It carries
+`*.log`, and the port tracks **2,963 `.log` files, 24.2 MB**, under `sdk-rs/` —
+gate evidence the parity audits cite by path. With `*.log` in force they are
+unstageable here while the monorepo tracks them, so the two sides' `sdk-rs`
+trees could never be equal, `health` would report `in_sync=no` forever and every
+export would retry the same files. The scaffold now negates them
+(`!sdk-rs/**/*.log`). Check `git check-ignore -v` on one of those paths before
+seeding; a seed that silently drops 2,963 files is the wedge, not the fix.
+
+Recorded as debt rather than fixed here: root `CLAUDE.md` says never commit
+generated artifacts, and 24.2 MB of gate logs is exactly that — the 712 MB
+`packages/tealscript/reports/` purge of 2026-09-12 is the precedent. They are
+evidence the audits cite, so deleting them is a decision for whoever owns the
+parity record, not a cleanup to do in passing.
+
 ## 3. One authoring home, and it is now this repo
 
 Authoring the same change in both repos makes both sides edit the same hunks
