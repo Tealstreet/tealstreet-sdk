@@ -68195,5 +68195,3315 @@
       }
     ],
     "evidence": "Actual native amendment helper reads snapshots through the concrete production OrderFrame. Complete retained payloads observe trigger, quantity and LIMIT execution-price precision separately; unchanged opposite legs retain raw snapshot values. Position-level updates skip quantity/execution fields, absent snapshots leave the original payload intact, and invalid trigger/quantity/execution values retain their exact partial mutation and error-event order. Real snapshot decoder/Store bindings retain separate accepted obligations."
+  },
+  "safe_cex_venue_bitunix::adapter_orders::OrderFrame": {
+    "shape": "observed",
+    "evidence": "All23 exact inventoried methods on the concrete OrderFrame execute against the constructed real BitunixVenue, shared Store and scripted native transport, including the two typed no-argument snapshot methods. The bounded fixture inspects declared returned JSON recursively with number bits (without serializing a decoded owner in the probe), real cache effects, error/log callbacks, source order identity and selected HTTP delegation. Native snapshot state includes two distinct positions/orders. This class profile does not exempt constituent model decoders, generic helper hosts, arbitrary prototypes/callbacks or lifecycle behavior.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "caller_id",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "options",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);match frame.caller_id($value){Ok(id)=>serde_json::json!({\"id\":id}),Err(e)=>serde_json::json!({\"error\":e.0.message})}}",
+        "cases": [
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "type": "limit",
+              "side": "buy",
+              "amount": 2,
+              "price": 100,
+              "clientOrderId": "valid-雪"
+            },
+            "output": {
+              "id": "valid-雪"
+            }
+          },
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "type": "limit",
+              "side": "buy",
+              "amount": 2,
+              "price": 100
+            },
+            "output": {
+              "id": null
+            }
+          },
+          {
+            "input": {
+              "symbol": "BTCUSDT",
+              "type": "limit",
+              "side": "buy",
+              "amount": 2,
+              "price": 100,
+              "clientOrderId": "has space"
+            },
+            "output": {
+              "error": "Bitunix clientOrderId must match /^\\S+$/"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "market",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "symbol",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);fn declared(v:serde_json::Value)->serde_json::Value{match v{serde_json::Value::Number(n)=>serde_json::json!({\"numberBits\":format!(\"{:016x}\",n.as_f64().unwrap().to_bits())}),serde_json::Value::Array(a)=>serde_json::Value::Array(a.into_iter().map(declared).collect()),serde_json::Value::Object(o)=>serde_json::Value::Object(o.into_iter().map(|(k,v)|(k,declared(v))).collect()),v=>v}}let out=native(frame.market($value));serde_json::json!({\"value\":out.map(declared)})}",
+        "cases": [
+          {
+            "input": "BTCUSDT",
+            "output": {
+              "value": {
+                "id": "BTC/USDT",
+                "symbol": "BTCUSDT",
+                "base": "BTC",
+                "quote": "USDT",
+                "active": true,
+                "precision": {
+                  "amount": {
+                    "numberBits": "3f50624dd2f1a9fc"
+                  },
+                  "price": {
+                    "numberBits": "3fb999999999999a"
+                  }
+                },
+                "limits": {
+                  "amount": {
+                    "min": {
+                      "numberBits": "0000000000000000"
+                    },
+                    "max": {
+                      "numberBits": "407f400000000000"
+                    }
+                  },
+                  "leverage": {
+                    "min": {
+                      "numberBits": "3ff0000000000000"
+                    },
+                    "max": {
+                      "numberBits": "4059000000000000"
+                    }
+                  }
+                }
+              }
+            }
+          },
+          {
+            "input": "NONE",
+            "output": {
+              "value": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "positions",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);fn declared(v:serde_json::Value)->serde_json::Value{match v{serde_json::Value::Number(n)=>serde_json::json!({\"numberBits\":format!(\"{:016x}\",n.as_f64().unwrap().to_bits())}),serde_json::Value::Array(a)=>serde_json::Value::Array(a.into_iter().map(declared).collect()),serde_json::Value::Object(o)=>serde_json::Value::Object(o.into_iter().map(|(k,v)|(k,declared(v))).collect()),v=>v}}let mut positions=store.positions().to_vec();positions[0].contracts=$value[\"contracts\"].as_f64().unwrap();positions[1].entry_price=$value[\"entry\"].as_f64().unwrap();safe_cex_store::Store::update(store.as_ref(),safe_cex_store::StoreUpdate{positions:Some(positions),..Default::default()},false).unwrap();let out=native(frame.positions());declared(serde_json::json!({\"rows\":out}))}",
+        "cases": [
+          {
+            "input": {
+              "contracts": 2.5,
+              "entry": 100.25
+            },
+            "output": {
+              "rows": [
+                {
+                  "id": "BTCUSDT:long",
+                  "symbol": "BTCUSDT",
+                  "side": "long",
+                  "entryPrice": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "notional": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "leverage": {
+                    "numberBits": "4024000000000000"
+                  },
+                  "unrealizedPnl": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "contracts": {
+                    "numberBits": "4004000000000000"
+                  },
+                  "liquidationPrice": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "marginType": "cross",
+                  "positionMode": "hedged"
+                },
+                {
+                  "id": "BTCUSDT:short",
+                  "symbol": "BTCUSDT",
+                  "side": "short",
+                  "entryPrice": {
+                    "numberBits": "4059100000000000"
+                  },
+                  "notional": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "leverage": {
+                    "numberBits": "4024000000000000"
+                  },
+                  "unrealizedPnl": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "contracts": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "liquidationPrice": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "marginType": "cross",
+                  "positionMode": "hedged"
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "contracts": 7,
+              "entry": 50.125
+            },
+            "output": {
+              "rows": [
+                {
+                  "id": "BTCUSDT:long",
+                  "symbol": "BTCUSDT",
+                  "side": "long",
+                  "entryPrice": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "notional": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "leverage": {
+                    "numberBits": "4024000000000000"
+                  },
+                  "unrealizedPnl": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "contracts": {
+                    "numberBits": "401c000000000000"
+                  },
+                  "liquidationPrice": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "marginType": "cross",
+                  "positionMode": "hedged"
+                },
+                {
+                  "id": "BTCUSDT:short",
+                  "symbol": "BTCUSDT",
+                  "side": "short",
+                  "entryPrice": {
+                    "numberBits": "4049100000000000"
+                  },
+                  "notional": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "leverage": {
+                    "numberBits": "4024000000000000"
+                  },
+                  "unrealizedPnl": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "contracts": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "liquidationPrice": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "marginType": "cross",
+                  "positionMode": "hedged"
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "orders",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);fn declared(v:serde_json::Value)->serde_json::Value{match v{serde_json::Value::Number(n)=>serde_json::json!({\"numberBits\":format!(\"{:016x}\",n.as_f64().unwrap().to_bits())}),serde_json::Value::Array(a)=>serde_json::Value::Array(a.into_iter().map(declared).collect()),serde_json::Value::Object(o)=>serde_json::Value::Object(o.into_iter().map(|(k,v)|(k,declared(v))).collect()),v=>v}}if let Some(orders)=$value.get(\"orders\"){let orders:Vec<safe_cex_types::Order>=serde_json::from_value(orders.clone()).unwrap();safe_cex_store::Store::update(store.as_ref(),safe_cex_store::StoreUpdate{orders:Some(orders),..Default::default()},false).unwrap();}let out=native(frame.orders());declared(serde_json::json!({\"rows\":out}))}",
+        "cases": [
+          {
+            "input": {
+              "orders": [
+                {
+                  "id": "parent",
+                  "status": "open",
+                  "symbol": "BTCUSDT",
+                  "type": "limit",
+                  "side": "buy",
+                  "price": 100,
+                  "amount": 2,
+                  "filled": 0,
+                  "remaining": 2,
+                  "reduceOnly": false,
+                  "lastUpdate": 0
+                },
+                {
+                  "id": "second",
+                  "status": "open",
+                  "symbol": "BTCUSDT",
+                  "type": "limit",
+                  "side": "sell",
+                  "price": 200.25,
+                  "amount": 2,
+                  "filled": 0,
+                  "remaining": 2,
+                  "reduceOnly": false,
+                  "lastUpdate": 0
+                }
+              ]
+            },
+            "output": {
+              "rows": [
+                {
+                  "id": "parent",
+                  "status": "open",
+                  "symbol": "BTCUSDT",
+                  "type": "limit",
+                  "side": "buy",
+                  "price": {
+                    "numberBits": "4059000000000000"
+                  },
+                  "amount": {
+                    "numberBits": "4000000000000000"
+                  },
+                  "filled": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "remaining": {
+                    "numberBits": "4000000000000000"
+                  },
+                  "reduceOnly": false,
+                  "lastUpdate": {
+                    "numberBits": "0000000000000000"
+                  }
+                },
+                {
+                  "id": "second",
+                  "status": "open",
+                  "symbol": "BTCUSDT",
+                  "type": "limit",
+                  "side": "sell",
+                  "price": {
+                    "numberBits": "4069080000000000"
+                  },
+                  "amount": {
+                    "numberBits": "4000000000000000"
+                  },
+                  "filled": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "remaining": {
+                    "numberBits": "4000000000000000"
+                  },
+                  "reduceOnly": false,
+                  "lastUpdate": {
+                    "numberBits": "0000000000000000"
+                  }
+                }
+              ]
+            }
+          },
+          {
+            "input": {
+              "orders": [
+                {
+                  "id": "other",
+                  "status": "open",
+                  "symbol": "BTCUSDT",
+                  "type": "limit",
+                  "side": "buy",
+                  "price": 100,
+                  "amount": 3,
+                  "filled": 0,
+                  "remaining": 2,
+                  "reduceOnly": false,
+                  "lastUpdate": 0
+                }
+              ]
+            },
+            "output": {
+              "rows": [
+                {
+                  "id": "other",
+                  "status": "open",
+                  "symbol": "BTCUSDT",
+                  "type": "limit",
+                  "side": "buy",
+                  "price": {
+                    "numberBits": "4059000000000000"
+                  },
+                  "amount": {
+                    "numberBits": "4008000000000000"
+                  },
+                  "filled": {
+                    "numberBits": "0000000000000000"
+                  },
+                  "remaining": {
+                    "numberBits": "4000000000000000"
+                  },
+                  "reduceOnly": false,
+                  "lastUpdate": {
+                    "numberBits": "0000000000000000"
+                  }
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "cached_position",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);venue.state.borrow_mut().position_id_cache.insert(\"key\".into(),\"雪\".into());let out=native(frame.cached_position($value.as_str().unwrap()));serde_json::json!({\"value\":out})}",
+        "cases": [
+          {
+            "input": "key",
+            "output": {
+              "value": "雪"
+            }
+          },
+          {
+            "input": "missing",
+            "output": {
+              "value": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "assert_single",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "caller",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "count",
+                {
+                  "primitive": "usize"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);let out=frame.assert_single($value.get(\"id\").and_then(|v|v.as_str()),$value[\"count\"].as_u64().unwrap()as usize);serde_json::json!({\"error\":out.err().map(|e|e.0.message)})}",
+        "cases": [
+          {
+            "input": {
+              "id": "one",
+              "count": 1
+            },
+            "output": {
+              "error": null
+            }
+          },
+          {
+            "input": {
+              "count": 2
+            },
+            "output": {
+              "error": null
+            }
+          },
+          {
+            "input": {
+              "id": "one",
+              "count": 2
+            },
+            "output": {
+              "error": "Bitunix clientOrderId is supported only when one order maps to one native order"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "cache_tif",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "client_id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "tif",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);native(frame.cache_tif(\"key\",$value));let out=venue.state.borrow().order_tif_cache.get(\"key\").cloned();serde_json::json!({\"cached\":out})}",
+        "cases": [
+          {
+            "input": "PostOnly",
+            "output": {
+              "cached": "PostOnly"
+            }
+          },
+          {
+            "input": 17,
+            "output": {
+              "cached": "17"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "cache_reduce_only",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "client_id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "reduce_only",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);native(frame.cache_reduce_only(\"key\",$value));let out=venue.state.borrow().order_reduce_only_cache.get(\"key\").copied();serde_json::json!({\"cached\":out})}",
+        "cases": [
+          {
+            "input": false,
+            "output": {
+              "cached": false
+            }
+          },
+          {
+            "input": [],
+            "output": {
+              "cached": true
+            }
+          },
+          {
+            "input": 0,
+            "output": {
+              "cached": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "reason",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "error",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_bitunix::adapter::Fault",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "fallback",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_num::json_stringify::JsJsonValue",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);let error=crate::adapter::Fault(safe_cex_exchange::runtime::ExchangeError::new($value[\"message\"].as_str().unwrap()));match native(frame.reason(&error,$value.get(\"fallback\").and_then(|v|v.as_str()))){safe_cex_num::JsJsonValue::String(s)=>serde_json::json!({\"message\":s}),_=>panic!(\"native string reason\")}}",
+        "cases": [
+          {
+            "input": {
+              "message": "denied",
+              "fallback": "fallback"
+            },
+            "output": {
+              "message": "denied"
+            }
+          },
+          {
+            "input": {
+              "message": "",
+              "fallback": "fallback"
+            },
+            "output": {
+              "message": "fallback"
+            }
+          },
+          {
+            "input": {
+              "message": ""
+            },
+            "output": {
+              "message": ""
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "warning",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "prefix",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "error",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_bitunix::adapter::Fault",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);let trace=std::rc::Rc::new(std::cell::RefCell::new(Vec::<serde_json::Value>::new()));let sink=trace.clone();venue.base.on(\"log\",std::rc::Rc::new(move|name,args|{sink.borrow_mut().push(serde_json::json!({\"event\":name,\"args\":args}));Ok(())}));let error=crate::adapter::Fault(safe_cex_exchange::runtime::ExchangeError::new($value.as_str().unwrap()));native(frame.warning(\"prefix: \",&error));let trace=trace.borrow().clone();serde_json::json!({\"trace\":trace})}",
+        "cases": [
+          {
+            "input": "denied",
+            "output": {
+              "trace": [
+                {
+                  "event": "log",
+                  "args": [
+                    "[bitunix] prefix: denied",
+                    "warning"
+                  ]
+                }
+              ]
+            }
+          },
+          {
+            "input": "雪",
+            "output": {
+              "trace": [
+                {
+                  "event": "log",
+                  "args": [
+                    "[bitunix] prefix: 雪",
+                    "warning"
+                  ]
+                }
+              ]
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "get",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "endpoint",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "config",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "serde_json::value::Value",
+                                                  "args": null
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "safe_cex_venue_bitunix::adapter::Fault",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);fn run<F:std::future::Future>(rt:&harness::Runtime,f:F)->F::Output{let mut f=std::pin::pin!(f);for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){return v;}rt.now.set(rt.now.get()+1000.0);rt.pump();}panic!(\"fixture must settle\")}fn declared(v:serde_json::Value)->serde_json::Value{match v{serde_json::Value::Number(n)=>serde_json::json!({\"numberBits\":format!(\"{:016x}\",n.as_f64().unwrap().to_bits())}),serde_json::Value::Array(a)=>serde_json::Value::Array(a.into_iter().map(declared).collect()),serde_json::Value::Object(o)=>serde_json::Value::Object(o.into_iter().map(|(k,v)|(k,declared(v))).collect()),v=>v}}let endpoint=if $value[\"first\"]==true{\"/frame-one\"}else{\"/frame-two\"};let response=serde_json::json!({\"data\":{\"tag\":$value[\"tag\"]}});wire.bodies.lock().unwrap().insert(endpoint.into(),response.clone());let out=native(run(&rt,frame.get(endpoint,safe_cex_num::JsJsonValue::from($value[\"payload\"].clone()))));let requests=wire.requests.lock().unwrap();assert_eq!(requests.len(),1);let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(v)=>v.clone(),safe_cex_transport::RestBody::Encoded(bytes)=>serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),safe_cex_transport::RestBody::Transformed(v)=>match v.value(){serde_json::Value::String(text)=>serde_json::from_str(text).unwrap(),v=>v.clone()}});serde_json::json!({\"method\":request.method.to_uppercase(),\"url\":request.url,\"value\":declared(out),\"params\":request.params.clone().map(declared),\"body\":body.map(declared),\"header\":request.headers.get(\"x-accepted\"),\"timeout\":request.timeout_ms})}",
+        "cases": [
+          {
+            "input": {
+              "first": true,
+              "tag": "one",
+              "payload": {
+                "params": {
+                  "id": "one",
+                  "flag": true,
+                  "nullable": null,
+                  "page": 1
+                },
+                "headers": {
+                  "x-accepted": "one"
+                },
+                "timeout": 37
+              }
+            },
+            "output": {
+              "method": "GET",
+              "url": "/frame-one",
+              "value": {
+                "data": {
+                  "data": {
+                    "tag": "one"
+                  }
+                }
+              },
+              "params": {
+                "id": "one",
+                "flag": true,
+                "nullable": null,
+                "page": {
+                  "numberBits": "3ff0000000000000"
+                }
+              },
+              "body": null,
+              "header": "one",
+              "timeout": 37
+            }
+          },
+          {
+            "input": {
+              "first": false,
+              "tag": "two",
+              "payload": {
+                "params": {
+                  "id": "two",
+                  "flag": false,
+                  "nullable": null,
+                  "page": 2
+                },
+                "headers": {
+                  "x-accepted": "two"
+                },
+                "timeout": 59
+              }
+            },
+            "output": {
+              "method": "GET",
+              "url": "/frame-two",
+              "value": {
+                "data": {
+                  "data": {
+                    "tag": "two"
+                  }
+                }
+              },
+              "params": {
+                "id": "two",
+                "flag": false,
+                "nullable": null,
+                "page": {
+                  "numberBits": "4000000000000000"
+                }
+              },
+              "body": null,
+              "header": "two",
+              "timeout": 59
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "post",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "endpoint",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "payload",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "serde_json::value::Value",
+                                                  "args": null
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "safe_cex_venue_bitunix::adapter::Fault",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);fn run<F:std::future::Future>(rt:&harness::Runtime,f:F)->F::Output{let mut f=std::pin::pin!(f);for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){return v;}rt.now.set(rt.now.get()+1000.0);rt.pump();}panic!(\"fixture must settle\")}fn declared(v:serde_json::Value)->serde_json::Value{match v{serde_json::Value::Number(n)=>serde_json::json!({\"numberBits\":format!(\"{:016x}\",n.as_f64().unwrap().to_bits())}),serde_json::Value::Array(a)=>serde_json::Value::Array(a.into_iter().map(declared).collect()),serde_json::Value::Object(o)=>serde_json::Value::Object(o.into_iter().map(|(k,v)|(k,declared(v))).collect()),v=>v}}let endpoint=if $value[\"first\"]==true{\"/frame-one\"}else{\"/frame-two\"};let response=serde_json::json!({\"data\":{\"tag\":$value[\"tag\"]}});wire.bodies.lock().unwrap().insert(endpoint.into(),response.clone());let out=native(run(&rt,frame.post(endpoint,safe_cex_num::JsJsonValue::from($value[\"payload\"].clone()))));let requests=wire.requests.lock().unwrap();assert_eq!(requests.len(),1);let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(v)=>v.clone(),safe_cex_transport::RestBody::Encoded(bytes)=>serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),safe_cex_transport::RestBody::Transformed(v)=>match v.value(){serde_json::Value::String(text)=>serde_json::from_str(text).unwrap(),v=>v.clone()}});serde_json::json!({\"method\":request.method.to_uppercase(),\"url\":request.url,\"value\":declared(out),\"params\":request.params.clone().map(declared),\"body\":body.map(declared)})}",
+        "cases": [
+          {
+            "input": {
+              "first": true,
+              "tag": "one",
+              "payload": {
+                "id": "one",
+                "reduceOnly": true,
+                "nullable": null,
+                "qty": 1.25
+              }
+            },
+            "output": {
+              "method": "POST",
+              "url": "/frame-one",
+              "value": {
+                "data": {
+                  "data": {
+                    "tag": "one"
+                  }
+                }
+              },
+              "params": null,
+              "body": {
+                "id": "one",
+                "reduceOnly": true,
+                "nullable": null,
+                "qty": {
+                  "numberBits": "3ff4000000000000"
+                }
+              }
+            }
+          },
+          {
+            "input": {
+              "first": false,
+              "tag": "two",
+              "payload": {
+                "id": "two",
+                "reduceOnly": false,
+                "nullable": null,
+                "qty": 3.5
+              }
+            },
+            "output": {
+              "method": "POST",
+              "url": "/frame-two",
+              "value": {
+                "data": {
+                  "data": {
+                    "tag": "two"
+                  }
+                }
+              },
+              "params": null,
+              "body": {
+                "id": "two",
+                "reduceOnly": false,
+                "nullable": null,
+                "qty": {
+                  "numberBits": "400c000000000000"
+                }
+              }
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "cached_tif",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "client_id",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);venue.state.borrow_mut().order_tif_cache.insert(\"17\".into(),\"PostOnly\".into());let out=native(frame.cached_tif($value.get(\"id\")));serde_json::json!({\"value\":out})}",
+        "cases": [
+          {
+            "input": {
+              "id": 17
+            },
+            "output": {
+              "value": "PostOnly"
+            }
+          },
+          {
+            "input": {
+              "id": null
+            },
+            "output": {
+              "value": null
+            }
+          },
+          {
+            "input": {},
+            "output": {
+              "value": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "reduce_only",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "raw",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "client_id",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);venue.state.borrow_mut().order_reduce_only_cache.insert(\"17\".into(),true);let out=native(frame.reduce_only($value.get(\"raw\"),$value.get(\"id\")));serde_json::json!({\"value\":out})}",
+        "cases": [
+          {
+            "input": {
+              "raw": false,
+              "id": 17
+            },
+            "output": {
+              "value": false
+            }
+          },
+          {
+            "input": {
+              "raw": "FaLsE",
+              "id": 17
+            },
+            "output": {
+              "value": false
+            }
+          },
+          {
+            "input": {
+              "id": 17
+            },
+            "output": {
+              "value": true
+            }
+          },
+          {
+            "input": {
+              "id": "missing"
+            },
+            "output": {
+              "value": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "key",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "row",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);let out=native(frame.key($value,\"value\"));serde_json::json!({\"present\":out.is_some(),\"value\":out})}",
+        "cases": [
+          {
+            "input": {
+              "value": null
+            },
+            "output": {
+              "present": true,
+              "value": null
+            }
+          },
+          {
+            "input": {
+              "value": false
+            },
+            "output": {
+              "present": true,
+              "value": false
+            }
+          },
+          {
+            "input": {},
+            "output": {
+              "present": false,
+              "value": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "raw_id",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "order",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);serde_json::json!({\"id\":native(frame.raw_id($value))})}",
+        "cases": [
+          {
+            "input": {
+              "id": "virtual__tp",
+              "info": {
+                "id": 0,
+                "orderId": "later"
+              }
+            },
+            "output": {
+              "id": "0"
+            }
+          },
+          {
+            "input": {
+              "id": "virtual__sl",
+              "info": {
+                "id": null,
+                "orderId": "wire"
+              }
+            },
+            "output": {
+              "id": "wire"
+            }
+          },
+          {
+            "input": {
+              "id": "virtual__tp",
+              "info": {
+                "id": "",
+                "orderId": "ignored"
+              }
+            },
+            "output": {
+              "id": "virtual__tp"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "leg_id",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "raw_id",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "position_id",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "leg_name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "disambiguate",
+                {
+                  "primitive": "bool"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);let leg=if $value[\"sl\"]==true{\"sl\"}else{\"tp\"};serde_json::json!({\"id\":native(frame.leg_id(\"raw\",$value.get(\"position\"),leg,$value[\"disambiguate\"]==true))})}",
+        "cases": [
+          {
+            "input": {
+              "position": 0,
+              "disambiguate": true
+            },
+            "output": {
+              "id": "raw__0__tp"
+            }
+          },
+          {
+            "input": {
+              "position": "",
+              "disambiguate": true,
+              "sl": true
+            },
+            "output": {
+              "id": "raw__position__sl"
+            }
+          },
+          {
+            "input": {
+              "position": "pos"
+            },
+            "output": {
+              "id": "raw"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "attached_leg",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "order",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "borrowed_ref": {
+                                        "lifetime": "'static",
+                                        "is_mutable": false,
+                                        "type": {
+                                          "primitive": "str"
+                                        }
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);if let Some(orders)=$value.get(\"orders\"){let orders:Vec<safe_cex_types::Order>=serde_json::from_value(orders.clone()).unwrap();safe_cex_store::Store::update(store.as_ref(),safe_cex_store::StoreUpdate{orders:Some(orders),..Default::default()},false).unwrap();}let out=native(frame.attached_leg(&$value[\"order\"]));serde_json::json!({\"value\":out})}",
+        "cases": [
+          {
+            "input": {
+              "orders": [
+                {
+                  "id": "parent",
+                  "status": "open",
+                  "symbol": "BTCUSDT",
+                  "type": "limit",
+                  "side": "buy",
+                  "price": 100,
+                  "amount": 2,
+                  "filled": 0,
+                  "remaining": 2,
+                  "reduceOnly": false,
+                  "lastUpdate": 0
+                }
+              ],
+              "order": {
+                "id": "parent__tp",
+                "status": "open",
+                "symbol": "BTCUSDT",
+                "type": "take_profit_market",
+                "side": "buy",
+                "price": 100,
+                "amount": 2,
+                "filled": 0,
+                "remaining": 2,
+                "reduceOnly": false,
+                "lastUpdate": 0
+              }
+            },
+            "output": {
+              "value": "tp"
+            }
+          },
+          {
+            "input": {
+              "orders": [],
+              "order": {
+                "id": "parent__tp",
+                "status": "open",
+                "symbol": "BTCUSDT",
+                "type": "take_profit_market",
+                "side": "buy",
+                "price": 100,
+                "amount": 2,
+                "filled": 0,
+                "remaining": 2,
+                "reduceOnly": false,
+                "lastUpdate": 0
+              }
+            },
+            "output": {
+              "value": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "standalone",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "order",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);if let Some(orders)=$value.get(\"orders\"){let orders:Vec<safe_cex_types::Order>=serde_json::from_value(orders.clone()).unwrap();safe_cex_store::Store::update(store.as_ref(),safe_cex_store::StoreUpdate{orders:Some(orders),..Default::default()},false).unwrap();}let out=native(frame.standalone(&$value[\"order\"]));serde_json::json!({\"value\":out})}",
+        "cases": [
+          {
+            "input": {
+              "orders": [
+                {
+                  "id": "parent",
+                  "status": "open",
+                  "symbol": "BTCUSDT",
+                  "type": "limit",
+                  "side": "buy",
+                  "price": 100,
+                  "amount": 2,
+                  "filled": 0,
+                  "remaining": 2,
+                  "reduceOnly": false,
+                  "lastUpdate": 0
+                }
+              ],
+              "order": {
+                "id": "parent__tp",
+                "status": "open",
+                "symbol": "BTCUSDT",
+                "type": "take_profit_market",
+                "side": "buy",
+                "price": 100,
+                "amount": 2,
+                "filled": 0,
+                "remaining": 2,
+                "reduceOnly": false,
+                "lastUpdate": 0
+              }
+            },
+            "output": {
+              "value": false
+            }
+          },
+          {
+            "input": {
+              "orders": [],
+              "order": {
+                "id": "other",
+                "status": "open",
+                "symbol": "BTCUSDT",
+                "type": "stop_market",
+                "side": "buy",
+                "price": 100,
+                "amount": 2,
+                "filled": 0,
+                "remaining": 2,
+                "reduceOnly": false,
+                "lastUpdate": 0
+              }
+            },
+            "output": {
+              "value": true
+            }
+          },
+          {
+            "input": {
+              "orders": [],
+              "order": {
+                "id": "parent",
+                "status": "open",
+                "symbol": "BTCUSDT",
+                "type": "limit",
+                "side": "buy",
+                "price": 100,
+                "amount": 2,
+                "filled": 0,
+                "remaining": 2,
+                "reduceOnly": false,
+                "lastUpdate": 0
+              }
+            },
+            "output": {
+              "value": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "position_order",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "order",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);serde_json::json!({\"value\":native(frame.position_order($value))})}",
+        "cases": [
+          {
+            "input": {
+              "amount": 2,
+              "info": {
+                "type": "position_tpsl"
+              }
+            },
+            "output": {
+              "value": true
+            }
+          },
+          {
+            "input": {
+              "amount": 0
+            },
+            "output": {
+              "value": true
+            }
+          },
+          {
+            "input": {
+              "amount": 2
+            },
+            "output": {
+              "value": false
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "snapshot",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "order",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "leg_name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'static",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_venue_bitunix::order_state::TpslLegSnapshot",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);let out=native(frame.snapshot(&$value[\"order\"],if $value[\"sl\"]==true{\"sl\"}else{\"tp\"}));serde_json::json!({\"value\":out.map(|s|serde_json::json!({\"bits\":([s.price,s.qty,s.order_price].map(|v|format!(\"{:016x}\",v.to_bits()))),\"stop\":s.stop_type,\"type\":s.order_type}))})}",
+        "cases": [
+          {
+            "input": {
+              "order": {
+                "id": "parent",
+                "status": "open",
+                "symbol": "BTCUSDT",
+                "type": "limit",
+                "side": "buy",
+                "price": 100,
+                "amount": 2,
+                "filled": 0,
+                "remaining": 2,
+                "reduceOnly": false,
+                "lastUpdate": 0,
+                "info": {
+                  "tpPrice": 123.25,
+                  "tpQty": 2.5,
+                  "tpStopType": "LAST",
+                  "tpOrderType": "limit",
+                  "tpOrderPrice": 120.125
+                }
+              }
+            },
+            "output": {
+              "value": {
+                "bits": [
+                  "405ed00000000000",
+                  "4004000000000000",
+                  "405e080000000000"
+                ],
+                "stop": "LAST_PRICE",
+                "type": "LIMIT"
+              }
+            }
+          },
+          {
+            "input": {
+              "order": {
+                "id": "parent",
+                "status": "open",
+                "symbol": "BTCUSDT",
+                "type": "limit",
+                "side": "buy",
+                "price": 100,
+                "amount": 2,
+                "filled": 0,
+                "remaining": 2,
+                "reduceOnly": false,
+                "lastUpdate": 0,
+                "info": {
+                  "slPrice": 80.25,
+                  "slQty": 3.5,
+                  "slStopType": "MARK",
+                  "slOrderType": "market",
+                  "slOrderPrice": 70
+                }
+              },
+              "sl": true
+            },
+            "output": {
+              "value": {
+                "bits": [
+                  "4054100000000000",
+                  "400c000000000000",
+                  "4051800000000000"
+                ],
+                "stop": "MARK_PRICE",
+                "type": "MARKET"
+              }
+            }
+          },
+          {
+            "input": {
+              "order": {
+                "id": "parent",
+                "status": "open",
+                "symbol": "BTCUSDT",
+                "type": "limit",
+                "side": "buy",
+                "price": 100,
+                "amount": 2,
+                "filled": 0,
+                "remaining": 2,
+                "reduceOnly": false,
+                "lastUpdate": 0
+              }
+            },
+            "output": {
+              "value": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "trigger",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "trigger",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "raw",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_venue_bitunix::adapter::Fault",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;fn native<T>(v:Result<T,crate::adapter::Fault>)->T{v.unwrap_or_else(|e|panic!(\"unexpected native fault: {}\",e.0.message))}let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);serde_json::json!({\"value\":native(frame.trigger($value.get(\"trigger\"),$value.get(\"raw\")))})}",
+        "cases": [
+          {
+            "input": {
+              "trigger": "last_price",
+              "raw": "MARK"
+            },
+            "output": {
+              "value": "MARK_PRICE"
+            }
+          },
+          {
+            "input": {
+              "trigger": "mark_price",
+              "raw": "LAST"
+            },
+            "output": {
+              "value": "LAST_PRICE"
+            }
+          },
+          {
+            "input": {
+              "trigger": "last_price"
+            },
+            "output": {
+              "value": "LAST_PRICE"
+            }
+          },
+          {
+            "input": {},
+            "output": {
+              "value": "MARK_PRICE"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+          "name": "update_standalone",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "order",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "update",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "alloc::vec::Vec",
+                                                  "args": {
+                                                    "angle_bracketed": {
+                                                      "args": [
+                                                        {
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "alloc::string::String",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      ],
+                                                      "constraints": []
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "safe_cex_venue_bitunix::adapter::Fault",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Execute this exact concrete production OrderFrame method on the constructed venue, shared Store and scripted native transport. Observe its declared returned values or actual native state; no receiver exemption or arbitrary host claim.",
+        "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}use crate::order_models::OrderModelHost;let(venue,rt,store,wire)=harness::fixture();let mut frame=$type{venue:venue.clone()};let _=(&rt,&store,&wire);fn run<F:std::future::Future>(rt:&harness::Runtime,f:F)->F::Output{let mut f=std::pin::pin!(f);for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){return v;}rt.now.set(rt.now.get()+1000.0);rt.pump();}panic!(\"fixture must settle\")}let events=std::rc::Rc::new(std::cell::RefCell::new(Vec::<serde_json::Value>::new()));let sink=events.clone();venue.base.on(\"error\",std::rc::Rc::new(move|name,args|{sink.borrow_mut().push(serde_json::json!({\"event\":name,\"payload\":args}));Ok(())}));let result=run(&rt,frame.update_standalone(&$value[\"order\"],&$value[\"update\"]));let requests=wire.requests.lock().unwrap().iter().map(|request|{let body=match request.body.as_ref().expect(\"amendment body\"){safe_cex_transport::RestBody::Encoded(bytes)=>serde_json::from_slice::<serde_json::Value>(bytes).unwrap(),safe_cex_transport::RestBody::Untransformed(v)=>v.clone(),safe_cex_transport::RestBody::Transformed(v)=>match v.value(){serde_json::Value::String(text)=>serde_json::from_str(text).unwrap(),v=>v.clone()}};serde_json::json!({\"method\":request.method.to_uppercase(),\"url\":request.url,\"body\":body})}).collect::<Vec<_>>();let events=events.borrow().clone();match result{Ok(ids)=>serde_json::json!({\"ids\":ids,\"events\":events,\"requests\":requests}),Err(error)=>serde_json::json!({\"error\":error.0.message,\"events\":events,\"requests\":requests})}}",
+        "cases": [
+          {
+            "input": {
+              "order": {
+                "id": "leg",
+                "symbol": "BTCUSDT",
+                "type": "take_profit_market",
+                "side": "sell",
+                "amount": 2,
+                "price": 120.25,
+                "info": {
+                  "orderId": "raw",
+                  "tpPrice": 120.25,
+                  "tpQty": 2,
+                  "tpStopType": "MARK_PRICE",
+                  "tpOrderType": "LIMIT",
+                  "tpOrderPrice": 121.789
+                }
+              },
+              "update": {
+                "price": 123.456,
+                "amount": 1.23456
+              }
+            },
+            "output": {
+              "ids": [
+                "leg"
+              ],
+              "requests": [
+                {
+                  "method": "POST",
+                  "url": "/api/v1/futures/tpsl/modify_order",
+                  "body": {
+                    "orderId": "raw",
+                    "tpPrice": "123.5",
+                    "tpStopType": "MARK_PRICE",
+                    "tpQty": "1.235",
+                    "tpOrderType": "LIMIT",
+                    "tpOrderPrice": "121.8"
+                  }
+                }
+              ],
+              "events": []
+            }
+          },
+          {
+            "input": {
+              "order": {
+                "id": "sl-leg",
+                "symbol": "BTCUSDT",
+                "type": "stop_market",
+                "side": "sell",
+                "amount": 2,
+                "price": 120.25,
+                "info": {
+                  "orderId": "raw",
+                  "slPrice": 90.123,
+                  "slQty": 2,
+                  "slStopType": "LAST_PRICE",
+                  "slOrderType": "MARKET"
+                }
+              },
+              "update": {
+                "price": 123.456,
+                "amount": 1.23456
+              }
+            },
+            "output": {
+              "ids": [
+                "sl-leg"
+              ],
+              "requests": [
+                {
+                  "method": "POST",
+                  "url": "/api/v1/futures/tpsl/modify_order",
+                  "body": {
+                    "orderId": "raw",
+                    "slPrice": "123.5",
+                    "slStopType": "LAST_PRICE",
+                    "slQty": "1.235",
+                    "slOrderType": "MARKET"
+                  }
+                }
+              ],
+              "events": []
+            }
+          }
+        ]
+      }
+    ]
   }
 }
