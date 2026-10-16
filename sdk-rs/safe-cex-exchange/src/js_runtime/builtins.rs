@@ -68,10 +68,28 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
                 _ => None,
             }
         }
-        Js::BigInt(n) => {
-            let n = n.clone();
-            (name == "toString").then(|| method("toString", move |_| Ok(Js::str(&n.to_string()))))
-        }
+        Js::BigInt(_) => (name == "toString").then(|| {
+            Js::function("toString", |this, args| {
+                let Js::BigInt(n) = this else {
+                    return Err(Thrown::type_error(
+                        "BigInt.prototype.toString requires that 'this' be a BigInt",
+                    ));
+                };
+                let requested = arg(&args, 0);
+                let radix = if requested.is_undefined() {
+                    10.0
+                } else {
+                    requested.to_number()?.trunc()
+                };
+                if !(2.0..=36.0).contains(&radix) {
+                    return Err(Thrown::error(
+                        "RangeError",
+                        "toString() radix argument must be between 2 and 36",
+                    ));
+                }
+                Ok(Js::str(&n.to_str_radix(radix as u32)))
+            })
+        }),
         Js::Bool(b) => {
             let b = *b;
             (name == "toString").then(|| {

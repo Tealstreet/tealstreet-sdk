@@ -1102,3 +1102,16 @@ existing byte representation. `hosted_signing_accepts_source_string_data_before_
 compares four form/empty/JSON-looking/scalar strings against the actual source
 remote adapter with installed Axios on both sides of the relay, including
 signer inputs and final transmitted text.
+
+The shared BigInt `toString` member honors radix 2 through 36, defaults omitted
+or undefined radix to decimal, truncates numeric radix arguments, and rejects
+out-of-range values with RangeError. Radix conversion uses the existing shared
+ToNumber profile; BigInt radix arguments retain its TypeError. Extracted methods
+read the actual call receiver and refuse non-BigInt values. Native arbitrary
+precision conversion supplies lowercase digits without losing integer bits.
+`tests/js_bigint_radix.rs` compares 472 engine cases against Node across every
+valid base, signed/large integers, defaults and scalar/array coercion boundaries.
+`tests/js_bigint_radix_controls.py` sequentially injects decimal-only output,
+incorrect rounding and base-two refusal; each must compile, fail the named source
+comparison and pass again after exact restoration. No venue-local radix shim is
+required.
