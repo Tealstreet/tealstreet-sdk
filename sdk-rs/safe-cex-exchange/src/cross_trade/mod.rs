@@ -14,8 +14,8 @@ pub use types::{
     default_cross_trade_config, default_cross_trade_copier,
 };
 
-#[derive(Debug, Clone, Default, serde::Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Clone, Default)]
+// Deserialize below enforces the object boundary.
 pub struct CrossTradeStore {
     pub positions_loaded: bool,
     pub positions: Vec<Position>,
@@ -122,4 +122,23 @@ pub(crate) fn first_price(a: Option<f64>, b: Option<f64>) -> Option<f64> {
 }
 pub(crate) fn done<T: 'static>(result: Result<T, ExchangeError>) -> ExchangeFuture<'static, T> {
     Box::pin(async move { result })
+}
+
+// A store snapshot is an object boundary; Serde's derived struct visitor also
+// accepts positional sequences unless the input is constrained here.
+#[derive(serde::Deserialize)]
+#[serde(remote = "CrossTradeStore", rename_all = "camelCase")]
+struct CrossTradeStoreWire {
+    positions_loaded: bool,
+    positions: Vec<Position>,
+    markets: Vec<Market>,
+    tickers: Vec<Ticker>,
+    tickers_by_symbol: JsObjectMap<Ticker>,
+    balance: Option<Balance>,
+    active_chasers: Vec<ActiveChaser>,
+}
+impl<'de> serde::Deserialize<'de> for CrossTradeStore {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        CrossTradeStoreWire::deserialize(safe_cex_types::strict_decode::object(deserializer))
+    }
 }

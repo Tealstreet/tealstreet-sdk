@@ -13,7 +13,10 @@ const sourcePath = path.join(root, 'safe-cex-types/src/ws_auth.rs');
 const original = fs.readFileSync(sourcePath, 'utf8');
 const contracts = JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/contracts.json')));
 const visitorPins = JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/local-functions.json')));
-const expectedVisitorLabels = ['RequestVisitor','PayloadVisitor','ResponseVisitor'].map(name => `safe-cex-types/src/ws_auth.rs::LOCAL_TRAIT_IMPL:serde::de::Visitor:${name}`);
+// RequestVisitor and ResponseVisitor are delegated to their enclosing
+// Deserialize owners by the scanner. The free payload helper retains the
+// explicit whole-file pin, which also detects mutations in those two bodies.
+const expectedVisitorLabels = ['PayloadVisitor'].map(name => `safe-cex-types/src/ws_auth.rs::LOCAL_TRAIT_IMPL:serde::de::Visitor:${name}`);
 function fingerprint(source, rules = visitorPins) {
   for (const label of expectedVisitorLabels) {
     assert.equal(rules[label]?.sourceSha256, createHash('sha256').update(source).digest('hex'), `${label}: accepted-set assertion: reviewed nested-function source changed`);

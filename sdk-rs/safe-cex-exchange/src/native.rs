@@ -285,7 +285,11 @@ impl WsRuntime for NativeRuntime {
         reconnecting: bool,
     ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
         Box::pin(async move {
-            if reconnecting {
+            // Header-capable source sockets select the wrapper branch even
+            // when the native core owns reconnects. Dial that authenticated
+            // attempt as a plain socket; header-less wrapper requests still
+            // require unsupported host-managed reconnection.
+            if reconnecting && options.headers.is_none() {
                 return Err(ExchangeError::new(
                     "the native host dials plain sockets only; the core owns reconnection",
                 ));
