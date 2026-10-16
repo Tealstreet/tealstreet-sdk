@@ -231,6 +231,20 @@ flat JSON maps deleted when merging older branches. See
 migration and complete cutover equality proof.
 
 
+The one exact GRVT `composition::Fields<bool>` borrowed map has a separate
+`shape: "borrowed-map"` route contract with the complete `borrowedRoutes`
+matrix from `scripts/accepted-grvt-fields.mjs`. Its existing fixed compiler
+identity is retained. Twelve immutable JSON texts each execute static text,
+static borrowed Value, and owned Value admission separately. Actual ordered
+keys and bool payloads are observed; text keys must retain their exact offsets
+and borrowed Value keys must point into the retained Value, outside the source
+text. Escaped text keys and nonempty owned Values refuse; an owned empty map
+admits. Every ordinary alternate trait detector still runs. The general borrowed
+AliasProbe guard and DeserializeOwned bound remain unchanged. The finite route
+policy cannot classify another alias, type argument, target, package or adapter;
+a reviewed consumer contract and all 36 route witnesses are still required.
+
+
 `parity-check --invention-crate <package>` requires explicit `--manifest` and
 `--exempt` inputs. It builds the complete maintained workspace index, preserving
 canonical local/shared reexport resolution and every mapping target, then narrows

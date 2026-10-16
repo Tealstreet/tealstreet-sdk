@@ -32,12 +32,29 @@ fn raw(input: &JsNumberInput) -> Result<Value, ExchangeError> {
         .map(|r| r.value)
         .map_err(|e| ExchangeError::new(e.to_string()))
 }
-#[derive(Serialize, Deserialize)]
-#[serde(rename_all = "camelCase")]
 struct Combined {
     instrument: Instrument,
     instrument_details: InstrumentDetails,
 }
+#[derive(Serialize, Deserialize)]
+#[serde(remote = "Combined", rename_all = "camelCase")]
+struct CombinedWire {
+    instrument: Instrument,
+    instrument_details: InstrumentDetails,
+}
+
+impl Serialize for Combined {
+    fn serialize<S: serde::Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        CombinedWire::serialize(self, serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for Combined {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        CombinedWire::deserialize(safe_cex_types::strict_decode::object(deserializer))
+    }
+}
+
 impl JsNumberOutput for Combined {
     fn check_number_output(&self) {
         js_number_output!(self,struct {instrument,instrument_details});

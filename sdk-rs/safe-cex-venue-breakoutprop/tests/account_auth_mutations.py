@@ -1,6 +1,7 @@
 """Run one actual-TS corpus per target, with compiling named controls and restoration."""
 from pathlib import Path
 import os,subprocess,argparse
+from decoder_mutations import replace_decoder_field
 parser=argparse.ArgumentParser();parser.add_argument('--start-at',type=int,default=0);args=parser.parse_args()
 crate=Path(__file__).resolve().parents[1];source=crate/'src/account_auth.rs';oracle=crate/'tests/account_auth_oracle.cjs';types=crate/'src/types.rs'
 env=dict(os.environ,SAFE_CEX_TYPESCRIPT_PATH='/Users/sam/cs/tealstreet-next/node_modules/typescript')
@@ -19,9 +20,10 @@ controls=[
 for field,ty in [('user_details','UserDetail'),('accounts','UserAccount')]:
  controls.append((types,'consuming '+field,f'    pub {field}: Vec<{ty}>,',f'    #[serde(deserialize_with="consume_all")]\n    pub {field}: Vec<{ty}>,','ACCOUNT-ERROR message'))
 for p,name,old,new,assertion in controls[args.start_at:]:
- original=p.read_bytes();s=original.decode();assert s.count(old)==1,(name,s.count(old))
+ original=p.read_bytes();s=original.decode()
+ if p!=types:assert s.count(old)==1,(name,s.count(old))
  try:
-  s=s.replace(old,new)
+  s=replace_decoder_field(s,old,new) if p==types else s.replace(old,new)
   if p==types:s+='\nfn consume_all<\'de,D:serde::Deserializer<\'de>,T:serde::Deserialize<\'de>>(d:D)->Result<Vec<T>,D::Error>{let consumed=Vec::<T>::deserialize(d)?;drop(consumed);Ok(vec![])}\n'
   p.write_text(s)
   r=subprocess.run(cmd,env=env,capture_output=True,text=True);out=r.stdout+r.stderr
