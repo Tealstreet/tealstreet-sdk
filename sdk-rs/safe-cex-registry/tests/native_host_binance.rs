@@ -9,12 +9,12 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
+use safe_cex_registry::{native_host::native_venue_host_with, rust_venues::rust_constructor};
 use safe_cex_store::Store;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, TransportProvider, native::ReqwestAdapter,
     socket::TunnelHost,
 };
-use safe_cex_registry::{native_host::native_venue_host_with, rust_venues::rust_constructor};
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{
@@ -39,7 +39,10 @@ struct Seen {
 }
 
 fn routes() -> HashMap<String, Value> {
-    let corpus: Value = serde_json::from_str(include_str!("../../safe-cex-venue-binance/tests/fixtures/public-rest.json")).unwrap();
+    let corpus: Value = serde_json::from_str(include_str!(
+        "../../safe-cex-venue-binance/tests/fixtures/public-rest.json"
+    ))
+    .unwrap();
     let case = |family: &str| {
         corpus
             .as_array()

@@ -23,7 +23,10 @@ pub fn native_venue_host() -> Rc<NativeVenueHost> {
     )
 }
 /// A host over a caller-chosen runtime and terminal adapter (another transport or a test origin).
-pub fn native_venue_host_with(runtime: Rc<dyn WsRuntime>, adapter: AdapterFactory) -> Rc<NativeVenueHost> {
+pub fn native_venue_host_with(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: AdapterFactory,
+) -> Rc<NativeVenueHost> {
     Rc::new(NativeVenueHost { runtime, adapter })
 }
 impl RustVenueHost for NativeVenueHost {
@@ -34,7 +37,10 @@ impl RustVenueHost for NativeVenueHost {
         ))
     }
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError> {
-        let inputs = safe_cex_venue_backpack::native_host::native_inputs(self.runtime.clone(), (self.adapter)()?);
+        let inputs = safe_cex_venue_backpack::native_host::native_inputs(
+            self.runtime.clone(),
+            (self.adapter)()?,
+        );
         Ok(BackpackDependencies {
             runtime: inputs.runtime,
             build_http: inputs.build_http,

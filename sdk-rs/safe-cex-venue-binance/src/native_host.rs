@@ -89,7 +89,10 @@ pub struct NativeImports {
     this: Weak<NativeImports>,
 }
 type Emitter = Rc<dyn Fn(EventValue) -> Result<(), Failure>>;
-pub fn native_imports(runtime: Rc<dyn WsRuntime>, adapter: Arc<dyn RestAdapter>) -> Rc<NativeImports> {
+pub fn native_imports(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: Arc<dyn RestAdapter>,
+) -> Rc<NativeImports> {
     Rc::new_cyclic(|this| NativeImports {
         timers: native_timers(runtime.clone()),
         runtime,
@@ -102,7 +105,10 @@ pub fn native_imports(runtime: Rc<dyn WsRuntime>, adapter: Arc<dyn RestAdapter>)
         this: this.clone(),
     })
 }
-fn register_client(this: &NativeImports, client: Rc<NativeClient>) -> (Rc<NativeClient>, EventValue) {
+fn register_client(
+    this: &NativeImports,
+    client: Rc<NativeClient>,
+) -> (Rc<NativeClient>, EventValue) {
     let mut clients = this.clients.borrow_mut();
     clients.push(client.clone());
     (
@@ -118,7 +124,6 @@ fn lookup_client(this: &NativeImports, handle: &EventValue) -> Result<Rc<NativeC
         .cloned()
         .ok_or_else(|| failure("unknown native HTTP client handle"))
 }
-
 
 /// An axios instance: defaults, interceptors, retry and rate limit around one HttpClient.
 struct NativeClient {
@@ -739,7 +744,10 @@ impl ExchangeImports for NativeImports {
         let secondary = factory(secondary_options)?;
         let route = NativeClient {
             http: None,
-            route: Some((lookup_client(self, &primary)?, lookup_client(self, &secondary)?)),
+            route: Some((
+                lookup_client(self, &primary)?,
+                lookup_client(self, &secondary)?,
+            )),
             request: RefCell::new(vec![]),
             response: RefCell::new(vec![]),
             retry: RefCell::new(None),
@@ -1119,7 +1127,11 @@ struct ListenerProtocol {
 fn into_exchange(error: Failure) -> ExchangeError {
     (*error).clone()
 }
-fn fire_listeners(this: &ListenerProtocol, event: &str, data: Option<EventValue>) -> Result<(), ExchangeError> {
+fn fire_listeners(
+    this: &ListenerProtocol,
+    event: &str,
+    data: Option<EventValue>,
+) -> Result<(), ExchangeError> {
     let targets: Vec<_> = this
         .listeners
         .borrow()
@@ -1129,9 +1141,7 @@ fn fire_listeners(this: &ListenerProtocol, event: &str, data: Option<EventValue>
         .collect();
     for callback in targets {
         match (&callback, &data) {
-            (PrivateCallback::Message(f), Some(data)) => {
-                f(data.clone()).map_err(into_exchange)?
-            }
+            (PrivateCallback::Message(f), Some(data)) => f(data.clone()).map_err(into_exchange)?,
             (PrivateCallback::Action(f), _) => f().map_err(into_exchange)?,
             (PrivateCallback::Message(_), None) => {}
         }
