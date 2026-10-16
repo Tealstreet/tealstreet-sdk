@@ -311,11 +311,12 @@ fn order_guard_fills_statuses_and_outer_iteration_have_native_values() {
     let first = mapped("one");
     let second = mapped("two");
     let mapped = arr(vec![first.clone(), second.clone()]);
+    // qty / value is 2.9999999999999996 in binary; the emitted price is cleaned to 3.
     order_host(
         &h,
         &owner,
         mapped.clone(),
-        obj(vec![("qty", n(5.0)), ("value", n(0.25))]),
+        obj(vec![("qty", n(0.3)), ("value", n(0.1))]),
     );
     let raw = order("PartiallyFilled");
     put(&raw, "price", t("0"));
@@ -356,13 +357,13 @@ fn order_guard_fills_statuses_and_outer_iteration_have_native_values() {
     );
     let fill = h.field(&h.global_value(), "fill");
     assert_eq!(
-        num(&h.field(&fill, "price")),
-        20.0,
-        "order native inverse execution price"
+        num(&h.field(&fill, "price")).to_bits(),
+        3.0_f64.to_bits(),
+        "order native inverse execution price is cleaned"
     );
     assert_eq!(
         num(&h.field(&fill, "amount")),
-        5.0,
+        0.3,
         "order native execution delta"
     );
     assert_eq!(label(&h.field(&fill, "id")), "one");
@@ -1047,7 +1048,7 @@ fn source_comparison_runs_after_all_native_assertions() {
     );
     assert_eq!(
         s["filled"],
-        json!({"price":20,"amount":5,"status":["closed","closed"],"trace":["map-order","seen:one","seen:two","execution","incremental","fill","store-orders"]})
+        json!({"price":3,"amount":0.3,"status":["closed","closed"],"trace":["map-order","seen:one","seen:two","execution","incremental","fill","store-orders"]})
     );
     assert_eq!(
         s["storeFailure"],

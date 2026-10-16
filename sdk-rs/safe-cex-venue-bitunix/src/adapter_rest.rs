@@ -515,7 +515,11 @@ impl crate::session_control::ExchangeSessionHost for Session {
         let venue = self.venue.clone();
         async move {
             let factory = venue.external.clone();
-            venue.base.init_external_public_data(|c| factory(c)).await
+            let owner = venue.base.clone();
+            venue
+                .base
+                .init_external_public_data(|c| factory(c, owner))
+                .await
         }
     }
     fn fetch(

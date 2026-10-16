@@ -1973,7 +1973,7 @@ fn actual_single_placement_native_floor() {
     }
 
     assert_eq!(
-        corpus["contentHash"], "2b6edc50a84e9daaee4cca942ff1e26cb553a3298a715c04d2915905a73b6b20",
+        corpus["contentHash"], "19136e17ec834dcd5dbea5ab924abb7e5b09f078117469fd710c13ff295f1f9a",
         "source/import pin after native values"
     );
     eprintln!(

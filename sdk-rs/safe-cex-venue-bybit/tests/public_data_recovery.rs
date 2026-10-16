@@ -351,6 +351,58 @@ impl Host {
             }
         }))
     }
+    fn option_get(
+        self: &Rc<Self>,
+        endpoint: &str,
+        params: Option<(DataValue, DataValue)>,
+    ) -> Result<Task<DataValue>, Error> {
+        let n = self.get_index.get();
+        self.get_index.set(n + 1);
+        let name = format!("get{n}");
+        let params = params.map_or(Value::Null, |(coin, cursor)| {
+            json!({"category":"option","baseCoin":leaves(&coin),"limit":1000,"cursor":leaves(&cursor)})
+        });
+        self.event(&name, vec![json!(endpoint), params])?;
+        let h = self.clone();
+        Ok(Box::pin(async move {
+            pending_once().await;
+            if h.input["failAsync"] == name {
+                Err(h.error(&name))
+            } else {
+                Ok(value(&h.input["optionPages"][n]))
+            }
+        }))
+    }
+    fn map_option(&self, row: DataValue) -> Result<DataValue, Error> {
+        self.events
+            .borrow_mut()
+            .push(json!(["mapOption", leaves(&row)]));
+        let symbol = match &row {
+            DataValue::Object(fields) => fields.borrow().get("symbol").cloned(),
+            _ => None,
+        };
+        let symbol = match symbol {
+            Some(DataValue::String(symbol)) => symbol,
+            _ => return Ok(DataValue::Null),
+        };
+        if self.input["failMap"].as_str() == Some(symbol.as_str()) {
+            return Err(self.error("mapOption"));
+        }
+        let fields = match &row {
+            DataValue::Object(fields) => fields.borrow().clone(),
+            _ => unreachable!(),
+        };
+        if !matches!(fields.get("status"), Some(DataValue::String(s)) if s == "Trading") {
+            return Ok(DataValue::Null);
+        }
+        let strike = fields
+            .get("strike")
+            .cloned()
+            .unwrap_or(DataValue::Undefined);
+        Ok(value(
+            &json!({"symbol":symbol,"option":{"strike":leaves(&strike)}}),
+        ))
+    }
     fn send(&self, frame: &str) -> Result<(), Error> {
         let decoded: Value = serde_json::from_str(frame).unwrap();
         self.event("send", vec![decoded["op"].clone(), decoded["args"].clone()])?;
@@ -581,16 +633,38 @@ fn run(h: Rc<Host>) -> (Result<DataValue, Error>, Vec<Value>) {
                             return Err(h.helper_error.clone());
                         }
                         let h = h.clone();
+                        let c = c.to_owned();
                         Ok(Box::pin(async move {
                             pending_once().await;
                             if h.input["brandError"] == true {
                                 Err(h.helper_error.clone())
                             } else if h.input["failAsync"] == "helper" {
                                 Err(h.error("helper"))
+                            } else if h.input["arrays"] == true {
+                                Ok(value(&json!([{"symbol":c}])))
                             } else {
                                 Ok(h.reply.clone())
                             }
                         }))
+                    },
+                    || {
+                        h.event("inverseEnabled", vec![])?;
+                        Ok(h.input["inverse"] == true)
+                    },
+                    || {
+                        h.event("optionsEnabled", vec![])?;
+                        Ok(h.input["options"] == true)
+                    },
+                    || {
+                        h.event("optionMarkets", vec![])?;
+                        let h = h.clone();
+                        Ok(Box::pin(async move {
+                            if h.input["failAsync"] == "optionMarkets" {
+                                Err(h.error("optionMarkets"))
+                            } else {
+                                Ok(value(&json!([{"symbol":"OPT"}])))
+                            }
+                        }) as Task<DataValue>)
                     },
                     |e| e.origin == "wrapped",
                     || {
@@ -598,6 +672,34 @@ fn run(h: Rc<Host>) -> (Result<DataValue, Error>, Vec<Value>) {
                         Ok(h.stored.borrow().clone())
                     },
                     |m, s| h.log(m, s),
+                    |m| {
+                        Rc::new(Fault {
+                            origin: format!("TypeError: {m}"),
+                            cause: None,
+                            retry: None,
+                        })
+                    },
+                );
+                before = Some(h.events.borrow().clone());
+                return drive(f);
+            }
+            "fetchOptionMarkets" => {
+                let f = fetch_option_markets(
+                    |e, p| h.option_get(e, p),
+                    |row| h.map_option(row),
+                    |e| e.origin.clone(),
+                    |m, s| h.log(m, s),
+                    || {
+                        h.event("stored", vec![])?;
+                        Ok(h.stored.borrow().clone())
+                    },
+                    |m| {
+                        Rc::new(Fault {
+                            origin: format!("TypeError: {m}"),
+                            cause: None,
+                            retry: None,
+                        })
+                    },
                 );
                 before = Some(h.events.borrow().clone());
                 return drive(f);
@@ -652,7 +754,7 @@ fn public_data_recovery_native_source_oracle() {
         String::from_utf8_lossy(&output.stderr)
     );
     let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(rows.len(), 81, "RECOVERY independent scenario floor");
+    assert_eq!(rows.len(), 98, "RECOVERY independent scenario floor");
     let mut counts = BTreeMap::new();
     let mut wire_pairs = vec![];
     for (index, row) in rows.iter().enumerate() {
@@ -855,7 +957,8 @@ fn public_data_recovery_native_source_oracle() {
             ("recovery", 12),
             ("markets", 11),
             ("fetchFees", 7),
-            ("fetchMarkets", 8),
+            ("fetchMarkets", 14),
+            ("fetchOptionMarkets", 11),
             ("fetchRetry", 10)
         ]),
         "RECOVERY independent family floors"
@@ -866,7 +969,5 @@ fn public_data_recovery_native_source_oracle() {
             "{label}: wire frame after ALL native assertions"
         );
     }
-    eprintln!(
-        "RECOVERY completed 81 iterations; stopped at iteration 80 (retry second-request rejection)"
-    );
+    eprintln!("RECOVERY completed 98 iterations");
 }

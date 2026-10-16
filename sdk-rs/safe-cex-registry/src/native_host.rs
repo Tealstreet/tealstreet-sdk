@@ -16,7 +16,12 @@ use safe_cex_exchange::{
     runtime::{ExchangeTask, ListenerCleanup, LogSeverity, RemoteSigner},
     websocket::{WsEvent, WsSocket},
 };
-use safe_cex_exchange::{native::native_runtime, runtime::ExchangeError, websocket::WsRuntime};
+use safe_cex_exchange::{
+    js_runtime::base_exchange::{ExternalPublicDataFactory, HostedSigner},
+    native::native_runtime,
+    runtime::ExchangeError,
+    websocket::WsRuntime,
+};
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::socket::SocketFrame;
 use safe_cex_transport::{RestAdapter, native::reqwest_adapter};
@@ -34,11 +39,12 @@ use std::{
 };
 
 pub type AdapterFactory = Rc<dyn Fn() -> Result<Arc<dyn RestAdapter>, ExchangeError>>;
-type HostedSigner = (Rc<dyn RemoteSigner>, Option<String>);
 pub struct NativeVenueHost {
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
     remote: Option<HostedSigner>,
+    kraken_nonces: Rc<safe_cex_venue_kraken::api::FuturesModule>,
+    kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
 }
 /// Direct transport and real HTTP, as `directTransport` is the TypeScript default.
 pub fn native_venue_host() -> Rc<NativeVenueHost> {
@@ -60,6 +66,8 @@ pub fn native_venue_host_with(
         runtime,
         adapter,
         remote: None,
+        kraken_nonces: Rc::default(),
+        kraken_spot_ids: kraken_spot_ids(),
     })
 }
 /// One account's host whose requests sign through a hosted `remoteSigner`
@@ -74,9 +82,43 @@ pub fn native_venue_host_signed(
         runtime,
         adapter,
         remote: Some((signer, account_name)),
+        kraken_nonces: Rc::default(),
+        kraken_spot_ids: kraken_spot_ids(),
     })
 }
+fn kraken_spot_ids() -> Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>> {
+    safe_cex_venue_kraken::spot_client_ids(|bytes| {
+        getrandom::getrandom(bytes).map_err(|_| safe_cex_types::js_coercion::JsCoercionError {
+            name: "Error",
+            message: "operating system entropy is unavailable",
+        })
+    })
+}
+
 impl RustVenueHost for NativeVenueHost {
+    fn hosted_signer(&self) -> Option<HostedSigner> {
+        self.remote.clone()
+    }
+
+    fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for kraken on the native host",
+            ));
+        }
+        Ok(safe_cex_venue_kraken::KrakenDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                (self.adapter)()?,
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            journal: None,
+            futures_nonces: self.kraken_nonces.clone(),
+            spot_client_ids: Some(self.kraken_spot_ids.clone()),
+        })
+    }
+
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError> {
         Ok(safe_cex_venue_binance::native_host::native_dependencies(
             self.runtime.clone(),
@@ -102,18 +144,25 @@ impl RustVenueHost for NativeVenueHost {
             date_parse: inputs.date_parse,
         })
     }
+    fn bitget(&self) -> Result<safe_cex_venue_bitget::BitgetDependencies, ExchangeError> {
+        Ok(safe_cex_venue_bitget::BitgetDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: None,
+        })
+    }
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for bitunix on the native host",
-            ));
-        }
         // createAPI builds a lane's client, then installs its transport; the
         // install sees the options of the lane just built.
         let built = Rc::new(RefCell::new(None::<safe_cex_types::ExchangeOptions>));
         let (runtime, adapter, record) =
             (self.runtime.clone(), self.adapter.clone(), built.clone());
         let install_runtime = self.runtime.clone();
+        let remote = self.remote.clone();
         Ok(BitunixDependencies {
             runtime: self.runtime.clone(),
             build: Rc::new(move |options| {
@@ -124,6 +173,7 @@ impl RustVenueHost for NativeVenueHost {
                     safe_cex_types::ExchangeName::Bitunix,
                     options,
                     safe_cex_transport::RestRequest::default(),
+                    remote.clone(),
                 )
             }),
             install: Rc::new(move |client| {
@@ -139,37 +189,31 @@ impl RustVenueHost for NativeVenueHost {
                 );
                 Ok(())
             }),
-            external_public_data: None,
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            remote_signer_account_name: self.remote.as_ref().and_then(|(_, name)| name.clone()),
         })
     }
-    // externalPublicData stays unset: the constructor refuses that option visibly.
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for blofin on the native host",
-            ));
-        }
         Ok(BlofinDependencies {
             runtime: self.runtime.clone(),
-            http: blofin_http(self.runtime.clone(), self.adapter.clone()),
-            external_public_data: None,
-            remote_signer_account_name: None,
+            http: blofin_http(
+                self.runtime.clone(),
+                self.adapter.clone(),
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            remote_signer_account_name: self.remote.as_ref().and_then(|(_, name)| name.clone()),
         })
     }
-    // externalPublicData stays unset: OkxExchange::new refuses that option visibly.
     fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for okx on the native host",
-            ));
-        }
         Ok(OkxDependencies {
             runtime: self.runtime.clone(),
-            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                 self.runtime.clone(),
                 (self.adapter)()?,
+                self.remote.clone(),
             ),
-            external_public_data: None,
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
 }
@@ -182,6 +226,7 @@ fn native_client(
     exchange: safe_cex_types::ExchangeName,
     options: &safe_cex_types::ExchangeOptions,
     request: safe_cex_transport::RestRequest,
+    remote: Option<HostedSigner>,
 ) -> Result<safe_cex_exchange::http::HttpClient, ExchangeError> {
     let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
     safe_cex_exchange::http::safe_cex_axios_create(
@@ -192,8 +237,10 @@ fn native_client(
             options: options.clone(),
             request,
             provider: Some(runtime.transport()),
-            signer: None,
-            account_name: None,
+            signer: remote.as_ref().map(|(signer, _)| {
+                safe_cex_exchange::js_runtime::client::transport_signer(signer.clone())
+            }),
+            account_name: remote.and_then(|(_, name)| name),
             adapter: adapter()?,
             host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
             runtime: exchange_runtime,
@@ -211,7 +258,11 @@ fn native_client(
 }
 
 /// BloFin's common HTTP builder: (options, baseURL, timeout budget) -> adapter.
-fn blofin_http(runtime: Rc<dyn WsRuntime>, adapter: AdapterFactory) -> BlofinHttp {
+fn blofin_http(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: AdapterFactory,
+    remote: Option<HostedSigner>,
+) -> BlofinHttp {
     Rc::new(move |options, base_url, budget| {
         let request = safe_cex_transport::RestRequest {
             base_url: Some(base_url.to_owned()),
@@ -224,18 +275,17 @@ fn blofin_http(runtime: Rc<dyn WsRuntime>, adapter: AdapterFactory) -> BlofinHtt
             safe_cex_types::ExchangeName::Blofin,
             options,
             request,
+            remote.clone(),
         )
         .map_err(|e| e.message)?;
         Ok(Rc::new(client) as Rc<dyn RestAdapter>)
     })
 }
 
-type ExternalFactory =
-    Rc<dyn Fn(&ExchangeOptionsExternalPublicData, Rc<BaseExchange>) -> Rc<dyn ExternalPublicData>>;
 /// ts: BaseExchange#initExternalPublicData. The websocket gateway runs the shared
 /// provider over native sockets and timers; an in-process source cannot be named in
 /// options (its capability type is uninhabited), so that variant fails visibly.
-fn gateway_factory(runtime: Rc<dyn WsRuntime>) -> ExternalFactory {
+fn gateway_factory(runtime: Rc<dyn WsRuntime>) -> ExternalPublicDataFactory {
     Rc::new(move |options, base| match options {
         ExchangeOptionsExternalPublicData::Variant0(config) => {
             let host = Rc::new(NativeGatewayHost {

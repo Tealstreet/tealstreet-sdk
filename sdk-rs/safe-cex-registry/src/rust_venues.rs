@@ -7,7 +7,7 @@ use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     external::ExternalPublicData,
     http::HttpClient,
-    js_runtime::base_exchange::ExternalPublicDataFactory,
+    js_runtime::base_exchange::{ExternalPublicDataFactory, HostedSigner},
     runtime::ExchangeError,
     websocket::WsRuntime,
 };
@@ -20,8 +20,10 @@ use safe_cex_venue_backpack::{
 use safe_cex_venue_binance::exchange_classes::{
     BinanceExchange, BinancePMExchange, BinanceSpotExchange, ExchangeDependencies,
 };
+use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
+use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use std::rc::Rc;
 
@@ -44,6 +46,7 @@ pub struct BitunixDependencies {
     pub install: BitunixInstall,
     /// Required when `options.externalPublicData` is set.
     pub external_public_data: Option<ExternalPublicDataFactory>,
+    pub remote_signer_account_name: Option<String>,
 }
 
 /// The common HTTP stack BloFin builds each client from: (options, baseURL, timeout budget).
@@ -61,12 +64,20 @@ pub struct BlofinDependencies {
 
 /// Host inputs for Rust venue construction, requested once per constructed instance.
 pub trait RustVenueHost {
+    /// Optional hosted account capability; no host-local secret is required.
+    fn hosted_signer(&self) -> Option<HostedSigner> {
+        None
+    }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
     fn okx(&self) -> Result<OkxDependencies, ExchangeError>;
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError>;
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError>;
+    /// Futures and Spot share the SDK runtime's nonce and client-ID state.
+    fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
+    /// Bitget, Bitget USDC and Bitget inverse share one input set.
+    fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -85,8 +96,13 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Binance, binance_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
     (ExchangeName::Binancespot, binancespot_constructor),
+    (ExchangeName::Bitget, bitget_constructor),
+    (ExchangeName::Bitgetinverse, bitget_constructor),
+    (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Kraken, kraken_constructor),
+    (ExchangeName::Krakenspot, kraken_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
@@ -150,30 +166,41 @@ fn external_factory(
             "{venue}: externalPublicData is configured but no provider was supplied"
         ))),
         None => Ok(Rc::new(
-            |_: &ExchangeOptionsExternalPublicData| -> Rc<dyn ExternalPublicData> {
+            |_: &ExchangeOptionsExternalPublicData,
+             _: Rc<BaseExchange>|
+             -> Rc<dyn ExternalPublicData> {
                 unreachable!("externalPublicData is unset, so no provider is built")
             },
         )),
     }
 }
 
+pub fn bitget_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = BitgetExchange::new(name, options, store, host.bitget()?)?;
+        Ok(exchange)
+    })
+}
+
 pub fn bitunix_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.bitunix()?;
         let external = external_factory("bitunix", deps.external_public_data, &options)?;
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options,
             store,
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
+        base.signers.remote_signer = host.hosted_signer().map(|(signer, _)| signer);
         let exchange = BitunixVenue::new(
             base,
             deps.build,
             deps.install,
             deps.runtime,
-            Rc::new(move |config| external(config)),
+            external,
+            deps.remote_signer_account_name,
         )?;
         Ok(exchange)
     })
@@ -183,21 +210,29 @@ pub fn blofin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.blofin()?;
         let external = external_factory("blofin", deps.external_public_data, &options)?;
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options,
             store,
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
+        base.signers.remote_signer = host.hosted_signer().map(|(signer, _)| signer);
         let http = deps.http;
         let exchange = BlofinNativeExchange::new(
             base,
             move |options, base_url, budget| http(options, base_url, budget),
             deps.runtime,
-            move |config| external(config),
+            external,
             deps.remote_signer_account_name,
         )?;
+        Ok(exchange)
+    })
+}
+
+pub fn kraken_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = KrakenExchange::new(name, options, store, host.kraken()?)?;
         Ok(exchange)
     })
 }

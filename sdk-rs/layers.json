@@ -219,9 +219,11 @@
     "venues": [
       "safe-cex-venue-backpack",
       "safe-cex-venue-binance",
+      "safe-cex-venue-bitget",
       "safe-cex-venue-bitunix",
       "safe-cex-venue-blofin",
-      "safe-cex-venue-okx"
+      "safe-cex-venue-okx",
+      "safe-cex-venue-kraken"
     ],
     "reason": "The registry's Rust constructor table (safe-cex-registry/CONSTRUCTION.md). Each bound venue is listed by its own follow-up; an unlisted registry -> venue edge fails, and a listed venue without a live edge is stale."
   },

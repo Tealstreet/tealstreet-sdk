@@ -805,7 +805,7 @@ fn actual_reconciliation_native_floor() {
     }
     // All decoded native values/effects/receiver/schema assertions precede pin.
     assert_eq!(
-        corpus["contentHash"], "f75769cd103770362574ae201ca32813669d91a3eca4b0763efbd0dc1d5e660a",
+        corpus["contentHash"], "1c4a256a44f0115bb67d32928e301c27ea1196f552cd6707d4b67b29cf3f9919",
         "source-only pin AFTER native assertions"
     );
     println!("170 native cases; stopped at iteration169; no exhaustive/runtime/engine claim");

@@ -151,6 +151,35 @@ pub fn dispatch<H: SnapshotHost>(
             let rows = h.wait(rows).await?;
             map_positions(h.as_ref(), &owner, rows)
         }))),
+        "option_orders_fetch" => Ok(call!(
+            h,
+            owner,
+            "fetchOrdersHelper",
+            vec![h.literal("option")]
+        )),
+        "inverse_positions_fetch" | "option_positions_fetch" => {
+            let category = if code == "inverse_positions_fetch" {
+                "inverse"
+            } else {
+                "option"
+            };
+            Ok(call!(
+                h,
+                owner,
+                "fetchPositionsHelper",
+                vec![
+                    h.undefined(),
+                    h.literal(category),
+                    h.undefined(),
+                    h.boolean(true)
+                ]
+            ))
+        }
+        "keep_category" => {
+            let get = h.select(owner, "getCategoryForSymbol")?;
+            let category = h.apply(get, vec![h.get(&first, "symbol")?])?;
+            Ok(h.boolean(h.equal(&category, &captures[0])))
+        }
         "ignore" => Ok(h.undefined()),
         "tick" => {
             let _ = captures;
@@ -429,9 +458,67 @@ pub fn fetch_orders<H: SnapshotHost>(h: Rc<H>, owner: H::Value) -> H::Value {
             vec![coins, h.callback(owner.clone(), "order_settle", vec![])?],
         )?;
         let orders = h.wait(p).await?;
+        if h.truthy(&call!(h, owner.clone(), "inverseEnabled", vec![])) {
+            let push = h.select(orders.clone(), "push")?;
+            let p = call!(
+                h,
+                owner.clone(),
+                "fetchOrdersHelper",
+                vec![h.literal("inverse")]
+            );
+            h.apply(push, vec![h.wait(p).await?])?;
+        }
+        if h.truthy(&call!(h, owner.clone(), "optionsEnabled", vec![])) {
+            let push = h.select(orders.clone(), "push")?;
+            let fetch = h.callback(owner.clone(), "option_orders_fetch", vec![])?;
+            let p =
+                fetch_category_rows_or_keep(h.clone(), owner.clone(), "option", "orders", fetch);
+            h.apply(push, vec![h.wait(p).await?])?;
+        }
         let preserve = h.select(owner, "preserveRecentlyPlacedOrders")?;
         let flat = call!(h, orders, "flat", vec![]);
         h.apply(preserve, vec![flat])
+    }))
+}
+/// A failed read of an opted-in category keeps that category's stored rows, so one bad
+/// poll neither wipes them nor moves the balance by their PnL.
+pub fn fetch_category_rows_or_keep<H: SnapshotHost>(
+    h: Rc<H>,
+    owner: H::Value,
+    category: &'static str,
+    what: &'static str,
+    fetch: H::Value,
+) -> H::Value {
+    let launcher = h.clone();
+    launcher.launch(Box::pin(async move {
+        let attempt = async {
+            let p = h.apply(fetch, vec![])?;
+            h.wait(p).await
+        };
+        let error = match attempt.await {
+            Ok(rows) => return Ok(rows),
+            Err(error) => h.error_value(error),
+        };
+        let message = h.optional(&error, "message")?;
+        let message = if h.equal(&message, &h.undefined())
+            || h.equal(&message, &h.intrinsic("null", vec![])?)
+        {
+            error
+        } else {
+            message
+        };
+        let text = h.intrinsic(
+            "template",
+            vec![
+                h.literal(&format!("Failed to refresh Bybit {category} {what}: ")),
+                message,
+            ],
+        )?;
+        let severity = h.intrinsic("LogSeverity.Warning", vec![])?;
+        call!(h, owner.clone(), "log", vec![text, severity]);
+        let filter = h.select(h.get(&h.get(&owner, "store")?, what)?, "filter")?;
+        let keep = h.callback(owner, "keep_category", vec![h.literal(category)])?;
+        h.apply(filter, vec![keep])
     }))
 }
 fn fetch_order_pages<H: SnapshotHost>(
@@ -538,9 +625,26 @@ pub fn fetch_positions<H: SnapshotHost>(h: Rc<H>, owner: H::Value, symbols: H::V
         );
         let p = h.intrinsic(
             "mapSeries",
-            vec![coins, h.callback(owner, "position_settle", vec![])?],
+            vec![coins, h.callback(owner.clone(), "position_settle", vec![])?],
         )?;
         let positions = h.wait(p).await?;
+        for (enabled, category, code) in [
+            ("inverseEnabled", "inverse", "inverse_positions_fetch"),
+            ("optionsEnabled", "option", "option_positions_fetch"),
+        ] {
+            if h.truthy(&call!(h, owner.clone(), enabled, vec![])) {
+                let push = h.select(positions.clone(), "push")?;
+                let fetch = h.callback(owner.clone(), code, vec![])?;
+                let p = fetch_category_rows_or_keep(
+                    h.clone(),
+                    owner.clone(),
+                    category,
+                    "positions",
+                    fetch,
+                );
+                h.apply(push, vec![h.wait(p).await?])?;
+            }
+        }
         Ok(call!(h, positions, "flat", vec![]))
     }))
 }
@@ -626,6 +730,7 @@ pub fn fetch_positions_helper<H: SnapshotHost>(
     symbols: H::Value,
     category: H::Value,
     settle: H::Value,
+    fail_closed: H::Value,
 ) -> H::Value {
     let launcher = h.clone();
     launcher.launch(Box::pin(async move {
@@ -641,7 +746,7 @@ pub fn fetch_positions_helper<H: SnapshotHost>(
             h.clone(),
             owner.clone(),
             h.object(vec![("category", category), ("settleCoin", settle)]),
-            false,
+            h.truthy(&fail_closed),
             h.literal(""),
             h.array(vec![]),
         );

@@ -506,6 +506,9 @@ fn runtime(h: H) -> Rc<s::LighterSignerRuntime<H, V>> {
             Ok(NativePromise::settled(engine, result))
         },
         new_error: |_, message| error("Error", message),
+        number: V::Num,
+        add: |_, _, _| panic!("auth deadline capability outside this slice"),
+        big_int: |_, _| panic!("auth deadline capability outside this slice"),
     })
 }
 fn super_error(message: &str) -> E {

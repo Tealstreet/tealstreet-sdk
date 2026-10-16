@@ -324,3 +324,117 @@ pub fn handle_tickers_event(
 
 #[cfg(test)]
 mod tests;
+
+/// BybitPublicWebsocket for the `bybit` connection: the linear socket, and the
+/// inverse socket when inverse markets are enabled.
+pub(crate) struct PublicProtocol {
+    pub parent: std::rc::Weak<crate::exchange::BybitExchange>,
+    pub runtime: Rc<dyn safe_cex_exchange::websocket::WsRuntime>,
+    pub category: &'static str,
+}
+impl PublicProtocol {
+    // ts: BybitPublicWebsocket constructor `messageHandlers` — tickers and pong.
+    pub(crate) fn register_handlers(socket: &Rc<BaseWebSocket>) {
+        let store_socket = Rc::downgrade(socket);
+        let tickers: safe_cex_exchange::websocket::MessageHandler = Rc::new(move |json| {
+            let Some(socket) = store_socket.upgrade() else {
+                return Ok(());
+            };
+            handle_tickers_event(socket.store().as_ref(), json, false)
+                .map_err(|error| ExchangeError::new(error.to_string()))
+        });
+        let pong_socket = Rc::downgrade(socket);
+        let pong: safe_cex_exchange::websocket::MessageHandler =
+            Rc::new(move |_| match pong_socket.upgrade() {
+                Some(socket) => socket.handle_pong_event(5_000),
+                None => Ok(()),
+            });
+        let mut handlers = socket.message_handlers.borrow_mut();
+        handlers.insert(
+            "tickers".into(),
+            Rc::new(std::cell::RefCell::new(vec![tickers])),
+        );
+        handlers.insert("pong".into(), Rc::new(std::cell::RefCell::new(vec![pong])));
+    }
+}
+impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
+    fn ping(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        ping(socket)
+    }
+    fn connect_and_subscribe(
+        &self,
+        socket: Rc<BaseWebSocket>,
+        _is_reconnect: bool,
+    ) -> Result<(), ExchangeError> {
+        let Some(parent) = self.parent.upgrade() else {
+            return Ok(());
+        };
+        connect_and_subscribe(
+            &socket,
+            self.runtime.as_ref(),
+            self.category,
+            parent.base.is_demo,
+            None,
+        )
+    }
+    // ts: BybitPublicWebsocket.onOpen — one tickers topic per market of this category.
+    fn on_open(
+        &self,
+        socket: Rc<BaseWebSocket>,
+    ) -> safe_cex_exchange::runtime::ExchangeFuture<'static, ()> {
+        let result = (|| -> Result<(), ExchangeError> {
+            if socket.is_disposed() {
+                return Ok(());
+            }
+            let linear = self.category == "linear";
+            let topics: Vec<String> = socket
+                .store()
+                .markets()
+                .iter()
+                .filter(|m| {
+                    m.option.is_none() && ((m.quote == "USDT" || m.quote == "USDC") == linear)
+                })
+                .map(|m| format!("tickers.{}", m.symbol))
+                .collect();
+            // subscribe(): the first chunk goes out now, each later one 10ms after the last.
+            let mut frames = topics
+                .chunks(10)
+                .map(|chunk| json!({"op": "subscribe", "args": chunk}).to_string())
+                .collect::<Vec<_>>()
+                .into_iter();
+            if let Some(first) = frames.next() {
+                socket.send(&first)?;
+                let rest: Vec<String> = frames.collect();
+                let runtime = self.runtime.clone();
+                let sender = Rc::downgrade(&socket);
+                socket.start_message_operation(async move {
+                    runtime.sleep(10).await?;
+                    for frame in rest {
+                        let Some(socket) = sender.upgrade() else {
+                            return Ok(());
+                        };
+                        socket.send(&frame)?;
+                        runtime.sleep(10).await?;
+                    }
+                    Ok(())
+                });
+            }
+            ping(&socket)?;
+            if self.runtime.enable_reconnecting() {
+                socket.emit_ws_reconnected()?;
+            }
+            Ok(())
+        })();
+        Box::pin(async move { result })
+    }
+    fn on_message(
+        &self,
+        socket: &Rc<BaseWebSocket>,
+        frame: &safe_cex_transport::socket::SocketFrame,
+    ) -> Result<(), ExchangeError> {
+        match frame {
+            safe_cex_transport::socket::SocketFrame::Text(text) => on_message(socket, text),
+            _ => Ok(()),
+        }
+    }
+}

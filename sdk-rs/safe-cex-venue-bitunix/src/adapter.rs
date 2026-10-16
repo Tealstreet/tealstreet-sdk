@@ -7,13 +7,12 @@ use crate::{
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
     exchange::{BaseExchange, Exchange},
-    external::ExternalPublicData,
     http::HttpClient,
     runtime::{ExchangeError, ExchangeFuture, ExchangeTask},
     websocket::WsRuntime,
 };
 use safe_cex_num::{JsCoercionError, JsJsonValue, js_json_stringify};
-use safe_cex_types::{ExchangeOptions, ExchangeOptionsExternalPublicData, PositionMode};
+use safe_cex_types::{ExchangeOptions, PositionMode};
 use serde_json::Value;
 use std::{
     cell::RefCell,
@@ -21,7 +20,7 @@ use std::{
 };
 
 pub(crate) type ExternalFactory =
-    Rc<dyn Fn(&ExchangeOptionsExternalPublicData) -> Rc<dyn ExternalPublicData>>;
+    safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory;
 pub(crate) type State = BitunixExchange<Rc<BaseExchange>, Rc<Client>, Rc<Socket>>;
 
 /// ts: BitunixExchange (bound to the shared exchange runtime)
@@ -33,6 +32,7 @@ pub struct BitunixVenue {
     pub(crate) self_ref: Weak<Self>,
     pub(crate) tasks: RefCell<Vec<Box<dyn ExchangeTask>>>,
     pub(crate) external: ExternalFactory,
+    pub(crate) remote_account_name: Option<String>,
 }
 
 /// Error carrier for ported bodies whose host error must absorb JS coercion failures.
@@ -186,7 +186,8 @@ impl BitunixVenue {
         build: Rc<dyn Fn(&ExchangeOptions) -> Result<HttpClient, ExchangeError>>,
         install: Rc<dyn Fn(&HttpClient) -> Result<(), ExchangeError>>,
         runtime: Rc<dyn WsRuntime>,
-        external: Rc<dyn Fn(&ExchangeOptionsExternalPublicData) -> Rc<dyn ExternalPublicData>>,
+        external: ExternalFactory,
+        remote_account_name: Option<String>,
     ) -> Result<Rc<Self>, ExchangeError> {
         let options = base.options();
         let owner: OwnerSlot = Rc::new(RefCell::new(Weak::new()));
@@ -216,6 +217,7 @@ impl BitunixVenue {
             self_ref: weak.clone(),
             tasks: RefCell::new(vec![]),
             external,
+            remote_account_name,
         });
         *owner.borrow_mut() = Rc::downgrade(&venue);
         let state = venue.state.borrow();

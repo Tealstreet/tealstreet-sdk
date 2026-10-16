@@ -96,9 +96,11 @@ safe-cex-exchange = { path = "safe-cex-exchange" }
 safe-cex-registry = { path = "safe-cex-registry" }
 safe-cex-venue-backpack = { path = "safe-cex-venue-backpack" }
 safe-cex-venue-binance = { path = "safe-cex-venue-binance" }
+safe-cex-venue-bitget = { path = "safe-cex-venue-bitget" }
 safe-cex-venue-bitunix = { path = "safe-cex-venue-bitunix" }
 safe-cex-venue-blofin = { path = "safe-cex-venue-blofin" }
 safe-cex-venue-okx = { path = "safe-cex-venue-okx" }
+safe-cex-venue-kraken = { path = "safe-cex-venue-kraken" }
 safe-cex-candle-cache = { path = "safe-cex-candle-cache" }
 safe-cex = { path = "safe-cex" }
 safe-cex-ffi = { path = "safe-cex-ffi" }
@@ -118,6 +120,7 @@ rmp-serde = "=1.3.1"
 
 # P5a Ed25519 and Starknet/SNIP-12 primitives; no provider/client dependency.
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
+p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
 starknet-crypto = { version = "=0.8.1", default-features = false, features = ["std"] }
 starknet-core = { version = "=0.16.0", default-features = false, features = ["std"] }
 

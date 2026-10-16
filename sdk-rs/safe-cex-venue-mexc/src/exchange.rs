@@ -17,9 +17,12 @@ use crate::{
     },
 };
 use safe_cex_exchange::{
-    capabilities::ExchangeCapabilities,
+    capabilities::{
+        CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
+    },
     error_reporting::ExchangeErrorInput,
-    exchange::{BaseExchange, Exchange},
+    exchange::{BaseExchange, Exchange, ValidatedBatch, ValidatedOrder},
+    js_runtime::base_exchange::ExternalPublicDataFactory,
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_store::{StoreUpdate, model_patch::ModelPatch};
@@ -27,7 +30,7 @@ use safe_cex_transport::{RestAdapter, RestFailure, RestRequest, RestResponseBody
 use safe_cex_types::{
     AccountValidationError, Candle, ExchangeAccount, Execution, ExecutionsOptions, FetchedLeverage,
     MarginType, OHLCVOptions, Order, OrderBook, OrderStatus, PlaceOrderOpts, Position,
-    PositionMode, ValidateAccountResult,
+    PositionMode, PositionSide, UpdateOrderOpts, ValidateAccountResult,
 };
 #[cfg(test)]
 use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
@@ -43,7 +46,8 @@ use std::{
 
 // ts: MexcExchange
 pub struct MexcExchange {
-    base: BaseExchange,
+    base: Rc<BaseExchange>,
+    external: ExternalPublicDataFactory,
     capabilities: ExchangeCapabilities,
     xhr: Rc<dyn RestAdapter>,
     local_to_utc: Rc<dyn Fn(f64) -> f64>,
@@ -53,7 +57,10 @@ pub struct MexcExchange {
     symbol_settings: RefCell<BTreeMap<String, MexcSymbolConfig>>,
     account_position_mode: RefCell<PositionMode>,
     public_socket: RefCell<Option<Rc<crate::ws_public::MexcPublicSocket>>>,
+    binding: std::cell::OnceCell<Rc<binding::Host>>,
 }
+#[path = "exchange_binding.rs"]
+mod binding;
 enum OrderKind {
     Regular,
     Plan,
@@ -213,8 +220,10 @@ impl Exchange for MexcExchange {
         options: OHLCVOptions,
         callback: Rc<dyn Fn(Candle)>,
     ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
-        if self.base.external_public_data_provider.borrow().is_some() {
-            return self.base.listen_ohlcv(options, callback);
+        // ts: mexc.exchange.ts:599 reads the provider itself, not super.listenOHLCV.
+        let provider = self.base.external_public_data_provider.borrow().clone();
+        if let Some(provider) = provider {
+            return provider.listen_ohlcv(options, callback);
         }
         let socket = self
             .public_socket
@@ -228,8 +237,10 @@ impl Exchange for MexcExchange {
         symbol: String,
         callback: Rc<dyn Fn(OrderBook)>,
     ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
-        if self.base.external_public_data_provider.borrow().is_some() {
-            return self.base.listen_order_book(symbol, callback);
+        // ts: mexc.exchange.ts:606 reads the provider itself, not super.listenOrderBook.
+        let provider = self.base.external_public_data_provider.borrow().clone();
+        if let Some(provider) = provider {
+            return provider.listen_order_book(symbol, callback);
         }
         let socket = self
             .public_socket
@@ -249,6 +260,114 @@ impl Exchange for MexcExchange {
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
         MexcExchange::cancel_orders(self, orders)
+    }
+    // ts: MexcExchange.placeOrder (mexc.exchange.ts:626); the bound body's first
+    // statement is the resolveCallerClientOrderId guard (order_workflow::place_order).
+    fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
+        let opts = binding::value(order.options());
+        binding::typed(self.js(), move |h| {
+            Ok(crate::order_workflow::place_order(h, opts?))
+        })
+    }
+    // ts: MexcExchange.placeOrders (mexc.exchange.ts:1030); assertCallerClientOrderIds first.
+    fn place_orders<'a>(&'a self, orders: ValidatedBatch<Self>) -> ExchangeFuture<'a, Vec<String>> {
+        let opts: Vec<&PlaceOrderOpts> = orders.orders().iter().map(|o| o.options()).collect();
+        let opts = binding::value(&opts);
+        binding::typed(self.js(), move |h| {
+            Ok(crate::order_workflow::place_orders(h, opts?))
+        })
+    }
+    // ts: MexcExchange.start (mexc.exchange.ts:212)
+    fn start(&self) -> ExchangeFuture<'_, ()> {
+        binding::unit(self.js(), |h| {
+            Ok(crate::runtime_assembly::start_exchange(h))
+        })
+    }
+    // ts: MexcExchange.setLeverage (mexc.exchange.ts:1436)
+    fn set_leverage(
+        &self,
+        symbol: String,
+        leverage: f64,
+        side: Option<PositionSide>,
+    ) -> ExchangeFuture<'_, ()> {
+        let side = binding::value(&side);
+        binding::unit(self.js(), move |h| {
+            Ok(crate::exchange_runtime::set_leverage(
+                h,
+                binding::value(&symbol)?,
+                binding::value(&leverage)?,
+                side?,
+            ))
+        })
+    }
+    // ts: MexcExchange.changePositionMode (mexc.exchange.ts:1460); the TS member takes no symbol.
+    fn change_position_mode(
+        &self,
+        hedged: bool,
+        _symbol: Option<String>,
+    ) -> ExchangeFuture<'_, ()> {
+        binding::unit(self.js(), move |h| {
+            Ok(crate::exchange_runtime::change_position_mode(
+                h,
+                binding::value(&hedged)?,
+            ))
+        })
+    }
+    // ts: MexcExchange.changeMarginType (mexc.exchange.ts:1476)
+    fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
+        let symbol = binding::value(&symbol);
+        binding::unit(self.js(), move |h| {
+            Ok(crate::exchange_runtime::change_margin_type(
+                h,
+                binding::value(&isolated)?,
+                symbol?,
+            ))
+        })
+    }
+    // ts: MexcExchange.updateOrder (mexc.exchange.ts:1144)
+    fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
+        let input = binding::value(&options);
+        binding::typed(self.js(), move |h| {
+            Ok(crate::runtime_assembly::update_order(h, input?))
+        })
+    }
+    // ts: MexcExchange.cancelSymbolOrders (mexc.exchange.ts:1340)
+    fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        binding::unit(self.js(), move |h| {
+            Ok(crate::exchange_runtime::cancel_symbol_orders(
+                h,
+                binding::value(&symbol)?,
+            ))
+        })
+    }
+    // ts: MexcExchange.cancelAllOrders (mexc.exchange.ts:1349)
+    fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
+        binding::unit(self.js(), |h| {
+            Ok(crate::exchange_runtime::cancel_all_orders(h))
+        })
+    }
+    // ts: MexcExchange.dispose (mexc.exchange.ts:1580)
+    fn dispose(&self) -> Result<(), ExchangeError> {
+        match self.binding.get() {
+            Some(host) => binding::dispose(host),
+            None => self.base.dispose(),
+        }
+    }
+    // ts: base.ts:799 — MexcExchange inherits fetchSymbolMaxLeverage, which rejects.
+    fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
+        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+    }
+    // ts: base.ts:989 — MexcExchange inherits scheduleCancel, which rejects.
+    fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
+        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
+    }
+    // ts: base.ts:1138 — MexcExchange inherits fetchPublicTrades, which rejects.
+    fn fetch_public_trades(
+        &self,
+        _symbol: String,
+        _limit: Option<f64>,
+    ) -> ExchangeFuture<'_, Vec<safe_cex_types::PublicTrade>> {
+        Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
 }
 fn failure_message(error: &RestFailure) -> Result<String, ExchangeError> {
@@ -279,24 +398,42 @@ fn failure_report_value(error: &RestFailure) -> Value {
 }
 
 impl MexcExchange {
+    fn js(&self) -> Option<Rc<binding::Host>> {
+        self.binding.get().cloned()
+    }
+    fn capabilities_table() -> ExchangeCapabilities {
+        ExchangeCapabilities {
+            start: CapabilityBinding::implemented(|venue, ()| venue.start()),
+            place_order: PlaceOrderBinding::implemented::<Self>(Exchange::place_order),
+            place_orders: PlaceOrdersBinding::implemented::<Self>(Exchange::place_orders),
+            fetch_historical_fills: CapabilityBinding::implemented(|venue, options| {
+                venue.fetch_historical_fills(options)
+            }),
+            ..Default::default()
+        }
+    }
     pub fn new(
         base: BaseExchange,
         xhr: Rc<dyn RestAdapter>,
         local_to_utc: Rc<dyn Fn(f64) -> f64>,
         sockets: crate::sockets::MexcSocketDependencies,
+        external: ExternalPublicDataFactory,
     ) -> Rc<Self> {
         let exchange = Rc::new(Self {
-            base,
+            base: Rc::new(base),
+            external,
             xhr,
             local_to_utc: local_to_utc.clone(),
-            capabilities: ExchangeCapabilities::default(),
+            capabilities: Self::capabilities_table(),
             placed: RefCell::default(),
             canceled: RefCell::default(),
             rejected: RefCell::default(),
             symbol_settings: RefCell::default(),
             account_position_mode: RefCell::new(PositionMode::Hedged),
             public_socket: RefCell::default(),
+            binding: std::cell::OnceCell::new(),
         });
+        let _ = exchange.binding.set(binding::Host::new(&exchange));
         let public = crate::ws_public::MexcPublicProtocol::bind(
             &exchange,
             sockets.runtime.clone(),

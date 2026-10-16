@@ -2903,6 +2903,7 @@ dependencies = [
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "tokio",
 ]
 
 [[package]]
@@ -3066,6 +3067,18 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7c87def4c32ab89d880effc9e097653c8da5d6ef28e6b539d313baaacfbafcbe"
 
 [[package]]
+name = "p256"
+version = "0.13.2"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "c9863ad85fa8f4460f9c48cb909d38a0d689dba1f6f6988a5e3e0d31071bcd4b"
+dependencies = [
+ "ecdsa",
+ "elliptic-curve",
+ "primeorder",
+ "sha2 0.10.9",
+]
+
+[[package]]
 name = "pairing_ce"
 version = "0.28.6"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -3201,6 +3214,15 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "85eae3c4ed2f50dcfe72643da4befc30deadb458a9b590d720cde2f2b1e97da9"
 dependencies = [
  "zerocopy",
+]
+
+[[package]]
+name = "primeorder"
+version = "0.13.6"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "353e1ca18966c16d9deb1c69278edbc5f194139612772bd9537af60ac231e1e6"
+dependencies = [
+ "elliptic-curve",
 ]
 
 [[package]]
@@ -3832,6 +3854,7 @@ dependencies = [
  "getrandom 0.4.3",
  "goldilocks-crypto",
  "hmac 0.12.1",
+ "p256",
  "poseidon-hash",
  "rmp-serde",
  "ryu-js",
@@ -3877,6 +3900,8 @@ dependencies = [
  "napi-derive",
  "safe-cex",
  "safe-cex-registry",
+ "serde_json",
+ "tokio",
  "wasm-bindgen",
 ]
 
@@ -3929,6 +3954,7 @@ name = "safe-cex-registry"
 version = "0.1.0"
 dependencies = [
  "futures-util",
+ "getrandom 0.2.17",
  "hmac 0.12.1",
  "safe-cex-exchange",
  "safe-cex-store",
@@ -3936,8 +3962,10 @@ dependencies = [
  "safe-cex-types",
  "safe-cex-venue-backpack",
  "safe-cex-venue-binance",
+ "safe-cex-venue-bitget",
  "safe-cex-venue-bitunix",
  "safe-cex-venue-blofin",
+ "safe-cex-venue-kraken",
  "safe-cex-venue-okx",
  "serde",
  "serde_json",
@@ -4098,6 +4126,7 @@ dependencies = [
  "safe-cex-exchange",
  "safe-cex-num",
  "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",
@@ -4212,7 +4241,11 @@ name = "safe-cex-venue-hyperliquid"
 version = "0.1.0"
 dependencies = [
  "alloy-dyn-abi",
+ "base64 0.22.1",
+ "flate2",
+ "getrandom 0.2.17",
  "indexmap 2.14.2",
+ "regex",
  "safe-cex-crypto",
  "safe-cex-exchange",
  "safe-cex-num",
@@ -4260,11 +4293,13 @@ name = "safe-cex-venue-lighter"
 version = "0.1.0"
 dependencies = [
  "form_urlencoded",
+ "getrandom 0.2.17",
  "indexmap 2.14.2",
  "num-bigint 0.4.6",
  "safe-cex-candle-cache",
  "safe-cex-crypto",
  "safe-cex-exchange",
+ "safe-cex-lighter-sdk",
  "safe-cex-num",
  "safe-cex-store",
  "safe-cex-transport",

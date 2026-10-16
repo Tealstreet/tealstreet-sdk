@@ -21,6 +21,7 @@ use std::{
 /// assembled (cores are created lazily after that) and the core registry.
 pub struct JsSocketContext {
     pub runtime: Rc<dyn WsRuntime>,
+    pub(crate) http: RefCell<Option<Rc<dyn super::client::JsHttpHost>>>,
     pub venue: RefCell<Option<Weak<dyn Exchange>>>,
     pub ids: Cell<u64>,
     pub cores: RefCell<Vec<(Js, Rc<SocketCore>)>>,
@@ -31,6 +32,7 @@ impl JsSocketContext {
     pub fn new(runtime: Rc<dyn WsRuntime>) -> Rc<Self> {
         Rc::new(Self {
             runtime,
+            http: RefCell::new(None),
             venue: RefCell::new(None),
             ids: Cell::new(0),
             cores: RefCell::default(),
@@ -50,6 +52,8 @@ pub struct SocketCore {
     /// as a replaced socket object takes its listeners with it.
     pub listeners: RefCell<ListenerList>,
     pub on_close_member: RefCell<Option<Js>>,
+    /// The JS `pingAt` value; every write also reaches the core's ping time.
+    ping_at: RefCell<Js>,
 }
 
 struct JsProtocol(Weak<SocketCore>);
@@ -58,11 +62,43 @@ fn core_error(e: Thrown) -> ExchangeError {
     e.to_exchange_error()
 }
 
+fn close_event(code: Option<u16>, reason: &str, was_clean: bool) -> Js {
+    Js::object(vec![
+        ("code", Js::Number(f64::from(code.unwrap_or(1005)))),
+        ("reason", Js::str(reason)),
+        ("wasClean", Js::Bool(was_clean)),
+    ])
+}
+
 impl JsProtocol {
     fn core(&self) -> Result<Rc<SocketCore>, ExchangeError> {
         self.0
             .upgrade()
             .ok_or_else(|| ExchangeError::new("socket facade was dropped"))
+    }
+    /// A receiver-defined `getWatchdog*ThresholdMs()`; absent or nullish keeps the core default.
+    fn receiver_threshold(&self, member: &str) -> Option<f64> {
+        let core = self.0.upgrade()?;
+        let this = core.this.borrow().clone();
+        let read = || -> Result<Option<f64>, Thrown> {
+            let getter = this.get(member)?;
+            if !getter.is_callable() {
+                return Ok(None);
+            }
+            let value = getter.call(this.clone(), vec![])?;
+            Ok(if value.is_nullish() {
+                None
+            } else {
+                Some(value.to_number()?)
+            })
+        };
+        read().unwrap_or_else(|thrown| {
+            core.context.runtime.report_exception(
+                &core_error(thrown),
+                &serde_json::json!({ "operation": member }),
+            );
+            None
+        })
     }
     fn emit(&self, event: &str, payload: Js) -> Result<(), ExchangeError> {
         let core = self.core()?;
@@ -114,6 +150,38 @@ impl WsProtocol for JsProtocol {
         let result = self.emit("open", Js::object(vec![("type", Js::str("open"))]));
         Box::pin(async move { result })
     }
+    fn on_transport_close(
+        &self,
+        _socket: &Rc<BaseWebSocket>,
+        code: Option<u16>,
+        reason: &str,
+    ) -> Result<(), ExchangeError> {
+        self.emit("close", close_event(code, reason, code != Some(1006)))
+    }
+    /// ts: a subclass `onClose` field replaces the base one createWebsocket listens with.
+    fn owns_close_handling(&self) -> bool {
+        let Ok(core) = self.core() else {
+            return false;
+        };
+        let this = core.this.borrow().clone();
+        let base_member = core.on_close_member.borrow().clone();
+        match this.get("onClose") {
+            Ok(on_close) => base_member.is_some_and(|base| !base.same_reference(&on_close)),
+            Err(thrown) => {
+                core.context.runtime.report_exception(
+                    &core_error(thrown),
+                    &serde_json::json!({ "operation": "onClose" }),
+                );
+                false
+            }
+        }
+    }
+    fn watchdog_stale_threshold_ms(&self) -> Option<f64> {
+        self.receiver_threshold("getWatchdogStaleThresholdMs")
+    }
+    fn watchdog_ping_threshold_ms(&self) -> Option<f64> {
+        self.receiver_threshold("getWatchdogPingThresholdMs")
+    }
     fn on_error(&self, _socket: &BaseWebSocket, message: &str) -> Result<(), ExchangeError> {
         self.emit(
             "error",
@@ -136,14 +204,7 @@ impl WsProtocol for JsProtocol {
                 reason,
                 was_clean,
             } => {
-                return self.emit(
-                    "close",
-                    Js::object(vec![
-                        ("code", Js::Number(f64::from(*code))),
-                        ("reason", Js::str(reason)),
-                        ("wasClean", Js::Bool(*was_clean)),
-                    ]),
-                );
+                return self.emit("close", close_event(Some(*code), reason, *was_clean));
             }
         };
         self.emit("message", Js::object(vec![("data", data)]))
@@ -154,6 +215,7 @@ impl SocketCore {
     /// The core is created on first use, once the venue exists as `dyn Exchange`.
     pub fn base(self: &Rc<Self>) -> Result<Rc<BaseWebSocket>, Thrown> {
         if let Some(base) = self.base.get() {
+            self.apply_pong_policy(base)?;
             return Ok(base.clone());
         }
         let venue = self
@@ -175,7 +237,17 @@ impl SocketCore {
             Rc::new(JsProtocol(Rc::downgrade(self))),
         );
         let _ = self.base.set(base.clone());
+        self.apply_pong_policy(&base)?;
         Ok(base)
+    }
+    /// A receiver's own `treatAnyMessageAsPong` field drives the core's flag.
+    fn apply_pong_policy(&self, base: &BaseWebSocket) -> Result<(), Thrown> {
+        let this = self.this.borrow().clone();
+        let treat = this.get("treatAnyMessageAsPong")?;
+        if !treat.is_undefined() {
+            base.treat_any_message_as_pong.set(treat.truthy());
+        }
+        Ok(())
     }
 }
 
@@ -230,6 +302,7 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         base: OnceCell::new(),
         listeners: RefCell::default(),
         on_close_member: RefCell::default(),
+        ping_at: RefCell::new(Js::Number(0.0)),
     });
     let def = |name: &str, f: Js| {
         let _ = socket.define(name, f);
@@ -258,7 +331,24 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         );
     }
     let _ = socket.define("ws", Js::Undefined);
-    let _ = socket.define("pingAt", Js::Number(0.0));
+    {
+        let (reader, writer) = (core.clone(), core.clone());
+        socket.define_accessor(
+            "pingAt",
+            Some(Rc::new(move |_| Ok(reader.ping_at.borrow().clone()))),
+            Some(Rc::new(move |_, value: Js| {
+                // ts: handlePongEvent reads `if (this.pingAt)`, so a falsy value is no ping.
+                let at = if value.truthy() {
+                    value.to_number()?
+                } else {
+                    0.0
+                };
+                writer.base()?.set_ping_at(at);
+                *writer.ping_at.borrow_mut() = value;
+                Ok(())
+            })),
+        );
+    }
     let _ = socket.define("messageHandlers", Js::object(vec![]));
     let _ = socket.define("lastReceived", Js::Number(0.0));
     // TS field initializers. The Rust core owns ping/pong and reconnect timing,

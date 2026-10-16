@@ -16,6 +16,14 @@ use std::{cell::RefCell, rc::Rc};
 pub trait JsHttpHost {
     fn runtime(&self) -> Rc<dyn ExchangeRuntime>;
     fn send(&self, config: Js) -> JsFuture<'static>;
+    /// Bind a fresh host to the exchange whose createAPI clients use it.
+    fn configure_exchange(&self, _name: safe_cex_types::ExchangeName) -> Result<(), Thrown> {
+        Ok(())
+    }
+    /// Hosted account capability shared by JS HTTP and BaseExchange/WS auth.
+    fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
+        None
+    }
 }
 
 type Host = Rc<dyn JsHttpHost>;
@@ -24,10 +32,13 @@ fn spawn(host: &Host, body: JsFuture<'static>) -> Js {
     Js::Promise(Promise::spawn(&host.runtime(), body))
 }
 
+/// One `interceptors.*.use(onFulfilled, onRejected)` registration.
+type Interceptor = (Js, Js);
+
 #[derive(Default)]
 struct ClientState {
-    requests: Vec<Js>,
-    responses: Vec<Js>,
+    requests: Vec<Interceptor>,
+    responses: Vec<Interceptor>,
     retries: u32,
     retry_condition: Option<Js>,
     /// axios-rate-limit windows `(maxRequests, perMilliseconds, sent)`; a chained
@@ -39,11 +50,13 @@ struct ClientState {
 pub fn create(host: Host, defaults: Js) -> Js {
     let state = Rc::new(RefCell::new(ClientState::default()));
     let client = Js::object_with_class("Axios", vec![("defaults", defaults.clone())]);
-    let use_fn = |list: fn(&mut ClientState) -> &mut Vec<Js>| {
+    let use_fn = |list: fn(&mut ClientState) -> &mut Vec<Interceptor>| {
         let state = state.clone();
         Js::function("use", move |_, a| {
-            list(&mut state.borrow_mut()).push(arg(&a, 0));
-            Ok(Js::Number(0.0))
+            let mut state = state.borrow_mut();
+            let list = list(&mut state);
+            list.push((arg(&a, 0), arg(&a, 1)));
+            Ok(Js::Number((list.len() - 1) as f64))
         })
     };
     let _ = client.define(
@@ -170,7 +183,7 @@ fn dispatch(
     host: Host,
     state: Rc<RefCell<ClientState>>,
     defaults: Js,
-    request: Js,
+    mut request: Js,
 ) -> JsFuture<'static> {
     Box::pin(async move {
         let mut attempt = 0;
@@ -192,6 +205,13 @@ fn dispatch(
                     if !retry {
                         return Err(error);
                     }
+                    // axios-retry resubmits the effective failed config. This
+                    // retains interceptor changes and the predicate's one-shot
+                    // signature-retry stamp across request re-signing.
+                    let failed_config = error.value.get("config")?;
+                    if failed_config.is_object() {
+                        request = failed_config;
+                    }
                     attempt += 1;
                 }
             }
@@ -199,18 +219,51 @@ fn dispatch(
     })
 }
 
+/// Axios' `promise.then(onFulfilled, onRejected)` link: a missing handler passes
+/// the settlement through; a rejection handler's return recovers the chain.
+async fn chain_step(interceptor: &Interceptor, current: Result<Js, Thrown>) -> Result<Js, Thrown> {
+    let (on_fulfilled, on_rejected) = interceptor;
+    match current {
+        Ok(value) if on_fulfilled.is_callable() => {
+            await_js(on_fulfilled.call(Js::Undefined, vec![value])?).await
+        }
+        Err(error) if on_rejected.is_callable() => {
+            await_js(on_rejected.call(Js::Undefined, vec![error.value])?).await
+        }
+        settled => settled,
+    }
+}
+
+/// One axios chain: request interceptors (LIFO), the adapter, response
+/// interceptors (FIFO), all links of one promise chain.
 async fn send_once(
     host: &Host,
     state: &Rc<RefCell<ClientState>>,
     defaults: &Js,
     request: Js,
 ) -> Result<Js, Thrown> {
-    let mut config = merged_config(defaults, &request)?;
-    let interceptors: Vec<Js> = state.borrow().requests.iter().rev().cloned().collect();
-    for interceptor in interceptors {
-        config = await_js(interceptor.call(Js::Undefined, vec![config])?).await?;
+    let mut current = Ok(merged_config(defaults, &request)?);
+    let requests: Vec<Interceptor> = state.borrow().requests.iter().rev().cloned().collect();
+    for interceptor in &requests {
+        current = chain_step(interceptor, current).await;
     }
-    throttle(host, state).await;
+    current = match current {
+        Ok(config) => dispatch_request(host, state, config).await,
+        Err(error) => Err(error),
+    };
+    let responses: Vec<Interceptor> = state.borrow().responses.clone();
+    for interceptor in &responses {
+        current = chain_step(interceptor, current).await;
+    }
+    current
+}
+
+async fn dispatch_request(
+    host: &Host,
+    state: &Rc<RefCell<ClientState>>,
+    config: Js,
+) -> Result<Js, Thrown> {
+    throttle(host, state).await?;
     let response = host.send(config.clone()).await?;
     if !response.get("config")?.is_object() {
         response.define("config", config.clone())?;
@@ -219,15 +272,10 @@ async fn send_once(
     if !(200.0..300.0).contains(&status) {
         return Err(axios_error(&response, &config)?);
     }
-    let mut response = response;
-    let interceptors: Vec<Js> = state.borrow().responses.clone();
-    for interceptor in interceptors {
-        response = await_js(interceptor.call(Js::Undefined, vec![response])?).await?;
-    }
     Ok(response)
 }
 
-async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) {
+async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) -> Result<(), Thrown> {
     loop {
         let runtime = host.runtime();
         let now = runtime.monotonic_now_ms();
@@ -252,10 +300,9 @@ async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) {
             wait
         };
         match wait {
-            None => return,
-            Some(ms) => {
-                let _ = runtime.sleep(ms.max(1.0) as u64).await;
-            }
+            None => return Ok(()),
+            // A failed host sleep rejects the request instead of spinning on the window.
+            Some(ms) => runtime.sleep(ms.max(1.0) as u64).await?,
         }
     }
 }
@@ -375,13 +422,68 @@ impl RestAdapter for JsRestAdapter {
 struct RestHttpHost {
     runtime: Rc<dyn ExchangeRuntime>,
     adapter: std::sync::Arc<dyn RestAdapter>,
+    remote: Option<super::base_exchange::HostedSigner>,
+    exchange: RefCell<Option<safe_cex_types::ExchangeName>>,
 }
 
 pub fn rest_http_host(
     runtime: Rc<dyn ExchangeRuntime>,
     adapter: std::sync::Arc<dyn RestAdapter>,
 ) -> Rc<dyn JsHttpHost> {
-    Rc::new(RestHttpHost { runtime, adapter })
+    rest_http_host_signed(runtime, adapter, None)
+}
+
+/// The production wire host with one hosted account's signer. Scope assembly
+/// supplies the exchange name before any client sends a request.
+pub fn rest_http_host_signed(
+    runtime: Rc<dyn ExchangeRuntime>,
+    adapter: std::sync::Arc<dyn RestAdapter>,
+    remote: Option<super::base_exchange::HostedSigner>,
+) -> Rc<dyn JsHttpHost> {
+    Rc::new(RestHttpHost {
+        runtime,
+        adapter,
+        remote,
+        exchange: RefCell::new(None),
+    })
+}
+
+struct TransportSigner(Rc<dyn crate::runtime::RemoteSigner>);
+impl safe_cex_transport::signing::RemoteSigner for TransportSigner {
+    fn sign(
+        &self,
+        request: safe_cex_transport::signing::RemoteSignerRequest,
+    ) -> safe_cex_transport::TransportFuture<'_, safe_cex_transport::signing::RemoteSignerResponse>
+    {
+        self.0.sign(request)
+    }
+}
+
+/// Adapt the local availability-aware signer to the transport's Arc capability.
+#[allow(clippy::arc_with_non_send_sync)]
+pub fn transport_signer(
+    signer: Rc<dyn crate::runtime::RemoteSigner>,
+) -> std::sync::Arc<dyn safe_cex_transport::signing::RemoteSigner> {
+    std::sync::Arc::new(TransportSigner(signer))
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn signed_adapter(
+    runtime: Rc<dyn ExchangeRuntime>,
+    adapter: std::sync::Arc<dyn RestAdapter>,
+    remote: &super::base_exchange::HostedSigner,
+    exchange: safe_cex_types::ExchangeName,
+    serializer: Option<&crate::http::ParamsSerializer>,
+) -> std::sync::Arc<dyn RestAdapter> {
+    let clock = runtime.clone();
+    std::sync::Arc::new(safe_cex_transport::signing::create_remote_signing_adapter(
+        transport_signer(remote.0.clone()),
+        exchange,
+        remote.1.clone(),
+        std::sync::Arc::new(move || runtime.unique_id()),
+        std::sync::Arc::new(move || clock.now_ms().max(0.0) as u64),
+        crate::http::remote_output_adapter(adapter, serializer),
+    ))
 }
 
 fn optional_text(config: &Js, key: &str) -> Result<Option<String>, Thrown> {
@@ -393,7 +495,32 @@ fn optional_text(config: &Js, key: &str) -> Result<Option<String>, Thrown> {
     })
 }
 
-fn rest_request(config: &Js) -> Result<RestRequest, Thrown> {
+fn js_params_serializer(config: &Js) -> Result<Js, Thrown> {
+    let serializer = config.get("paramsSerializer")?;
+    if serializer.is_callable() {
+        Ok(serializer)
+    } else if serializer.is_object() {
+        super::scope::bound_member(&serializer, "serialize")
+    } else {
+        Ok(Js::Undefined)
+    }
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn hosted_params_serializer(config: &Js) -> Result<Option<crate::http::ParamsSerializer>, Thrown> {
+    let serialize = js_params_serializer(config)?;
+    Ok(serialize.is_callable().then(|| {
+        std::sync::Arc::new(move |params: &serde_json::Value| {
+            serialize
+                .call(Js::Undefined, vec![from_json(params)])
+                .and_then(|query| query.to_js_string())
+                .map(|query| String::from_utf16_lossy(&query))
+                .map_err(|error| safe_cex_transport::TransportError::Host(error.message()))
+        }) as crate::http::ParamsSerializer
+    }))
+}
+
+fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Thrown> {
     let mut headers = indexmap::IndexMap::new();
     let config_headers = config.get("headers")?;
     if !config_headers.is_nullish() {
@@ -417,15 +544,8 @@ fn rest_request(config: &Js) -> Result<RestRequest, Thrown> {
     let mut url = optional_text(config, "url")?.unwrap_or_default();
     let mut params = config.get("params")?;
     // Axios: a configured paramsSerializer (function or `{ serialize }`) owns the query.
-    let serializer = config.get("paramsSerializer")?;
-    let serialize = if serializer.is_callable() {
-        serializer
-    } else if serializer.is_object() {
-        super::scope::bound_member(&serializer, "serialize")?
-    } else {
-        Js::Undefined
-    };
-    if serialize.is_callable() && !params.is_nullish() {
+    let serialize = js_params_serializer(config)?;
+    if serialize_query && serialize.is_callable() && !params.is_nullish() {
         let query = serialize.call(Js::Undefined, vec![params])?;
         let query = String::from_utf16_lossy(&query.to_js_string()?);
         if !query.is_empty() {
@@ -438,6 +558,8 @@ fn rest_request(config: &Js) -> Result<RestRequest, Thrown> {
         params = Js::Undefined;
     }
     let timeout = config.get("timeout")?;
+    // ts: markSkipRemoteSigning tags a public request a hosted signer need not see.
+    let skip_remote_signing = config.get("safeCexSkipRemoteSigning")?.truthy();
     Ok(RestRequest {
         method: optional_text(config, "method")?
             .unwrap_or_else(|| "get".into())
@@ -455,6 +577,7 @@ fn rest_request(config: &Js) -> Result<RestRequest, Thrown> {
         } else {
             Some(to_json(&params)?)
         },
+        skip_remote_signing,
         ..Default::default()
     })
 }
@@ -470,6 +593,33 @@ fn response_data(body: RestResponseBody) -> Js {
             from_json(&value)
         }
     }
+}
+
+fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
+    let result = config.spread_object()?;
+    result.set("method", Js::str(&request.method))?;
+    result.set("url", Js::str(&request.url))?;
+    result.set(
+        "baseURL",
+        request.base_url.as_deref().map_or(Js::Undefined, Js::str),
+    )?;
+    let headers = Js::object(vec![]);
+    for (name, value) in request.headers {
+        headers.define(&name, Js::str(&value))?;
+    }
+    result.set("headers", headers)?;
+    result.set(
+        "params",
+        request.params.as_ref().map_or(Js::Undefined, from_json),
+    )?;
+    let data = match request.body {
+        None => Js::Undefined,
+        Some(RestBody::Untransformed(value)) => from_json(&value),
+        Some(RestBody::Transformed(value)) => from_json(value.value()),
+        Some(RestBody::Encoded(bytes)) => Js::str(&String::from_utf8_lossy(&bytes)),
+    };
+    result.set("data", data)?;
+    Ok(result)
 }
 
 fn js_response(response: RestResponse, config: Js) -> Js {
@@ -490,21 +640,74 @@ fn js_response(response: RestResponse, config: Js) -> Js {
 }
 
 impl JsHttpHost for RestHttpHost {
+    fn configure_exchange(&self, name: safe_cex_types::ExchangeName) -> Result<(), Thrown> {
+        if self.remote.is_none() {
+            return Ok(());
+        }
+        let mut exchange = self.exchange.borrow_mut();
+        if exchange.as_ref().is_some_and(|current| current != &name) {
+            return Err(Thrown::error(
+                "Error",
+                "HTTP host already belongs to another exchange",
+            ));
+        }
+        *exchange = Some(name);
+        Ok(())
+    }
+    fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
+        self.remote.clone()
+    }
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.runtime.clone()
     }
     fn send(&self, config: Js) -> JsFuture<'static> {
         let adapter = self.adapter.clone();
+        let remote = self.remote.clone();
+        let exchange = self.exchange.borrow().clone();
+        let runtime = self.runtime.clone();
         Box::pin(async move {
-            let request = rest_request(&config)?;
-            match adapter.execute(request).await {
-                Ok(response) => Ok(js_response(response, config)),
+            let adapter = if let Some(remote) = &remote {
+                signed_adapter(
+                    runtime,
+                    adapter,
+                    remote,
+                    exchange.ok_or_else(|| {
+                        Thrown::error("Error", "hosted HTTP host has no exchange")
+                    })?,
+                    hosted_params_serializer(&config)?.as_ref(),
+                )
+            } else {
+                adapter
+            };
+            let request = rest_request(&config, remote.is_none())?;
+            match adapter.execute_with_receipt(request).await {
+                Ok(execution) => {
+                    let config = if remote.is_some() {
+                        effective_config(&config, execution.config)?
+                    } else {
+                        config
+                    };
+                    Ok(js_response(execution.response, config))
+                }
                 // A status failure still carries the response; the client classifies it.
                 Err(RestFailure {
                     response: Some(response),
+                    request,
                     ..
-                }) => Ok(js_response(*response, config)),
+                }) => {
+                    let config = if remote.is_some() {
+                        effective_config(&config, *request)?
+                    } else {
+                        config
+                    };
+                    Ok(js_response(*response, config))
+                }
                 Err(failure) => {
+                    let config = if remote.is_some() {
+                        effective_config(&config, *failure.request)?
+                    } else {
+                        config
+                    };
                     let error = super::value::error_object("AxiosError", &failure.message);
                     if let Some(code) = &failure.code {
                         error.define("code", Js::str(code))?;

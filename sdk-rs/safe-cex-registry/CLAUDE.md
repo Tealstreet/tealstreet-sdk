@@ -74,12 +74,25 @@ native `GatewayHost` (runtime dials and timers) with the exchange Store as paren
 the gateway always delivers whole batches, so the owned Store copy is current.
 The in-process variant cannot be named in native options (its capability type is
 uninhabited) and fails visibly until a host-registered source exists.
-`tests/native_host_external_data.rs` starts Binance on a local gateway socket.
+Every venue takes the provider through js_runtime's `ExternalPublicDataFactory`,
+called with the exchange's own `Rc<BaseExchange>`, so OKX, Bitget, BloFin and
+Bitunix share Binance's gateway path. `tests/native_host_external_data.rs` starts
+Binance and OKX on a local gateway socket.
 
 `native_venue_host_signed` is one account's host with a hosted `remoteSigner`
 (exchange-server's browser relay) and its accountName; no secret is held. Binance
 installs the remote signing adapter on every client and signs Spot ws-auth
-through it; backpack refuses that host visibly until its signing is wired.
+through it. OKX-family, BloFin and Bitunix also share that hosted account for
+HTTP and private websocket auth. The JS host binds its exchange name during
+BaseExchange construction and injects the same signer into options and core
+availability; it refuses reuse for a different exchange. Bitunix retains the
+account name in its private auth request. Backpack still refuses hosted signing.
 `tests/native_host_remote_signer.rs` verifies the signer's HMAC server-side.
 `tests/native_host_tunnel.rs` runs `tealstreetTunnel` REST over a local tradetunnel
 (rpc.auth with the proxy token, rpc.http frames) with no direct venue request.
+`tests/native_host_binance_family.rs` runs BinancePMExchange (PAPI, listen-key stream)
+and BinanceSpotExchange (signed ws-api user-data subscription) on the native host.
+
+The native JSON account surface forwards journal reads (`fetchHistoricalPositions`)
+to the venue's declared fold/reported path, preserving account and time bounds.
+It must not inherit a TS wrapper's default rejection for a supported venue method.

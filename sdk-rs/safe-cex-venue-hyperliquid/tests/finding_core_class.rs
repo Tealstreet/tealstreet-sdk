@@ -16,7 +16,7 @@ fn native_core_class_constructs_clients_sockets_and_callable_frame() {
         serde_json::from_str(include_str!("fixtures/finding-core-class-frame.json")).unwrap();
     assert_eq!(
         fixture["fields"].as_array().unwrap().len(),
-        121,
+        125,
         "CORE independent field floor"
     );
     assert_eq!(
@@ -26,7 +26,7 @@ fn native_core_class_constructs_clients_sockets_and_callable_frame() {
     );
     assert_eq!(
         fixture["metadata"].as_array().unwrap().len(),
-        94,
+        102,
         "CORE independent installed callable floor"
     );
     let mut h = Host::default();
@@ -59,19 +59,19 @@ fn native_core_class_constructs_clients_sockets_and_callable_frame() {
     .concat();
     assert_eq!(
         actual, expected,
-        "CORE native all121 fields in source order"
+        "CORE native all125 fields in source order"
     );
     assert_eq!(
         actual.len(),
-        124,
+        128,
         "CORE independent native field count including base"
     );
     {
         let st = h.state.borrow();
         assert_eq!(
             st.functions.len(),
-            169,
-            "CORE independent 19 prototype entries plus two75-arrow instances"
+            180,
+            "CORE independent 24 prototype entries plus two78-arrow instances"
         );
         assert_eq!(st.getters.len(), 2, "CORE native getters");
         assert_eq!(
@@ -372,7 +372,7 @@ fn native_core_class_constructs_clients_sockets_and_callable_frame() {
     );
     let receipt: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(receipt["source_cases"], 2);
-    assert_eq!(receipt["installed_callables"], 94);
+    assert_eq!(receipt["installed_callables"], 102);
     assert_eq!(
         receipt["state_cases"], 6,
         "CORE independent source state cases"

@@ -4,6 +4,7 @@ use crate::runtime::ExchangeError;
 use indexmap::IndexMap;
 use safe_cex_num::{JsCoercionError, js_number_string, parse_float};
 use std::{cell::RefCell, fmt, rc::Rc};
+mod typed;
 
 pub type Str = Rc<[u16]>;
 pub type NativeFn = Rc<dyn Fn(Js, Vec<Js>) -> Result<Js, Thrown>>;
@@ -448,10 +449,21 @@ impl Js {
             Some(Prop::Accessor(Some(getter), _)) => getter(self),
             Some(Prop::Accessor(None, _)) => Ok(Js::Undefined),
             None => {
+                if let Js::Function(function) = self {
+                    if key == utf16("name").as_ref() {
+                        return Ok(Js::String(function.name.clone()));
+                    }
+                    return Ok(super::builtins::member(self, key).unwrap_or(Js::Undefined));
+                }
                 if let Js::Object(o) = self
                     && let Some(proto) = o.proto.borrow().clone()
                 {
                     return proto.get_key(key);
+                }
+                if let Js::Function(f) = self
+                    && key == utf16("name").as_ref()
+                {
+                    return Ok(Js::String(f.name.clone()));
                 }
                 Ok(Js::Undefined)
             }
@@ -767,14 +779,12 @@ pub fn to_json(value: &Js) -> Result<serde_json::Value, Thrown> {
     })
 }
 
-/// Typed boundary helpers: serde types cross through the JSON projection.
+/// Typed boundary helpers retain native numbers; JSON wire projection is separate.
 pub fn to_typed<T: serde::de::DeserializeOwned>(value: &Js) -> Result<T, Thrown> {
-    serde_json::from_value(to_json(value)?).map_err(|e| Thrown::type_error(&e.to_string()))
+    typed::decode(value)
 }
 pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown> {
-    Ok(from_json(
-        &serde_json::to_value(value).map_err(|e| Thrown::type_error(&e.to_string()))?,
-    ))
+    typed::encode(value)
 }
 
 /// The JSON-shaped projection a typed wire body takes, keeping undefined and BigInt.

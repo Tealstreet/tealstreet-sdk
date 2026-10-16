@@ -261,8 +261,16 @@ impl ApiHost for ApiImport {
         _: &Rc<dyn ReadTransport>,
         n: usize,
         policy: ReadClassification,
+        signature: safe_cex_transport::signature_rejection::IsSignatureRejection,
     ) -> Result<(), ExchangeError> {
         assert_eq!(n, 3, "BINGX-C imported retry count");
+        for (data, rejected) in signature_corpus() {
+            assert_eq!(
+                signature(&data).unwrap(),
+                rejected,
+                "BINGX-C retry signature predicate {data}"
+            );
+        }
         for (method, url, read) in [
             ("GET", "/read", true),
             ("HEAD", "/read", true),
@@ -900,11 +908,23 @@ fn api_factory_matches_actual_typescript() {
             c.get("params").cloned(),
             "BINGX-C native request snapshot"
         );
-        if n < 2 {
-            assert_ne!(
-                case["caller"], case["input"]["config"],
-                "BINGX-C source mutates caller alias"
+        // unsignedPayload signs a copy of data/params; POST still writes the
+        // caller's headers object.
+        let (caller, input) = (&case["caller"], &case["input"]["config"]);
+        for field in ["data", "params"] {
+            assert_eq!(
+                caller.get(field),
+                input.get(field),
+                "BINGX-C source signs a copy of the caller {field}"
             );
+        }
+        if n == 1 {
+            assert_eq!(
+                caller["headers"]["Content-Type"], "application/json",
+                "BINGX-C source POST mutates caller headers"
+            );
+        } else {
+            assert_eq!(caller, input, "BINGX-C source leaves the caller config");
         }
     }
 }
@@ -996,8 +1016,8 @@ fn startup_reports_private_task_rejection() {
 fn api_nan_field_boundary_is_visible() {
     let c = &corpus()["nanApi"];
     assert_eq!(
-        c["producedNaN"], true,
-        "BINGX-C source POST unary number yields NaN"
+        c["serializedNaNAsNull"], true,
+        "BINGX-C source POST unary number yields NaN, serialized as null"
     );
     let h = host(c["input"].clone(), Some(c.clone()));
     let base = Rc::new(BaseExchange::new(
@@ -1095,5 +1115,53 @@ fn close_bindings_do_not_cycle_the_native_host() {
         corpus()["retainedPublicClose"],
         json!({"op":"publicClose","event":{"code":1007}}),
         "BINGX-C source retained public close still runs"
+    );
+}
+
+fn signature_corpus() -> Vec<(Value, bool)> {
+    vec![
+        (json!({"code":100001}), true),
+        (json!({"code":"100001"}), true),
+        (
+            json!({"code":-1,"msg":"Signature verification failed"}),
+            true,
+        ),
+        (json!({"msg":"SIGNATURE VERIFICATION FAILED, retry"}), true),
+        (json!({"msg":["signature verification failed"]}), true),
+        (json!({"code":[100001]}), true),
+        (json!({"code":0,"msg":""}), false),
+        (json!({"code":100002}), false),
+        (json!({"code":null,"msg":null}), false),
+        (json!({"msg":"signature mismatch"}), false),
+        (json!("100001"), false),
+        (json!([]), false),
+        (json!(null), false),
+    ]
+}
+#[test]
+fn signature_rejection_predicate_matches_actual_typescript() {
+    let mut inputs = vec![];
+    for (data, rejected) in signature_corpus() {
+        assert_eq!(
+            is_bingx_signature_rejection(&data).unwrap(),
+            rejected,
+            "BINGX-C native signature predicate {data}"
+        );
+        inputs.push(data);
+    }
+    let source = &corpus()["signature"];
+    assert_eq!(
+        source["corpus"],
+        Value::Array(inputs),
+        "BINGX-C source corpus"
+    );
+    let natives: Vec<_> = signature_corpus()
+        .into_iter()
+        .map(|(_, rejected)| json!(rejected))
+        .collect();
+    assert_eq!(
+        source["results"],
+        Value::Array(natives),
+        "BINGX-C source signature predicate"
     );
 }

@@ -13,8 +13,11 @@ safe-cex-num.workspace = true
 safe-cex-store.workspace = true
 safe-cex-transport.workspace = true
 safe-cex-crypto.workspace = true
+# Host CSPRNG for Schnorr nonces (crypto.getRandomValues on wasm32).
+getrandom.workspace = true
 safe-cex-candle-cache.workspace = true
 safe-cex-exchange.workspace = true
+safe-cex-lighter-sdk = { path = "../safe-cex-lighter-sdk" }
 serde.workspace = true
 serde_json.workspace = true
 indexmap = { version = "=2.14.2", features = ["serde"] }

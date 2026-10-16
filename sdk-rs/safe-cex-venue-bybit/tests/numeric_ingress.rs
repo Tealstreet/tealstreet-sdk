@@ -74,7 +74,7 @@ fn numeric_ingress_preserves_all_registered_records() {
         String::from_utf8_lossy(&output.stderr)
     );
     let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(cases.len(), 297);
+    assert_eq!(cases.len(), 306);
     for case in &cases {
         match case["record"].as_str().unwrap() {
             "BybitApiKeyInfo" => check::<BybitApiKeyInfo>(case, |v, p| match p {
@@ -146,6 +146,7 @@ fn numeric_ingress_preserves_all_registered_records() {
                         "/stopLoss" => base.stop_loss.unwrap(),
                         "/takeProfit" => base.take_profit.unwrap(),
                         "/maxSlippagePct" => base.max_slippage_pct.unwrap(),
+                        "/impliedVolatility" => base.implied_volatility.unwrap(),
                         "/bybitSlippageToleranceTicks" => match v {
                             BybitPlaceOrderOpts::TickSize(v) => v.ticks,
                             _ => panic!("wrong variant"),
