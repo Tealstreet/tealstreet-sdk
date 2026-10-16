@@ -97,7 +97,11 @@ pub(crate) fn map_market(
             let value = parse_float(raw.get("deliveryTime"))?;
             value != 0. && !value.is_nan()
         }),
-        is_inverse: (!matches!(family, Family::Linear)).then_some(category == "inverse"),
+        // The bybit connection marks only inverse rows; the other families always say which.
+        is_inverse: match family {
+            Family::Linear => (category == "inverse").then_some(true),
+            _ => Some(category == "inverse"),
+        },
         is_spot: spot.then_some(true),
         is_perpetual: None,
         taker_fee: fee
