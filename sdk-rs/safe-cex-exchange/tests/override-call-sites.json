@@ -5784,6 +5784,132 @@
     "file": "safe-cex-venue-paradex/src/runtime_assembly.rs"
   },
   {
+    "function": "capabilities",
+    "body": "50ab6d5389df161e",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-phemex/src/binding/exchange.rs"
+  },
+  {
+    "function": "capabilities",
+    "body": "50ab6d5389df161e",
+    "call": "venue . fetch_historical_fills (opts)",
+    "file": "safe-cex-venue-phemex/src/binding/exchange.rs"
+  },
+  {
+    "function": "install",
+    "body": "c6523323dcff2333",
+    "reference": "session :: dispose",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "order :: start",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_markets",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_positions",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_orders",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_historical_fills",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "data :: fetch_ohlcv",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "order :: update_order",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "cancel :: cancel_orders",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "cancel :: cancel_orders",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "settings :: change_position_mode",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "settings :: change_margin_type",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "async_method",
+    "body": "ad9debb9bd2648ab",
+    "reference": "settings :: set_leverage",
+    "file": "safe-cex-venue-phemex/src/binding/methods.rs"
+  },
+  {
+    "function": "base_dispose",
+    "body": "14be89e65b3fa365",
+    "call": "self . rt . base () . dispose ()",
+    "file": "safe-cex-venue-phemex/src/binding/session.rs"
+  },
+  {
+    "function": "create",
+    "body": "b39b38507183f79b",
+    "reference": "private :: dispose",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
+  },
+  {
+    "function": "listen_candles",
+    "body": "83edf18fcf59a9b5",
+    "reference": "ws :: listen_ohlcv",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
+  },
+  {
+    "function": "listen_candles",
+    "body": "83edf18fcf59a9b5",
+    "call": "s . dispose (& mut host . clone ())",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
+  },
+  {
+    "function": "listen_book",
+    "body": "76ac6d3a34cebd5a",
+    "reference": "ws :: listen_order_book",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
+  },
+  {
+    "function": "listen_book",
+    "body": "76ac6d3a34cebd5a",
+    "call": "s . dispose (& mut host . clone ())",
+    "file": "safe-cex-venue-phemex/src/binding/sockets.rs"
+  },
+  {
     "function": "change_position_mode",
     "body": "89e80f0d31e1467e",
     "call": "host . fetch_positions (& symbol)",
