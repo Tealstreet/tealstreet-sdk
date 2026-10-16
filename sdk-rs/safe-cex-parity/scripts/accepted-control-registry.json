@@ -116,7 +116,8 @@
     ],
     "accepted-inherited-constant-output.test.mjs": [
       "reviewed inherited refusals retain exact compiler source fixture and native witnesses",
-      "reviewed inherited refusal source fixture and adapter pins reject executed mutations"
+      "reviewed inherited refusal source fixture and adapter pins reject executed mutations",
+      "Kucoin constant policies keep exact inherited override and observer provenance"
     ],
     "accepted-inventory.test.mjs": [
       "compiler impl identity sees manual private Deserialize and deduplicates reexports",
@@ -362,6 +363,10 @@
     "Fields route",
     "direct constant maintained source pin",
     "direct constant indexed raw method pin",
-    "direct constant native returned capability"
+    "direct constant native returned capability",
+    "Kucoin inherited observer fixture pin",
+    "Kucoin override observer fixture pin",
+    "Kucoin override maintained source pin",
+    "Kucoin inherited method scope"
   ]
 }
