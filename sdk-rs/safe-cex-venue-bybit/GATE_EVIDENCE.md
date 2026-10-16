@@ -3677,3 +3677,29 @@ clippy, wasm, wiring, layers and routing are centrally owned. The local-order
 runner now omits clippy and retains its three scoped native gates, formatting,
 diff check and build. The snapshot runner is historical and is not rerun here.
 Controls are not replayed or attributed to delivery. No remote push is performed.
+
+## Startup extraction checkpoint, not accepted
+
+The previous three-row local-order delivery is frozen at
+5ee8bc62283b550dfbe8635387773c9f73dc47d5 with its exact-SHA six positive
+gates and two required local CI exits all 0, and was handed off without a push.
+This new branch starts its next pending function, BybitExchange.start. The
+prepared source corpus retains 33 original profiles plus three independently
+labelled evaluation-order supplements. No native result, mutation control,
+annotation or accepted startup gate is claimed at this checkpoint.
+
+The source cache continuation is empty because fetchAndCacheApiKeyInfo normally
+logs its own failures. Its own final logger can reject, or a supplied method can
+reject directly; start's empty continuation suppresses that rejection. The Rust
+callback instead sends the retained original error value to emitAndLogError,
+and retains any reporter failure. This is an intentional visible-error
+correction, not claimed parity or a measured defect at this preparation stage.
+The success continuation for margin probing remains distinct. A later paired
+source/native witness must establish the correction before changing the row.
+
+The hard stop arrived during the startup native-host fixture implementation.
+That unfinished host is preserved only in ignored local preparation, unmounted
+and uncompiled; it is not an accepted oracle or part of the delivery commit.
+No startup mutation ran, and its row remains pending with zero new row credit.
+Final checkpoint formatting and workspace build must be measured against the
+checkpoint SHA separately from the accepted three-row local-order delivery.

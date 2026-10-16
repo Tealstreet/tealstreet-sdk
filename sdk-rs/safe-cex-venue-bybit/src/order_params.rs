@@ -171,12 +171,13 @@ struct PlacementNumbers {
     stop_loss: Option<f64>,
     take_profit: Option<f64>,
     max_slippage_pct: Option<f64>,
+    implied_volatility: Option<f64>,
     ticks: Option<f64>,
     level: Option<u8>,
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for PlacementNumbers {
     fn check_number_output(&self) {
-        safe_cex_num::js_number_output!(self, struct { amount, price, trigger_price, stop_loss, take_profit, max_slippage_pct, ticks, level });
+        safe_cex_num::js_number_output!(self, struct { amount, price, trigger_price, stop_loss, take_profit, max_slippage_pct, implied_volatility, ticks, level });
     }
 }
 impl safe_cex_num::numeric_ingress::JsNumberOutput for BybitPlaceOrderOpts {
@@ -211,7 +212,7 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for BybitPlaceOrderOpts {
             client_order_id: _,
             max_slippage_pct,
             close: _,
-            implied_volatility: _,
+            implied_volatility,
         } = base;
         PlacementNumbers {
             amount: *amount,
@@ -220,6 +221,7 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for BybitPlaceOrderOpts {
             stop_loss: *stop_loss,
             take_profit: *take_profit,
             max_slippage_pct: *max_slippage_pct,
+            implied_volatility: *implied_volatility,
             ticks,
             level,
         }

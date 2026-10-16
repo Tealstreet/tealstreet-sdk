@@ -85,8 +85,9 @@ impl Host {
         Ok(Rc::new(p.as_array().unwrap().clone()))
     }
     fn market(&self, s: &str) -> Result<Option<(f64, f64)>, Error> {
-        self.event("market", json!(["market", s]))?;
-        Ok(if self.input["noMarket"] == true {
+        // The source getter logs its fixed BTC map, then the body indexes it by symbol.
+        self.event("market", json!(["market", "BTC"]))?;
+        Ok(if self.input["noMarket"] == true || s != "BTC" {
             None
         } else {
             Some((
@@ -261,7 +262,7 @@ fn position_controls_match_maintained_bodies() {
         String::from_utf8_lossy(&output.stderr)
     );
     let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(rows.len(), 182, "POSITION independent fixture floor");
+    assert_eq!(rows.len(), 188, "POSITION independent fixture floor");
     let mut floors = BTreeMap::<String, usize>::new();
     for (iteration, row) in rows.iter().enumerate() {
         let h = Host::new(row);
@@ -275,7 +276,7 @@ fn position_controls_match_maintained_bodies() {
                 let n = number(i.get("input"), 4.);
                 let r = if h.family == "primary" {
                     drive(set_leverage(
-                        "BTC",
+                        s.unwrap_or("BTC"),
                         n,
                         |s| h.market(s),
                         || h.positions(),
@@ -287,7 +288,7 @@ fn position_controls_match_maintained_bodies() {
                     ))
                 } else {
                     drive(set_inverse_leverage(
-                        "BTC",
+                        s.unwrap_or("BTC"),
                         n,
                         |s| h.market(s),
                         || h.positions(),
@@ -299,6 +300,12 @@ fn position_controls_match_maintained_bodies() {
                     ))
                 };
                 r.map(|()| None)
+            }
+            "mode" if h.family == "primary" => {
+                drive(change_primary_position_mode(hedged, s, |a, b, c| {
+                    h.helper(a, b, c)
+                }))
+                .map(|()| None)
             }
             "mode" => {
                 drive(change_position_mode(hedged, s, |a, b, c| h.helper(a, b, c))).map(|()| None)
@@ -415,8 +422,8 @@ fn position_controls_match_maintained_bodies() {
     assert_eq!(
         floors,
         BTreeMap::from([
-            ("leverage".into(), 52),
-            ("mode".into(), 10),
+            ("leverage".into(), 54),
+            ("mode".into(), 14),
             ("helper".into(), 30),
             ("margin".into(), 40),
             ("fetch".into(), 50)
