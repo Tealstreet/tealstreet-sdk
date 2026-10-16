@@ -236,7 +236,9 @@ async fn place_body<H: PlacementHost>(
     } else {
         caller
     };
-    let ids = method(h, e, "placeOrderWithCloid", |_| Ok(vec![opts.clone(), cloid]))?;
+    let ids = method(h, e, "placeOrderWithCloid", |_| {
+        Ok(vec![opts.clone(), cloid])
+    })?;
     h.await_value(ids).await
 }
 /// ts: #placeOrderWithCloid; `cloid` is the main wire's client order ID.
@@ -287,7 +289,9 @@ async fn body<H: PlacementHost>(
         }
         return Ok(ids);
     } else if kind_is(h, opts, "Limit")? {
-        let value = method(h, e, "placeLimitOrder", |_| Ok(vec![opts.clone(), cloid.clone()]))?;
+        let value = method(h, e, "placeLimitOrder", |_| {
+            Ok(vec![opts.clone(), cloid.clone()])
+        })?;
         return h.await_value(value).await;
     } else if kind_is(h, opts, "TakeProfit")? || kind_is(h, opts, "StopLoss")? {
         let index = asset(h, &m)?;

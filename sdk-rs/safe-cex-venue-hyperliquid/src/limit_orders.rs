@@ -377,5 +377,8 @@ where
     let e = e.clone();
     let opts = opts.clone();
     let cloid = cloid.clone();
-    crate::helper_tasks::start(host, async move { place_body(&mut h, &e, &opts, &cloid).await })
+    crate::helper_tasks::start(
+        host,
+        async move { place_body(&mut h, &e, &opts, &cloid).await },
+    )
 }

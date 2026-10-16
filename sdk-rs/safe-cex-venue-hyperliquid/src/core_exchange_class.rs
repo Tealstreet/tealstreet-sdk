@@ -42,7 +42,12 @@ pub enum CoreExchangeMethod {
     ShouldUsePositionTpsl,
     BuildMarketsLowerCaseMap,
     AddToPrePlacementCache,
+    ForgetPrePlacement,
+    RecordPlacement,
+    GetPlacementRecord,
+    ForgetPlacementRecord,
     MatchPrePlacement,
+    MatchPrePlacementTrigger,
     GetPendingHip3Order,
     AddPendingHip3Order,
     RemovePendingHip3Order,
@@ -107,6 +112,8 @@ pub enum CoreExchangeMethod {
     RunRetryChainStep,
     EndRetryChain,
     ParseOpenOrders,
+    MapOpenOrderRow,
+    FindOrderByClientOrderId,
     FetchIncomeHistory,
     ResolveCoinToSymbol,
     FetchHistoricalOrders,
@@ -124,6 +131,7 @@ pub enum CoreExchangeMethod {
     ResolveReduceOnly,
     SignActionOrDefer,
     PlaceOrder,
+    PlaceOrderWithCloid,
     CancelOrders,
     ScheduleCancel,
     UpdateOrder,
@@ -251,9 +259,49 @@ pub fn create_core_exchange_class<H: CoreExchangeClassHost>(
             body: CoreExchangeMethod::AddToPrePlacementCache,
         },
         "addToPrePlacementCache",
-        5,
+        6,
     )?;
     h.define_exchange_method(&prototype, "addToPrePlacementCache", &f, false)?;
+    let f = h.core_exchange_function(
+        CoreExchangeCapture {
+            class: class.clone(),
+            receiver: None,
+            body: CoreExchangeMethod::ForgetPrePlacement,
+        },
+        "forgetPrePlacement",
+        3,
+    )?;
+    h.define_exchange_method(&prototype, "forgetPrePlacement", &f, false)?;
+    let f = h.core_exchange_function(
+        CoreExchangeCapture {
+            class: class.clone(),
+            receiver: None,
+            body: CoreExchangeMethod::RecordPlacement,
+        },
+        "recordPlacement",
+        2,
+    )?;
+    h.define_exchange_method(&prototype, "recordPlacement", &f, false)?;
+    let f = h.core_exchange_function(
+        CoreExchangeCapture {
+            class: class.clone(),
+            receiver: None,
+            body: CoreExchangeMethod::GetPlacementRecord,
+        },
+        "getPlacementRecord",
+        1,
+    )?;
+    h.define_exchange_method(&prototype, "getPlacementRecord", &f, false)?;
+    let f = h.core_exchange_function(
+        CoreExchangeCapture {
+            class: class.clone(),
+            receiver: None,
+            body: CoreExchangeMethod::ForgetPlacementRecord,
+        },
+        "forgetPlacementRecord",
+        1,
+    )?;
+    h.define_exchange_method(&prototype, "forgetPlacementRecord", &f, false)?;
     let f = h.core_exchange_function(
         CoreExchangeCapture {
             class: class.clone(),
@@ -264,6 +312,16 @@ pub fn create_core_exchange_class<H: CoreExchangeClassHost>(
         4,
     )?;
     h.define_exchange_method(&prototype, "matchPrePlacement", &f, false)?;
+    let f = h.core_exchange_function(
+        CoreExchangeCapture {
+            class: class.clone(),
+            receiver: None,
+            body: CoreExchangeMethod::MatchPrePlacementTrigger,
+        },
+        "matchPrePlacementTrigger",
+        3,
+    )?;
+    h.define_exchange_method(&prototype, "matchPrePlacementTrigger", &f, false)?;
     let f = h.core_exchange_function(
         CoreExchangeCapture {
             class: class.clone(),
@@ -488,6 +546,9 @@ pub fn construct_core_exchange_class<H: CoreExchangeClassHost>(
     WsPingHost::define_data(h, &owner, "xhr", &value)?;
     let value = WsPingHost::undefined(h);
     WsPingHost::define_data(h, &owner, "infoXhr", &value)?;
+    // Every placement carries a cloid; a caller's goes on the main wire verbatim.
+    let value = SpotAccountHost::imported(h, "hyperliquidClientOrderIdRule")?;
+    WsPingHost::define_data(h, &owner, "clientOrderIdRule", &value)?;
     let value = WsPingHost::undefined(h);
     WsPingHost::define_data(h, &owner, "unlimitedXHR", &value)?;
     let value = WsPingHost::undefined(h);
@@ -1129,6 +1190,26 @@ pub fn construct_core_exchange_class<H: CoreExchangeClassHost>(
         CoreExchangeCapture {
             class: class.clone(),
             receiver: Some(owner.clone()),
+            body: CoreExchangeMethod::MapOpenOrderRow,
+        },
+        "mapOpenOrderRow",
+        2,
+    )?;
+    WsPingHost::define_data(h, &owner, "mapOpenOrderRow", &value)?;
+    let value = h.core_exchange_function(
+        CoreExchangeCapture {
+            class: class.clone(),
+            receiver: Some(owner.clone()),
+            body: CoreExchangeMethod::FindOrderByClientOrderId,
+        },
+        "findOrderByClientOrderId",
+        2,
+    )?;
+    WsPingHost::define_data(h, &owner, "findOrderByClientOrderId", &value)?;
+    let value = h.core_exchange_function(
+        CoreExchangeCapture {
+            class: class.clone(),
+            receiver: Some(owner.clone()),
             body: CoreExchangeMethod::FetchIncomeHistory,
         },
         "fetchIncomeHistory",
@@ -1301,6 +1382,16 @@ pub fn construct_core_exchange_class<H: CoreExchangeClassHost>(
         CoreExchangeCapture {
             class: class.clone(),
             receiver: Some(owner.clone()),
+            body: CoreExchangeMethod::PlaceOrderWithCloid,
+        },
+        "placeOrderWithCloid",
+        2,
+    )?;
+    WsPingHost::define_data(h, &owner, "placeOrderWithCloid", &value)?;
+    let value = h.core_exchange_function(
+        CoreExchangeCapture {
+            class: class.clone(),
+            receiver: Some(owner.clone()),
             body: CoreExchangeMethod::CancelOrders,
         },
         "cancelOrders",
@@ -1453,8 +1544,45 @@ pub fn call_core_exchange<H: CoreExchangeClassHost>(
             let a2 = arg(2);
             let a3 = arg(3);
             let a4 = arg(4);
-            cache_orders::exchange_add_to_pre_placement_cache(h, &a0, &a1, &a2, &a3, &a4, None)?;
+            let a5 = arg(5);
+            cache_orders::exchange_add_to_pre_placement_cache(
+                h,
+                &a0,
+                &a1,
+                &a2,
+                &a3,
+                &a4,
+                Some(&a5),
+            )?;
             Ok(u)
+        }
+        CoreExchangeMethod::ForgetPrePlacement => {
+            let a0 = arg(0);
+            let a1 = arg(1);
+            let a2 = arg(2);
+            cache_orders::exchange_forget_pre_placement(h, &a0, &a1, &a2)?;
+            Ok(u)
+        }
+        CoreExchangeMethod::RecordPlacement => {
+            let a0 = arg(0);
+            let a1 = arg(1);
+            cache_orders::exchange_record_placement(h, &a0, &a1)?;
+            Ok(u)
+        }
+        CoreExchangeMethod::GetPlacementRecord => {
+            let a0 = arg(0);
+            cache_orders::exchange_get_placement_record(h, &a0)
+        }
+        CoreExchangeMethod::ForgetPlacementRecord => {
+            let a0 = arg(0);
+            cache_orders::exchange_forget_placement_record(h, &a0)?;
+            Ok(u)
+        }
+        CoreExchangeMethod::MatchPrePlacementTrigger => {
+            let a0 = arg(0);
+            let a1 = arg(1);
+            let a2 = arg(2);
+            cache_orders::exchange_match_pre_placement_trigger(h, &a0, &a1, &a2)
         }
         CoreExchangeMethod::MatchPrePlacement => {
             let a0 = arg(0);
@@ -1826,6 +1954,17 @@ pub fn call_core_exchange<H: CoreExchangeClassHost>(
             let a0 = arg(0);
             core_position_order_state::parse_open_orders(h, receiver, &a0)
         }
+        CoreExchangeMethod::MapOpenOrderRow => {
+            let a0 = arg(0);
+            let a1 = arg(1);
+            core_position_order_state::map_open_order_row(h, receiver, &a0, &a1)
+        }
+        CoreExchangeMethod::FindOrderByClientOrderId => {
+            let a0 = arg(0);
+            let a1 = arg(1);
+            let promise = order_reads::find_order_by_client_order_id(h, receiver, &a0, &a1);
+            Ok(h.observe_exchange_task(promise))
+        }
         CoreExchangeMethod::FetchIncomeHistory => {
             let a0 = arg(0);
             let promise = core_rest_reads::fetch_income_history(h, receiver, &a0);
@@ -1946,6 +2085,12 @@ pub fn call_core_exchange<H: CoreExchangeClassHost>(
         CoreExchangeMethod::PlaceOrder => {
             let a0 = arg(0);
             let promise = placement_dispatch::place_order(h, receiver, &a0);
+            Ok(h.observe_exchange_task(promise))
+        }
+        CoreExchangeMethod::PlaceOrderWithCloid => {
+            let a0 = arg(0);
+            let a1 = arg(1);
+            let promise = placement_dispatch::place_order_with_cloid(h, receiver, &a0, &a1);
             Ok(h.observe_exchange_task(promise))
         }
         CoreExchangeMethod::CancelOrders => {

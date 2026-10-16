@@ -725,6 +725,8 @@ const effectNames = [
     'forgetLimitOrderTimeInForce',
     'removePendingHip3Order',
     'matchPrePlacement',
+    'forgetPlacementRecord',
+    'forgetPrePlacement',
     'scheduleOrderRefresh',
     'emit',
     'post',
@@ -915,6 +917,8 @@ async function add(name, label, args, config = {}) {
     simple(parent, 'getPendingHip3Order', () => config.pending ?? null);
     simple(parent, 'getPlacedLimitOrderTimeInForce', () => config.placedTif);
     virtual(parent, 'matchPrePlacement', () => config.preplacement ?? null);
+    simple(parent, 'getPlacementRecord', () => (config.record ? tag({ ...config.record }, 'record') : undefined));
+    simple(parent, 'matchPrePlacementTrigger', () => (config.stopEntry ? tag({ ...config.stopEntry }, 'stopEntry') : undefined));
     e._deadOrders = new Set(config.dead ?? []);
     e.isPublicDataOnly = config.publicOnly ?? false;
     simple(e, 'shouldUseSpotCollateralBalance', () => config.spotCollateral ?? false);
@@ -966,6 +970,11 @@ async function add(name, label, args, config = {}) {
     globals.parseHyperliquidOrderTimeInForce = tag(
         (t) => (t === 'Gtc' ? 'GTC' : undefined),
         'parseHyperliquidOrderTimeInForce',
+    );
+    // Same contract as hyperliquid.cloid.ts: a lowercase 0x + 32-hex string, else undefined.
+    globals.readHyperliquidCloid = tag(
+        (v) => (typeof v === 'string' && /^0x[0-9a-f]{32}$/.test(v) ? v : undefined),
+        'readHyperliquidCloid',
     );
     globals.hasSeenFill = tag((id) => seen.has(id), 'hasSeenFill');
     globals.markFillSeen = tag((id) => seen.add(id), 'markFillSeen');
@@ -1104,6 +1113,14 @@ async function add(name, label, args, config = {}) {
         ['null', null, {}],
         ['iterator step error', updates(), { throwNext: 1 }],
         ['body error closes', updates(), { throwGet: 'status' }],
+        [
+            'cloid record',
+            updates(order({ oid: 152, cloid: '0x0123456789abcdef0123456789abcdef' })),
+            { record: { type: 'stop-loss', price: 17.5, side: 'buy', amount: 4.75, reduceOnly: true, symbol: 'BTC/USD', placedAt: 100 } },
+        ],
+        ['cloid without record', updates(order({ oid: 152, cloid: '0x0123456789abcdef0123456789abcdef' })), {}],
+        ['removed with cloid', updates(order({ cloid: '0x0123456789abcdef0123456789abcdef' }), 'filled'), {}],
+        ['core stop entry', updates(order({ oid: 153 })), { stopEntry: { type: 'stop-loss', price: 21.5 } }],
     ])
         await add('handleOrderUpdates', label, [u], c);
     for (const [label, coin, side, c] of [
@@ -1186,8 +1203,18 @@ async function add(name, label, args, config = {}) {
         ['null input', null, {}],
     ])
         await add('parseOpenOrders', label, [os], c);
-    const expectation = [10, 10, 10, 12, 16, 8, 8, 12, 10, 10];
-    assert.equal(cases.length, 106);
+    const cloid = '0x0123456789abcdef0123456789abcdef';
+    for (const [label, row, status, c] of [
+        ['cloid', order({ cloid }), 'open', {}],
+        ['null cloid', order({ cloid: null }), 'open', {}],
+        ['uppercase cloid', order({ cloid: cloid.toUpperCase() }), 'open', {}],
+        ['unknown market', order({ coin: 'UNKNOWN', cloid }), 'open', {}],
+        ['lowercase hip3', order({ coin: 'XYZ:BTC', cloid }), 'open', {}],
+        ['closed status', order({ cloid }), 'closed', {}],
+    ])
+        await add('mapOpenOrderRow', label, [row, status], c);
+    const expectation = [10, 10, 10, 12, 20, 8, 8, 12, 10, 10, 6];
+    assert.equal(cases.length, 116);
     metadata.roots.forEach(([owner, name], i) =>
         assert.equal(cases.filter((c) => c.name === name).length, expectation[i], name),
     );
@@ -1198,8 +1225,8 @@ async function add(name, label, args, config = {}) {
             effectNames,
             cases,
             expectation,
-            iterationStop: 105,
-            scope: 'ten bodies/owned callbacks; fixture virtual callees and ECMAScript primitives; no full classes/live exchange/general async proof',
+            iterationStop: 115,
+            scope: 'eleven bodies/owned callbacks; fixture virtual callees and ECMAScript primitives; no full classes/live exchange/general async proof',
         }),
     );
 })().catch((error) => {
