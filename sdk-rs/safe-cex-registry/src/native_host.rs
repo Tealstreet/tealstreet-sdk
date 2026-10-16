@@ -369,15 +369,27 @@ impl RustVenueHost for NativeVenueHost {
     fn phemex(
         &self,
     ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
+        let http = safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+            self.runtime.clone(),
+            (self.adapter)()?,
+            self.remote.clone(),
+        );
+        let installer_http = http.clone();
+        let provider = self.runtime.transport();
         Ok(
             safe_cex_venue_phemex::binding::exchange::PhemexDependencies {
                 runtime: self.runtime.clone(),
-                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
-                    self.runtime.clone(),
-                    (self.adapter)()?,
-                    self.remote.clone(),
-                ),
-                install_transport: None,
+                http,
+                install_transport: Some(Rc::new(move |client, options, name| {
+                    safe_cex_exchange::js_runtime::client::factory::install_transport_adapter(
+                        installer_http.clone(),
+                        provider.as_ref(),
+                        &client,
+                        &options,
+                        name,
+                        safe_cex_transport::RestAdapterVariant::Default,
+                    )
+                })),
                 external_public_data: Some(gateway_factory(self.runtime.clone())),
             },
         )
