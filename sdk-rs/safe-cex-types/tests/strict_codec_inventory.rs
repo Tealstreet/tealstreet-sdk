@@ -1,5 +1,31 @@
 use quote::ToTokens;
+use std::collections::BTreeSet;
 use syn::{Attribute, Fields, Item};
+
+// strict_codecs is one module below the definitions it mirrors. An explicit
+// `super::Record` names the same parent record as the canonical `Record`.
+// Only erase that prefix for an exact type declared in that parent file;
+// foreign paths, field shapes and generic arguments remain significant.
+fn companion_type(ty: &syn::Type, parent_types: &BTreeSet<String>) -> String {
+    let source = ty.to_token_stream().to_string();
+    let tokens: Vec<_> = source.split_whitespace().collect();
+    let mut output = vec![];
+    let mut i = 0;
+    while i < tokens.len() {
+        if tokens.get(i) == Some(&"super")
+            && tokens.get(i + 1) == Some(&"::")
+            && tokens
+                .get(i + 2)
+                .is_some_and(|name| parent_types.contains(*name))
+            && tokens.get(i + 3) != Some(&"::")
+        {
+            i += 2;
+        }
+        output.push(tokens[i]);
+        i += 1;
+    }
+    output.join(" ")
+}
 
 fn serde_attributes(attributes: &[Attribute]) -> Vec<String> {
     attributes
@@ -22,6 +48,16 @@ fn private_companions_cannot_drift_from_canonical_definitions() {
         "../safe-cex-store/src/contract.rs",
     ] {
         let file = syn::parse_file(&std::fs::read_to_string(root.join(relative)).unwrap()).unwrap();
+        let parent_types: BTreeSet<_> = file
+            .items
+            .iter()
+            .filter_map(|item| match item {
+                Item::Struct(s) => Some(s.ident.to_string()),
+                Item::Enum(e) => Some(e.ident.to_string()),
+                Item::Type(t) => Some(t.ident.to_string()),
+                _ => None,
+            })
+            .collect();
         let module = file
             .items
             .iter()
@@ -95,7 +131,9 @@ fn private_companions_cannot_drift_from_canonical_definitions() {
                     assert_eq!(a.ident, b.ident);
                     assert_eq!(
                         a.ty.to_token_stream().to_string(),
-                        b.ty.to_token_stream().to_string()
+                        companion_type(&b.ty, &parent_types),
+                        "{relative}:{name}: field type drift in {}",
+                        a.ident.as_ref().unwrap()
                     );
                     assert_eq!(
                         serde_attributes(&a.attrs),
@@ -118,5 +156,29 @@ fn private_companions_cannot_drift_from_canonical_definitions() {
             count += 1;
         }
         assert!(count > 0);
+    }
+}
+
+#[test]
+fn parent_qualification_preserves_real_type_differences() {
+    let parent_types = BTreeSet::from(["OptionGreeks".to_owned(), "OtherRecord".to_owned()]);
+    let normalized = |source: &str| companion_type(&syn::parse_str(source).unwrap(), &parent_types);
+    assert_eq!(
+        normalized("Option<super::OptionGreeks>"),
+        "Option < OptionGreeks >"
+    );
+    for different in [
+        "Option<super::OtherRecord>",
+        "Vec<super::OptionGreeks>",
+        "Option<other::OptionGreeks>",
+        "Option<super::OptionGreeksExtra>",
+        "Option<super::OptionGreeks::Associated>",
+        "Option<&super::OptionGreeks>",
+    ] {
+        assert_ne!(
+            normalized(different),
+            normalized("Option<OptionGreeks>"),
+            "{different}"
+        );
     }
 }
