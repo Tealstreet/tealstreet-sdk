@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.income.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/income.rs" ]
 
 [[symbol]]
 ts = "toNumber"

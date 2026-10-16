@@ -7220,3 +7220,43 @@ reason = "Rust-only boxed future/result carrier for host asynchronous loader ope
 [[exempt]]
 rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeLoopFn"
 reason = "Rust-only owned callback carrier for the host loop scheduler's anonymous asynchronous function argument; no standalone TypeScript declaration. Loop behavior remains in its mapped operations. Accepted-set alias identity and raw-construction probes remain mandatory. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/helper_tasks.rs::HelperTaskHost"
+reason = "Async runtime glue: native realm hook that retains eagerly started source async bodies (start_task) and resolves their return (settle_return) for helper_tasks::start, used by mapped async bodies across market_bootstrap, order_reads, spot_trading, startup_timeout and spot_rate_limiter. TS async functions use the built-in Promise machinery; no TypeScript declaration or venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/helper_tasks.rs::HelperTaskHost::start_task"
+reason = "Runtime adapter hook polling and retaining a started async body (microtask scheduling) for helper_tasks::start; JS engine behavior with no TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/helper_tasks.rs::HelperTaskHost::settle_return"
+reason = "Runtime adapter hook for async-return Promise resolution/adoption in helper_tasks::start; JS engine behavior with no TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/helper_tasks.rs::HelperObserver"
+reason = "Native Promise-observer handle returned by helper_tasks::start for mapped async bodies (with_startup_timeout, fetch_orders, fetch_markets_and_tickers, ...); stands in for the built-in Promise, no TypeScript declaration or venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/builder_fee.rs::ApprovalDomain"
+reason = "C3 representation of the inferred object-literal type of HYPERLIQUID_BUILDER_DOMAIN / HYPERLIQUID_BUILDER_DOMAIN_TESTNET (name/version/chainId/verifyingContract); TS declares no named type for it and the struct adds no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/builder_fee.rs::ApprovalField"
+reason = "C3 representation of the {name,type} EIP-712 field entries inside APPROVE_BUILDER_FEE_TYPES and agent.rs APPROVE_AGENT_TYPES; TS uses inline object literals with no named type, and the struct adds no behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::Value"
+reason = "Associated handle alias for the native JS value type of the StartupTimeoutHost binding surface used by with_startup_timeout; no TypeScript declaration or behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::Error"
+reason = "Associated handle alias for the native thrown-value type of the StartupTimeoutHost binding surface used by with_startup_timeout; no TypeScript declaration or behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::Value"
+reason = "Associated handle alias for the native JS value type of the WsPingHost binding surface (identity-retaining clone) used by the mapped ping/open bodies and every host trait built on it; no TypeScript declaration or behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::Error"
+reason = "Associated handle alias for the native thrown-value type of the WsPingHost binding surface used by the mapped ping/open bodies; no TypeScript declaration or behavior."

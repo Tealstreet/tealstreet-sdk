@@ -16,15 +16,15 @@ kind = "constructor"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/spot_runtime.rs::new_spot_exchange"
 status = "ported"
-note = "Complete Rust spot class assembly and owned dispatcher over previously ported bodies. Preserves all25 arrow names/lengths/declaration order, prototype method, static frozen configuration, source field initialization, Base/newTarget handles and the actual imported PERP createAPI used twice by the source constructor. Native metadata, initial state, dependency arguments/aliases and async dispatcher asserted against unchanged whole-source classes; Base/import/native engine primitives remain explicit bindings. No shared SDK type/trait or perp row changed."
+note = "Complete Rust spot class assembly and owned dispatcher over previously ported bodies. Preserves all25 arrow names/lengths/declaration order, prototype method, static frozen configuration, source field initialization, Base/newTarget handles and the actual imported PERP createAPI used twice by the source constructor. Native metadata, initial state, dependency arguments/aliases and async dispatcher asserted against unchanged whole-source classes; Base/import/native engine primitives remain explicit bindings. No shared SDK type/trait or perp row changed. Renamed Rust target: safe-cex-venue-hyperliquid/src/spot_runtime.rs::new_spot_exchange."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.symbolOrIdToCoin"
 kind = "field-fn"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::spot_symbol_or_id_to_coin"
 status = "ported"
-note = "Host-bound Rust source algorithm. Native includes/split and numeric-index0 receiver/callee/argument order; returns original native symbol handle if no dash, preserves UTF16/lone-surrogate values and errors. Actual-source market-data-selectors-oracle.cjs covers161fixedcases through160 across ten roots with decoded native members/fields/arguments/state before wire; iterator/property/regex/coercion/imported libraries and fullclass implementations remain host contracts, no exhaustive behavior claim."
+note = "Host-bound Rust source algorithm. Native includes/split and numeric-index0 receiver/callee/argument order; returns original native symbol handle if no dash, preserves UTF16/lone-surrogate values and errors. Actual-source market-data-selectors-oracle.cjs covers161fixedcases through160 across ten roots with decoded native members/fields/arguments/state before wire; iterator/property/regex/coercion/imported libraries and fullclass implementations remain host contracts, no exhaustive behavior claim. Renamed Rust target: safe-cex-venue-hyperliquid/src/market_data_selectors.rs::spot_symbol_or_id_to_coin."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.validateAccount"
@@ -48,15 +48,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/spot_account_reads.rs::tick"
 status = "ported"
-note = "Source HyperliquidSpotExchange.tick body and owned callbacks in Rust with eager retained tasks and explicit native async-return adoption. Preserves startup/public-data snapshots, original store/request references, balance-refresh guard and forced timestamp order, shared native in-flight child promise with catch/finally clearing, zero-order fresh arrays, native candle destructuring and fake/filtered position row identities. Unchanged whole-source oracle floor62 through61 plus dropped-observer witness; native values, UTF16, finite bits/NaN class, prefixes/effects, rejection values and original handles asserted. Virtual dependencies and JS primitives/imported libraries remain bindings; not a full class, JS engine, general calendar/iterator/thenable or live-network proof."
+note = "Source HyperliquidSpotExchange.tick body and owned callbacks in Rust with eager retained tasks and explicit native async-return adoption. Preserves startup/public-data snapshots, original store/request references, balance-refresh guard and forced timestamp order, shared native in-flight child promise with catch/finally clearing, zero-order fresh arrays, native candle destructuring and fake/filtered position row identities. Unchanged whole-source oracle floor62 through61 plus dropped-observer witness; native values, UTF16, finite bits/NaN class, prefixes/effects, rejection values and original handles asserted. Virtual dependencies and JS primitives/imported libraries remain bindings; not a full class, JS engine, general calendar/iterator/thenable or live-network proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/spot_account_reads.rs::tick."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.dispose"
 kind = "field-fn"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::spot_dispose"
 status = "ported"
-note = "Rust invokes home-prototype super disposal first, then freshly resolves and disposes public/private websocket receivers without optional guards; native effects/order/errors checked; virtual callees/full class remain outside proof. Actual-source lifecycle-delegates-oracle.cjs covers111fixedcases through110 across ten roots with native values/effects before any wire; no exhaustive/cardinality closure claim."
+note = "Rust invokes home-prototype super disposal first, then freshly resolves and disposes public/private websocket receivers without optional guards; native effects/order/errors checked; virtual callees/full class remain outside proof. Actual-source lifecycle-delegates-oracle.cjs covers111fixedcases through110 across ten roots with native values/effects before any wire; no exhaustive/cardinality closure claim. Renamed Rust target: safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::spot_dispose."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange#fetchMarketsAndTickers"
@@ -64,15 +64,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::fetch_markets_and_tickers"
 status = "ported"
-note = "Rust owns the complete spot market/order body and lexical callbacks. Preserves lookup/read order, original ticker info aliases, native scalar fields/NaN class, market/limit/TPSL signing requests, four-argument source signL1Action, post then refresh, numeric cancel inputs, inherited update membership and original cancel row handle before dead-order insertion/replacement. Eager retained async tasks and native return adoption. Imported precision/signing libraries and virtual dependencies remain bindings; controlled-source floor30 through29 across this slice is not a real signer/network or exhaustive input proof."
+note = "Rust owns the complete spot market/order body and lexical callbacks. Preserves lookup/read order, original ticker info aliases, native scalar fields/NaN class, market/limit/TPSL signing requests, four-argument source signL1Action, post then refresh, numeric cancel inputs, inherited update membership and original cancel row handle before dead-order insertion/replacement. Eager retained async tasks and native return adoption. Imported precision/signing libraries and virtual dependencies remain bindings; controlled-source floor30 through29 across this slice is not a real signer/network or exhaustive input proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/spot_trading.rs::fetch_markets_and_tickers."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange#getSpotCoinMarkPrice"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/balance_state.rs::get_spot_coin_mark_price", "safe-cex-venue-hyperliquid/src/balance_state.rs::BalanceHost::spot_market_predicate" ]
+rs = [ "safe-cex-venue-hyperliquid/src/balance_state.rs::get_spot_coin_mark_price", "safe-cex-venue-hyperliquid/src/balance_state.rs::BalanceHost::spot_market_predicate", "safe-cex-venue-hyperliquid/src/balance_state.rs::SpotMarketPredicate", "safe-cex-venue-hyperliquid/src/balance_state.rs::run_spot_market_predicate" ]
 status = "ported"
-note = "Four ticker keys, nullish mark/last/index/midPrice; owned native Array.find predicate for base/id/symbol and optional token index, then matching market ticker. Rust owns this source body under venue-local primitive/property/iterator/operator/intrinsic and virtual-callee bindings. Native source floor152 through151 asserts f64/UTF16/handles/literal fields/state and owned market predicate before wire; no roundtrip gate. Full exchange classes, async refresh/callee implementations, general prototypes/live/exhaustive behavior remain outside this leaf proof. API split: safe-cex-venue-hyperliquid/src/balance_state.rs::get_spot_coin_mark_price retains the operation body; shared declarations safe-cex-venue-hyperliquid/src/balance_state.rs::BalanceHost::spot_market_predicate supply the retained Array.find callback binding for upper-case symbol/token-index matching. These are consumed host capabilities, not a claim of completed runtime assembly."
+note = "Four ticker keys, nullish mark/last/index/midPrice; owned native Array.find predicate for base/id/symbol and optional token index, then matching market ticker. Rust owns this source body under venue-local primitive/property/iterator/operator/intrinsic and virtual-callee bindings. Native source floor152 through151 asserts f64/UTF16/handles/literal fields/state and owned market predicate before wire; no roundtrip gate. Full exchange classes, async refresh/callee implementations, general prototypes/live/exhaustive behavior remain outside this leaf proof. API split: safe-cex-venue-hyperliquid/src/balance_state.rs::get_spot_coin_mark_price retains the operation body; shared declarations safe-cex-venue-hyperliquid/src/balance_state.rs::BalanceHost::spot_market_predicate supply the retained Array.find callback binding for upper-case symbol/token-index matching. These are consumed host capabilities, not a claim of completed runtime assembly. The markets.find predicate get_spot_coin_mark_price allocates captures SpotMarketPredicate and executes as run_spot_market_predicate: safe-cex-venue-hyperliquid/src/balance_state.rs::SpotMarketPredicate safe-cex-venue-hyperliquid/src/balance_state.rs::run_spot_market_predicate"
 
 [[symbol]]
 ts = "HyperliquidSpotExchange#buildSpotBalance"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/balance_state.rs::apply_spot_balances"
 status = "ported"
-note = "Array guard, resolve store sender before payload/buildSpotBalance argument, ordered native balance field and update call. Rust owns this source body under venue-local primitive/property/iterator/operator/intrinsic and virtual-callee bindings. Native source floor152 through151 asserts f64/UTF16/handles/literal fields/state and owned market predicate before wire; no roundtrip gate. Full exchange classes, async refresh/callee implementations, general prototypes/live/exhaustive behavior remain outside this leaf proof."
+note = "Array guard, resolve store sender before payload/buildSpotBalance argument, ordered native balance field and update call. Rust owns this source body under venue-local primitive/property/iterator/operator/intrinsic and virtual-callee bindings. Native source floor152 through151 asserts f64/UTF16/handles/literal fields/state and owned market predicate before wire; no roundtrip gate. Full exchange classes, async refresh/callee implementations, general prototypes/live/exhaustive behavior remain outside this leaf proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/balance_state.rs::apply_spot_balances."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange#fetchSpotClearinghouseState"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/balance_state.rs::request_spot_balance_refresh"
 status = "ported"
-note = "Undefined-only false default with null retained, refresh method receiver and argument, source void return. Rust owns this source body under venue-local primitive/property/iterator/operator/intrinsic and virtual-callee bindings. Native source floor152 through151 asserts f64/UTF16/handles/literal fields/state and owned market predicate before wire; no roundtrip gate. Full exchange classes, async refresh/callee implementations, general prototypes/live/exhaustive behavior remain outside this leaf proof."
+note = "Undefined-only false default with null retained, refresh method receiver and argument, source void return. Rust owns this source body under venue-local primitive/property/iterator/operator/intrinsic and virtual-callee bindings. Native source floor152 through151 asserts f64/UTF16/handles/literal fields/state and owned market predicate before wire; no roundtrip gate. Full exchange classes, async refresh/callee implementations, general prototypes/live/exhaustive behavior remain outside this leaf proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/balance_state.rs::request_spot_balance_refresh."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange#refreshSpotBalance"
@@ -136,7 +136,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::spot_symbol_configuration_from_asset_data"
 status = "ported"
-note = "Source HyperliquidSpotExchange._getSymbolConfigurationFromAssetData algorithm in Rust with venue-local primitive/property/collection/global/callee bindings. Native129case floor through128 asserts config field order/bits and default object aliases, fresh mode/leverage/cache reads, optional-chain error boundaries, strict assignment, raw short-circuit/requested identity and owned some predicate/aggregate as applicable. Source spot coin parameter unused. Full exchange classes, fake-position generators, intrinsic/virtual callee implementations and live operation remain separate pending work."
+note = "Source HyperliquidSpotExchange._getSymbolConfigurationFromAssetData algorithm in Rust with venue-local primitive/property/collection/global/callee bindings. Native129case floor through128 asserts config field order/bits and default object aliases, fresh mode/leverage/cache reads, optional-chain error boundaries, strict assignment, raw short-circuit/requested identity and owned some predicate/aggregate as applicable. Source spot coin parameter unused. Full exchange classes, fake-position generators, intrinsic/virtual callee implementations and live operation remain separate pending work. Renamed Rust target: safe-cex-venue-hyperliquid/src/account_position_leaves.rs::spot_symbol_configuration_from_asset_data."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange#generateFakePositionsFromMarkets"
@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::spot_get_fake_positions"
 status = "ported"
-note = "Source HyperliquidSpotExchange.getFakePositions algorithm in Rust with venue-local primitive/property/collection/global/callee bindings. Native129case floor through128 asserts config field order/bits and default object aliases, fresh mode/leverage/cache reads, optional-chain error boundaries, strict assignment, raw short-circuit/requested identity and owned some predicate/aggregate as applicable. Source spot coin parameter unused. Full exchange classes, fake-position generators, intrinsic/virtual callee implementations and live operation remain separate pending work."
+note = "Source HyperliquidSpotExchange.getFakePositions algorithm in Rust with venue-local primitive/property/collection/global/callee bindings. Native129case floor through128 asserts config field order/bits and default object aliases, fresh mode/leverage/cache reads, optional-chain error boundaries, strict assignment, raw short-circuit/requested identity and owned some predicate/aggregate as applicable. Source spot coin parameter unused. Full exchange classes, fake-position generators, intrinsic/virtual callee implementations and live operation remain separate pending work. Renamed Rust target: safe-cex-venue-hyperliquid/src/account_position_leaves.rs::spot_get_fake_positions."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.fetchPositions"
@@ -160,23 +160,23 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/spot_account_reads.rs::fetch_positions"
 status = "ported"
-note = "Source HyperliquidSpotExchange.fetchPositions body and owned callbacks in Rust with eager retained tasks and explicit native async-return adoption. Preserves startup/public-data snapshots, original store/request references, balance-refresh guard and forced timestamp order, shared native in-flight child promise with catch/finally clearing, zero-order fresh arrays, native candle destructuring and fake/filtered position row identities. Unchanged whole-source oracle floor62 through61 plus dropped-observer witness; native values, UTF16, finite bits/NaN class, prefixes/effects, rejection values and original handles asserted. Virtual dependencies and JS primitives/imported libraries remain bindings; not a full class, JS engine, general calendar/iterator/thenable or live-network proof."
+note = "Source HyperliquidSpotExchange.fetchPositions body and owned callbacks in Rust with eager retained tasks and explicit native async-return adoption. Preserves startup/public-data snapshots, original store/request references, balance-refresh guard and forced timestamp order, shared native in-flight child promise with catch/finally clearing, zero-order fresh arrays, native candle destructuring and fake/filtered position row identities. Unchanged whole-source oracle floor62 through61 plus dropped-observer witness; native values, UTF16, finite bits/NaN class, prefixes/effects, rejection values and original handles asserted. Virtual dependencies and JS primitives/imported libraries remain bindings; not a full class, JS engine, general calendar/iterator/thenable or live-network proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/spot_account_reads.rs::fetch_positions."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.listenOHLCV"
 kind = "field-fn"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::spot_listen_ohlcv"
 status = "ported"
-note = "Rust spot wrapper retains fresh publicWebsocket/listenOHLCV lookup, native options/callback receiver arguments and cleanup result/error identity; listener implementation remains a virtual host callee. Actual-source lifecycle-delegates-oracle.cjs covers111fixedcases through110 across ten roots with native values/effects before any wire; no exhaustive/cardinality closure claim."
+note = "Rust spot wrapper retains fresh publicWebsocket/listenOHLCV lookup, native options/callback receiver arguments and cleanup result/error identity; listener implementation remains a virtual host callee. Actual-source lifecycle-delegates-oracle.cjs covers111fixedcases through110 across ten roots with native values/effects before any wire; no exhaustive/cardinality closure claim. Renamed Rust target: safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::spot_listen_ohlcv."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.listenOrderBook"
 kind = "field-fn"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::spot_listen_order_book"
 status = "ported"
-note = "Rust spot wrapper retains fresh publicWebsocket/listenOrderBook lookup, native symbol/callback receiver arguments and cleanup result/error identity; listener implementation remains a virtual host callee. Actual-source lifecycle-delegates-oracle.cjs covers111fixedcases through110 across ten roots with native values/effects before any wire; no exhaustive/cardinality closure claim."
+note = "Rust spot wrapper retains fresh publicWebsocket/listenOrderBook lookup, native symbol/callback receiver arguments and cleanup result/error identity; listener implementation remains a virtual host callee. Actual-source lifecycle-delegates-oracle.cjs covers111fixedcases through110 across ten roots with native values/effects before any wire; no exhaustive/cardinality closure claim. Renamed Rust target: safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::spot_listen_order_book."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.setLeverage"
@@ -184,7 +184,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::spot_set_leverage"
 status = "ported"
-note = "Standalone spot source action/post algorithm deliberately signs with four arguments, unconditional signature, no spot guard/vault/cache invalidation; native unary leverage and root-only optional leverage.type. Rust owns the selected source body under venue-local primitive/imported-helper/virtual-callee and await bindings. Native143case floor through142 checks decoded fields/handles/state/call arity and94pending-once await cutpoints before wire, no roundtrip. Async embedding immediately first-polls the body; arbitrary eager JS-call vs lazy Rust-future scheduling, Promise assimilation implementation, imported signing/parser/builder/mask callees, full classes/live/general behavior remain outside this leaf proof."
+note = "Standalone spot source action/post algorithm deliberately signs with four arguments, unconditional signature, no spot guard/vault/cache invalidation; native unary leverage and root-only optional leverage.type. Rust owns the selected source body under venue-local primitive/imported-helper/virtual-callee and await bindings. Native143case floor through142 checks decoded fields/handles/state/call arity and94pending-once await cutpoints before wire, no roundtrip. Async embedding immediately first-polls the body; arbitrary eager JS-call vs lazy Rust-future scheduling, Promise assimilation implementation, imported signing/parser/builder/mask callees, full classes/live/general behavior remain outside this leaf proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/order_request_leaves.rs::spot_set_leverage."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.changeMarginType"
@@ -192,7 +192,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::spot_change_margin_type"
 status = "ported"
-note = "Standalone spot action/post: isolated truthiness and active leverage.value, four signer arguments/null vault, unconditional signature and no core invalidation. Rust owns the selected source body under venue-local primitive/imported-helper/virtual-callee and await bindings. Native143case floor through142 checks decoded fields/handles/state/call arity and94pending-once await cutpoints before wire, no roundtrip. Async embedding immediately first-polls the body; arbitrary eager JS-call vs lazy Rust-future scheduling, Promise assimilation implementation, imported signing/parser/builder/mask callees, full classes/live/general behavior remain outside this leaf proof."
+note = "Standalone spot action/post: isolated truthiness and active leverage.value, four signer arguments/null vault, unconditional signature and no core invalidation. Rust owns the selected source body under venue-local primitive/imported-helper/virtual-callee and await bindings. Native143case floor through142 checks decoded fields/handles/state/call arity and94pending-once await cutpoints before wire, no roundtrip. Async embedding immediately first-polls the body; arbitrary eager JS-call vs lazy Rust-future scheduling, Promise assimilation implementation, imported signing/parser/builder/mask callees, full classes/live/general behavior remain outside this leaf proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/order_request_leaves.rs::spot_change_margin_type."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.placeOrder"
@@ -200,7 +200,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::place_order"
 status = "ported"
-note = "Rust owns the complete spot market/order body and lexical callbacks. Preserves lookup/read order, original ticker info aliases, native scalar fields/NaN class, market/limit/TPSL signing requests, four-argument source signL1Action, post then refresh, numeric cancel inputs, inherited update membership and original cancel row handle before dead-order insertion/replacement. Eager retained async tasks and native return adoption. Imported precision/signing libraries and virtual dependencies remain bindings; controlled-source floor30 through29 across this slice is not a real signer/network or exhaustive input proof."
+note = "Rust owns the complete spot market/order body and lexical callbacks. Preserves lookup/read order, original ticker info aliases, native scalar fields/NaN class, market/limit/TPSL signing requests, four-argument source signL1Action, post then refresh, numeric cancel inputs, inherited update membership and original cancel row handle before dead-order insertion/replacement. Eager retained async tasks and native return adoption. Imported precision/signing libraries and virtual dependencies remain bindings; controlled-source floor30 through29 across this slice is not a real signer/network or exhaustive input proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/spot_trading.rs::place_order."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.cancelOrders"
@@ -208,7 +208,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::cancel_orders"
 status = "ported"
-note = "Rust owns the complete spot market/order body and lexical callbacks. Preserves lookup/read order, original ticker info aliases, native scalar fields/NaN class, market/limit/TPSL signing requests, four-argument source signL1Action, post then refresh, numeric cancel inputs, inherited update membership and original cancel row handle before dead-order insertion/replacement. Eager retained async tasks and native return adoption. Imported precision/signing libraries and virtual dependencies remain bindings; controlled-source floor30 through29 across this slice is not a real signer/network or exhaustive input proof."
+note = "Rust owns the complete spot market/order body and lexical callbacks. Preserves lookup/read order, original ticker info aliases, native scalar fields/NaN class, market/limit/TPSL signing requests, four-argument source signL1Action, post then refresh, numeric cancel inputs, inherited update membership and original cancel row handle before dead-order insertion/replacement. Eager retained async tasks and native return adoption. Imported precision/signing libraries and virtual dependencies remain bindings; controlled-source floor30 through29 across this slice is not a real signer/network or exhaustive input proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/spot_trading.rs::cancel_orders."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.updateOrder"
@@ -216,12 +216,12 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::update_order"
 status = "ported"
-note = "Rust owns the complete spot market/order body and lexical callbacks. Preserves lookup/read order, original ticker info aliases, native scalar fields/NaN class, market/limit/TPSL signing requests, four-argument source signL1Action, post then refresh, numeric cancel inputs, inherited update membership and original cancel row handle before dead-order insertion/replacement. Eager retained async tasks and native return adoption. Imported precision/signing libraries and virtual dependencies remain bindings; controlled-source floor30 through29 across this slice is not a real signer/network or exhaustive input proof."
+note = "Rust owns the complete spot market/order body and lexical callbacks. Preserves lookup/read order, original ticker info aliases, native scalar fields/NaN class, market/limit/TPSL signing requests, four-argument source signL1Action, post then refresh, numeric cancel inputs, inherited update membership and original cancel row handle before dead-order insertion/replacement. Eager retained async tasks and native return adoption. Imported precision/signing libraries and virtual dependencies remain bindings; controlled-source floor30 through29 across this slice is not a real signer/network or exhaustive input proof. Renamed Rust target: safe-cex-venue-hyperliquid/src/spot_trading.rs::update_order."
 
 [[symbol]]
 ts = "HyperliquidSpotExchange.priceToPrecision"
 kind = "field-fn"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::spot_price_to_precision"
 status = "ported"
-note = "Host-bound Rust source algorithm. Source two-stage actual CCXT precision callers, Math.max5/significant digits then fixed8 minus amount precision; only market root optional, missing precision on existing market still throws; callee/constant order and native result/error preserved. Actual-source market-data-selectors-oracle.cjs covers161fixedcases through160 across ten roots with decoded native members/fields/arguments/state before wire; iterator/property/regex/coercion/imported libraries and fullclass implementations remain host contracts, no exhaustive behavior claim."
+note = "Host-bound Rust source algorithm. Source two-stage actual CCXT precision callers, Math.max5/significant digits then fixed8 minus amount precision; only market root optional, missing precision on existing market still throws; callee/constant order and native result/error preserved. Actual-source market-data-selectors-oracle.cjs covers161fixedcases through160 across ten roots with decoded native members/fields/arguments/state before wire; iterator/property/regex/coercion/imported libraries and fullclass implementations remain host contracts, no exhaustive behavior claim. Renamed Rust target: safe-cex-venue-hyperliquid/src/market_data_selectors.rs::spot_price_to_precision."

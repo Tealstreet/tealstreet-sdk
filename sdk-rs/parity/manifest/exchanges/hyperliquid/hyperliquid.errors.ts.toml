@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.errors.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/api_errors.rs" ]
 
 [[symbol]]
 ts = "HyperliquidAPIError"
@@ -7,20 +8,20 @@ kind = "class"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::core::HyperliquidAPIError"
 status = "ported"
-note = "Source-native Error handle preserves distinct core/spot class prototypes, Error(message) coercion/absent own message, ESNext parameter-property code slot, ordered code/name writes and opaque errors. Handler performs fresh response/data reads and source truthiness fallbacks. External Error/property primitives are host bindings; code/name/message/descriptor flags, native receiver/error identity and code handle alias are checked against actual source, including unpaired UTF-16 and thrown primitives. No intrinsic Error/backtrace implementation or exhaustive cardinality claim."
+note = "Source-native Error handle preserves distinct core/spot class prototypes, Error(message) coercion/absent own message, ESNext parameter-property code slot, ordered code/name writes and opaque errors. Handler performs fresh response/data reads and source truthiness fallbacks. External Error/property primitives are host bindings; code/name/message/descriptor flags, native receiver/error identity and code handle alias are checked against actual source, including unpaired UTF-16 and thrown primitives. No intrinsic Error/backtrace implementation or exhaustive cardinality claim. Renamed Rust target: safe-cex-venue-hyperliquid/src/api_errors.rs::core::HyperliquidAPIError."
 
 [[symbol]]
 ts = "HyperliquidAPIError.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::core::HyperliquidAPIError::new"
+rs = [ "safe-cex-venue-hyperliquid/src/api_errors.rs::core::HyperliquidAPIError::new", "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorClass", "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost", "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::new_error", "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::define_field", "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::set_property" ]
 status = "ported"
-note = "Source-native Error handle preserves distinct core/spot class prototypes, Error(message) coercion/absent own message, ESNext parameter-property code slot, ordered code/name writes and opaque errors. Handler performs fresh response/data reads and source truthiness fallbacks. External Error/property primitives are host bindings; code/name/message/descriptor flags, native receiver/error identity and code handle alias are checked against actual source, including unpaired UTF-16 and thrown primitives. No intrinsic Error/backtrace implementation or exhaustive cardinality claim."
+note = "Source-native Error handle preserves distinct core/spot class prototypes, Error(message) coercion/absent own message, ESNext parameter-property code slot, ordered code/name writes and opaque errors. Handler performs fresh response/data reads and source truthiness fallbacks. External Error/property primitives are host bindings; code/name/message/descriptor flags, native receiver/error identity and code handle alias are checked against actual source, including unpaired UTF-16 and thrown primitives. No intrinsic Error/backtrace implementation or exhaustive cardinality claim. Renamed Rust target: safe-cex-venue-hyperliquid/src/api_errors.rs::core::HyperliquidAPIError::new. Native Error allocation with the derived prototype selected by ApiErrorClass, plus the code parameter-property define and code/name writes, shared by the core and spot constructors: safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorClass safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::new_error safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::define_field safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::set_property"
 
 [[symbol]]
 ts = "handleApiError"
 kind = "function"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::core::handle_api_error"
+rs = [ "safe-cex-venue-hyperliquid/src/api_errors.rs::core::handle_api_error", "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::literal", "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::truthy", "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::exception_from_value" ]
 status = "ported"
-note = "Source-native Error handle preserves distinct core/spot class prototypes, Error(message) coercion/absent own message, ESNext parameter-property code slot, ordered code/name writes and opaque errors. Handler performs fresh response/data reads and source truthiness fallbacks. External Error/property primitives are host bindings; code/name/message/descriptor flags, native receiver/error identity and code handle alias are checked against actual source, including unpaired UTF-16 and thrown primitives. No intrinsic Error/backtrace implementation or exhaustive cardinality claim."
+note = "Source-native Error handle preserves distinct core/spot class prototypes, Error(message) coercion/absent own message, ESNext parameter-property code slot, ordered code/name writes and opaque errors. Handler performs fresh response/data reads and source truthiness fallbacks. External Error/property primitives are host bindings; code/name/message/descriptor flags, native receiver/error identity and code handle alias are checked against actual source, including unpaired UTF-16 and thrown primitives. No intrinsic Error/backtrace implementation or exhaustive cardinality claim. Renamed Rust target: safe-cex-venue-hyperliquid/src/api_errors.rs::core::handle_api_error. Fallback code/message literals, response/request truthiness and the throw conversion used by handle_api_error routing: safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::literal safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::truthy safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::exception_from_value"

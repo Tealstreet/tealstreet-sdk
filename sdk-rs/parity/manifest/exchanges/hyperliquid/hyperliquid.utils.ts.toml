@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.utils.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/market_helpers.rs" ]
 
 [[symbol]]
 ts = "symbolToCoin"

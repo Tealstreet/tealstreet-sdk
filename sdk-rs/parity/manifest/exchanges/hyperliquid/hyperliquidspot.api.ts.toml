@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.api.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/spot_client.rs" ]
 
 [[symbol]]
 ts = "createAPI"

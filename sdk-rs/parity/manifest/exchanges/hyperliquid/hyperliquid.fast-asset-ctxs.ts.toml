@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.fast-asset-ctxs.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/json_models.rs", "safe-cex-venue-hyperliquid/src/market_helpers.rs" ]
 
 [[symbol]]
 ts = "HyperliquidFastAssetCtx"
