@@ -1,9 +1,12 @@
 //! Exchange error normalization, signer retry/warning and snapshot failure bodies.
 //! Native values/UTF16 are retained at required live JS property, callee, receiver,
-//! instanceof, regex and coercion hosts. State/clock/Math return values remain
-//! ordinary Numbers; reflective numeric-intrinsic overrides/out-of-type numeric
-//! fields are unproved. Full exchange/runtime construction pending.
-use crate::{sdk_account_api::AccountValue, transaction_signing::SigningResult};
+//! instanceof, regex and coercion hosts. Out-of-type state/clock/Math primitives
+//! take JS ToNumber; object values throw TypeError (no host ToPrimitive here).
+//! Full exchange/runtime construction pending.
+use crate::{
+    sdk_account_api::{AccountValue, primitive_to_number},
+    transaction_signing::SigningResult,
+};
 use std::rc::Rc;
 const STANDARD: &str = "Lighter Standard account rate limit temporarily active. Standard accounts have very small API limits; please wait before retrying or switch the Lighter account tier to Plus or Premium if this persists.";
 const ACCOUNT: &str =
@@ -37,11 +40,8 @@ fn text(s: &str) -> AccountValue {
 fn eq(value: &AccountValue, s: &str) -> bool {
     matches!(value,AccountValue::String(v) if *v==s.encode_utf16().collect::<Vec<_>>())
 }
-fn number(value: AccountValue) -> f64 {
-    let AccountValue::Number(value) = value else {
-        unreachable!("typed Number state/clock/Math result")
-    };
-    value
+fn number(value: AccountValue) -> SigningResult<f64> {
+    primitive_to_number(&value)
 }
 fn call(
     h: &dyn ExchangeErrorRecoveryHost,
@@ -68,9 +68,7 @@ fn fallback_empty(value: AccountValue) -> AccountValue {
     if value.truthy() { value } else { text("") }
 }
 fn now(h: &dyn ExchangeErrorRecoveryHost) -> SigningResult<f64> {
-    Ok(number(
-        h.global("virtualClock.getCurrentTimeMs")?.call(&[])?,
-    ))
+    number(h.global("virtualClock.getCurrentTimeMs")?.call(&[])?)
 }
 // ts: LighterExchange.getAccountRateLimitGuidanceMessage
 pub fn get_account_rate_limit_guidance_message(
@@ -104,7 +102,7 @@ pub fn should_short_circuit_signer_retry(h: &dyn ExchangeErrorRecoveryHost) -> S
     if issue && !h.global("isWasmReady")?.call(&[])?.truthy() {
         return Ok(true);
     }
-    Ok(now < number(h.get(&h.owner(), "signerRetryBlockedUntil")?))
+    Ok(now < number(h.get(&h.owner(), "signerRetryBlockedUntil")?)?)
 }
 // ts: LighterExchange#getSignerRetryBlockMessage
 pub fn get_signer_retry_block_message(
@@ -112,9 +110,9 @@ pub fn get_signer_retry_block_message(
 ) -> SigningResult<AccountValue> {
     let now = now(h)?;
     let max = h.global("Math.max")?;
-    let until = number(h.get(&h.owner(), "signerRetryBlockedUntil")?);
+    let until = number(h.get(&h.owner(), "signerRetryBlockedUntil")?)?;
     let remaining =
-        number(max.call(&[AccountValue::Number(0.0), AccountValue::Number(until - now)])?);
+        number(max.call(&[AccountValue::Number(0.0), AccountValue::Number(until - now)])?)?;
     let issue = h.member(&h.owner(), "isWasmRuntimeIssueMessage")?;
     let message = fallback_empty(h.get(&h.owner(), "signerInitErrorMessage")?);
     let issue = issue.call(&[message])?.truthy();
@@ -153,7 +151,7 @@ pub fn warn_signer_unavailable(
     message: &[u16],
 ) -> SigningResult<()> {
     let now = now(h)?;
-    if now - number(h.get(&h.owner(), "lastSignerWarningAt")?) < 10000.0 {
+    if now - number(h.get(&h.owner(), "lastSignerWarningAt")?)? < 10000.0 {
         return Ok(());
     }
     h.set(&h.owner(), "lastSignerWarningAt", AccountValue::Number(now))?;
@@ -236,8 +234,8 @@ pub fn handle_private_snapshot_fetch_error(
         return Ok(());
     }
     let now = now(h)?;
-    if number(h.get(&h.owner(), "lastTransientSnapshotWarningAt")?) > 0.0
-        && now - number(h.get(&h.owner(), "lastTransientSnapshotWarningAt")?) < 60000.0
+    if number(h.get(&h.owner(), "lastTransientSnapshotWarningAt")?)? > 0.0
+        && now - number(h.get(&h.owner(), "lastTransientSnapshotWarningAt")?)? < 60000.0
     {
         return Ok(());
     }

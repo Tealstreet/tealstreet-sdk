@@ -2,10 +2,10 @@
 //! JS operations preserve callable/receiver capture, keys, coercion, callbacks,
 //! import values, original throws, await and return adoption. No exchange,
 //! array/JS engine, signer, timer or network construction is provided here.
-//! Numeric arithmetic inputs follow source typed Number contracts.
+//! Numeric operands take JS ToNumber; objects throw TypeError.
 use crate::{
     exchange_account_access::ExchangeAccountAccessHost,
-    sdk_account_api::AccountValue,
+    sdk_account_api::{AccountValue, primitive_to_number},
     transaction_promise::{NativePromise, PromiseResolver},
     transaction_signing::{SigningResult, TransactionSigningError},
 };
@@ -49,11 +49,8 @@ fn eq(a: &AccountValue, b: &AccountValue) -> bool {
         _ => false,
     }
 }
-fn num(v: AccountValue) -> f64 {
-    let AccountValue::Number(n) = v else {
-        unreachable!("source typed Number")
-    };
-    n
+fn num(v: AccountValue) -> SigningResult<f64> {
+    primitive_to_number(&v)
 }
 fn call(h: &dyn TradingHost, key: &str, args: &[AccountValue]) -> SigningResult<AccountValue> {
     h.member(&h.owner(), key)?.call(args)
@@ -270,7 +267,7 @@ pub fn ensure_partner_attribution_approved(
                 let expiry = owner.global("Number")?.call(&[expiry])?;
                 let finite = owner.global("Number.isFinite")?.call(&[expiry.clone()])?;
                 Ok(AccountValue::Boolean(
-                    finite.truthy() && num(expiry) > num(now.clone()),
+                    finite.truthy() && num(expiry)? > num(now.clone())?,
                 ))
             }))?;
             if !some.call(&[callback])?.truthy() {
@@ -306,7 +303,7 @@ pub fn refresh_margin_mode_state_after_invalid_order(
             let position = args.first().cloned().unwrap_or(AccountValue::Undefined);
             let matches = eq(&live.get(&position, "symbol")?, &same_symbol);
             Ok(AccountValue::Boolean(
-                matches && num(live.get(&position, "contracts")?) > 0.0,
+                matches && num(live.get(&position, "contracts")?)? > 0.0,
             ))
         }))?;
         let open = some.call(&[callback])?;
@@ -435,7 +432,7 @@ pub fn resolve_conditional_execution_price(
     side: AccountValue,
     opts: AccountValue,
 ) -> SigningResult<AccountValue> {
-    let slippage = num(call(h, "resolveStopSlippagePct", &[opts.clone()])?);
+    let slippage = num(call(h, "resolveStopSlippagePct", &[opts.clone()])?)?;
     let multiplier = if eq(&side, &h.constant("OrderSide.Buy")?) {
         1.0 + slippage / 100.0
     } else {
@@ -778,7 +775,7 @@ pub fn cancel_symbol_orders(
             )))
         }))?;
         let orders = filter.call(&[callback])?;
-        if num(h.get(&orders, "length")?) > 0.0 {
+        if num(h.get(&orders, "length")?)? > 0.0 {
             let cancel = call(h.as_ref(), "cancelOrders", &[orders])?;
             return wait(Ok(cancel), |result| {
                 result?;

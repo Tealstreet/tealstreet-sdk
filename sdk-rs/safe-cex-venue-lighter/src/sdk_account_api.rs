@@ -163,6 +163,71 @@ impl AccountValue {
         matches!(self, Self::Null | Self::Undefined)
     }
 }
+pub(crate) fn type_error(message: &str) -> crate::transaction_signing::TransactionSigningError {
+    TransactionBuildError {
+        name: "TypeError",
+        message: message.encode_utf16().collect(),
+    }
+    .into()
+}
+/// Abstract ToNumber over primitives. Objects throw: these sites hold no host
+/// ToPrimitive (valueOf/toString), so object operands surface as a TypeError.
+pub(crate) fn primitive_to_number(value: &AccountValue) -> SigningResult<f64> {
+    Ok(match value {
+        AccountValue::Undefined => f64::NAN,
+        AccountValue::Null => 0.0,
+        AccountValue::Boolean(v) => f64::from(u8::from(*v)),
+        AccountValue::Number(v) => *v,
+        AccountValue::String(v) => safe_cex_num::number_from_string(&String::from_utf16_lossy(v)),
+        AccountValue::BigInt(_) => {
+            return Err(type_error("Cannot convert a BigInt value to a number"));
+        }
+        AccountValue::Symbol(_) => {
+            return Err(type_error("Cannot convert a Symbol value to a number"));
+        }
+        AccountValue::Function(_) | AccountValue::Object(_) | AccountValue::HtmlDda => {
+            return Err(type_error("Cannot convert object to primitive value"));
+        }
+    })
+}
+/// `value + right` for a Number literal `right`: string operands concatenate,
+/// BigInt cannot mix, objects throw as in primitive_to_number.
+pub(crate) fn primitive_add_number(
+    value: &AccountValue,
+    right: f64,
+) -> SigningResult<AccountValue> {
+    Ok(match value {
+        AccountValue::String(left) => {
+            let mut text = left.clone();
+            text.extend(safe_cex_num::js_number_string(right).encode_utf16());
+            AccountValue::String(text)
+        }
+        AccountValue::BigInt(_) => {
+            return Err(type_error(
+                "Cannot mix BigInt and other types, use explicit conversions",
+            ));
+        }
+        other => AccountValue::Number(primitive_to_number(other)? + right),
+    })
+}
+/// Abstract ToString over primitives; object operands throw as in primitive_to_number.
+pub(crate) fn primitive_to_string(value: &AccountValue) -> SigningResult<Vec<u16>> {
+    let text = match value {
+        AccountValue::String(v) => return Ok(v.clone()),
+        AccountValue::Undefined => "undefined".to_owned(),
+        AccountValue::Null => "null".to_owned(),
+        AccountValue::Boolean(v) => v.to_string(),
+        AccountValue::Number(v) => safe_cex_num::js_number_string(*v),
+        AccountValue::BigInt(v) => v.to_string(),
+        AccountValue::Symbol(_) => {
+            return Err(type_error("Cannot convert a Symbol value to a string"));
+        }
+        AccountValue::Function(_) | AccountValue::Object(_) | AccountValue::HtmlDda => {
+            return Err(type_error("Cannot convert object to primitive value"));
+        }
+    };
+    Ok(text.encode_utf16().collect())
+}
 pub trait AccountObject {
     fn get(&self, key: &str) -> SigningResult<AccountValue>;
 }

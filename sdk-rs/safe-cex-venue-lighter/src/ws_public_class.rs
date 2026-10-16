@@ -3,11 +3,12 @@
 //! delete with ToPropertyKey, binding reads, Call/Construct, closures, iteration,
 //! template ToString, relational comparison, await and async return adoption)
 //! is a required live host operation, performed in source evaluation order.
-//! Owner clock/counter fields are typed Numbers; log severities are the source
+//! Out-of-type clock/counter primitives take JS ToNumber/`+`; objects throw
+//! TypeError (no host ToPrimitive). Log severities are the source
 //! LogSeverity string values, as in the neighbouring public-socket bodies.
 use crate::{
     public_ingress::{self, IngressOps},
-    sdk_account_api::AccountValue,
+    sdk_account_api::{AccountValue, primitive_add_number, primitive_to_number},
     transaction_promise::{NativePromise, PromiseResolver, TransactionRuntime},
     transaction_signing::{SigningResult, TransactionSigningError},
     ws_public,
@@ -105,11 +106,8 @@ fn u(s: &str) -> Vec<u16> {
 fn text(s: &str) -> AccountValue {
     AccountValue::String(u(s))
 }
-fn num(value: &AccountValue) -> f64 {
-    let AccountValue::Number(n) = value else {
-        unreachable!("typed Number owner field or clock")
-    };
-    *n
+fn num(value: &AccountValue) -> SigningResult<f64> {
+    primitive_to_number(value)
 }
 fn is_number(value: &AccountValue, n: f64) -> bool {
     matches!(value, AccountValue::Number(v) if *v == n)
@@ -394,8 +392,9 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         text("")
     };
     let now = virtual_now(hr)?;
-    let time_since_connect = if num(&own(hr, "connectStartedAt")?) > 0.0 {
-        num(&now) - num(&own(hr, "connectStartedAt")?)
+    let time_since_connect = if num(&own(hr, "connectStartedAt")?)? > 0.0 {
+        let started = own(hr, "connectStartedAt")?;
+        num(&now)? - num(&started)?
     } else {
         f64::INFINITY
     };
@@ -413,13 +412,13 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         || get(hr, &classification, "isRateLimited")?.truthy()
         || get(hr, &classification, "isPolicyRestricted")?.truthy();
     if should_count {
-        let failed = num(&own(hr, "failedConnections")?);
-        set_own(hr, "failedConnections", AccountValue::Number(failed + 1.0))?;
+        let failed = primitive_add_number(&own(hr, "failedConnections")?, 1.0)?;
+        set_own(hr, "failedConnections", failed)?;
     } else if is_number(&close_code, 1000.0) {
         set_own(hr, "failedConnections", AccountValue::Number(0.0))?;
     } else {
         let value = binding_method(hr, "Math", "max", || {
-            let failed = num(&own(hr, "failedConnections")?);
+            let failed = num(&own(hr, "failedConnections")?)?;
             Ok(vec![
                 AccountValue::Number(0.0),
                 AccountValue::Number(failed - 1.0),
@@ -431,7 +430,7 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         && !own(hr, "connectedViaProxyRoute")?.truthy()
         && !own(hr, "useReadonlyDirectRoute")?.truthy()
         && should_count
-        && num(&own(hr, "failedConnections")?) >= DIRECT_ROUTE_FAILURES_BEFORE_READONLY
+        && num(&own(hr, "failedConnections")?)? >= DIRECT_ROUTE_FAILURES_BEFORE_READONLY
     {
         set_own(hr, "useReadonlyDirectRoute", AccountValue::Boolean(true))?;
         log(hr, "warning", || {
@@ -453,17 +452,13 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         if own(hr, "connectedViaProxyRoute")?.truthy() {
             set_own(hr, "directRouteFailureCount", AccountValue::Number(0.0))?;
             if should_count {
-                let count = num(&own(hr, "proxyRouteFailureCount")?);
-                set_own(
-                    hr,
-                    "proxyRouteFailureCount",
-                    AccountValue::Number(count + 1.0),
-                )?;
-                let paused_until = num(&own(hr, "directFallbackProbePausedUntil")?);
-                let can_probe = num(&now) >= paused_until;
+                let count = primitive_add_number(&own(hr, "proxyRouteFailureCount")?, 1.0)?;
+                set_own(hr, "proxyRouteFailureCount", count)?;
+                let paused_until = own(hr, "directFallbackProbePausedUntil")?;
+                let can_probe = num(&now)? >= num(&paused_until)?;
                 if !own(hr, "useDirectFallbackRoute")?.truthy()
                     && can_probe
-                    && num(&own(hr, "proxyRouteFailureCount")?)
+                    && num(&own(hr, "proxyRouteFailureCount")?)?
                         >= PROXY_ROUTE_FAILURES_BEFORE_DIRECT_FALLBACK
                 {
                     set_own(hr, "useDirectFallbackRoute", AccountValue::Boolean(true))?;
@@ -483,17 +478,13 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
                 set_own(hr, "useDirectFallbackRoute", AccountValue::Boolean(false))?;
             }
         } else if should_count {
-            let count = num(&own(hr, "directRouteFailureCount")?);
-            set_own(
-                hr,
-                "directRouteFailureCount",
-                AccountValue::Number(count + 1.0),
-            )?;
+            let count = primitive_add_number(&own(hr, "directRouteFailureCount")?, 1.0)?;
+            set_own(hr, "directRouteFailureCount", count)?;
             set_own(hr, "useDirectFallbackRoute", AccountValue::Boolean(false))?;
             set_own(
                 hr,
                 "directFallbackProbePausedUntil",
-                AccountValue::Number(num(&now) + PROXY_DIRECT_FALLBACK_FAILURE_COOLDOWN_MS),
+                primitive_add_number(&now, PROXY_DIRECT_FALLBACK_FAILURE_COOLDOWN_MS)?,
             )?;
             log(hr, "warning", || {
                 let count = own(hr, "directRouteFailureCount")?;
@@ -595,9 +586,9 @@ pub fn on_close(h: Rc<dyn PublicSocketHost>, event: &AccountValue) -> SigningRes
         hr.invoke(&remove, &ws, &[text(event_name), handler])?;
     }
     set_own(hr, "ws", AccountValue::Undefined)?;
-    let count = num(&own(hr, "onCloseCount")?);
+    let count = num(&own(hr, "onCloseCount")?)?;
     set_own(hr, "onCloseCount", AccountValue::Number(count + 1.0))?;
-    if num(&own(hr, "onCloseCount")?) > 100.0 {
+    if num(&own(hr, "onCloseCount")?)? > 100.0 {
         log(hr, "error", || {
             Ok(text(
                 "[Lighter] Public WS onClose count > 100, stopping reconnection",
@@ -716,8 +707,11 @@ pub fn fetch_and_emit_order_book_from_rest(
             let status = status_code(hr, &error)?;
             if is_number(&status, 403.0) {
                 let record = own(hr, "orderBookRestFallbackCooldownUntilByTopic")?;
-                let until = num(&virtual_now(hr)?) + ORDER_BOOK_REST_FALLBACK_403_COOLDOWN_MS;
-                hr.set(&record, &catch_topic, AccountValue::Number(until))?;
+                let until = primitive_add_number(
+                    &virtual_now(hr)?,
+                    ORDER_BOOK_REST_FALLBACK_403_COOLDOWN_MS,
+                )?;
+                hr.set(&record, &catch_topic, until)?;
                 log(hr, "warning", || {
                     template(
                         hr,
@@ -810,12 +804,9 @@ fn ticker_fallback_body(h: Rc<dyn PublicSocketHost>) -> SigningResult<Step> {
         let error = hr.error_value(error);
         let status = status_code(hr, &error)?;
         if is_number(&status, 403.0) {
-            let until = num(&virtual_now(hr)?) + TICKER_REST_FALLBACK_403_COOLDOWN_MS;
-            set_own(
-                hr,
-                "tickerRestFallbackCooldownUntil",
-                AccountValue::Number(until),
-            )?;
+            let until =
+                primitive_add_number(&virtual_now(hr)?, TICKER_REST_FALLBACK_403_COOLDOWN_MS)?;
+            set_own(hr, "tickerRestFallbackCooldownUntil", until)?;
             log(hr, "warning", || {
                 Ok(text(
                     "[Lighter] REST ticker fallback returned 403; pausing ticker REST fallback to avoid noisy retry loop.",
@@ -891,8 +882,8 @@ pub fn attempt_order_book_recovery(
     }
     let now = virtual_now(h)?;
     let last = h.get(&own(h, "lastOrderBookRecoveryAtByTopic")?, topic)?;
-    let last = if last.truthy() { num(&last) } else { 0.0 };
-    if num(&now) - last < ORDER_BOOK_RECOVERY_COOLDOWN_MS {
+    let last = if last.truthy() { num(&last)? } else { 0.0 };
+    if num(&now)? - last < ORDER_BOOK_RECOVERY_COOLDOWN_MS {
         own_call(
             h,
             "armOrderBookStaleTimeout",
@@ -903,14 +894,15 @@ pub fn attempt_order_book_recovery(
     let record = own(h, "lastOrderBookRecoveryAtByTopic")?;
     h.set(&record, topic, now)?;
     let attempts = h.get(&own(h, "orderBookRecoveryAttempts")?, topic)?;
-    let attempt = if attempts.truthy() {
-        num(&attempts)
+    let attempts = if attempts.truthy() {
+        attempts
     } else {
-        0.0
-    } + 1.0;
+        AccountValue::Number(0.0)
+    };
+    let attempt = primitive_add_number(&attempts, 1.0)?;
     let record = own(h, "orderBookRecoveryAttempts")?;
-    h.set(&record, topic, AccountValue::Number(attempt))?;
-    let should_reconnect = !own(h, "isConnected")?.truthy() || attempt >= 2.0;
+    h.set(&record, topic, attempt.clone())?;
+    let should_reconnect = !own(h, "isConnected")?.truthy() || num(&attempt)? >= 2.0;
     let message = |prefix: &str| -> SigningResult<AccountValue> {
         template(
             h,
@@ -920,7 +912,7 @@ pub fn attempt_order_book_recovery(
                 Part::Text(" ("),
                 Part::Value(reason.clone()),
                 Part::Text(", attempt "),
-                Part::Value(AccountValue::Number(attempt)),
+                Part::Value(attempt.clone()),
                 Part::Text(")."),
             ],
         )
@@ -1026,7 +1018,7 @@ fn seconds(
     raw: impl FnOnce() -> SigningResult<AccountValue>,
 ) -> SigningResult<AccountValue> {
     let raw = global_call(h, "Number", || Ok(vec![raw()?]))?;
-    let n = num(&raw);
+    let n = num(&raw)?;
     Ok(AccountValue::Number(if n > 10_000_000_000.0 {
         n / 1000.0
     } else {
@@ -1928,7 +1920,7 @@ impl PublicMethod {
                 let h = contexts.socket(owner.clone());
                 let delay = match a(0) {
                     AccountValue::Undefined => None,
-                    value => Some(num(&value)),
+                    value => Some(num(&value)?),
                 };
                 let reason = match a(1) {
                     AccountValue::Undefined => None,
