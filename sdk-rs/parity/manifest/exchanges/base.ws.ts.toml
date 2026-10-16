@@ -198,9 +198,9 @@ note = "Adapted shared socket split: concrete lifecycle and state projections, p
 ts = "BaseWebSocket.handlePongEvent"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_pong_event", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::mark_ping_sent" ]
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_pong_event", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::mark_ping_sent", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_ping_at" ]
 status = "ported"
-note = "Adapted shared socket split: concrete lifecycle and state projections, protocol override hooks and guarded auth/dispatch helpers implement the same source contract. safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_pong_event safe-cex-exchange/src/websocket.rs::BaseWebSocket::mark_ping_sent"
+note = "Adapted shared socket split: concrete lifecycle and state projections, protocol override hooks and guarded auth/dispatch helpers implement the same source contract. safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_pong_event safe-cex-exchange/src/websocket.rs::BaseWebSocket::mark_ping_sent Split member `safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_ping_at` writes the ping time a venue assigns to its own pingAt field, so handlePongEvent measures latency from the ping the venue sent."
 
 [[symbol]]
 ts = "BaseWebSocket.recordMessageHandlerStats"
@@ -406,9 +406,9 @@ note = ""
 ts = "BaseWebSocket.onClose"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::on_close", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_before_close" ]
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::on_close", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_before_close", "safe-cex-exchange/src/websocket.rs::WsProtocol::on_transport_close" ]
 status = "ported"
-note = " Split member `safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_before_close`; the hook that replaces subclasses re-assigning the instance onClose arrow field to wrap the retained base handler (asterdex public/private streams); the registered callback runs before this base body."
+note = " Split member `safe-cex-exchange/src/websocket.rs::BaseWebSocket::set_before_close`; the hook that replaces subclasses re-assigning the instance onClose arrow field to wrap the retained base handler (asterdex public/private streams); the registered callback runs before this base body. Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::on_transport_close`. After the core handles a transport close itself, the venue protocol receives it, as TS fires every close listener a venue registered on its socket."
 
 [[symbol]]
 ts = "BaseWebSocket#resetReconnectBackoff"
