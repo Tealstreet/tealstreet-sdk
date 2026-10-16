@@ -1591,31 +1591,31 @@
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . fetch_markets ()",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . fetch_tickers ()",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . fetch_ohlcv (arg (0))",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . validate_account ()",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . set_leverage (arg (0) . text () ? , arg (1) . number () ?)",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
@@ -1627,8 +1627,8 @@
   },
   {
     "function": "capture_store",
-    "body": "8263f22d1eb3da94",
-    "call": "owner . base . store . update_order (& arg (0) . get (\"id\") ? . text () ? , & patch (& arg (1)) ?)",
+    "body": "afa7a6dd7df55092",
+    "call": "owner . base . store . update_order (& arg (0) . read (\"id\") ? . text () ? , & patch (& arg (1)) ?)",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
@@ -1771,13 +1771,13 @@
   },
   {
     "function": "start_fetch_throttled",
-    "body": "facdc5e46a2b7abc",
+    "body": "5c89d8e2e902ba2c",
     "reference": "class_jobs :: start",
     "file": "safe-cex-venue-binance/src/private_classes.rs"
   },
   {
     "function": "start_fetch_throttled",
-    "body": "facdc5e46a2b7abc",
+    "body": "5c89d8e2e902ba2c",
     "call": "retained . parent . fetch_orders ()",
     "file": "safe-cex-venue-binance/src/private_classes.rs"
   },
@@ -4279,7 +4279,7 @@
   },
   {
     "function": "dispose",
-    "body": "45a8a8dba45efd57",
+    "body": "a57c48d8faa866ff",
     "call": "self . base . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/binding.rs"
   },
@@ -4615,13 +4615,19 @@
   },
   {
     "function": "base_exchange_class",
-    "body": "f16535160061e222",
+    "body": "d0b3260d4e9cb7dc",
     "call": "b . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
   {
     "function": "base_exchange_class",
-    "body": "f16535160061e222",
+    "body": "d0b3260d4e9cb7dc",
+    "call": "b . can_sign ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
+  },
+  {
+    "function": "base_exchange_class",
+    "body": "d0b3260d4e9cb7dc",
     "call": "b . name ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
@@ -4633,7 +4639,7 @@
   },
   {
     "function": "store_object",
-    "body": "48f2b1686705ce57",
+    "body": "13a244caa990fb9f",
     "call": "s . update_order (& id , & changes)",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_store.rs"
   },
@@ -4744,6 +4750,12 @@
     "body": "2d287c9ee82edad0",
     "reference": "helper_tasks :: start",
     "file": "safe-cex-venue-hyperliquid/src/spot_account_reads.rs"
+  },
+  {
+    "function": "new",
+    "body": "15c83f5cece8b548",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/spot_binding.rs"
   },
   {
     "function": "wait_for_token",
