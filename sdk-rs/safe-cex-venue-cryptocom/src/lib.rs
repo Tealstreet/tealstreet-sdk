@@ -2,6 +2,7 @@
 pub mod api;
 pub mod api_envelope_body;
 pub mod api_guards;
+pub mod binding;
 pub mod order_mappings;
 pub mod private_order_mappings;
 pub mod signing;
