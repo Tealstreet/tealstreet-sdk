@@ -444,6 +444,7 @@ async fn trading_stop(rt: &Rt, opts: Js, trailing: bool) -> Result<Js, Thrown> {
         .iter()
         .find(|t| t.symbol == base.symbol)
         .cloned();
+    drop(parent);
     let market = market.ok_or_else(|| {
         Thrown::error(
             "Error",

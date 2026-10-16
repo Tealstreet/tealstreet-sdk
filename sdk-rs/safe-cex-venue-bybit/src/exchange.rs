@@ -380,6 +380,15 @@ impl BybitExchange {
         let limit = |adapter| -> Arc<dyn RestAdapter> {
             Arc::new(RateLimitedAdapter::new(adapter, clock.clone(), 5, 1000))
         };
+        let default_executions_lookback_ms =
+            if base.name == safe_cex_types::ExchangeName::Bybitinverse {
+                30.
+            } else {
+                7.
+            } * 24.
+                * 60.
+                * 60.
+                * 1000.;
         let venue = Rc::new(Self {
             base,
             capabilities: crate::binding::exchange::capabilities(),
@@ -399,7 +408,7 @@ impl BybitExchange {
             batch_limit: Cell::new(10.),
             force_unified_balance: Cell::new(false),
             execution_query_max_range_ms: 7. * 24. * 60. * 60. * 1000. - 1.,
-            default_executions_lookback_ms: 7. * 24. * 60. * 60. * 1000.,
+            default_executions_lookback_ms,
         });
         let erased: Rc<dyn Exchange> = venue.clone();
         let owner = Rc::downgrade(&erased);
@@ -416,21 +425,24 @@ impl BybitExchange {
         let _ = venue.xhr.set(xhr);
         let _ = venue.unlimited_xhr.set(unlimited_xhr);
         let parent = WsExchangeParent::new(&erased);
-        let public = BaseWebSocket::new(
-            1,
-            parent.clone(),
-            runtime.clone(),
-            public_protocol(
-                Rc::downgrade(&venue),
-                if venue.base.name == safe_cex_types::ExchangeName::Bybitspot {
-                    "spot"
-                } else {
-                    "linear"
-                },
-            ),
-        );
-        venue.base.set_socket(SocketSlot::Public, Some(public));
-        if venue.inverse_enabled() {
+        let dedicated_inverse = venue.base.name == safe_cex_types::ExchangeName::Bybitinverse;
+        if !dedicated_inverse {
+            let public = BaseWebSocket::new(
+                1,
+                parent.clone(),
+                runtime.clone(),
+                public_protocol(
+                    Rc::downgrade(&venue),
+                    if venue.base.name == safe_cex_types::ExchangeName::Bybitspot {
+                        "spot"
+                    } else {
+                        "linear"
+                    },
+                ),
+            );
+            venue.base.set_socket(SocketSlot::Public, Some(public));
+        }
+        if dedicated_inverse || venue.inverse_enabled() {
             let inverse = BaseWebSocket::new(
                 1,
                 parent.clone(),
