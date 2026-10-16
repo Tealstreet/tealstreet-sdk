@@ -25,7 +25,7 @@ pub struct ScopeShared<X> {
     pub base: OnceCell<Rc<BaseExchange>>,
     pub globals: Js,
     pub exchange: RefCell<Js>,
-    pub timers: RefCell<Vec<(Js, Box<dyn ExchangeTask>)>>,
+    pub timers: Timers,
     pub extra: X,
 }
 
@@ -170,33 +170,49 @@ impl<X> Scope<X> {
     pub fn now(&self) -> f64 {
         self.shared.runtime.now_ms()
     }
-    /// setTimeout: returns a timer handle object; clearTimeout drops the task.
-    pub fn set_timeout(&self, callback: Rc<dyn Fn() -> Result<(), Thrown>>, delay_ms: f64) -> Js {
+    /// setTimeout: returns a timer handle object; clearTimeout cancels the task.
+    /// A fired timer removes its own entry, so handles do not accumulate.
+    pub fn set_timeout(&self, callback: Rc<dyn Fn() -> Result<(), Thrown>>, delay_ms: f64) -> Js
+    where
+        X: 'static,
+    {
         let runtime = self.shared.runtime.clone();
         let delay = if delay_ms.is_finite() && delay_ms > 0.0 {
             delay_ms as u64
         } else {
             0
         };
+        let handle = Js::object_with_class("Timeout", vec![]);
+        let fired = Rc::new(std::cell::Cell::new(false));
+        let (shared, own, done) = (Rc::downgrade(&self.shared), handle.clone(), fired.clone());
         let reporter = runtime.clone();
         let task = runtime.spawn_local(Box::pin(async move {
-            reporter.sleep(delay).await.ok();
-            if let Err(error) = callback() {
-                reporter.report_exception(
-                    &error.to_exchange_error(),
-                    &serde_json::json!({"source": "setTimeout"}),
-                );
+            let slept = reporter.sleep(delay).await;
+            done.set(true);
+            if let Some(shared) = shared.upgrade() {
+                drop(take_timers(&shared.timers, &own));
+            }
+            let outcome = match slept {
+                // A host timer that fails never fires; say so rather than run early.
+                Err(error) => Err((error, "setTimeout sleep")),
+                Ok(()) => callback().map_err(|error| (error.to_exchange_error(), "setTimeout")),
+            };
+            if let Err((error, source)) = outcome {
+                reporter.report_exception(&error, &serde_json::json!({ "source": source }));
             }
         }));
-        let handle = Js::object_with_class("Timeout", vec![]);
-        self.shared.timers.borrow_mut().push((handle.clone(), task));
+        // An inline host may already have run the timer: never register a dead task.
+        if !fired.get() {
+            self.shared.timers.borrow_mut().push((handle.clone(), task));
+        }
         handle
     }
     pub fn clear_timeout(&self, handle: &Js) {
-        self.shared
-            .timers
-            .borrow_mut()
-            .retain(|(h, _)| !h.same_reference(handle));
+        let removed = take_timers(&self.shared.timers, handle);
+        // Host cancellation runs after the timer list's borrow is released.
+        for (_, task) in removed {
+            task.cancel();
+        }
     }
     pub fn report(&self, error: &Thrown, source: &str) {
         self.shared.runtime.report_exception(
@@ -213,4 +229,14 @@ pub fn scope_of<X>(weak: &std::rc::Weak<ScopeShared<X>>) -> Result<Scope<X>, Thr
         .ok_or_else(|| Thrown::error("Error", "exchange runtime disposed"))?;
     let this = shared.exchange.borrow().clone();
     Ok(Scope { shared, this })
+}
+
+type Timers = RefCell<Vec<(Js, Box<dyn ExchangeTask>)>>;
+fn take_timers(timers: &Timers, handle: &Js) -> Vec<(Js, Box<dyn ExchangeTask>)> {
+    let mut timers = timers.borrow_mut();
+    let (taken, kept) = std::mem::take(&mut *timers)
+        .into_iter()
+        .partition(|(h, _)| h.same_reference(handle));
+    *timers = kept;
+    taken
 }

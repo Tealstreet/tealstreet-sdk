@@ -1567,6 +1567,297 @@
       "reason": "Owns the fold inputs and callback future; it reserves no task slot, listener or shared waiter."
     },
     {
+      "owner": "src/js_runtime/base_exchange.rs::create",
+      "boundaries": [
+        "async-block",
+        "await",
+        "async-block",
+        "async-block",
+        "await",
+        "await",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "9c823dde1183ccf8569b86aab24cff297c5f1c747c734ac89715a103b52f96c1",
+      "classification": "no-owned-latch",
+      "reason": "JS BaseExchange method bodies delegate to the core owners (load_account_market_overlay and the base reads) and await caller-local promises; the on/off rows are synchronous listener bookkeeping, not an in-flight reservation."
+    },
+    {
+      "owner": "src/js_runtime/builtins.rs::chain_value",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "cbbb17ce3188524bcae1eb6b2d26d007ecb4110b45d23de8a57a21fdc231a13e",
+      "classification": "no-owned-latch",
+      "reason": "Spawns a js_runtime Promise body: it runs eagerly to its first suspension and the runtime owns the rest, independently of awaiters, as a JS async function does. Locals belong to the body; no latch or registration spans an await."
+    },
+    {
+      "owner": "src/js_runtime/builtins.rs::promise_member",
+      "boundaries": [
+        "async-block",
+        "await",
+        "await",
+        "await"
+      ],
+      "producer_sha256": "01be6bfa7adf32ad3e8b405460bf36f4a19a8fffb807255b55c14a573ceab9ea",
+      "classification": "no-owned-latch",
+      "reason": "Spawns a js_runtime Promise body: it runs eagerly to its first suspension and the runtime owns the rest, independently of awaiters, as a JS async function does. Locals belong to the body; no latch or registration spans an await. then/catch/finally awaits the source promise through its own PromiseWait."
+    },
+    {
+      "owner": "src/js_runtime/client.rs::JsRestAdapter as RestAdapter::execute",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "05ecbcc1e553c938ae25614c991e5c9d9937bdff3d6728b5c1fb826b3218bc71",
+      "classification": "no-owned-latch",
+      "reason": "Awaits the JS client's promise and projects the outcome; the rejection slot is written after settlement, so a dropped call reserves nothing."
+    },
+    {
+      "owner": "src/js_runtime/client.rs::JsRestAdapter::send",
+      "boundaries": [
+        "async-function",
+        "await"
+      ],
+      "producer_sha256": "6255e963903f4309b79c9b34c02366557ca67da3fe9e0c51b3ca8712560fbcd4",
+      "classification": "no-owned-latch",
+      "reason": "Builds the axios call from the request and awaits its promise; request values are local."
+    },
+    {
+      "owner": "src/js_runtime/client.rs::RestHttpHost as JsHttpHost::send",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "96b7bf3db29e8bec26fdea9c938908fab73acc3181f357abcea1929a48f39f06",
+      "classification": "no-owned-latch",
+      "reason": "Drives the supplied RestAdapter once and projects the response; no registration outlives a drop."
+    },
+    {
+      "owner": "src/js_runtime/client.rs::dispatch",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "49255a1bb85843d457056786c2f1858034487d185770e5168e2df529c4fef8ba",
+      "classification": "no-owned-latch",
+      "reason": "Retry loop with a local attempt counter; interceptor lists and the retry condition are cloned out of client state before each await."
+    },
+    {
+      "owner": "src/js_runtime/client.rs::send_once",
+      "boundaries": [
+        "async-function",
+        "await",
+        "await",
+        "await",
+        "await"
+      ],
+      "producer_sha256": "0d432923eaaa157b787003792d09ee379583f859eca8ad8000fc404715256025",
+      "classification": "no-owned-latch",
+      "reason": "Interceptor lists are cloned out before awaiting; the throttle slot is recorded only after its last sleep, matching axios-rate-limit counting a started request."
+    },
+    {
+      "owner": "src/js_runtime/client.rs::spawn",
+      "boundaries": [
+        "future-signature"
+      ],
+      "producer_sha256": "334de4c639bcd42b7b3a9bcb3fb4041c2623253d7e49fe8c754ec65eb8021bc5",
+      "classification": "no-owned-latch",
+      "reason": "Spawns a js_runtime Promise body: it runs eagerly to its first suspension and the runtime owns the rest, independently of awaiters, as a JS async function does. Locals belong to the body; no latch or registration spans an await."
+    },
+    {
+      "owner": "src/js_runtime/client.rs::throttle",
+      "boundaries": [
+        "async-function",
+        "await"
+      ],
+      "producer_sha256": "4dd78754653887309585ec03d4a1f1eb73396ff20ea20e6e40c92265ec854168",
+      "classification": "no-owned-latch",
+      "reason": "Records its window slot only once no sleep remains, with no borrow across the sleep. A failed host sleep now rejects the request rather than spinning on the window."
+    },
+    {
+      "owner": "src/js_runtime/library.rs::install_library",
+      "boundaries": [
+        "async-block",
+        "await",
+        "async-block",
+        "await",
+        "async-block",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "fba85f1955da07aa3d3ef427452cb342378e893672d5b335be307868a7d102ac",
+      "classification": "no-owned-latch",
+      "reason": "Library builtins (Promise helpers, sleep, map/all) spawn js_runtime Promise bodies that own their values; no shared slot spans an await."
+    },
+    {
+      "owner": "src/js_runtime/library.rs::sleep_promise",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "c673e012a28b8aecbe9c3c630ba5d3caf2a48f63ea6063426f9d3c4b11c80b49",
+      "classification": "no-owned-latch",
+      "reason": "Spawns a Promise over one host sleep; a sleep error rejects it."
+    },
+    {
+      "owner": "src/js_runtime/promise.rs::Promise::spawn",
+      "boundaries": [
+        "future-signature",
+        "owned-or-host-spawn",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "d4ae87b742733a1038ad87b4ce261f21d17308f015ccb30a0faf9043c5d4c06a",
+      "classification": "no-owned-latch",
+      "reason": "Polls the body once inline, then hands the rest to runtime.spawn_local. The task handle lives in promise state and is dropped on settlement; the spawned driver owns completion independently of awaiters, as JS does."
+    },
+    {
+      "owner": "src/js_runtime/promise.rs::Promise::wait",
+      "boundaries": [
+        "future-signature",
+        "future-return"
+      ],
+      "producer_sha256": "daab6257bd854b074529f8c413b070ed4f7ac3471085ee11a60a3d4ebb0a9d94",
+      "classification": "immediate",
+      "reason": "Constructs an unpolled PromiseWait; registration happens in its poll and is released by its Drop."
+    },
+    {
+      "owner": "src/js_runtime/promise.rs::PromiseWait as Future::poll",
+      "boundaries": [
+        "future-self-return",
+        "future-poll",
+        "shared-waiter-registration"
+      ],
+      "producer_sha256": "cd65ffa41a00b8ebc2536908434daee2824b3bafa82c6dc8ab30d723161a0ef7",
+      "classification": "guarded",
+      "reason": "Each PromiseWait owns one id-keyed waker registration. Drop removes it without settling or cancelling the promise, re-poll replaces only its own waker, and replaced/removed wakers are dropped after the state borrow is released.",
+      "witnesses": [
+        "tests/js_runtime.rs::dropped_promise_wait_releases_its_waker"
+      ],
+      "source_dependencies": [
+        {
+          "file": "src/js_runtime/promise.rs",
+          "sha256": "07bc982171c0d946b3b7f5f7db3c5fb155ffb3ec4994700b4ea9a2c0291012ee"
+        }
+      ],
+      "guards": [
+        {
+          "type": "PromiseWait",
+          "file": "src/js_runtime/promise.rs"
+        }
+      ]
+    },
+    {
+      "owner": "src/js_runtime/promise.rs::adopt",
+      "boundaries": [
+        "async-function",
+        "future-signature",
+        "await",
+        "await"
+      ],
+      "producer_sha256": "9ffc5970fffa7807d41afb422d785533d272fe5171c678dc62bf0dedaf9296ba",
+      "classification": "no-owned-latch",
+      "reason": "Awaits the body, then each adopted inner promise through its own PromiseWait; no shared state is reserved."
+    },
+    {
+      "owner": "src/js_runtime/promise.rs::all",
+      "boundaries": [
+        "async-function",
+        "await",
+        "poll-fn",
+        "await"
+      ],
+      "producer_sha256": "518fb546e06c89e87653af74c1199da4000016e6c9ca569b0835217ea3ff1beb",
+      "classification": "no-owned-latch",
+      "reason": "Holds one PromiseWait per pending promise across turns and drops them with the future, releasing every registration; first rejection wins."
+    },
+    {
+      "owner": "src/js_runtime/promise.rs::all_settled",
+      "boundaries": [
+        "async-function",
+        "await"
+      ],
+      "producer_sha256": "c6348c90189ae45f4275df592776ad7d396e6617629c43cf7a90d478a9ddb675",
+      "classification": "no-owned-latch",
+      "reason": "Awaits each value in order through await_js; results are local."
+    },
+    {
+      "owner": "src/js_runtime/promise.rs::await_js",
+      "boundaries": [
+        "async-function",
+        "await"
+      ],
+      "producer_sha256": "27c62f2ca49f9c4a4037424c0ea66275487d7314f26ca2c344b74e142ea27aa1",
+      "classification": "no-owned-latch",
+      "reason": "Awaits nested promises through PromiseWait; nothing outlives a drop."
+    },
+    {
+      "owner": "src/js_runtime/scope.rs::Scope < X >::set_timeout",
+      "boundaries": [
+        "owned-or-host-spawn",
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "72c93f600e50782a303b685a7539f04a01328d57349f21dba2a0f9c4e9cdd12b",
+      "classification": "no-owned-latch",
+      "reason": "Registers its host task in the scope's timer list only if it has not already fired; clearTimeout cancels removed tasks after the borrow, and a fired timer removes its own entry through a Weak. A failed host sleep is reported, not fired early."
+    },
+    {
+      "owner": "src/js_runtime/scope.rs::Scope < X >::spawn",
+      "boundaries": [
+        "future-signature"
+      ],
+      "producer_sha256": "e6da1f9290e9606c903c7efa8b7de9605354c5494f334665835d2dd6c50fbe66",
+      "classification": "no-owned-latch",
+      "reason": "Spawns a js_runtime Promise body: it runs eagerly to its first suspension and the runtime owns the rest, independently of awaiters, as a JS async function does. Locals belong to the body; no latch or registration spans an await."
+    },
+    {
+      "owner": "src/js_runtime/sockets.rs::JsProtocol as WsProtocol::on_open",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block"
+      ],
+      "producer_sha256": "9481ea3e677c05ef1e35fc028b027464ab8b632d408f19c0545cb81e25113464",
+      "classification": "immediate",
+      "reason": "Emits the open event synchronously, then returns a ready future carrying its result."
+    },
+    {
+      "owner": "src/js_runtime/value.rs::Js as fmt :: Debug::fmt",
+      "boundaries": [
+        "opaque-macro-review",
+        "opaque-macro-review",
+        "opaque-macro-review",
+        "opaque-macro-review",
+        "opaque-macro-review",
+        "opaque-macro-review",
+        "opaque-macro-review",
+        "opaque-macro-review",
+        "opaque-macro-review",
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "7dd5aab614e42d777c7284b4d9b3865367bb5d81067d4389a3e2331049cb1694",
+      "classification": "immediate",
+      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed."
+    },
+    {
+      "owner": "src/js_runtime/value.rs::Thrown as fmt :: Debug::fmt",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "3a33833762410a3e47e96d24141addcf14718dc69671aaf5067a7523694d6e37",
+      "classification": "immediate",
+      "reason": "std write! formatting is synchronous; no future is constructed."
+    },
+    {
       "owner": "src/loop_util.rs::loop_once",
       "boundaries": [
         "async-function",
@@ -1683,6 +1974,27 @@
       "producer_sha256": "2e164f4f5dcb5c3d0ac44751a1eb718285c42ed2030d01f1023e8f9222d4e509",
       "classification": "no-owned-latch",
       "reason": "Awaits tokio Mutex::lock then mpsc recv, both cancel-safe: a dropped event future loses no frame and releases its lock wait. The ended branch returns an unregistered pending future."
+    },
+    {
+      "owner": "src/native.rs::TokenTunnel as TunnelHost::spawn_local",
+      "boundaries": [
+        "future-signature",
+        "owned-or-host-spawn"
+      ],
+      "producer_sha256": "4e487d5c7059bf8f6efdeb73ce1e88882dd01ddd8f4fbe769e98d4566e60b391",
+      "classification": "no-owned-latch",
+      "reason": "Forwards to the wrapped dial host's spawn_local; the returned task handle is the host's cancellation owner."
+    },
+    {
+      "owner": "src/native.rs::UnavailableTunnel as RestAdapter::execute",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block"
+      ],
+      "producer_sha256": "e1f094a8ddffc4a75bcedeea4b9e177e335cd1f45198eac308d632b17630bba2",
+      "classification": "immediate",
+      "reason": "Returns a ready pre-transmit failure naming why the HOW tunnel is unavailable."
     },
     {
       "owner": "src/owned_tasks.rs::Driver as Future::poll",
@@ -2127,7 +2439,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "8fa96bbe703268636f8c14b0e401391f3f1e7e756beb5361e6b9d6a43678c661"
+          "sha256": "b5aa14364fbfbcf158155c8a04de9e43a7692ec11b9ad10964c5fd2a75db4135"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2172,7 +2484,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "8fa96bbe703268636f8c14b0e401391f3f1e7e756beb5361e6b9d6a43678c661"
+          "sha256": "b5aa14364fbfbcf158155c8a04de9e43a7692ec11b9ad10964c5fd2a75db4135"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2276,7 +2588,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "8fa96bbe703268636f8c14b0e401391f3f1e7e756beb5361e6b9d6a43678c661"
+          "sha256": "b5aa14364fbfbcf158155c8a04de9e43a7692ec11b9ad10964c5fd2a75db4135"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2320,7 +2632,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "8fa96bbe703268636f8c14b0e401391f3f1e7e756beb5361e6b9d6a43678c661"
+          "sha256": "b5aa14364fbfbcf158155c8a04de9e43a7692ec11b9ad10964c5fd2a75db4135"
         }
       ],
       "guards": [

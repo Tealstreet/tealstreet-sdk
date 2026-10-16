@@ -210,7 +210,7 @@ async fn send_once(
     for interceptor in interceptors {
         config = await_js(interceptor.call(Js::Undefined, vec![config])?).await?;
     }
-    throttle(host, state).await;
+    throttle(host, state).await?;
     let response = host.send(config.clone()).await?;
     if !response.get("config")?.is_object() {
         response.define("config", config.clone())?;
@@ -227,7 +227,7 @@ async fn send_once(
     Ok(response)
 }
 
-async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) {
+async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) -> Result<(), Thrown> {
     loop {
         let runtime = host.runtime();
         let now = runtime.monotonic_now_ms();
@@ -252,10 +252,9 @@ async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) {
             wait
         };
         match wait {
-            None => return,
-            Some(ms) => {
-                let _ = runtime.sleep(ms.max(1.0) as u64).await;
-            }
+            None => return Ok(()),
+            // A failed host sleep rejects the request instead of spinning on the window.
+            Some(ms) => runtime.sleep(ms.max(1.0) as u64).await?,
         }
     }
 }
