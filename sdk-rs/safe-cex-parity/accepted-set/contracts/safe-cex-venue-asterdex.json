@@ -4428,5 +4428,1317 @@
     "category": "non-decoder",
     "reason": "The registry-supplied Rc factory receives a typed ExchangeOptions reference and returns an existing JsHttpHost handle or ExchangeError. It constructs a native dependency after options decoding, rather than decoding a JSON/string factory capability. Native probes check actual factory type/trait absence without constructing a client.",
     "evidence": "Reviewed safe-cex-venue-asterdex/src/native_exchange.rs::AsterDEXHttpFactory and its local consumers. The native gate verifies full compiler inventory, all selected external roots against actual check artifacts/sysroot, invariant type equality for fixed generic aliases, and actual Deserialize plus seven raw conversion traits. This is an individual capability classification, with no blanket source/receiver exemption."
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXAPIVersion": {
+    "shape": "string",
+    "literals": [
+      "v1",
+      "v3"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts lines20-24 exact exported type/readonly STP literals. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V1 => serde_json::json!({\"ok\":true,\"variant\":\"V1\",\"ordinal\":0}),$type::V3 => serde_json::json!({\"ok\":true,\"variant\":\"V3\",\"ordinal\":1}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"v1\"",
+          "output": {
+            "ok": true,
+            "variant": "V1",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"v3\"",
+          "output": {
+            "ok": true,
+            "variant": "V3",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"V1\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" v1\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"v1 \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"v1\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"v1\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"v3\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXFapiVersion": {
+    "shape": "string",
+    "literals": [
+      "v1",
+      "v3",
+      "v4"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts lines20-24 exact exported type/readonly STP literals. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V1 => serde_json::json!({\"ok\":true,\"variant\":\"V1\",\"ordinal\":0}),$type::V3 => serde_json::json!({\"ok\":true,\"variant\":\"V3\",\"ordinal\":1}),$type::V4 => serde_json::json!({\"ok\":true,\"variant\":\"V4\",\"ordinal\":2}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"v1\"",
+          "output": {
+            "ok": true,
+            "variant": "V1",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"v3\"",
+          "output": {
+            "ok": true,
+            "variant": "V3",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"v4\"",
+          "output": {
+            "ok": true,
+            "variant": "V4",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"V1\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" v1\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"v1 \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"v1\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"v1\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"v3\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"v4\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXStpMode": {
+    "shape": "string",
+    "literals": [
+      "EXPIRE_TAKER",
+      "EXPIRE_MAKER",
+      "EXPIRE_BOTH"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts lines20-24 exact exported type/readonly STP literals. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V0 => serde_json::json!({\"ok\":true,\"variant\":\"V0\",\"ordinal\":0}),$type::V1 => serde_json::json!({\"ok\":true,\"variant\":\"V1\",\"ordinal\":1}),$type::V2 => serde_json::json!({\"ok\":true,\"variant\":\"V2\",\"ordinal\":2}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"EXPIRE_TAKER\"",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"EXPIRE_MAKER\"",
+          "output": {
+            "ok": true,
+            "variant": "V1",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"EXPIRE_BOTH\"",
+          "output": {
+            "ok": true,
+            "variant": "V2",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"expire_taker\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" EXPIRE_TAKER\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"EXPIRE_TAKER \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"EXPIRE_TAKER\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"EXPIRE_TAKER\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"EXPIRE_MAKER\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"EXPIRE_BOTH\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXPositionModeResponseDualSidePositionString": {
+    "shape": "string",
+    "literals": [
+      "true",
+      "false"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts line252 dualSidePosition string alternatives extracted from the actual field union. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V0 => serde_json::json!({\"ok\":true,\"variant\":\"V0\",\"ordinal\":0}),$type::V1 => serde_json::json!({\"ok\":true,\"variant\":\"V1\",\"ordinal\":1}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"true\"",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"false\"",
+          "output": {
+            "ok": true,
+            "variant": "V1",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"TRUE\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" true\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"true \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"true\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"true\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"false\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXStreamTickerE": {
+    "shape": "string",
+    "literals": [
+      "ticker"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts line454 exact event literal on the owning interface. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V0 => serde_json::json!({\"ok\":true,\"variant\":\"V0\",\"ordinal\":0}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"ticker\"",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"ticker\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"TICKER\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" ticker\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"ticker \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"ticker\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"ticker\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXStreamDepthE": {
+    "shape": "string",
+    "literals": [
+      "depthUpdate"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts line475 exact event literal on the owning interface. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V0 => serde_json::json!({\"ok\":true,\"variant\":\"V0\",\"ordinal\":0}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"depthUpdate\"",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"depthUpdate\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"DEPTHUPDATE\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" depthUpdate\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"depthUpdate \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"depthUpdate\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"depthUpdate\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXStreamTradeE": {
+    "shape": "string",
+    "literals": [
+      "aggTrade"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts line487 exact event literal on the owning interface. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V0 => serde_json::json!({\"ok\":true,\"variant\":\"V0\",\"ordinal\":0}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"aggTrade\"",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"aggTrade\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"AGGTRADE\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" aggTrade\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"aggTrade \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"aggTrade\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"aggTrade\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXStreamMarkPriceE": {
+    "shape": "string",
+    "literals": [
+      "markPriceUpdate"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts line500 exact event literal on the owning interface. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V0 => serde_json::json!({\"ok\":true,\"variant\":\"V0\",\"ordinal\":0}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"markPriceUpdate\"",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"markPriceUpdate\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"MARKPRICEUPDATE\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" markPriceUpdate\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"markPriceUpdate \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"markPriceUpdate\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"markPriceUpdate\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXAccountUpdateE": {
+    "shape": "string",
+    "literals": [
+      "ACCOUNT_UPDATE"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts line512 exact event literal on the owning interface. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V0 => serde_json::json!({\"ok\":true,\"variant\":\"V0\",\"ordinal\":0}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"ACCOUNT_UPDATE\"",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"ACCOUNT_UPDATE\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"account_update\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" ACCOUNT_UPDATE\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"ACCOUNT_UPDATE \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"ACCOUNT_UPDATE\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"ACCOUNT_UPDATE\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXOrderUpdateE": {
+    "shape": "string",
+    "literals": [
+      "ORDER_TRADE_UPDATE"
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts line538 exact event literal on the owning interface. Native variant/ordinal and actual Clone are observed through owned Value, borrowed qualified Deserialize, raw text and qualified raw-text routes. Each valid tag refuses its tagged-map form; single-tag owners also execute a distinct whitespace text input. Ordinary lexical Wire owners remain separate obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded { $type::V0 => serde_json::json!({\"ok\":true,\"variant\":\"V0\",\"ordinal\":0}) } }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "\"ORDER_TRADE_UPDATE\"",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"ORDER_TRADE_UPDATE\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "V0",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"order_trade_update\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" ORDER_TRADE_UPDATE\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"ORDER_TRADE_UPDATE \"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[\"ORDER_TRADE_UPDATE\"]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"ORDER_TRADE_UPDATE\":null}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::types::AsterDEXPositionModeResponseDualSidePosition": {
+    "shape": "union",
+    "positive": [
+      true,
+      false,
+      "true",
+      "false"
+    ],
+    "negative": [
+      null,
+      42,
+      [],
+      {},
+      "",
+      "TRUE",
+      " false",
+      {
+        "true": null
+      },
+      {
+        "false": null
+      },
+      {
+        "Boolean": true
+      },
+      {
+        "String": "true"
+      }
+    ],
+    "entrypoints": [],
+    "evidence": "asterdex.types.ts:252 dualSidePosition is boolean | true-string | false-string. Actual native Boolean/String variants, boolean/string payload identity, ordinal and Clone are observed on four Deserialize routes, including separate tagged-map refusal. This contract does not classify the parent record or lexical helpers.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "payload",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independent enum JSON text fixture\"); let input:serde_json::Value=serde_json::from_str(raw).unwrap(); let observe=|decoded:$type| { let cloned=decoded.clone(); assert_eq!(decoded,cloned,\"ASTER enum native Clone identity\"); match decoded {\n $type::Boolean(v)=>serde_json::json!({\"ok\":true,\"variant\":\"Boolean\",\"payload\":v,\"ordinal\":0}),\n $type::String(v)=>{ let tag=match v { crate::types::AsterDEXPositionModeResponseDualSidePositionString::V0=>\"true\",crate::types::AsterDEXPositionModeResponseDualSidePositionString::V1=>\"false\" }; serde_json::json!({\"ok\":true,\"variant\":\"String\",\"payload\":tag,\"ordinal\":1}) }\n} }; let mut decoder=serde_json::Deserializer::from_str(raw); match (serde_json::from_value::<$type>(input.clone()),<$type as serde::Deserialize>::deserialize(&input),serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(&mut decoder)) {(Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{ decoder.end().unwrap(); let expected=observe(owned); assert_eq!(expected,observe(borrowed),\"ASTER enum borrowed variant\"); assert_eq!(expected,observe(text),\"ASTER enum text variant\"); assert_eq!(expected,observe(qualified),\"ASTER enum qualified variant\"); expected },(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"ok\":false}),_=>panic!(\"ASTER enum decoder route disagreement\") } }",
+      "cases": [
+        {
+          "input": "true",
+          "output": {
+            "ok": true,
+            "variant": "Boolean",
+            "payload": true,
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": true,
+            "variant": "Boolean",
+            "payload": false,
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"true\"",
+          "output": {
+            "ok": true,
+            "variant": "String",
+            "payload": "true",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"false\"",
+          "output": {
+            "ok": true,
+            "variant": "String",
+            "payload": "false",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"TRUE\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\" false\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"true\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"false\":null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"Boolean\":true}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"String\":\"true\"}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }
