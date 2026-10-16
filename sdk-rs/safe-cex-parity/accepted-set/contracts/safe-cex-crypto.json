@@ -8129,5 +8129,959 @@
         ]
       }
     ]
+  },
+  "safe_cex_crypto::msgpack::json_input": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "json_input",
+      "signature": {
+        "inputs": [
+          [
+            "raw",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_num::json_stringify::JsJsonValue",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "msgpack.rs json_input is the raw JSON parser used before MessagePack encoding, matching JSON.parse input in tests/fixtures/msgpack/generate.cjs. Direct native JsJsonValue matches independently pin all JSON variant payloads, duplicate assignment/insertion order, binary64 rounding, -0, overflow infinities and underflow; malformed JSON refuses. These are native/default parser witnesses, not an arbitrary UTF-16 or full MessagePack acceptance claim.",
+    "call": "{ fn observe(v: safe_cex_num::JsJsonValue) -> serde_json::Value { use safe_cex_num::JsJsonValue as J; match v { J::Null => serde_json::json!([\"null\"]), J::Bool(v) => serde_json::json!([\"bool\",v]), J::Number(v) => serde_json::json!([\"number\",format!(\"{:016x}\",v.to_bits())]), J::String(v) => serde_json::json!([\"text\",v]), J::Array(v) => serde_json::json!([\"array\",v.into_iter().map(observe).collect::<Vec<_>>()]), J::Object(v) => serde_json::json!([\"object\",v.into_iter().map(|(k,v)| serde_json::json!([k,observe(v)])).collect::<Vec<_>>()]), J::Undefined | J::BigInt(_) => panic!(\"JSON input produced a non-JSON native variant\") } } match $type($value.as_str().expect(\"raw JSON witness\")) { Ok(native) => serde_json::json!({\"ok\":true,\"value\":observe(native)}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": "null",
+        "output": {
+          "ok": true,
+          "value": [
+            "null"
+          ]
+        }
+      },
+      {
+        "input": "true",
+        "output": {
+          "ok": true,
+          "value": [
+            "bool",
+            true
+          ]
+        }
+      },
+      {
+        "input": "false",
+        "output": {
+          "ok": true,
+          "value": [
+            "bool",
+            false
+          ]
+        }
+      },
+      {
+        "input": "\"雪\\u0000\"",
+        "output": {
+          "ok": true,
+          "value": [
+            "text",
+            "雪\u0000"
+          ]
+        }
+      },
+      {
+        "input": "[]",
+        "output": {
+          "ok": true,
+          "value": [
+            "array",
+            []
+          ]
+        }
+      },
+      {
+        "input": "{}",
+        "output": {
+          "ok": true,
+          "value": [
+            "object",
+            []
+          ]
+        }
+      },
+      {
+        "input": "[-0,1.5,9007199254740993,1e400,-1e400,1e-400]",
+        "output": {
+          "ok": true,
+          "value": [
+            "array",
+            [
+              [
+                "number",
+                "8000000000000000"
+              ],
+              [
+                "number",
+                "3ff8000000000000"
+              ],
+              [
+                "number",
+                "4340000000000000"
+              ],
+              [
+                "number",
+                "7ff0000000000000"
+              ],
+              [
+                "number",
+                "fff0000000000000"
+              ],
+              [
+                "number",
+                "0000000000000000"
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "input": "{\"z\":1,\"2\":false,\"a\":[null],\"z\":2}",
+        "output": {
+          "ok": true,
+          "value": [
+            "object",
+            [
+              [
+                "z",
+                [
+                  "number",
+                  "4000000000000000"
+                ]
+              ],
+              [
+                "2",
+                [
+                  "bool",
+                  false
+                ]
+              ],
+              [
+                "a",
+                [
+                  "array",
+                  [
+                    [
+                      "null"
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          ]
+        }
+      },
+      {
+        "input": "undefined",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "01",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "[",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "null true",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_crypto::zklink::contract::decimal": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "decimal",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u128"
+                    }
+                  },
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed imported zkLink post-WASM ABI decimal parser: native u128 values, optional plus/underscores, unsigned grammar and checked-overflow errors. Expectations are independently specified numeric values/error strings, not reserialized decoded records.",
+    "call": "{ match $type($value.as_str().expect(\"raw decimal fixture\")) { Ok(v)=>serde_json::json!({\"ok\":true,\"value\":v.to_string()}), Err(e)=>serde_json::json!({\"ok\":false,\"error\":e}) } }",
+    "cases": [
+      {
+        "input": "0",
+        "output": {
+          "ok": true,
+          "value": "0"
+        }
+      },
+      {
+        "input": "+1_2_",
+        "output": {
+          "ok": true,
+          "value": "12"
+        }
+      },
+      {
+        "input": "340282366920938463463374607431768211455",
+        "output": {
+          "ok": true,
+          "value": "340282366920938463463374607431768211455"
+        }
+      },
+      {
+        "input": "-1",
+        "output": {
+          "ok": false,
+          "error": "zkLink invalid unsigned decimal"
+        }
+      },
+      {
+        "input": "0x1",
+        "output": {
+          "ok": false,
+          "error": "zkLink invalid unsigned decimal"
+        }
+      },
+      {
+        "input": "340282366920938463463374607431768211456",
+        "output": {
+          "ok": false,
+          "error": "zkLink decimal exceeds u128"
+        }
+      }
+    ]
+  },
+  "safe_cex_crypto::zklink::contract::closest_packable_amount": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "closest_packable_amount",
+      "signature": {
+        "inputs": [
+          [
+            "amount",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed raw decimal parse plus35-bit SDK amount packing. Independent small and mantissa-edge expectations supplement tests/fixtures/zklink/contracts.json npm SDK oracle; direct native canonical amount strings and refusal errors are observed.",
+    "call": "{ match $type($value.as_str().expect(\"raw decimal fixture\")) { Ok(v)=>serde_json::json!({\"ok\":true,\"value\":v}), Err(e)=>serde_json::json!({\"ok\":false,\"error\":e}) } }",
+    "cases": [
+      {
+        "input": "0",
+        "output": {
+          "ok": true,
+          "value": "0"
+        }
+      },
+      {
+        "input": "1",
+        "output": {
+          "ok": true,
+          "value": "1"
+        }
+      },
+      {
+        "input": "34359738368",
+        "output": {
+          "ok": true,
+          "value": "34359738367"
+        }
+      },
+      {
+        "input": "-1",
+        "output": {
+          "ok": false,
+          "error": "zkLink invalid unsigned decimal"
+        }
+      }
+    ]
+  },
+  "safe_cex_crypto::zklink::contract::closest_packable_fee": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "closest_packable_fee",
+      "signature": {
+        "inputs": [
+          [
+            "fee",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Reviewed raw decimal parse plus11-bit SDK fee packing. Independent2048->2047 and2050->2050 expectations agree with pinned npm SDK oracle; actual native canonical strings and invalid-decimal errors are observed.",
+    "call": "{ match $type($value.as_str().expect(\"raw decimal fixture\")) { Ok(v)=>serde_json::json!({\"ok\":true,\"value\":v}), Err(e)=>serde_json::json!({\"ok\":false,\"error\":e}) } }",
+    "cases": [
+      {
+        "input": "0",
+        "output": {
+          "ok": true,
+          "value": "0"
+        }
+      },
+      {
+        "input": "2048",
+        "output": {
+          "ok": true,
+          "value": "2047"
+        }
+      },
+      {
+        "input": "2050",
+        "output": {
+          "ok": true,
+          "value": "2050"
+        }
+      },
+      {
+        "input": "-1",
+        "output": {
+          "ok": false,
+          "error": "zkLink invalid unsigned decimal"
+        }
+      }
+    ]
+  },
+  "safe_cex_crypto::zklink::contract::Contract": {
+    "shape": "map",
+    "evidence": "Reviewed imported zkLink SDK Contract post-WASM ABI ten-field record (contract.rs source provenance). Raw JSON must preserve bounded integer fields, exact decimal strings and fixed two-byte fee array; venue owns prior WASM coercion. Direct native field and independently authored36-byte preimage observations. Complete declaration-order positional array proved accepted before the concrete object guard; named-object fields and signing preimage witnesses remain independent. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "sample": {
+      "accountId": 16909060,
+      "subAccountId": 5,
+      "slotId": 1543,
+      "nonce": 526602,
+      "pairId": 11,
+      "size": "1",
+      "price": "2",
+      "direction": true,
+      "feeRates": [
+        12,
+        13
+      ],
+      "hasSubsidy": false
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"accountId\":v.account_id,\"subAccountId\":v.sub_account_id,\"slotId\":v.slot_id,\"nonce\":v.nonce,\"pairId\":v.pair_id,\"size\":v.size,\"price\":v.price,\"direction\":v.direction,\"feeRates\":v.fee_rates,\"hasSubsidy\":v.has_subsidy}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "accountId": 16909060,
+            "subAccountId": 5,
+            "slotId": 1543,
+            "nonce": 526602,
+            "pairId": 11,
+            "size": "1",
+            "price": "2",
+            "direction": true,
+            "feeRates": [
+              12,
+              13
+            ],
+            "hasSubsidy": false
+          },
+          "output": {
+            "accountId": 16909060,
+            "subAccountId": 5,
+            "slotId": 1543,
+            "nonce": 526602,
+            "pairId": 11,
+            "size": "1",
+            "price": "2",
+            "direction": true,
+            "feeRates": [
+              12,
+              13
+            ],
+            "hasSubsidy": false
+          }
+        },
+        {
+          "input": {
+            "accountId": 286397204,
+            "subAccountId": 21,
+            "slotId": 5655,
+            "nonce": 1579290,
+            "pairId": 27,
+            "size": "2",
+            "price": "3",
+            "direction": false,
+            "feeRates": [
+              28,
+              29
+            ],
+            "hasSubsidy": true
+          },
+          "output": {
+            "accountId": 286397204,
+            "subAccountId": 21,
+            "slotId": 5655,
+            "nonce": 1579290,
+            "pairId": 27,
+            "size": "2",
+            "price": "3",
+            "direction": false,
+            "feeRates": [
+              28,
+              29
+            ],
+            "hasSubsidy": true
+          }
+        },
+        {
+          "input": [
+            16909060,
+            5,
+            1543,
+            526602,
+            11,
+            "1",
+            "2",
+            true,
+            [
+              12,
+              13
+            ],
+            false
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "signing_bytes",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "array": {
+                            "type": {
+                              "primitive": "u8"
+                            },
+                            "len": "36"
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual typed Contract::signing_bytes is executed on independently specified post-WASM ABI records; inspect real bytes and length rather than re-encoding the decoded owner.",
+        "nativeFields": [
+          "length",
+          "bytes"
+        ],
+        "call": "{ let v: $type=serde_json::from_value($value.clone()).expect(\"native preimage fixture\"); let bytes=v.signing_bytes().expect(\"valid native contract\"); serde_json::json!({\"ok\":true,\"length\":bytes.len(),\"bytes\":bytes.as_slice()}) }",
+        "cases": [
+          {
+            "input": {
+              "accountId": 16909060,
+              "subAccountId": 5,
+              "slotId": 1543,
+              "nonce": 526602,
+              "pairId": 11,
+              "size": "1",
+              "price": "2",
+              "direction": true,
+              "feeRates": [
+                12,
+                13
+              ],
+              "hasSubsidy": false
+            },
+            "output": {
+              "ok": true,
+              "length": 36,
+              "bytes": [
+                254,
+                1,
+                2,
+                3,
+                4,
+                5,
+                6,
+                7,
+                8,
+                9,
+                10,
+                11,
+                1,
+                0,
+                0,
+                0,
+                0,
+                32,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                2,
+                12,
+                13,
+                0
+              ]
+            }
+          },
+          {
+            "input": {
+              "accountId": 286397204,
+              "subAccountId": 21,
+              "slotId": 5655,
+              "nonce": 1579290,
+              "pairId": 27,
+              "size": "2",
+              "price": "3",
+              "direction": false,
+              "feeRates": [
+                28,
+                29
+              ],
+              "hasSubsidy": true
+            },
+            "output": {
+              "ok": true,
+              "length": 36,
+              "bytes": [
+                254,
+                17,
+                18,
+                19,
+                20,
+                21,
+                22,
+                23,
+                24,
+                25,
+                26,
+                27,
+                0,
+                0,
+                0,
+                0,
+                0,
+                64,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                0,
+                3,
+                28,
+                29,
+                1
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_crypto::zklink::contract::ContractSigner": {
+    "shape": "observed",
+    "evidence": "Native seed-only signer import is bounded exact65-byte hex, optional lowercase0x. Direct constructor witnesses sign the same known typed Contract and compare public key/signature against independently captured pinned npm SDK cases base and seed-v-0, with exact oracle package/artifact provenance in existing fixture. No secret export or Serde wrapper is added; typed signing API executes inside both successful constructor witnesses.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_signature",
+          "signature": {
+            "inputs": [
+              [
+                "signature",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "Self"
+                        }
+                      },
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute actual hex seed constructor, then observe its public signing result on an existing independent SDK oracle Contract; malformed seed cases observe its native refusal.",
+        "call": "{ let signature=$value.as_str().expect(\"public SDK signature-seed fixture\"); match $type::from_signature(signature) { Ok(signer)=>{ let c=super::Contract { account_id:16909060,sub_account_id:5,slot_id:1543,nonce:526602,pair_id:11,size:\"1234567890123456789\".into(),price:\"987654321098765432109876543210\".into(),direction:true,fee_rates:[12,13],has_subsidy:false }; let wire=signer.sign_contract(&c).expect(\"valid public SDK fixture\"); serde_json::json!({\"ok\":true,\"pubKey\":wire[\"signature\"][\"pubKey\"],\"signature\":wire[\"signature\"][\"signature\"]}) }, Err(e)=>serde_json::json!({\"ok\":false,\"error\":e}) } }",
+        "cases": [
+          {
+            "input": "010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101010101011b",
+            "output": {
+              "ok": true,
+              "pubKey": "0x2b1250c65c5bdce6e8e19b9f6ae44172c2c90100d9917379f536ba3c2be60325",
+              "signature": "dcc270665aa43972713ad56d738bcf45d44fbc96631367567e69699be8e1a627a40ac7769c713f822cdd04b12afee4aa134b8bfe4930a9222ad6302a65db0c04"
+            }
+          },
+          {
+            "input": "0202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020202020200",
+            "output": {
+              "ok": true,
+              "pubKey": "0xef0bdd0f9f323a499a9971cb05891769044bbdbe0568ab7e6dac1fb319d22026",
+              "signature": "c2d95c115d79e812a2cda0cfe96d61946c0b35617ea446f4e6a8e64ec8e54c2b2faf6b9012aaa01d10fb1f919ca3da931ed0901464aabb90793169fcce6f8202"
+            }
+          },
+          {
+            "input": "",
+            "output": {
+              "ok": false,
+              "error": "zkLink signature seed must contain exactly 65 bytes"
+            }
+          },
+          {
+            "input": "gggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggggg",
+            "output": {
+              "ok": false,
+              "error": "zkLink invalid signature seed hex"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "sign_contract",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "contract",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_crypto::zklink::contract::Contract",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Receives only typed Contract, no raw JSON/string decoder input; actual signing method executes in both successful from_signature witnesses and existing24-case npm SDK production tests."
+      }
+    ]
   }
 }

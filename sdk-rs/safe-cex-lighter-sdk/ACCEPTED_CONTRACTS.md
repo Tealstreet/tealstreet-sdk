@@ -1,7 +1,7 @@
 # Accepted-input contract review
 
 The 33 selected native/default census keys are reviewed individually in
-[contracts.json](../safe-cex-parity/accepted-set/contracts.json). Exact compiler APIs and the
+[the SDK contract file](../safe-cex-parity/accepted-set/contracts/safe-cex-lighter-sdk.json). Exact compiler APIs and the
 per-owner reasons are part of each contract. The review follows the shared
 [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary) and
 [surrogate](../parity/MANIFEST-SPEC.md#forced-surrogate-conflict) boundaries.
