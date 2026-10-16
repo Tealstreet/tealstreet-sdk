@@ -87,7 +87,7 @@ fn polymarket_registry_preserves_supplied_account_extension() {
                     "/positions" => Some(json!([])),
                     _ => None,
                 }),
-                json!({"key":format!("0x{}", "01".repeat(32)), "polymarket": {
+                json!({"key":format!("0x{}", "01".repeat(32)), "secret":"unused", "polymarket": {
                     "apiKey":"supplied-native-key", "apiSecret":"c3VwcGxpZWQtc2VjcmV0",
                     "apiPassphrase":"supplied-native-passphrase", "signerType":signer_type,
                     "funderAddress":funder
