@@ -192,6 +192,31 @@ ordinary inventory and the four records' production contract probes. Run accepte
 probes serially; this focused command excludes other owners and the feature/wasm
 matrix.
 
+The income, API-type and orderbook-apply string unions use private Serde remote
+schemas after their existing String admission. Preserve both actual native
+variant identity and the complete Serde rename/alias inventory. The 24 valid
+tags must each reject a tagged-null object through owned, borrowed, qualified
+and text decoding. `tests/accepted_string_shapes.rs` supplies those witnesses;
+`python3 sdk-rs/safe-cex-venue-binance/scripts/string-shape-controls.py` removes
+only one String frontdoor at a time, requires the named valid-tagged-object
+assertion to fail after compilation, restores exact bytes and requires a pass.
+`node sdk-rs/safe-cex-venue-binance/scripts/string-contracts.mjs` performs fresh
+ordinary inventory and production native probes for those three enums only.
+It excludes other owners, aliases, local scopes and feature/wasm coverage.
+
+`order_logic`'s already-set position-mode error recognizer, deprecated balance
+predicate and post-only rejection classifier each have a specific reviewed
+non-decoder reason. Their actual Boolean/error results are witnessed directly in
+`tests/accepted_predicate_roles.rs`, supplemented by the maintained live
+`order_logic` and `rejection` targets. Run
+`python3 sdk-rs/safe-cex-venue-binance/scripts/predicate-role-controls.py` to
+replace one result at a time with an incorrect Boolean, require its named native
+test to fail after compilation, then restore exact source and pass. The separate
+`node sdk-rs/safe-cex-venue-binance/scripts/predicate-role-contracts.mjs` runs fresh
+ordinary compiler discovery and those three production classification receipts.
+Those receipts classify the functions; they do not execute their predicate logic
+or discharge another function, owner, alias, local or feature configuration.
+
 The public-factory response witness now pins the repaired shared provenance
 boundary: direct quoted HTTP text parses once; HOW custom-parser strings pass
 through the venue parser again (source ts-bug). The original equal-response

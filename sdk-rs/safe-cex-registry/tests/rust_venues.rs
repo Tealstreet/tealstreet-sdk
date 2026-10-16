@@ -764,6 +764,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bitrue,
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
+            ExchangeName::Breakoutprop,
             ExchangeName::Grvt,
             ExchangeName::Bybit,
             ExchangeName::Bybitdemo,

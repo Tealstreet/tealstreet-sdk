@@ -11,13 +11,13 @@ use crate::{
 };
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
-    exchange::{BaseExchange, Exchange},
+    exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_num::numeric_ingress::JsNumberInput;
 use safe_cex_store::Store;
 use safe_cex_transport::provider::RestRequest;
-use safe_cex_types::{ExchangeName, ExchangeOptions, OHLCVOptions, PlaceOrderOpts};
+use safe_cex_types::{ExchangeName, ExchangeOptions, OHLCVOptions};
 use serde_json::json;
 use std::{
     cell::{Cell, RefCell},
@@ -28,9 +28,11 @@ use std::{
 };
 
 pub trait DxClient {
+    fn rate_limit(&self, max_rps: f64) -> Result<(), ExchangeError>;
     fn request(&self, request: RestRequest) -> ExchangeFuture<'static, JsNumberInput>;
 }
 pub trait BreakoutHost {
+    fn runtime_host(&self) -> Rc<dyn crate::native_reads::NativeRuntimeHost>;
     fn construct_base(
         &self,
         name: ExchangeName,
@@ -56,7 +58,7 @@ pub trait BreakoutHost {
     fn report_abandoned_login(&self, error: &ExchangeError);
 }
 pub struct BreakoutpropExchange {
-    pub base: BaseExchange,
+    pub base: Rc<BaseExchange>,
     pub host: Rc<dyn BreakoutHost>,
     pub xhr: RefCell<Option<Rc<dyn DxClient>>>,
     pub unlimited_xhr: RefCell<Option<Rc<dyn DxClient>>>,
@@ -68,19 +70,8 @@ pub struct BreakoutpropExchange {
     pub session_token_request: RefCell<Option<Rc<LoginTask>>>,
     pub account_code: RefCell<Option<String>>,
     pub recent_ws_requests: RefCell<Vec<(String, (f64, Vec<safe_cex_types::Candle>))>>,
-    caps: ExchangeCapabilities,
-}
-impl Exchange for BreakoutpropExchange {
-    type PlaceOpts = PlaceOrderOpts;
-    fn base(&self) -> &BaseExchange {
-        &self.base
-    }
-    fn capabilities(&self) -> &ExchangeCapabilities {
-        &self.caps
-    }
-    fn dispose(&self) -> Result<(), ExchangeError> {
-        BreakoutpropExchange::dispose(self)
-    }
+    pub(crate) caps: ExchangeCapabilities,
+    pub(crate) binding: RefCell<Option<safe_cex_exchange::js_runtime::value::Js>>,
 }
 impl BreakoutpropExchange {
     // ts: constructor. Assign rate-limited API, independent unlimited API, then socket.
@@ -92,7 +83,7 @@ impl BreakoutpropExchange {
     ) -> Result<Rc<Self>, ExchangeError> {
         let base = host.construct_base(name, options, store)?;
         let exchange = Rc::new(Self {
-            base,
+            base: Rc::new(base),
             host: host.clone(),
             xhr: RefCell::new(None),
             unlimited_xhr: RefCell::new(None),
@@ -104,7 +95,8 @@ impl BreakoutpropExchange {
             session_token_request: RefCell::new(None),
             account_code: RefCell::new(None),
             recent_ws_requests: RefCell::new(vec![]),
-            caps: Default::default(),
+            caps: crate::binding::capabilities(),
+            binding: RefCell::new(None),
         });
         let client = host.create_api(exchange.clone())?;
         let limited = host.rate_limit(client, 5.)?;
@@ -115,6 +107,7 @@ impl BreakoutpropExchange {
             host.construct_public_ancestor(exchange.clone(), handlers)
         })?;
         *exchange.public_websocket.borrow_mut() = Some(socket);
+        *exchange.binding.borrow_mut() = Some(crate::binding::instance(&exchange)?);
         Ok(exchange)
     }
     pub fn dispose(&self) -> Result<(), ExchangeError> {

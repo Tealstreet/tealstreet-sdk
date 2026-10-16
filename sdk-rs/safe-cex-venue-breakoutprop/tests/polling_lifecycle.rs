@@ -84,6 +84,9 @@ struct Client {
     id: u32,
 }
 impl DxClient for Client {
+    fn rate_limit(&self, _: f64) -> Result<(), ExchangeError> {
+        Err(ExchangeError::new("fixture host owns rate limiting"))
+    }
     fn request(&self, request: RestRequest) -> ExchangeFuture<'static, JsNumberInput> {
         self.state.requests.borrow_mut().push((self.id, request));
         let reply = self
@@ -136,6 +139,9 @@ impl PollingAncestor for Ancestor {
     }
 }
 impl BreakoutHost for Host {
+    fn runtime_host(&self) -> Rc<dyn safe_cex_venue_breakoutprop::native_reads::NativeRuntimeHost> {
+        Rc::new(Host(self.0.clone()))
+    }
     fn construct_base(
         &self,
         n: ExchangeName,
@@ -780,6 +786,10 @@ struct Wire {
     faults: RefCell<VecDeque<(f64, bool)>>,
 }
 impl ApiWire for Wire {
+    fn rate_limit(&self, max: f64) -> Result<(), ExchangeError> {
+        self.trace.borrow_mut().push(format!("limit:{max}"));
+        Ok(())
+    }
     fn request(
         &self,
         c: Config,
@@ -1510,4 +1520,34 @@ fn final_native_read_bindings() {
         4,
         "NATIVE two raw instrument requests"
     );
+}
+
+impl safe_cex_venue_breakoutprop::native_reads::NativeRuntimeHost for Host {
+    fn create_external(
+        &self,
+        _: &safe_cex_types::ExchangeOptionsExternalPublicData,
+    ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData> {
+        panic!("constructor fixture has no external source")
+    }
+    fn local_to_utc(&self, value: f64) -> f64 {
+        value
+    }
+    fn uuid(&self) -> String {
+        "fixed".into()
+    }
+    fn spawn_order(&self, future: ExchangeFuture<'static, ()>) {
+        self.0.tasks.borrow_mut().push(future);
+    }
+    fn schedule_loop(
+        &self,
+        next: Rc<dyn Fn() -> ExchangeFuture<'static, ()>>,
+        delay: Option<f64>,
+    ) -> Result<(), ExchangeError> {
+        let clock = self.0.clock.clone();
+        self.0.tasks.borrow_mut().push(Box::pin(async move {
+            clock.sleep(delay.unwrap_or(0.0).max(0.0) as u64).await?;
+            next().await
+        }));
+        Ok(())
+    }
 }

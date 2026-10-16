@@ -5,7 +5,7 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 The first slice provides the constants and seven response aliases from
 `breakoutprop.types.ts` (nested records are named Rust structs), plus
 `parseDxSessionTimeoutMs` and `toDxOrderType`. The portfolio read formatters are extracted into `portfolio.rs`. Exchange
-construction, REST I/O orchestration, writes and polling listeners remain pending. There is no native
+construction, REST I/O orchestration, writes and polling listeners are now assembled by the production binding described below. There is no native
 WebSocket in the source adapter.
 
 Decode response records through `safe_cex_num::numeric_ingress::{js_from_str,
@@ -225,3 +225,38 @@ returned error values and options are owned snapshots, with actual callback
 mutation and late-option-change witnesses. All candidate counts and identities
 are pinned independently: dropping a redundant matching account can leave the
 selected result unchanged, so result equality alone is insufficient coverage.
+
+## Production binding
+
+The existing constructor now installs shared js_runtime class functions and
+promises, and the Exchange trait dispatches all 16 methods through them. Existing
+source ports remain the bodies for session, portfolio, order and polling work.
+ProductionHost supplies real API clients, the shared five-RPS scheduler, owned
+login/order/loop continuations, and a BaseWebSocket ancestor that never dials.
+BaseExchange is shared by Rc with external data providers; constructor and API
+oracles retain their original hosts and independent source comparisons.
+
+Create a fresh ProductionHost from BreakoutDependencies for each account. Its
+HTTP host must contain the selected transport; install_transport is a required
+fallible callback invoked at the source tunnel-install point. local_to_utc is
+an explicit host policy for offset-less legacy dates. ProductionHost rejects
+reuse for a different live account. No source product enablement is changed.
+
+The typed native order-result ABI carries a scalar source orderId as one string,
+and an array as its numeric/string scalar entries. Nonscalar IDs and lone UTF-16
+surrogates visibly refuse. Source undefined array returns likewise cannot enter
+required native Vec outputs. Existing helper snapshot/strict-codec choices still
+apply; shared typed conversion captures native Number events before JSON.
+
+Run tests/binding.rs for the production constructor and all 16 trait methods.
+Run python3 scripts/binding-controls.py from this crate (or repository root) for
+16 independent compiling dispatch failures and restored 14/14 passing tests.
+These are dispatch controls, not full JavaScript semantics or live API parity.
+Run them alone, never alongside another Cargo command; logs stay outside the repo.
+
+
+The registry's opt-in Rust path constructs this host with options-aware native
+HTTP and the shared gateway factory. Native DXtrade login refuses remoteSigner
+until that capability is implemented. Its JS date realm explicitly uses UTC for
+offset-less local dates; other hosts must supply their own local_to_utc policy.
+The live native HTTP witness is registry/tests/native_host_breakoutprop.rs.

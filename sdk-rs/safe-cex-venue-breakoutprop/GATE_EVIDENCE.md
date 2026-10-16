@@ -523,3 +523,67 @@ with #286 and refuses shared TransportFuture's Result-wrapped output against
 the current fixed local-future alias probe. That refusal remains visible; the
 shared policy owner is implementing finite support. These focused receipts do
 not claim a full dependency, feature or wasm accepted-gate pass.
+
+# Production Exchange binding and native registry (2026-10-16)
+
+The existing BreakoutpropExchange constructor now assembles shared js_runtime
+class functions/promises over the existing source ports and the real
+ProductionHost. All 16 trait methods are called by the constructor E2E;
+getAccount, fetchSymbolMaxLeverage, setLeverage, changePositionMode,
+changeMarginType, scheduleCancel and fetchPublicTrades retain BaseExchange's
+exact source Error("Not implemented") without HTTP. Caller client-order IDs
+reject before session acquisition. Private portfolio reads leave Store and
+loaded flags unchanged. This adapter uses DXtrade sessions and polling, with no
+network websocket; the scripted runtime panics on any dial.
+
+Measured verification:
+
+- Full venue suite, including the existing actual-TypeScript oracles: 70 tests
+  passed. Production binding target: 14 passed. Source oracles still load the
+  actual mirror source; no TypeScript or original fixture values were edited.
+- scripts/binding-controls.py: all 16 independent dispatch changes compiled,
+  failed their named production E2E at exit101, then restored source passed
+  14/14. These prove dispatch coverage, not complete JavaScript semantics.
+- scripts/registry-control.py: removal of only the Breakoutprop table entry
+  compiled and failed the actual native registry construction witness; original
+  source bytes restored and the native HTTP test passed 1/1.
+- http_failure_preserves_axios_code_and_config compiled and failed on lost
+  ECONNABORTED metadata before the bridge fix. The fixed production wire retains
+  code, config, Axios identity and response alongside original native metadata;
+  all 14 binding tests pass. Preliminary fixtures using an allowed network retry
+  code did not isolate metadata loss and are not counted as this proof.
+- Native registry E2E uses loopback reqwest HTTP for DXtrade login, startup,
+  reads, placement and cancellation. It checks the source login body, DXAPI
+  session header, independent amount/price rounding and no websocket dial.
+  Source formatPositions deliberately synthesizes a flat position for each
+  stored market; the integration assertion retains that behavior.
+
+The first native HTTP run exposed missing Axios baseURL/relative-URL joining in
+shared transport. That production defect is fixed separately in merged PR182;
+its actual-Axios eight-case comparison and compiling regression belong there.
+This binding is stacked on that fix and the required shared-limiter registry
+cutover in PR164. It preserves additive Coinbase and Polymarket constructors.
+
+Native DXtrade remoteSigner login refuses visibly. The native JS date realm
+explicitly uses UTC for offset-less legacy dates; other embedding hosts supply
+the required local_to_utc dependency. The Vec<String> native order-result ABI
+wraps a scalar source ID, retains scalar array entries and visibly refuses
+nonscalar IDs or lone surrogates. Existing strict-codec, owned snapshot and
+source helper scheduling choices remain disclosed in their original rows.
+Manifests were reconciled row by row, never regenerated.
+
+Final local gates: native venue all-targets strict clippy, native registry strict
+clippy and venue/registry wasm32 library strict clippy pass; scoped formatting
+passes. Native registry HTTP passes 1/1 and the constructor suite passes 13/13.
+Global parity passes with 7,459 rows and 17,108 public Rust items (zero findings).
+Layers pass 88/88; the live registry oracle observes 48 ordered names and its
+script test passes 1/1. Gate and mutation logs stay outside the repository.
+
+
+The production polling bridge reuses shared loop_util for the source five-second
+fallback, warning deduplication and deferred callback. An infinite interval
+returns before scheduling any task. poll_loop_uses_source_fallback_and_disables_infinity
+compiled and failed the original immediate callback, then passed after the fix.
+It covers omitted, zero, negative, NaN, configured finite and infinite intervals,
+and checks callback deferral separately from the sleep deadline. This adds one
+binding test; the final binding target is 14/14 and full venue suite is 70/70.

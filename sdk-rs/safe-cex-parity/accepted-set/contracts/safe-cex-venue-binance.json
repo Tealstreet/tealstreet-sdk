@@ -454,5 +454,954 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_binance::binance_types::BinanceIncomeType": {
+    "category": "decoder",
+    "shape": "string",
+    "literals": [
+      "TRANSFER",
+      "WELCOME_BONUS",
+      "REALIZED_PNL",
+      "FUNDING_FEE",
+      "COMMISSION",
+      "INSURANCE_CLEAR",
+      "REFERRAL_KICKBACK",
+      "COMMISSION_REBATE",
+      "API_REBATE",
+      "CONTEST_REWARD",
+      "CROSS_COLLATERAL_TRANSFER",
+      "OPTIONS_PREMIUM_FEE",
+      "OPTIONS_SETTLE_PROFIT",
+      "INTERNAL_TRANSFER",
+      "AUTO_EXCHANGE",
+      "DELIVERED_SETTELMENT",
+      "COIN_SWAP_DEPOSIT",
+      "COIN_SWAP_WITHDRAW",
+      "POSITION_LIMIT_INCREASE_FEE"
+    ],
+    "entrypoints": [],
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.types.ts::BinanceIncomeType declares these exact unit string literals. String::deserialize admits only text before the private serde(remote) schema; existing Serialize spellings are retained. tests/accepted_string_shapes.rs observes every actual native variant independently, inventories the real Serde rename/alias set, and rejects each valid tagged-null object over owned/borrowed/qualified/text paths. Per-owner compiled removal of only the String frontdoor must fail its named tagged-shape assertion and restore/pass. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
+    "observation": {
+      "call": "{ match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok($type::TRANSFER) => serde_json::json!(\"native-TRANSFER\"), Ok($type::WelcomeBonus) => serde_json::json!(\"native-WelcomeBonus\"), Ok($type::RealizedPnl) => serde_json::json!(\"native-RealizedPnl\"), Ok($type::FundingFee) => serde_json::json!(\"native-FundingFee\"), Ok($type::COMMISSION) => serde_json::json!(\"native-COMMISSION\"), Ok($type::InsuranceClear) => serde_json::json!(\"native-InsuranceClear\"), Ok($type::ReferralKickback) => serde_json::json!(\"native-ReferralKickback\"), Ok($type::CommissionRebate) => serde_json::json!(\"native-CommissionRebate\"), Ok($type::ApiRebate) => serde_json::json!(\"native-ApiRebate\"), Ok($type::ContestReward) => serde_json::json!(\"native-ContestReward\"), Ok($type::CrossCollateralTransfer) => serde_json::json!(\"native-CrossCollateralTransfer\"), Ok($type::OptionsPremiumFee) => serde_json::json!(\"native-OptionsPremiumFee\"), Ok($type::OptionsSettleProfit) => serde_json::json!(\"native-OptionsSettleProfit\"), Ok($type::InternalTransfer) => serde_json::json!(\"native-InternalTransfer\"), Ok($type::AutoExchange) => serde_json::json!(\"native-AutoExchange\"), Ok($type::DeliveredSettelment) => serde_json::json!(\"native-DeliveredSettelment\"), Ok($type::CoinSwapDeposit) => serde_json::json!(\"native-CoinSwapDeposit\"), Ok($type::CoinSwapWithdraw) => serde_json::json!(\"native-CoinSwapWithdraw\"), Ok($type::PositionLimitIncreaseFee) => serde_json::json!(\"native-PositionLimitIncreaseFee\"), Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": "TRANSFER",
+          "output": "native-TRANSFER"
+        },
+        {
+          "input": "WELCOME_BONUS",
+          "output": "native-WelcomeBonus"
+        },
+        {
+          "input": "REALIZED_PNL",
+          "output": "native-RealizedPnl"
+        },
+        {
+          "input": "FUNDING_FEE",
+          "output": "native-FundingFee"
+        },
+        {
+          "input": "COMMISSION",
+          "output": "native-COMMISSION"
+        },
+        {
+          "input": "INSURANCE_CLEAR",
+          "output": "native-InsuranceClear"
+        },
+        {
+          "input": "REFERRAL_KICKBACK",
+          "output": "native-ReferralKickback"
+        },
+        {
+          "input": "COMMISSION_REBATE",
+          "output": "native-CommissionRebate"
+        },
+        {
+          "input": "API_REBATE",
+          "output": "native-ApiRebate"
+        },
+        {
+          "input": "CONTEST_REWARD",
+          "output": "native-ContestReward"
+        },
+        {
+          "input": "CROSS_COLLATERAL_TRANSFER",
+          "output": "native-CrossCollateralTransfer"
+        },
+        {
+          "input": "OPTIONS_PREMIUM_FEE",
+          "output": "native-OptionsPremiumFee"
+        },
+        {
+          "input": "OPTIONS_SETTLE_PROFIT",
+          "output": "native-OptionsSettleProfit"
+        },
+        {
+          "input": "INTERNAL_TRANSFER",
+          "output": "native-InternalTransfer"
+        },
+        {
+          "input": "AUTO_EXCHANGE",
+          "output": "native-AutoExchange"
+        },
+        {
+          "input": "DELIVERED_SETTELMENT",
+          "output": "native-DeliveredSettelment"
+        },
+        {
+          "input": "COIN_SWAP_DEPOSIT",
+          "output": "native-CoinSwapDeposit"
+        },
+        {
+          "input": "COIN_SWAP_WITHDRAW",
+          "output": "native-CoinSwapWithdraw"
+        },
+        {
+          "input": "POSITION_LIMIT_INCREASE_FEE",
+          "output": "native-PositionLimitIncreaseFee"
+        },
+        {
+          "input": {
+            "TRANSFER": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "WELCOME_BONUS": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "REALIZED_PNL": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "FUNDING_FEE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "COMMISSION": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "INSURANCE_CLEAR": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "REFERRAL_KICKBACK": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "COMMISSION_REBATE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "API_REBATE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "CONTEST_REWARD": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "CROSS_COLLATERAL_TRANSFER": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "OPTIONS_PREMIUM_FEE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "OPTIONS_SETTLE_PROFIT": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "INTERNAL_TRANSFER": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "AUTO_EXCHANGE": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "DELIVERED_SETTELMENT": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "COIN_SWAP_DEPOSIT": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "COIN_SWAP_WITHDRAW": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "POSITION_LIMIT_INCREASE_FEE": null
+          },
+          "output": null
+        },
+        {
+          "input": null,
+          "output": null
+        },
+        {
+          "input": false,
+          "output": null
+        },
+        {
+          "input": 17,
+          "output": null
+        },
+        {
+          "input": [],
+          "output": null
+        },
+        {
+          "input": [
+            "tag"
+          ],
+          "output": null
+        },
+        {
+          "input": "",
+          "output": null
+        },
+        {
+          "input": "UNKNOWN",
+          "output": null
+        },
+        {
+          "input": "transfer",
+          "output": null
+        },
+        {
+          "input": " TRANSFER",
+          "output": null
+        },
+        {
+          "input": "TRANSFER ",
+          "output": null
+        },
+        {
+          "input": "\ufeffTRANSFER",
+          "output": null
+        },
+        {
+          "input": "welcome_bonus",
+          "output": null
+        },
+        {
+          "input": " WELCOME_BONUS",
+          "output": null
+        },
+        {
+          "input": "WELCOME_BONUS ",
+          "output": null
+        },
+        {
+          "input": "\ufeffWELCOME_BONUS",
+          "output": null
+        },
+        {
+          "input": "realized_pnl",
+          "output": null
+        },
+        {
+          "input": " REALIZED_PNL",
+          "output": null
+        },
+        {
+          "input": "REALIZED_PNL ",
+          "output": null
+        },
+        {
+          "input": "\ufeffREALIZED_PNL",
+          "output": null
+        },
+        {
+          "input": "funding_fee",
+          "output": null
+        },
+        {
+          "input": " FUNDING_FEE",
+          "output": null
+        },
+        {
+          "input": "FUNDING_FEE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffFUNDING_FEE",
+          "output": null
+        },
+        {
+          "input": "commission",
+          "output": null
+        },
+        {
+          "input": " COMMISSION",
+          "output": null
+        },
+        {
+          "input": "COMMISSION ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCOMMISSION",
+          "output": null
+        },
+        {
+          "input": "insurance_clear",
+          "output": null
+        },
+        {
+          "input": " INSURANCE_CLEAR",
+          "output": null
+        },
+        {
+          "input": "INSURANCE_CLEAR ",
+          "output": null
+        },
+        {
+          "input": "\ufeffINSURANCE_CLEAR",
+          "output": null
+        },
+        {
+          "input": "referral_kickback",
+          "output": null
+        },
+        {
+          "input": " REFERRAL_KICKBACK",
+          "output": null
+        },
+        {
+          "input": "REFERRAL_KICKBACK ",
+          "output": null
+        },
+        {
+          "input": "\ufeffREFERRAL_KICKBACK",
+          "output": null
+        },
+        {
+          "input": "commission_rebate",
+          "output": null
+        },
+        {
+          "input": " COMMISSION_REBATE",
+          "output": null
+        },
+        {
+          "input": "COMMISSION_REBATE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCOMMISSION_REBATE",
+          "output": null
+        },
+        {
+          "input": "api_rebate",
+          "output": null
+        },
+        {
+          "input": " API_REBATE",
+          "output": null
+        },
+        {
+          "input": "API_REBATE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffAPI_REBATE",
+          "output": null
+        },
+        {
+          "input": "contest_reward",
+          "output": null
+        },
+        {
+          "input": " CONTEST_REWARD",
+          "output": null
+        },
+        {
+          "input": "CONTEST_REWARD ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCONTEST_REWARD",
+          "output": null
+        },
+        {
+          "input": "cross_collateral_transfer",
+          "output": null
+        },
+        {
+          "input": " CROSS_COLLATERAL_TRANSFER",
+          "output": null
+        },
+        {
+          "input": "CROSS_COLLATERAL_TRANSFER ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCROSS_COLLATERAL_TRANSFER",
+          "output": null
+        },
+        {
+          "input": "options_premium_fee",
+          "output": null
+        },
+        {
+          "input": " OPTIONS_PREMIUM_FEE",
+          "output": null
+        },
+        {
+          "input": "OPTIONS_PREMIUM_FEE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffOPTIONS_PREMIUM_FEE",
+          "output": null
+        },
+        {
+          "input": "options_settle_profit",
+          "output": null
+        },
+        {
+          "input": " OPTIONS_SETTLE_PROFIT",
+          "output": null
+        },
+        {
+          "input": "OPTIONS_SETTLE_PROFIT ",
+          "output": null
+        },
+        {
+          "input": "\ufeffOPTIONS_SETTLE_PROFIT",
+          "output": null
+        },
+        {
+          "input": "internal_transfer",
+          "output": null
+        },
+        {
+          "input": " INTERNAL_TRANSFER",
+          "output": null
+        },
+        {
+          "input": "INTERNAL_TRANSFER ",
+          "output": null
+        },
+        {
+          "input": "\ufeffINTERNAL_TRANSFER",
+          "output": null
+        },
+        {
+          "input": "auto_exchange",
+          "output": null
+        },
+        {
+          "input": " AUTO_EXCHANGE",
+          "output": null
+        },
+        {
+          "input": "AUTO_EXCHANGE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffAUTO_EXCHANGE",
+          "output": null
+        },
+        {
+          "input": "delivered_settelment",
+          "output": null
+        },
+        {
+          "input": " DELIVERED_SETTELMENT",
+          "output": null
+        },
+        {
+          "input": "DELIVERED_SETTELMENT ",
+          "output": null
+        },
+        {
+          "input": "\ufeffDELIVERED_SETTELMENT",
+          "output": null
+        },
+        {
+          "input": "coin_swap_deposit",
+          "output": null
+        },
+        {
+          "input": " COIN_SWAP_DEPOSIT",
+          "output": null
+        },
+        {
+          "input": "COIN_SWAP_DEPOSIT ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCOIN_SWAP_DEPOSIT",
+          "output": null
+        },
+        {
+          "input": "coin_swap_withdraw",
+          "output": null
+        },
+        {
+          "input": " COIN_SWAP_WITHDRAW",
+          "output": null
+        },
+        {
+          "input": "COIN_SWAP_WITHDRAW ",
+          "output": null
+        },
+        {
+          "input": "\ufeffCOIN_SWAP_WITHDRAW",
+          "output": null
+        },
+        {
+          "input": "position_limit_increase_fee",
+          "output": null
+        },
+        {
+          "input": " POSITION_LIMIT_INCREASE_FEE",
+          "output": null
+        },
+        {
+          "input": "POSITION_LIMIT_INCREASE_FEE ",
+          "output": null
+        },
+        {
+          "input": "\ufeffPOSITION_LIMIT_INCREASE_FEE",
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::protocol_types::ApiType": {
+    "category": "decoder",
+    "shape": "string",
+    "literals": [
+      "papi",
+      "fapi"
+    ],
+    "entrypoints": [],
+    "evidence": "packages/safe-cex/src/exchanges/binance/binancepm.api.ts::ApiType declares these exact unit string literals. String::deserialize admits only text before the private serde(remote) schema; existing Serialize spellings are retained. tests/accepted_string_shapes.rs observes every actual native variant independently, inventories the real Serde rename/alias set, and rejects each valid tagged-null object over owned/borrowed/qualified/text paths. Per-owner compiled removal of only the String frontdoor must fail its named tagged-shape assertion and restore/pass. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
+    "observation": {
+      "call": "{ match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok($type::Papi) => serde_json::json!(\"native-Papi\"), Ok($type::Fapi) => serde_json::json!(\"native-Fapi\"), Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": "papi",
+          "output": "native-Papi"
+        },
+        {
+          "input": "fapi",
+          "output": "native-Fapi"
+        },
+        {
+          "input": {
+            "papi": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "fapi": null
+          },
+          "output": null
+        },
+        {
+          "input": null,
+          "output": null
+        },
+        {
+          "input": false,
+          "output": null
+        },
+        {
+          "input": 17,
+          "output": null
+        },
+        {
+          "input": [],
+          "output": null
+        },
+        {
+          "input": [
+            "tag"
+          ],
+          "output": null
+        },
+        {
+          "input": "",
+          "output": null
+        },
+        {
+          "input": "UNKNOWN",
+          "output": null
+        },
+        {
+          "input": "PAPI",
+          "output": null
+        },
+        {
+          "input": " papi",
+          "output": null
+        },
+        {
+          "input": "papi ",
+          "output": null
+        },
+        {
+          "input": "\ufeffpapi",
+          "output": null
+        },
+        {
+          "input": "FAPI",
+          "output": null
+        },
+        {
+          "input": " fapi",
+          "output": null
+        },
+        {
+          "input": "fapi ",
+          "output": null
+        },
+        {
+          "input": "\ufefffapi",
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::protocol_types::BinanceOrderBookApplyResult": {
+    "category": "decoder",
+    "shape": "string",
+    "literals": [
+      "applied",
+      "ignored",
+      "gap"
+    ],
+    "entrypoints": [],
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.orderbook.ts::BinanceOrderBookApplyResult declares these exact unit string literals. String::deserialize admits only text before the private serde(remote) schema; existing Serialize spellings are retained. tests/accepted_string_shapes.rs observes every actual native variant independently, inventories the real Serde rename/alias set, and rejects each valid tagged-null object over owned/borrowed/qualified/text paths. Per-owner compiled removal of only the String frontdoor must fail its named tagged-shape assertion and restore/pass. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
+    "observation": {
+      "call": "{ match <$type as serde::Deserialize>::deserialize($value.clone()) { Ok($type::Applied) => serde_json::json!(\"native-Applied\"), Ok($type::Ignored) => serde_json::json!(\"native-Ignored\"), Ok($type::Gap) => serde_json::json!(\"native-Gap\"), Err(_) => serde_json::Value::Null } }",
+      "cases": [
+        {
+          "input": "applied",
+          "output": "native-Applied"
+        },
+        {
+          "input": "ignored",
+          "output": "native-Ignored"
+        },
+        {
+          "input": "gap",
+          "output": "native-Gap"
+        },
+        {
+          "input": {
+            "applied": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "ignored": null
+          },
+          "output": null
+        },
+        {
+          "input": {
+            "gap": null
+          },
+          "output": null
+        },
+        {
+          "input": null,
+          "output": null
+        },
+        {
+          "input": false,
+          "output": null
+        },
+        {
+          "input": 17,
+          "output": null
+        },
+        {
+          "input": [],
+          "output": null
+        },
+        {
+          "input": [
+            "tag"
+          ],
+          "output": null
+        },
+        {
+          "input": "",
+          "output": null
+        },
+        {
+          "input": "UNKNOWN",
+          "output": null
+        },
+        {
+          "input": "APPLIED",
+          "output": null
+        },
+        {
+          "input": " applied",
+          "output": null
+        },
+        {
+          "input": "applied ",
+          "output": null
+        },
+        {
+          "input": "\ufeffapplied",
+          "output": null
+        },
+        {
+          "input": "IGNORED",
+          "output": null
+        },
+        {
+          "input": " ignored",
+          "output": null
+        },
+        {
+          "input": "ignored ",
+          "output": null
+        },
+        {
+          "input": "\ufeffignored",
+          "output": null
+        },
+        {
+          "input": "GAP",
+          "output": null
+        },
+        {
+          "input": " gap",
+          "output": null
+        },
+        {
+          "input": "gap ",
+          "output": null
+        },
+        {
+          "input": "\ufeffgap",
+          "output": null
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_binance::order_logic::is_binance_position_mode_already_set_error": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_binance_position_mode_already_set_error",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean recognizer for an existing exchange error: reads response.data.code and compares it strictly with numeric/string -4059. Returns a predicate rather than constructing or admitting a decoded owner.",
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::isBinancePositionModeAlreadySetError. The actual Rust body computes this Boolean predicate on an existing value rather than decoding a representation into an owner. tests/accepted_predicate_roles.rs::position_mode_error_is_a_strict_boolean_recognizer executes independent native Boolean/error witnesses; tests/order_logic.rs (217 source comparisons) executes the maintained live TS oracle. scripts/predicate-role-controls.py compiled an incorrect result, required this named native test to fail, then restored exact source and passed. Production native classification receipts are checked separately by scripts/predicate-role-contracts.mjs; they are not claimed as predicate execution."
+  },
+  "safe_cex_venue_binance::order_logic::detect_balance_issue": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "detect_balance_issue",
+      "signature": {
+        "inputs": [
+          [
+            "_account_data",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Deprecated source-compatible account predicate. Deliberately ignores the supplied account value and always returns false; it admits no representation and constructs no decoded output.",
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::BinanceExchange.detectBalanceIssue. The actual Rust body computes this Boolean predicate on an existing value rather than decoding a representation into an owner. tests/accepted_predicate_roles.rs::deprecated_balance_predicate_ignores_account_data executes independent native Boolean/error witnesses; tests/order_logic.rs (217 source comparisons) executes the maintained live TS oracle. scripts/predicate-role-controls.py compiled an incorrect result, required this named native test to fail, then restored exact source and passed. Production native classification receipts are checked separately by scripts/predicate-role-contracts.mjs; they are not claimed as predicate execution."
+  },
+  "safe_cex_venue_binance::order_logic::is_post_only_rejection_error": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_post_only_rejection_error",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Boolean classifier for an existing exchange error: nullish code precedence, numeric -5022 check, then source-truthy message selection and shared fallible String coercion before substring checks. It produces a predicate or coercion error, not a decoded owner.",
+    "evidence": "packages/safe-cex/src/exchanges/binance/binance.exchange.ts::BinanceExchange.isPostOnlyRejectionError. The actual Rust body computes this Boolean predicate on an existing value rather than decoding a representation into an owner. tests/accepted_predicate_roles.rs::post_only_predicate_preserves_code_and_message_precedence executes independent native Boolean/error witnesses; tests/rejection.rs (5,471 source comparisons) executes the maintained live TS oracle. scripts/predicate-role-controls.py compiled an incorrect result, required this named native test to fail, then restored exact source and passed. Production native classification receipts are checked separately by scripts/predicate-role-contracts.mjs; they are not claimed as predicate execution."
   }
 }

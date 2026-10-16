@@ -121,6 +121,11 @@ for (const variant of variants) {
         const fields = members.map(value => `#[serde(rename = ${quote(value)})] ${pascal(value)},`).join('\n');
         output += `#[derive(Debug, Clone, Copy, PartialEq, Eq, serde::Serialize)]
           pub enum ${name} { ${fields} }
+          #[derive(serde::Deserialize)]
+          #[serde(remote = "${name}")]
+          // Remote variants must retain the public source-derived identifiers.
+          #[allow(clippy::upper_case_acronyms)]
+          enum ${name}Wire { ${fields} }
           impl safe_cex_num::numeric_ingress::JsNumberOutput for ${name} {
             fn check_number_output(&self) {
               safe_cex_num::js_number_output!(self, enum { ${members.map(pascal).join(',')} });
@@ -128,11 +133,8 @@ for (const variant of variants) {
           }
           impl<'de> serde::Deserialize<'de> for ${name} {
             fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-              #[derive(serde::Deserialize)]
-              enum Wire { ${members.map(value => `#[serde(rename = ${quote(value)})] ${value.toLowerCase().split('_').map(s => s[0].toUpperCase() + s.slice(1)).join('')},`).join("\n")} }
               let text = <String as serde::Deserialize>::deserialize(deserializer)?;
-              let wire = <Wire as serde::Deserialize>::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(text))?;
-              Ok(match wire { ${members.map(v => `Wire::${v.toLowerCase().split('_').map(s => s[0].toUpperCase() + s.slice(1)).join('')} => Self::${pascal(v)},`).join('\n')} })
+              ${name}Wire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(text))
             }
           }\n`;
       } else output += record(name, node);

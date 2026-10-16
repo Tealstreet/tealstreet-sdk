@@ -186,6 +186,14 @@ pub trait RustVenueHost {
             "Lighter dependencies are unavailable on this host",
         ))
     }
+    fn breakoutprop(
+        &self,
+        _options: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_breakoutprop::host::BreakoutDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Breakout Prop dependencies are unavailable on this host",
+        ))
+    }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
@@ -234,6 +242,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitrue, bitrue_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Breakoutprop, breakoutprop_constructor),
     (ExchangeName::Grvt, grvt_constructor),
     (ExchangeName::Bybit, bybit_constructor),
     (ExchangeName::Bybitdemo, bybit_constructor),
@@ -403,13 +412,14 @@ pub fn cryptocom_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor
 pub fn backpack_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.backpack()?;
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options,
             store,
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
+        base.signers.remote_signer = host.hosted_signer().map(|(signer, _)| signer);
         let exchange = BackpackExchange::new(
             base,
             deps.build_http,
@@ -692,5 +702,19 @@ pub fn txflow_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
                 &safe_cex_transport::TransportRegistry::default(),
             )?,
         ))
+    })
+}
+
+/// Construct DXtrade with the same shared core and source API/polling lifecycle.
+pub fn breakoutprop_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.breakoutprop(&options)?;
+        safe_cex_venue_breakoutprop::lifecycle::BreakoutpropExchange::new(
+            safe_cex_venue_breakoutprop::host::ProductionHost::new(deps),
+            name,
+            options,
+            store,
+        )
+        .map(|exchange| exchange as Rc<dyn safe_cex_exchange::exchange::Exchange>)
     })
 }

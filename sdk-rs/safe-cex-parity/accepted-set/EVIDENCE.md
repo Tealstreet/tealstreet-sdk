@@ -475,3 +475,36 @@ the borrowed emitter compiles and hits its existing runtime refusal. Neither
 refusal is a passing native witness. Exact borrowed production-path support is
 separate work; no keys, dependencies, classification, runtime guard or standing
 debt changes in this registry addition.
+
+
+## Transport Result-bearing future identities
+
+Two separate finite entries in `generic-aliases.json` review
+`safe_cex_transport::provider::TransportFuture<'static,bool>` and
+`safe_cex_transport::provider::RestFuture<'static,bool>`. Their actual source
+outputs are `Result<T,TransportError>` and `Result<T,RestFailure>`; neither is
+the original local-future family with `Output=T`. Every prior registry entry
+is unchanged, and no shared helper or guard changes.
+
+Fresh Rust 1.99 native/default rustdoc plus selected Cargo check artifacts on
+source base `54537b8d0a` discover 108 transport owners, six aliases and nine
+construction obligations. Both declarations retain exact raw/expanded ASTs,
+original lifetime/type parameters and the authenticated Pin/Box/Future/Result
+sysroot roots. The existing reviewed alias path emits invariant equality
+against independently authored native types containing the actual local
+TransportError/RestFailure. Actual production alias probes without cfg(test)
+execute ordinary Serde and conversion checks: two explicit classifications,
+zero failed owners. These focused temporary control contracts establish the
+fixed capability identities; they are not installed production classifications
+or evidence of future polling or transport execution.
+
+All 24 focused reviewed/identity/callable/future/alias policy tests pass.
+Against the fresh compiler aliases, changed source, raw/expanded target, generic
+default, caller expected-type redirection, missing root identity, missing
+serde_json origin and unknown names each retain their existing refusal.
+There is no permission for arbitrary Result-bearing futures or generic arguments.
+
+The ordinary transport inventory now passes both future registrations and stops
+at the separate `safe_cex_transport::secondary::RateLimitWrapper` declaration:
+its lifetime-only generic target requires another exact compiler review. No
+whole-package or workspace gate clearance is claimed here.
