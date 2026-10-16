@@ -69,6 +69,7 @@ impl CoinbaseConstructionHost for Host {
             from_typed(&self.shared.extra.name).map_err(from_thrown)?,
             to_js(&options),
             store::facade(self.shared.store.clone()),
+            |_| Ok(()),
         )
         .map_err(from_thrown)?;
         if self.shared.http.hosted_signer().is_some()

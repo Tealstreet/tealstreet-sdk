@@ -95,6 +95,13 @@ outcome rather than that preparation failed. Doing the fetch in the venue and
 then calling `start_websocket` reopens exactly the disposal and stale-generation
 races this operation exists to own.
 
+JS-backed sockets dispatch typed disposal through the live receiver's `dispose`
+member. The facade guards both that dispatch and the base prototype's
+`super.dispose()` path against reentry. A source throw is reported through the
+runtime; the infallible protocol hook still permits core transport cleanup.
+The Weex source-member witness covers timer/listener cleanup, superclass order,
+direct and typed calls, repeated disposal and guard reset after errors.
+
 Socket options use `None` for omitted SDK tuning and `Some(options)` for explicit
 RWS options, including an empty object. Make absence a distinct representable
 state rather than a default value. Header presence does not select tuning.
@@ -1011,11 +1018,29 @@ JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
 `dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
 cases cover successful cleanup and each throwing socket, shared-cell visibility,
 retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
-The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
-worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
-completion hook and reconstructed error properties. Arguments/results use the
-existing JSON worker boundary; it does not create a parallel worker protocol.
 
+The JS HTTP bridge retains JSON-data adapter config in RestRequest.config_extensions,
+including GRVT's browser cookie/account fields. It leaves executable Axios hooks
+on the source config. Hosted effective config still spreads that source object,
+then overlays actual adapter fields; terminal extension updates survive too.
+Cookie promotion belongs exclusively to HOW, not the direct HTTP bridge.
+
+
+The common `Js::Builtin` variant retains an existing native `PrototypeRealm`
+intrinsic referent when decoded-data venue bodies interact with core socket
+statistics. `Js::from_prototype` preserves reference/realm identity and live
+primitive fields instead of copying a snapshot. This is the native data-reference
+profile: type/text/arity, scalar field access, enumerable assigned fields and
+identity; it does not supply intrinsic function execution or full descriptors.
+Unsupported intrinsic field writes are refused. Original-receiver prototype
+access and native error identity are covered by `tests/prototype_js_values.rs`.
+Binance's `EventValue` is now an alias to this graph, with its existing decoded
+coercion profile expressed as operations rather than another heap.
+`to_typed_preserving_undefined` is the declared-DTO mode of the same native
+visitor: own undefined fields enter as unit values, while callable fields are
+refused. Binance uses this existing DTO policy for nested `info`; the ordinary
+`to_typed` JSON-shaped omission policy is unchanged. The two modes have independent
+presence/null, native numeric-bit and callable-refusal tests in `typed_js_values`.
 
 The shared lodash import table supplies `times` for source order splitting.
 It truncates the coerced count, returns an empty array for invalid/nonpositive
@@ -1036,3 +1061,31 @@ an exhausted budget rejects the original error before sleeping or sending.
 including request overrides, async predicate results, timer failure and loss of
 an observer during a pending delay. This covers configured callbacks within the
 runtime's existing HTTP and timer profiles.
+
+The shared utility import table also installs Lodash `throttle`. Its scheduler
+uses the existing Scope clock and cancellable timers, preserving leading and
+trailing options, the latest receiver/arguments, maxWait, cached returns and
+callback errors. The returned function exposes cancel and flush. Polymarket
+consumes this shared factory directly; it has no venue-local scheduler.
+`tests/js_throttle.rs` compares 294 installed-Lodash traces in one Node capture,
+including sustained bursts, stalled timers and clock rollback, then checks
+native error identity separately. Host timer precision remains Scope's existing
+millisecond profile. The sequential `tests/js_throttle_controls.py` faults each
+of leading, trailing and maxWait; all three must compile and fail the source
+comparison, then pass after exact restoration. A fourth fault removes the shared
+import and must fail Polymarket construction, then restore all 15 concrete tests.
+
+
+The single `js_runtime::base_exchange::create` factory takes a synchronous source
+field initializer as its sixth argument. It initializes the JS receiver, reads
+`isSpot` and `isDemo` using shared property access/truthiness, then publishes the
+immutable typed base and installs its callbacks. Venue adapters own subclass
+field values; core contains no venue-name classification. Empty initializers keep
+the source base defaults. The hook must only initialize fields, without starting
+work or retaining the unpublished receiver. Typed flags are construction snapshots;
+later JS field changes do not rewrite them.
+Kraken/KuCoin Spot and Bybit/OKX Demo construction tests exercise actual facades.
+`tests/source_identity_controls.py` removes each projection, requires compiled
+assertion failures in both affected families, restores exact factory bytes and
+requires all four witnesses to pass. The runtime test also covers source getters,
+truthiness, inherited false defaults and original getter-error identity.

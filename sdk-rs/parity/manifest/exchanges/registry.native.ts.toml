@@ -30,9 +30,9 @@ note = "CHOSEN: this source registry object maps to the ordered descriptor and e
 ts = "exchangeRegistry.apexomni"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_apexomni"
+rs = [ "safe-cex-registry/src/loaders.rs::native_apexomni", "safe-cex-registry/src/rust_venues.rs::apexomni_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::apexomni" ]
 status = "divergent"
-note = "CHOSEN: native_apexomni selects the actual source module ./apexomni/apexomni.exchange and export ApexOmniExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_apexomni. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_apexomni selects the actual source module ./apexomni/apexomni.exchange and export ApexOmniExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_apexomni. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members: `safe-cex-registry/src/rust_venues.rs::apexomni_constructor`, `safe-cex-registry/src/rust_venues.rs::RustVenueHost::apexomni`. The native constructor assembles existing bodies on shared js_runtime with the real zkLink contract signer. native_host_apexomni proves startup and signed placement/cancellation over real loopback transports. Default construction remains module-host."
 
 [[symbol]]
 ts = "exchangeRegistry.asterdex"
@@ -206,9 +206,9 @@ note = "CHOSEN: native_cryptocom selects the actual source module ./cryptocom/cr
 ts = "exchangeRegistry.grvt"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_grvt"
+rs = [ "safe-cex-registry/src/loaders.rs::native_grvt", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::grvt", "safe-cex-registry/src/rust_venues.rs::grvt_constructor" ]
 status = "divergent"
-note = "CHOSEN: native_grvt selects the actual source module ./grvt/grvt.exchange and export GrvtExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_grvt. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "Rust construction split members safe-cex-registry/src/rust_venues.rs::RustVenueHost::grvt and safe-cex-registry/src/rust_venues.rs::grvt_constructor request fresh runtime/HTTP/provider dependencies and construct the production shared-js-runtime venue. NativeVenueHost supplies these inputs; hosted signing refuses visibly because source active SDK signing requires a local wallet. tests/rust_venues.rs::grvt_constructs_through_registry_and_reads_actual_public_gateway checks the selected class and real configured gateway request without module fallback. CHOSEN: native_grvt selects the actual source module ./grvt/grvt.exchange and export GrvtExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_grvt. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.hyperliquid"

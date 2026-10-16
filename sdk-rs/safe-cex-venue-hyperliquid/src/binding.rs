@@ -271,6 +271,22 @@ impl Exchange for HyperliquidExchange {
     fn start(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("start", |_| Ok(vec![])))
     }
+    fn fetch_historical_positions(
+        &self,
+        options: safe_cex_exchange::journal::HistoricalPositionOptions,
+    ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
+        Box::pin(self.typed("fetchHistoricalPositions", move |realm| {
+            let opts = realm.new_object();
+            realm.define_str(&opts, "account", Value::str(&options.account))?;
+            if let Some(from) = options.from {
+                realm.define_str(&opts, "from", Value::Number(from))?;
+            }
+            if let Some(to) = options.to {
+                realm.define_str(&opts, "to", Value::Number(to))?;
+            }
+            Ok(vec![opts])
+        }))
+    }
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
         Box::pin(async move {
             self.typed("placeOrder", |r| Ok(vec![r.from_typed(order.options())?]))

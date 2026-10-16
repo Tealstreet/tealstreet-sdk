@@ -1,0 +1,480 @@
+//! Calls the production GRVT constructor and trait against scripted transports.
+#[path = "support/binding_harness.rs"]
+#[allow(dead_code)]
+mod harness;
+use harness::*;
+use safe_cex_types::*;
+use serde_json::json;
+
+#[test]
+fn constructor_and_account_use_trading_gateway() {
+    let h = harness(ExchangeName::Grvt, options(), |http| {
+        http.route(
+            "POST",
+            "/lite/v1/account_summary",
+            200.0,
+            json!({"r":{"e":"101"}}),
+        )
+    });
+    let account = h
+        .drive(h.venue().get_account())
+        .expect("production account binding");
+    assert_eq!(account.user_id, "account-42");
+    let requests = h.http.calls("/lite/v1/account_summary");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].data, json!({"sub_account_id":"42"}));
+    assert_eq!(requests[0].base_url, json!("https://trades.grvt.io"));
+}
+
+use safe_cex_store::{Store, StoreUpdate};
+use serde_json::Value;
+const SYMBOL: &str = "BTC_USDT_PERP";
+fn instrument() -> Value {
+    json!({"i":"BTC_USDT_Perp","k":"PERPETUAL","b":"BTC","q":"USDT","ms":"0.001","ts":"0.1","mp":"25","ih":"0x030501","bd":3,"qd":6})
+}
+fn source_order() -> Value {
+    json!({"oi":"0xabcdef","sa":"42","im":false,"ti":"GOOD_TILL_TIME","po":false,"ro":false,"l":[{"i":"BTC_USDT_Perp","s":"0.125","lp":"50000","ib":true}],"m":{"co":"71","ct":"1700000000000000000"},"s1":{"s":"OPEN","ts":["0.025"],"bs":["0.1"]}})
+}
+fn script(http: &Http) {
+    for (path, body) in [
+        ("/auth/api_key/login", json!({})),
+        ("/lite/v1/account_summary", json!({"r":{}})),
+        ("/lite/v1/all_instruments", json!({"r":[instrument()]})),
+        (
+            "/lite/v1/funding_account_summary",
+            json!({"r":{"ma":"account-42","te":"123","tc":"100"}}),
+        ),
+        (
+            "/lite/v1/aggregated_account_summary",
+            json!({"r":{"te":"123","ts2":"100","tu":"3","sb":[{"c":"USDT","b":"123"}]}}),
+        ),
+        (
+            "/full/v1/get_authorized_builders",
+            json!({"results":[{"builder_account_id":"0xee8f3559f298fffa79b8253437969d15b5dccff3","max_futures_fee_rate":"300"}]}),
+        ),
+        (
+            "/lite/v1/get_all_initial_leverage",
+            json!({"r":[{"i":"BTC_USDT_Perp","l":"7","ml":"1","ml1":"50"}]}),
+        ),
+        ("/lite/v1/set_initial_leverage", json!({"s":true})),
+        (
+            "/lite/v1/positions",
+            json!({"r":[{"i":"BTC_USDT_Perp","s":"-0.5","ep":"49000","n":"24500","up":"-100","l":"7","el":"60000"}]}),
+        ),
+        ("/lite/v1/open_orders", json!({"r":[source_order()]})),
+        (
+            "/lite/v1/create_order",
+            json!({"r":{"oi":"0xfeed","bf":"0.03"}}),
+        ),
+        ("/lite/v1/cancel_order", json!({"r":{}})),
+        ("/lite/v1/cancel_all_orders", json!({"r":true})),
+        (
+            "/lite/v1/kline",
+            json!({"r":[{"ot":"1700000000000000000","o":"1","h":"3","l":"0.5","c":"2","vb":"10"}]}),
+        ),
+        (
+            "/lite/v1/book",
+            json!({"r":{"bids":[{"price":"10","size":"2"}],"asks":[{"price":"11","size":"3"}]}}),
+        ),
+    ] {
+        http.route("POST", path, 200.0, body);
+    }
+}
+fn setup() -> Harness {
+    harness(ExchangeName::Grvt, options(), script)
+}
+fn loaded(h: &Harness) {
+    let markets = h
+        .drive(h.venue().fetch_markets())
+        .expect("fetch market fixture");
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+}
+fn order_opts(id: &str) -> PlaceOrderOpts {
+    serde_json::from_value(json!({"symbol":SYMBOL,"type":"limit","side":"buy","amount":0.125,"price":50000,"timeInForce":"GoodTillCancel","clientOrderId":id})).unwrap()
+}
+#[test]
+fn fetch_markets_uses_public_gateway_and_keeps_signing_metadata() {
+    let h = setup();
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert_eq!(markets.len(), 1);
+    let market = &markets[0];
+    assert_eq!(market.id, "BTC_USDT_Perp");
+    assert_eq!(market.symbol, SYMBOL);
+    assert_eq!(market.precision.amount, 0.001);
+    assert_eq!(market.info.as_ref().unwrap()["ih"], "0x030501");
+    assert_eq!(
+        h.http.calls("/lite/v1/all_instruments")[0].base_url,
+        "https://market-data.grvt.io"
+    );
+}
+#[test]
+fn fetch_tickers_uses_loaded_markets_without_http() {
+    let h = setup();
+    loaded(&h);
+    let before = h.http.count();
+    let rows = h.drive(h.venue().fetch_tickers()).unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "BTC_USDT_Perp");
+    assert_eq!(rows[0].last, 0.0);
+    assert_eq!(h.http.count(), before);
+}
+#[test]
+fn validate_account_seeds_sdk_cookie_and_sends_null_funding_body() {
+    let h = setup();
+    let result = h.drive(h.venue().validate_account()).unwrap();
+    assert_eq!(serde_json::to_value(result.error).unwrap(), json!(""));
+    let calls = h.http.calls("/lite/v1/funding_account_summary");
+    assert_eq!(calls.len(), 1);
+    assert!(calls[0].data.is_null());
+    assert_eq!(calls[0].headers["Cookie"], "gravity=fixture-session");
+    assert_eq!(calls[0].headers["X-Grvt-Account-Id"], "account-42");
+    assert_eq!(
+        h.http.calls("/auth/api_key/login").len(),
+        1,
+        "authenticate seeds cookie; SDK must not log in again"
+    );
+}
+#[test]
+fn fetch_positions_maps_private_rows_and_preserves_source_filter_mapping() {
+    let h = setup();
+    loaded(&h);
+    let before = h.store.positions().to_vec();
+    let rows = h
+        .drive(h.venue().fetch_positions(Some(vec![SYMBOL.into()])))
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].symbol, SYMBOL);
+    assert_eq!(rows[0].side, PositionSide::Short);
+    assert_eq!(rows[0].contracts, 0.5);
+    assert_eq!(rows[0].entry_price, 49000.0);
+    assert_eq!(h.store.positions().len(), before.len(), "fetch is pure");
+    let calls = h.http.calls("/lite/v1/positions");
+    assert_eq!(calls[0].data["sa"], "42");
+    assert_eq!(
+        calls[0].data["undefined"],
+        json!(["BTC_USDT_Perp"]),
+        "ts-bug: SDK unknown instrument_ids key maps to undefined"
+    );
+}
+#[test]
+fn fetch_orders_maps_nonce_and_singleton_source_filter() {
+    let h = setup();
+    loaded(&h);
+    let rows = h
+        .drive(h.venue().fetch_orders(Some(vec![SYMBOL.into()])))
+        .unwrap();
+    assert_eq!(rows.len(), 1);
+    assert_eq!(rows[0].id, "71");
+    assert_eq!(rows[0].symbol, SYMBOL);
+    assert_eq!(rows[0].amount, 0.125);
+    assert_eq!(rows[0].filled, 0.025);
+    assert!(h.store.orders().is_empty(), "fetch is pure");
+    assert_eq!(
+        h.http.calls("/lite/v1/open_orders")[0].data,
+        json!({"sa":"42","undefined":"BTC_USDT_Perp"})
+    );
+}
+#[test]
+fn place_order_signs_lite_sdk_payload_and_keeps_caller_id() {
+    let h = setup();
+    loaded(&h);
+    let ids = h
+        .drive(Box::pin(
+            h.venue().base().place_order(h.venue(), order_opts("71")),
+        ))
+        .unwrap();
+    assert_eq!(ids, vec!["71"]);
+    let calls = h.http.calls("/lite/v1/create_order");
+    assert_eq!(calls.len(), 1);
+    let order = &calls[0].data["o"];
+    assert_eq!(order["m"]["co"], "71");
+    assert_eq!(order["l"][0]["i"], "BTC_USDT_Perp");
+    assert_eq!(order["l"][0]["s"], "0.125");
+    assert_eq!(order["s"]["ci"], "325");
+    assert_eq!(order["s"]["r"].as_str().unwrap().len(), 66);
+    assert_eq!(order["bf"], "0.03");
+    assert_eq!(calls[0].headers["Cookie"], "gravity=fixture-session");
+}
+#[test]
+fn place_orders_runs_source_sequential_batch() {
+    let h = setup();
+    loaded(&h);
+    let ids = h
+        .drive(Box::pin(h.venue().base().place_orders(
+            h.venue(),
+            vec![order_opts("71"), order_opts("72")],
+        )))
+        .unwrap();
+    assert_eq!(ids, vec!["71", "72"]);
+    let calls = h.http.calls("/lite/v1/create_order");
+    assert_eq!(calls.len(), 2);
+    assert_eq!(calls[0].data["o"]["m"]["co"], "71");
+    assert_eq!(calls[1].data["o"]["m"]["co"], "72");
+}
+#[test]
+fn cancel_orders_reconciles_source_nonce_to_real_order_id() {
+    let h = setup();
+    loaded(&h);
+    let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
+    h.drive(h.venue().cancel_orders(orders)).unwrap();
+    let calls = h.http.calls("/lite/v1/cancel_order");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(calls[0].data, json!({"sa":"42","oi":"0xabcdef"}));
+}
+#[test]
+fn set_leverage_sends_sdk_request_and_updates_cache() {
+    let h = setup();
+    loaded(&h);
+    h.drive(h.venue().set_leverage(SYMBOL.into(), 7.0, None))
+        .unwrap();
+    let calls = h.http.calls("/lite/v1/set_initial_leverage");
+    assert_eq!(calls.len(), 1);
+    assert_eq!(
+        calls[0].data,
+        json!({"sa":"42","i":"BTC_USDT_Perp","l":"7"})
+    );
+    assert_eq!(h.store.fetched_leverage()[SYMBOL].buy_leverage, 7.0);
+}
+#[test]
+fn update_order_validates_then_cancels_and_replaces() {
+    let h = setup();
+    loaded(&h);
+    let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
+    let opts = serde_json::from_value(json!({"order":orders[0],"update":{"price":50100}})).unwrap();
+    let ids = h.drive(h.venue().update_order(opts)).unwrap();
+    assert_eq!(ids, vec!["500000000"]);
+    assert_eq!(h.http.calls("/lite/v1/cancel_order").len(), 1);
+    assert_eq!(
+        h.http.calls("/lite/v1/create_order")[0].data["o"]["l"][0]["lp"],
+        "50100"
+    );
+}
+#[test]
+fn start_public_only_loads_markets_tickers_and_opens_public_socket() {
+    let mut options = options();
+    options.public_data_only = Some(true);
+    let h = harness(ExchangeName::Grvt, options, script);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    assert!(
+        h.store.loaded().markets
+            && h.store.loaded().tickers
+            && h.store.loaded().positions
+            && h.store.loaded().orders
+            && h.store.loaded().balance
+    );
+    assert_eq!(h.store.markets().len(), 1);
+    assert_eq!(h.runtime.sockets.borrow().len(), 1);
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|v| v["params"]["stream"] == "v1.ticker.d")
+    );
+    assert!(h.http.calls("/auth/api_key/login").is_empty());
+}
+#[test]
+fn max_leverage_preserves_inherited_refusal() {
+    let h = setup();
+    assert_eq!(
+        h.drive(h.venue().fetch_symbol_max_leverage(SYMBOL.into()))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert_eq!(h.http.count(), 0);
+}
+#[test]
+fn position_mode_preserves_inherited_refusal() {
+    let h = setup();
+    assert_eq!(
+        h.drive(h.venue().change_position_mode(true, Some(SYMBOL.into())))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert_eq!(h.http.count(), 0);
+}
+#[test]
+fn margin_type_preserves_inherited_refusal() {
+    let h = setup();
+    assert_eq!(
+        h.drive(h.venue().change_margin_type(true, Some(SYMBOL.into())))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert_eq!(h.http.count(), 0);
+}
+#[test]
+fn schedule_cancel_preserves_inherited_refusal() {
+    let h = setup();
+    assert_eq!(
+        h.drive(h.venue().schedule_cancel(Some(Some(1.0))))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert_eq!(h.http.count(), 0);
+}
+#[test]
+fn public_trades_preserves_inherited_refusal() {
+    let h = setup();
+    assert_eq!(
+        h.drive(h.venue().fetch_public_trades(SYMBOL.into(), Some(10.0)))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert_eq!(h.http.count(), 0);
+}
+#[test]
+fn invalid_caller_id_refuses_before_any_request() {
+    let h = setup();
+    for id in ["0", "00", "01", "-1", "9223372036854775808", "1.0"] {
+        let error = h
+            .drive(Box::pin(
+                h.venue().base().place_order(h.venue(), order_opts(id)),
+            ))
+            .unwrap_err();
+        assert!(error.message.contains("GRVT"), "{id}: {}", error.message);
+    }
+    assert_eq!(h.http.count(), 0);
+}
+
+#[test]
+fn start_private_loads_pure_snapshots_and_tick_balance() {
+    let h = setup();
+    h.runtime.private_proxy.set(true);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    assert_eq!(h.store.balance().total, 123.0);
+    assert_eq!(h.store.balance().free, 100.0);
+    assert_eq!(h.store.positions()[0].contracts, 0.5);
+    assert_eq!(h.store.orders()[0].id, "71");
+    assert_eq!(h.store.markets()[0].limits.leverage.max, 50.0);
+    assert_eq!(h.runtime.sockets.borrow().len(), 2);
+    assert!(
+        h.runtime.reports.borrow().is_empty(),
+        "{:?}",
+        h.runtime.reports.borrow()
+    );
+}
+#[test]
+fn private_socket_sends_auth_before_streams_and_recovers_once_then_fails_closed() {
+    let h = setup();
+    h.runtime.private_proxy.set(true);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let first = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url.ends_with("/private"))
+        .unwrap()
+        .1
+        .clone();
+    assert_eq!(first.sent.borrow().len(), 1);
+    assert_eq!(first.sent.borrow()[0]["type"], "auth");
+    assert_eq!(
+        first.sent.borrow()[0]["session_cookie"],
+        "rm=true; gravity=fixture-session"
+    );
+    first.events.borrow_mut().push_back(message(
+        json!({"type":"error","message":"denied"}).to_string(),
+    ));
+    h.runtime.pump();
+    h.runtime.advance(2000.0);
+    let private: Vec<_> = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .filter(|(url, _)| url.ends_with("/private"))
+        .map(|(_, s)| s.clone())
+        .collect();
+    assert_eq!(private.len(), 2, "one session refresh reconnect");
+    assert!(first.closed.get());
+    let second = &private[1];
+    assert_eq!(second.sent.borrow().len(), 1);
+    assert_eq!(second.sent.borrow()[0]["type"], "auth");
+    second.events.borrow_mut().push_back(message(
+        json!({"type":"error","message":"still denied"}).to_string(),
+    ));
+    h.runtime.pump();
+    h.runtime.advance(10000.0);
+    assert!(second.closed.get(), "second denial fails closed");
+    assert_eq!(
+        h.runtime
+            .sockets
+            .borrow()
+            .iter()
+            .filter(|(url, _)| url.ends_with("/private"))
+            .count(),
+        2,
+        "no extra retry after terminal auth failure"
+    );
+    assert_eq!(
+        h.http.calls("/auth/api_key/login").len(),
+        2,
+        "initial login plus one refresh"
+    );
+    for socket in private {
+        assert!(
+            socket.sent.borrow().iter().all(|v| v["type"] == "auth"),
+            "auth failure sends no subscriptions or literal auth-failed frame"
+        );
+    }
+}
+#[test]
+fn public_book_listener_maps_frame_and_unsubscribes() {
+    use std::{cell::RefCell, rc::Rc};
+    let mut opts = options();
+    opts.public_data_only = Some(true);
+    let h = harness(ExchangeName::Grvt, opts, script);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let books = Rc::new(RefCell::new(vec![]));
+    let received = books.clone();
+    let cleanup = h
+        .venue()
+        .listen_order_book(
+            SYMBOL.into(),
+            Rc::new(move |b| received.borrow_mut().push(b)),
+        )
+        .unwrap();
+    let socket = h.runtime.sockets.borrow()[0].1.clone();
+    socket.events.borrow_mut().push_back(message(json!({"s":"v1.book.s","f":{"i":"BTC_USDT_Perp","b":[{"p":"10","s":"2"},{"p":"9","s":"3"}],"a":[{"p":"11","s":"4"}]}}).to_string()));
+    h.runtime.pump();
+    assert_eq!(books.borrow().len(), 1);
+    assert_eq!(books.borrow()[0].bids[1].total, 5.0);
+    assert_eq!(books.borrow()[0].asks[0].price, 11.0);
+    cleanup().unwrap();
+    assert!(
+        socket
+            .sent
+            .borrow()
+            .iter()
+            .any(|v| v["method"] == "unsubscribe")
+    );
+    h.venue().dispose().unwrap();
+    assert!(h.venue().base().is_disposed());
+    assert!(socket.closed.get());
+}
+
+fn message(value: String) -> safe_cex_exchange::websocket::WsEvent {
+    safe_cex_exchange::websocket::WsEvent::Message(safe_cex_transport::socket::SocketFrame::Text(
+        value,
+    ))
+}

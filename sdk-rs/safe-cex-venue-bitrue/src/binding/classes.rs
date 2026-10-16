@@ -153,6 +153,7 @@ impl CompositionHost for Rt {
             arg(&args, 0),
             arg(&args, 1),
             arg(&args, 2),
+            |_| Ok(()),
         )?;
         self.shared
             .base

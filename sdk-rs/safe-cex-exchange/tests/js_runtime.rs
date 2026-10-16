@@ -22,6 +22,7 @@ struct Runtime {
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
+    exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
     dials: RefCell<
@@ -68,7 +69,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, _: &ExchangeError, _: &Value) {}
+    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+        self.exceptions
+            .borrow_mut()
+            .push((error.to_string(), context.clone()));
+    }
     fn report_raw_exception(&self, _: &Value, _: &Value) {}
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
@@ -1258,6 +1263,13 @@ fn base_exchange(options: Value) -> Result<Js, Thrown> {
 }
 
 fn assemble(options: Value) -> Result<Assembled, Thrown> {
+    assemble_with_fields(options, |_| Ok(()))
+}
+
+fn assemble_with_fields(
+    options: Value,
+    initialize_fields: impl FnOnce(&Js) -> Result<(), Thrown>,
+) -> Result<Assembled, Thrown> {
     use safe_cex_exchange::{
         client_order_id::pattern_client_order_id_rule,
         exchange::ExchangeSettings,
@@ -1289,6 +1301,7 @@ fn assemble(options: Value) -> Result<Assembled, Thrown> {
         Js::str("okx"),
         from_json(&options),
         Js::object(vec![]),
+        initialize_fields,
     )?;
     Ok(Assembled {
         this,
@@ -1371,6 +1384,7 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
             method: method.into(),
             url: url.into(),
             params: Some(json!({"instId": "BTC-USDT-SWAP"})),
+            config_extensions: [("grvtCookie".into(), json!("gravity=bridge"))].into(),
             ..Default::default()
         };
         settle(
@@ -1398,6 +1412,11 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
     assert_eq!(
         http.sent.borrow()[0]["params"],
         json!({"instId": "BTC-USDT-SWAP"})
+    );
+    assert_eq!(
+        http.sent.borrow()[0]["grvtCookie"],
+        json!("gravity=bridge"),
+        "REST CONFIG native-to-JS bridge"
     );
     let upper =
         to_json(&run("GET", "/ok").expect("an uppercase verb dispatches like Axios")).unwrap();
@@ -3359,5 +3378,103 @@ fn disposed_assignment_matches_actual_venue_cleanup_sequence() {
     }
 }
 
+#[test]
+fn rest_http_host_retains_adapter_config_without_inventing_direct_cookie_headers() {
+    let runtime = Rc::new(Runtime::default());
+    let terminal = std::sync::Arc::new(Terminal::default());
+    let xhr = client::create(
+        client::rest_http_host(runtime.clone(), terminal.clone()),
+        Js::object(vec![("baseURL", Js::str("https://trades.grvt.io"))]),
+    );
+    let response = settle(
+        &runtime,
+        xhr.call_method(
+            "post",
+            vec![
+                Js::str("/ok"),
+                Js::Null,
+                Js::object(vec![
+                    ("grvtCookie", Js::str("rm=true; gravity=session-42")),
+                    ("grvtAccountId", Js::str("42")),
+                    (
+                        "customTrace",
+                        Js::object(vec![("attempt", Js::Number(2.0))]),
+                    ),
+                    (
+                        "headers",
+                        Js::object(vec![("X-Ts-Grvt-Session", Js::str("session-42"))]),
+                    ),
+                ]),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let seen = terminal.seen.lock().unwrap();
+    assert_eq!(
+        seen[0].config_extensions["grvtCookie"],
+        json!("rm=true; gravity=session-42"),
+        "REST ADAPTER CONFIG lost GRVT cookie before terminal transport"
+    );
+    assert_eq!(seen[0].config_extensions["grvtAccountId"], json!("42"));
+    assert_eq!(
+        seen[0].config_extensions["customTrace"],
+        json!({"attempt":2.0})
+    );
+    assert!(
+        !seen[0].headers.contains_key("Cookie"),
+        "DIRECT source cookie behavior"
+    );
+    assert_eq!(seen[0].headers["X-Ts-Grvt-Session"], "session-42");
+    assert_eq!(
+        to_json(&response.get("config").unwrap().get("customTrace").unwrap()).unwrap(),
+        json!({"attempt":2.0})
+    );
+}
+
 #[path = "support/js_websocket_options.rs"]
 mod ws_options;
+
+#[path = "support/js_socket_dispose.rs"]
+mod socket_dispose;
+
+#[test]
+fn source_identity_fields_are_read_before_the_typed_base_is_published() {
+    for (spot, demo, expected_spot, expected_demo) in [
+        (Js::Bool(true), Js::Bool(false), true, false),
+        (Js::Bool(false), Js::Bool(true), false, true),
+        (Js::str("source truthy"), Js::Number(0.0), true, false),
+        (Js::Null, Js::object(vec![]), false, true),
+    ] {
+        let assembled = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
+            receiver.define_accessor("isSpot", Some(Rc::new(move |_| Ok(spot.clone()))), None);
+            receiver.define("isDemo", demo)
+        })
+        .unwrap();
+        assert_eq!(
+            assembled.base.is_spot, expected_spot,
+            "source isSpot projection"
+        );
+        assert_eq!(
+            assembled.base.is_demo, expected_demo,
+            "source isDemo projection"
+        );
+        assert_eq!(
+            assembled.this.get("isSpot").unwrap().truthy(),
+            expected_spot
+        );
+        assert_eq!(
+            assembled.this.get("isDemo").unwrap().truthy(),
+            expected_demo
+        );
+    }
+    let inherited = assemble(json!({"key":"k","secret":"s"})).unwrap();
+    assert!(!inherited.base.is_spot && !inherited.base.is_demo);
+    let cause = Thrown::error("RangeError", "source flag getter");
+    let expected = cause.value.clone();
+    let result = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
+        receiver.define_accessor("isDemo", Some(Rc::new(move |_| Err(cause.clone()))), None);
+        Ok(())
+    });
+    assert!(result.err().unwrap().value.strict_equals(&expected));
+}

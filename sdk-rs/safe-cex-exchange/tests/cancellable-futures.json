@@ -1582,9 +1582,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "8d220c2a457cf8efbf02be95d100677740a4638aa382503c715b38afb8d862eb",
+      "producer_sha256": "fa3fd6e286eaca9259d9d112ee6f4b0a3117373389a178cd094005e4cc494f46",
       "classification": "no-owned-latch",
-      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation. Reviewed writable isDisposed getter/setter share the existing Cell; assignment is synchronous and adds no await, task, waiter, listener or other reservation. Actual-source disposal sequencing checks original cleanup errors and superclass listener retention."
+      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes. Socket registration adds weak synchronous property lookups only; lazy core creation happens at lookup and introduces no future or pending reservation. Reviewed writable isDisposed getter/setter share the existing Cell; assignment is synchronous and adds no await, task, waiter, listener or other reservation. Actual-source disposal sequencing checks original cleanup errors and superclass listener retention. Reviewed direct source-field initializer cutover: the callback and isSpot/isDemo getter reads complete synchronously before Rc publication and before external provider construction. Failure returns the original throw before callbacks are installed. All twelve existing async/await boundaries are unchanged; no new future, task, waiter or slot is introduced."
     },
     {
       "owner": "src/js_runtime/base_exchange.rs::worker_rpc",
@@ -1637,9 +1637,9 @@
         "async-function",
         "await"
       ],
-      "producer_sha256": "6255e963903f4309b79c9b34c02366557ca67da3fe9e0c51b3ca8712560fbcd4",
+      "producer_sha256": "d45d7aa04cf20562cf4512ba1e8c0868ea437a2a67d177c41675edd99d667362",
       "classification": "no-owned-latch",
-      "reason": "Builds the axios call from the request and awaits its promise; request values are local."
+      "reason": "Builds the axios call from the request and awaits its promise; request values are local. Reviewed JSON adapter-extension projection is synchronous and local before the existing client await; no task, reservation, shared borrow or cancellation owner is added."
     },
     {
       "owner": "src/js_runtime/client.rs::RestHttpHost as JsHttpHost::send",
@@ -1709,9 +1709,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "c7b8b93cc60e00e2cb2bcfe44a35d00e13eef66524b5f1b158e2fdb9324eb64b",
+      "producer_sha256": "e63e86db789706fc031753ae1886eda07cf62d6faf2399d51e785ee6485db2c1",
       "classification": "no-owned-latch",
-      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical. Reviewed shared throttle installation: the added callback is synchronous and creates no new await or Promise; the same seven async boundaries and Promise/loop captures remain unchanged. Throttle delegates timer ownership/cancellation to Scope.set_timeout/clear_timeout, exercised by js_throttle native scheduling/cancel traces and the existing Scope timer regression."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",
@@ -1867,11 +1867,12 @@
         "opaque-macro-review",
         "opaque-macro-review",
         "opaque-macro-review",
+        "opaque-macro-review",
         "opaque-macro-review"
       ],
-      "producer_sha256": "b9798f457464f9c2ac70ceb92270684184664cab1cbaf400f766dac7833a034a",
+      "producer_sha256": "45732140d3e7a32d79fa0febf3c2f9690a24aad9f3040e9d5e6473f74b7450be",
       "classification": "immediate",
-      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed descriptor value formatting: the new DataDescriptor match arm passes its value to the same synchronous debug-map entry, with no task, waiter, or future."
+      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed retained Builtin referent arm: reference.js_string() returns an owned string and write! formats it synchronously. Existing DataDescriptor debug-map formatting remains synchronous. No task, waiter, future or cancellation latch is added."
     },
     {
       "owner": "src/js_runtime/value.rs::Thrown as fmt :: Debug::fmt",

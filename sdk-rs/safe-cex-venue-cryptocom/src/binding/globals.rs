@@ -57,7 +57,8 @@ pub(crate) fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result
         settings: super::exchange::settings(),
         external_public_data: extra.external_public_data.clone(),
     };
-    let (this, core) = base_exchange::create(&rt.shared.sockets, parts, name, options, store)?;
+    let (this, core) =
+        base_exchange::create(&rt.shared.sockets, parts, name, options, store, |_| Ok(()))?;
     let _ = rt.shared.base.set(core);
     Ok(this)
 }

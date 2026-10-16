@@ -36,6 +36,7 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                 arg(&a, 0),
                 arg(&a, 1),
                 arg(&a, 2),
+                |_| Ok(()),
             )?;
             rt.shared
                 .base
@@ -115,17 +116,6 @@ pub(crate) fn build(weak: Weak<Shared>) -> Js {
                 .global("JSON.parse")?
                 .call(Js::Undefined, a)
                 .unwrap_or(Js::Null))
-        }),
-    );
-    def(
-        "throttle",
-        func("throttle", |rt, a| {
-            Ok(super::throttle::new(
-                rt,
-                arg(&a, 0),
-                arg(&a, 1).to_number()?,
-                arg(&a, 2),
-            ))
         }),
     );
     def(
