@@ -11,6 +11,30 @@ status = "ported"
 note = ""
 
 [[symbol]]
+ts = "cleanFloat"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "decimalsOf"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "subtractDecimals"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "createIncrementalFills"
 kind = "const-fn"
 layer = "mirror"
