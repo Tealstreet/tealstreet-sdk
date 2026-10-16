@@ -1,7 +1,6 @@
 //! Lodash throttle's leading/trailing/maxWait scheduling for the source callback.
-use super::{Rt, Shared};
-use safe_cex_exchange::js_runtime::{
-    scope::scope_of,
+use super::{
+    scope::{Scope, ScopeShared, scope_of},
     value::{Js, Thrown},
 };
 use std::{
@@ -15,19 +14,20 @@ struct State {
     timer: Option<Js>,
     result: Js,
 }
-struct Throttle {
-    weak: Weak<Shared>,
+struct Throttle<X> {
+    weak: Weak<ScopeShared<X>>,
     function: Js,
     wait: f64,
+    max_wait: f64,
     leading: bool,
     trailing: bool,
     state: RefCell<State>,
 }
-impl Throttle {
+impl<X: 'static> Throttle<X> {
     fn should_invoke(&self, now: f64) -> bool {
         let s = self.state.borrow();
         s.last_call.is_none_or(|last| {
-            now - last >= self.wait || now - last < 0. || now - s.last_invoke >= self.wait
+            now - last >= self.wait || now - last < 0. || now - s.last_invoke >= self.max_wait
         })
     }
     fn invoke(&self, now: f64) -> Result<Js, Thrown> {
@@ -42,7 +42,7 @@ impl Throttle {
         }
         Ok(self.state.borrow().result.clone())
     }
-    fn schedule(self: &Rc<Self>, rt: &Rt, delay: f64) {
+    fn schedule(self: &Rc<Self>, rt: &Scope<X>, delay: f64) {
         let this = self.clone();
         let h = rt.set_timeout(Rc::new(move || this.expire()), delay);
         self.state.borrow_mut().timer = Some(h);
@@ -61,7 +61,7 @@ impl Throttle {
             let remaining = {
                 let s = self.state.borrow();
                 (self.wait - (now - s.last_call.unwrap_or(now)))
-                    .min(self.wait - (now - s.last_invoke))
+                    .min(self.max_wait - (now - s.last_invoke))
             };
             self.schedule(&rt, remaining);
         }
@@ -95,17 +95,18 @@ impl Throttle {
         Ok(self.state.borrow().result.clone())
     }
 }
-pub(crate) fn new(rt: &Rt, function: Js, wait: f64, options: Js) -> Js {
-    let leading = options
-        .get("leading")
-        .map_or(true, |v| v.is_undefined() || v.truthy());
-    let trailing = options
-        .get("trailing")
-        .map_or(true, |v| v.is_undefined() || v.truthy());
+pub(super) fn new<X: 'static>(
+    rt: &Scope<X>,
+    function: Js,
+    wait: f64,
+    leading: bool,
+    trailing: bool,
+) -> Js {
     let t = Rc::new(Throttle {
         weak: Rc::downgrade(&rt.shared),
         function,
         wait,
+        max_wait: wait.max(0.),
         leading,
         trailing,
         state: RefCell::new(State {
@@ -116,5 +117,46 @@ pub(crate) fn new(rt: &Rt, function: Js, wait: f64, options: Js) -> Js {
             result: Js::Undefined,
         }),
     });
-    Js::function("throttled", move |this, args| t.call(this, args))
+    let called = t.clone();
+    let value = Js::function("throttled", move |this, args| called.call(this, args));
+    let cancelled = t.clone();
+    value
+        .define(
+            "cancel",
+            Js::function("cancel", move |_, _| {
+                let rt = scope_of(&cancelled.weak)?;
+                let timer = {
+                    let mut s = cancelled.state.borrow_mut();
+                    s.last_invoke = 0.;
+                    s.last_call = None;
+                    s.pending = None;
+                    s.timer.take()
+                };
+                if let Some(timer) = timer {
+                    rt.clear_timeout(&timer);
+                }
+                Ok(Js::Undefined)
+            }),
+        )
+        .expect("fresh throttle function");
+    value
+        .define(
+            "flush",
+            Js::function("flush", move |_, _| {
+                let now = scope_of(&t.weak)?.now();
+                let pending = {
+                    let mut s = t.state.borrow_mut();
+                    let timer = s.timer.take().is_some();
+                    timer && t.trailing && s.pending.is_some()
+                };
+                if pending {
+                    t.invoke(now)
+                } else {
+                    t.state.borrow_mut().pending = None;
+                    Ok(t.state.borrow().result.clone())
+                }
+            }),
+        )
+        .expect("fresh throttle function");
+    value
 }
