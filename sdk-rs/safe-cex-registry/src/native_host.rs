@@ -160,17 +160,14 @@ impl RustVenueHost for NativeVenueHost {
     fn kucoin(
         &self,
         name: safe_cex_types::ExchangeName,
-        options: &safe_cex_types::ExchangeOptions,
+        _options: &safe_cex_types::ExchangeOptions,
     ) -> Result<safe_cex_venue_kucoin::kucoin_exchange::KucoinDependencies, ExchangeError> {
-        if self.remote.is_some() || options.remote_signer.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for kucoin on the native host",
-            ));
-        }
         let runtime = self.runtime.clone();
         let adapter = (self.adapter)()?;
+        let remote = self.remote.clone();
         Ok(safe_cex_venue_kucoin::kucoin_exchange::KucoinDependencies {
             runtime: self.runtime.clone(),
+            hosted_signer: self.remote.clone(),
             http: Rc::new(move |options| {
                 native_http_options(
                     &runtime,
@@ -178,7 +175,7 @@ impl RustVenueHost for NativeVenueHost {
                     name.clone(),
                     options,
                     safe_cex_transport::RestRequest::default(),
-                    None,
+                    remote.clone(),
                 )
             }),
             registry: Rc::new(safe_cex_transport::TransportRegistry::default()),
