@@ -57,7 +57,10 @@ Selected validation passed: 14 external native tests, two direct private-helper
 tests, all 19 compiled mutation/restoration controls, and nine canonical native
 decoder results with zero failures or classification-only receipts. All seven
 selected compiler Clone capabilities match their specific construction reviews.
-Full integrated readiness checks are pending. This is nine original
+After merging master f3691e05a6, the integrated scoped suite passed 144 tests
+with zero failures and two existing ignored tests. Strict host/WASM all-target
+Clippy, formatting, parity (7459 rows/17204 public Rust items, zero findings),
+and the fresh nine-owner/seven-construction gate passed. This is nine original
 native/default census owners and seven specific construction reviews. Other
 owners, aliases, newer discovery,
 locals, features and WASM contract execution remain separate obligations.
