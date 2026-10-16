@@ -243,14 +243,14 @@ describe('HyroTrader private stream recovery ordering', () => {
     await vi.advanceTimersByTimeAsync(30_001);
     expect(sockets).toHaveLength(2);
     sockets[1].dispatchEvent(new Event('open'));
-    sockets[1].dispatchEvent(message({ topic: 'order', data: [] }));
+    sockets[1].dispatchEvent(message({ topic: 'order', data: [{ symbol: 'BTCUSDT' }] }));
     expect(handle).not.toHaveBeenCalled();
     sockets[1].ack('auth');
     await vi.advanceTimersByTimeAsync(0);
     sockets[1].ack('subscribe');
     await vi.advanceTimersByTimeAsync(0);
     expect(socket.ready).toBe(true);
-    sockets[1].dispatchEvent(message({ topic: 'order', data: [] }));
+    sockets[1].dispatchEvent(message({ topic: 'order', data: [{ symbol: 'BTCUSDT' }] }));
     expect(handle).toHaveBeenCalledTimes(1);
   });
   it('waits for both acknowledgements and REST before processing events', async () => {
@@ -275,12 +275,12 @@ describe('HyroTrader private stream recovery ordering', () => {
     expect(snapshot).not.toHaveBeenCalled();
     ack('subscribe');
     await vi.waitFor(() => expect(snapshot).toHaveBeenCalledTimes(1));
-    socket.onMessage(message({ topic: 'order', data: [] }));
+    socket.onMessage(message({ topic: 'order', data: [{ symbol: 'BTCUSDT' }] }));
     expect(handle).not.toHaveBeenCalled();
     resolve(true);
     await pending;
     expect(socket.ready).toBe(true);
-    socket.onMessage(message({ topic: 'order', data: [] }));
+    socket.onMessage(message({ topic: 'order', data: [{ symbol: 'BTCUSDT' }] }));
     expect(handle).toHaveBeenCalledTimes(1);
   });
   it.each(['auth', 'subscribe'])('reconnects on %s rejection without applying events', async (op) => {
