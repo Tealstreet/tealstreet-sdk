@@ -742,9 +742,9 @@ note = "safe-cex-exchange/src/exchange.rs::BaseExchange::update_positions_in_web
 ts = "BaseExchange.callMethodInWorker"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::call_method_in_worker"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::call_method_in_worker", "safe-cex-exchange/src/js_runtime/base_exchange.rs::create" ]
 status = "ported"
-note = "safe-cex-exchange/src/exchange.rs::BaseExchange::call_method_in_worker is the typed Rust composition of this source symbol."
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::call_method_in_worker is the typed Rust composition of this source symbol. Shared target `safe-cex-exchange/src/js_runtime/base_exchange.rs::create` also serves BaseExchange construction: it installs the JS callMethodInWorker member, forwarding the declared JSON worker arguments to that existing core owner. Runtime Promise scheduling retains its listener/deadline cleanup and invokes the venue completion hook. The returned JSON result and reconstructed error name/message/stack/code are observed by tests/js_runtime.rs::base_worker_rpc_forwards_arguments_results_errors_and_completion_hook."
 
 [[symbol]]
 ts = "BaseExchange.afterMethodCalledInWorker"
