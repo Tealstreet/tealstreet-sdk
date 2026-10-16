@@ -347,3 +347,11 @@ Signer validation has a separate nine-case live TransactionClient precedence
 oracle. That bounded proof does not establish arbitrary SDK input, constructor
 reflection or typed-array crypto parity. The archived signing-preimage fixture
 remains immutable; source-only corpus provenance is checked after native values.
+
+The current source Lighter family uses LighterApiClient and a local TransactionClient
+signer. It does not populate BaseExchange.xhr for shared hosted HTTP signing;
+ensureSignerAdapter and SDK initialization require a local secret even when a
+remoteSigner is available. `tests/hosted_signer.rs` compares six live source gates
+and both native family names with an advertised hosted capability, preserving
+the missing-key error before HTTP or signer calls. This evidence covers that
+conditional source limitation, not hosted transaction signing.

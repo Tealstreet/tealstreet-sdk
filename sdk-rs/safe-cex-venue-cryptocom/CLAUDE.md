@@ -303,3 +303,10 @@ updates, and public OHLCV/book listeners. socket_classes.rs supplies ordered fie
 construction and concrete new body closures; existing_member bridges to older
 native typed hosts remain a class-level FINDING. SOCKET_EVIDENCE.md documents the
 mandatory opaque language/host contracts and the scoped 60-case witness.
+
+The production dispose override delegates to the source body. Shared js_runtime
+`isDisposed` is writable and updates the typed base flag, so no full base dispose
+call is needed. This preserves the source's inherited event listeners while
+disposing public then private sockets. The binding lifecycle regression checks
+the flag and retained update listener; shared js_runtime's live-source disposal
+oracle checks ordering and abrupt completion.

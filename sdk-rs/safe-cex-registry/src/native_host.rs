@@ -118,7 +118,42 @@ fn kraken_spot_ids() -> Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>> {
     })
 }
 
+// The shared transport clock is local-task compatible, like its browser adapters.
+struct BybitClock(Rc<dyn WsRuntime>);
+impl safe_cex_transport::rate_limit::RateLimitClock for BybitClock {
+    fn now_ms(&self) -> u64 {
+        self.0.now_ms() as u64
+    }
+    fn sleep_ms(&self, milliseconds: u64) -> safe_cex_transport::TransportFuture<'_, ()> {
+        Box::pin(async move {
+            self.0
+                .sleep(milliseconds)
+                .await
+                .map_err(|error| safe_cex_transport::TransportError::Host(error.message))
+        })
+    }
+}
+
 impl RustVenueHost for NativeVenueHost {
+    #[allow(
+        clippy::arc_with_non_send_sync,
+        reason = "RateLimitClock and adapters share the native LocalSet"
+    )]
+    fn bybit(&self) -> Result<safe_cex_venue_bybit::BybitDependencies, ExchangeError> {
+        Ok(safe_cex_venue_bybit::BybitDependencies {
+            runtime: self.runtime.clone(),
+            remote_signer: self.remote.clone(),
+            wire: (self.adapter)()?,
+            http_host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
+            rate_limit_clock: Arc::new(BybitClock(self.runtime.clone())),
+            retry_clock: Rc::new(BybitClock(self.runtime.clone())),
+            clock: safe_cex_store::virtual_clock::VIRTUAL_CLOCK.clone(),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            // The production native host starts with the direct socket path.
+            relay_enabled: false,
+        })
+    }
+
     fn kucoin_external_public_data(&self) -> Option<ExternalPublicDataFactory> {
         Some(gateway_factory(self.runtime.clone()))
     }
@@ -242,6 +277,7 @@ impl RustVenueHost for NativeVenueHost {
         Ok(
             safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
                 runtime: self.runtime.clone(),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
                 http: Arc::new(HyperliquidHttp(client)),
                 limiter: self.hyperliquid_limiter.clone(),
                 signers: safe_cex_exchange::runtime::ExchangeSigners {
@@ -299,6 +335,18 @@ impl RustVenueHost for NativeVenueHost {
             http: safe_cex_exchange::js_runtime::client::rest_http_host(
                 self.runtime.clone(),
                 (self.adapter)()?,
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
+
+    fn woo(&self) -> Result<safe_cex_venue_woo::WooDependencies, ExchangeError> {
+        Ok(safe_cex_venue_woo::WooDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
@@ -423,6 +471,17 @@ impl RustVenueHost for NativeVenueHost {
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
             remote_signer_account_name: self.remote.as_ref().and_then(|(_, name)| name.clone()),
+        })
+    }
+    fn bitrue(&self) -> Result<safe_cex_venue_bitrue::BitrueDependencies, ExchangeError> {
+        Ok(safe_cex_venue_bitrue::BitrueDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
     fn okx(&self) -> Result<OkxDependencies, ExchangeError> {

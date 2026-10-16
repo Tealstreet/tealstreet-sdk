@@ -283,7 +283,10 @@ Declared realm choices: promise reactions run as runtime tasks, not a V8
 microtask queue; store reads are snapshots (writes go through Store methods);
 the cross cache is per realm and memory-only (no BroadcastChannel or
 sessionStorage on native hosts); `close` listeners are not invoked because the
-core socket runs the close/reconnect path; external public data rejects visibly.
+core socket runs the close/reconnect path. External public data uses the shared
+BaseExchange initialization and host-supplied provider factory, retaining the
+same Store and provider disposal owner. The native host supplies its gateway
+factory; custom embeddings must supply one when the option is configured.
 Signing converts actions with `undefined` members retained, matching msgpack nil.
 
 The production host supplies `ExchangeSigners` through the existing dependency
@@ -299,3 +302,11 @@ Date construction and Date.now apply the shared TimeClip operation to injected
 wall-clock values. A fractional host clock must still produce an integer nonce;
 `tests/binding.rs` checks local signing with a fractional input. NativeRuntime also
 supplies integer epoch milliseconds, while monotonic clocks retain their precision.
+
+The original 53-root/2380-case numeric fixture deliberately excludes WsUserEvent;
+its complete intersection has separate finding_user_event/spot_runtime proofs.
+The source generator keeps that scope even after the seed repaired the previously
+fabricated user-only feeder row to valid funding plus user. Collection identity
+pins the repaired feeder hash and reconstructs the old excluded row to verify
+that every other feeder byte is unchanged. Neither numeric goldens nor native
+production behavior are rewritten to reconcile this source-corpus boundary.

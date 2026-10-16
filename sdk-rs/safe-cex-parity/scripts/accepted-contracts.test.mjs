@@ -58,7 +58,7 @@ test('byte conversion inputs cannot bypass typed constructor classification', ()
   assert.throws(() => contractFor(actual, { [owner.name]: contract }), /raw decoder cannot be classified typed/);
 });
 
-test('multiple observed entrypoints execute independently and cannot claim non-decoder receipts', () => {
+test('multiple observed entrypoints execute independently and cannot claim non-decoder receipts', async () => {
   const methods = [{ name: 'first', signature: {} }, { name: 'second', signature: {} }];
   const actual = { ...owner, deserialize: false, methods, rawEntrypoints: [true, true] };
   const entrypoints = methods.map((api, i) => ({ api: { kind: 'inherent', ...api }, input: 'observed', reason: 'Executed opaque forwarding, not a typed-input claim.', call: `$type::${api.name}($value)`, cases: [{ input: 'left', output: { value: i } }, { input: 'right', output: { value: i + 2 } }] }));
@@ -82,6 +82,31 @@ test('multiple observed entrypoints execute independently and cannot claim non-d
   assert.throws(() => resolve(repeated), /distinct inputs and outputs/);
   const single = { ...contract, entrypoints: entrypoints.slice(0, 1), call: '$value', cases: entrypoints[0].cases, category: 'non-decoder' };
   assert.throws(() => contractFor({ ...actual, methods: methods.slice(0, 1), rawEntrypoints: [true] }, { [owner.name]: single }), /observed API cannot skip executed witnesses/);
+  const constructor = { name: 'new', signature: { inputs: [], output: { generic: 'Self' } } };
+  const mixedOwner = { ...actual, methods: [methods[0], constructor], rawEntrypoints: [true, false] };
+  const mixed = { ...contract, entrypoints: [entrypoints[0], { api: { kind: 'inherent', ...constructor }, input: 'typed', reason: 'Zero-argument construction does not decode a serialized input.' }] };
+  const resolved = contractFor(mixedOwner, { [owner.name]: mixed });
+  assert.deepEqual(resolved.cases, entrypoints[0].cases.map(row => ({ input: { entrypoint: 0, input: row.input }, output: row.output })), 'only the raw entrypoint gets generated runtime dispatch');
+  assert.doesNotMatch(resolved.call, /::new/, 'typed constructors do not receive fabricated varying-input witnesses');
+  assert.throws(() => contractFor({ ...mixedOwner, rawEntrypoints: [true, true] }, { [owner.name]: mixed }), /raw decoder cannot be classified typed/);
+  const rawSignature = structuredClone(mixedOwner);
+  rawSignature.methods[1].signature.inputs = [['raw', { borrowed_ref: { type: { primitive: 'str' } } }]];
+  const disguised = structuredClone(mixed); disguised.entrypoints[1].api.signature = rawSignature.methods[1].signature;
+  assert.throws(() => contractFor(rawSignature, { [owner.name]: disguised }), /raw decoder cannot be classified typed/);
+  const noWitness = { ...mixed, entrypoints: mixed.entrypoints.map(entry => ({ ...entry, input: 'typed' })) };
+  assert.throws(() => contractFor({ ...mixedOwner, rawEntrypoints: [false, false] }, { [owner.name]: noWitness }), /must execute an actual observed method/);
+  const { spawnSync } = await import('node:child_process');
+  const url = new URL('./accepted-contracts.mjs', import.meta.url).href;
+  const anchor = "      if (entry.input === 'typed') validateTypedEntrypoint(type, entry, index);";
+  const execute = mutate => {
+    const hook = mutate ? `import {registerHooks} from 'node:module'; registerHooks({load(url,context,next){const loaded=next(url,context);if(url!==${JSON.stringify(url)})return loaded;const source=String(loaded.source);const anchor=${JSON.stringify(anchor)};assert.equal(source.split(anchor).length,2,'one mixed-observation typed validation site');return {...loaded,source:source.replace(anchor,'')};}});` : '';
+    const program = `import assert from 'node:assert/strict'; ${hook} const {contractFor}=await import(${JSON.stringify(url)}); const owner=${JSON.stringify({ ...mixedOwner, rawEntrypoints: [true, true] })}; const contract=${JSON.stringify(mixed)}; assert.throws(()=>contractFor(owner,{[owner.name]:contract}),/raw decoder cannot be classified typed/,'observed typed raw compiler role must refuse');`;
+    return spawnSync(process.execPath, ['--input-type=module', '--eval', program], { encoding: 'utf8' });
+  };
+  let result = execute(false); assert.equal(result.status, 0, result.stderr);
+  result = execute(true); assert.equal(result.status, 1, result.stderr); assert.match(result.stderr, /observed typed raw compiler role must refuse/);
+  console.log('observed typed entrypoint raw compiler role: named assertion; process exit 1');
+  result = execute(false); assert.equal(result.status, 0, result.stderr);
 });
 
 test('open JSON and supplemental methods require native witnesses without replacing shape checks', () => {

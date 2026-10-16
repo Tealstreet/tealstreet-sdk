@@ -1,4 +1,5 @@
 //! SDK dispatch reaches the same owned exchange and socket method bodies.
+use crate::native_value::NativeValue;
 use crate::{
     adapter::BackpackExchange, model_bridge as bridge, order_actions as actions,
     rest_reads as reads,

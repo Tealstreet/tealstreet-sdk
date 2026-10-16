@@ -691,3 +691,29 @@ fn public_only_start_skips_private_sockets_and_rest() {
     drop(loaded);
     h.venue().dispose().expect("dispose");
 }
+
+#[test]
+fn dispose_sets_source_flag_without_removing_inherited_listeners() {
+    use std::{cell::Cell, rc::Rc};
+    let h = venue(|_| {});
+    let observed = Rc::new(Cell::new(0));
+    let seen = observed.clone();
+    h.venue().base().on(
+        "update",
+        Rc::new(move |_, _| {
+            seen.set(seen.get() + 1);
+            Ok(())
+        }),
+    );
+    h.venue().dispose().expect("source dispose");
+    assert!(
+        h.venue().base().is_disposed(),
+        "source assignment reaches shared state"
+    );
+    h.venue().base().emit("update", json!({})).unwrap();
+    assert_eq!(
+        observed.get(),
+        1,
+        "source override does not invoke base listener cleanup"
+    );
+}
