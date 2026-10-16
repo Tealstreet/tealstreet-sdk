@@ -6418,6 +6418,4402 @@
       }
     ]
   },
+  "safe_cex_venue_grvt::order_semantics::map_order_status": {
+    "api": {
+      "kind": "function",
+      "name": "map_order_status",
+      "signature": {
+        "inputs": [
+          [
+            "status",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_types::OrderStatus",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed grvt.exchange.ts mapOrderStatus: FILLED closes, CANCELLED/REJECTED cancel, all remaining JSON-data and absent inputs open. Native OrderStatus variant identity is inspected directly. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
+    "call": "{let d=$type(if $value[\"present\"].as_bool().unwrap(){Some(&$value[\"status\"])}else{None});let name=match d {safe_cex_types::OrderStatus::Open=>\"open\",safe_cex_types::OrderStatus::Closed=>\"closed\",safe_cex_types::OrderStatus::Canceled=>\"canceled\",safe_cex_types::OrderStatus::Creating=>\"creating\",safe_cex_types::OrderStatus::Updating=>\"updating\",safe_cex_types::OrderStatus::Canceling=>\"canceling\"};serde_json::json!({\"variant\":name})}",
+    "cases": [
+      {
+        "input": {
+          "present": false
+        },
+        "output": {
+          "variant": "open"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "status": "FILLED"
+        },
+        "output": {
+          "variant": "closed"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "status": "CANCELLED"
+        },
+        "output": {
+          "variant": "canceled"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "status": "REJECTED"
+        },
+        "output": {
+          "variant": "canceled"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "status": "PENDING"
+        },
+        "output": {
+          "variant": "open"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "status": "OPEN"
+        },
+        "output": {
+          "variant": "open"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "status": "filled"
+        },
+        "output": {
+          "variant": "open"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "status": null
+        },
+        "output": {
+          "variant": "open"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "status": []
+        },
+        "output": {
+          "variant": "open"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::order_semantics::get_order_creation_time_ms": {
+    "api": {
+      "kind": "function",
+      "name": "get_order_creation_time_ms",
+      "signature": {
+        "inputs": [
+          [
+            "metadata",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed source optional create_time/ct nullish precedence and decimal BigInt division before Number conversion. Native optional f64 bits distinguish absent/invalid/zero results and positive integer output; numeric input uses source Number stringification. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
+    "call": "{match $type(if $value[\"present\"].as_bool().unwrap(){Some(&$value[\"metadata\"])}else{None}){Some(d)=>serde_json::json!({\"bits\":format!(\"{:016x}\",d.to_bits())}),None=>serde_json::json!({\"absent\":true})}}",
+    "cases": [
+      {
+        "input": {
+          "present": false
+        },
+        "output": {
+          "absent": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {}
+        },
+        "output": {
+          "absent": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "create_time": "1700000000123456789"
+          }
+        },
+        "output": {
+          "bits": "4278bcfe5687b000"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "create_time": null,
+            "ct": "2000001"
+          }
+        },
+        "output": {
+          "bits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "create_time": "",
+            "ct": "2000001"
+          }
+        },
+        "output": {
+          "absent": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "create_time": "999999"
+          }
+        },
+        "output": {
+          "absent": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "ct": "0000002000000"
+          }
+        },
+        "output": {
+          "bits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "ct": 2000001
+          }
+        },
+        "output": {
+          "bits": "4000000000000000"
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "ct": -2000001
+          }
+        },
+        "output": {
+          "absent": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "ct": true
+          }
+        },
+        "output": {
+          "absent": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "ct": "1e9"
+          }
+        },
+        "output": {
+          "absent": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "metadata": {
+            "ct": "1234567890123456789000000"
+          }
+        },
+        "output": {
+          "bits": "43b12210f47de981"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::order_semantics::get_grvt_order_time_in_force": {
+    "api": {
+      "kind": "function",
+      "name": "get_grvt_order_time_in_force",
+      "signature": {
+        "inputs": [
+          [
+            "order",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::OrderTimeInForce",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed grvt.order-semantics.ts: nullish full/lite precedence; post-only requires a boolean when present; GOOD_TILL_TIME maps to GTC/PostOnly, IOC/FOK refuse post-only, unsupported TIF remains absent. Native shared enum variants are observed. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
+    "call": "{let d=$type($value.as_object().unwrap());let name=d.map(|d|match d {safe_cex_types::OrderTimeInForce::GoodTillCancel=>\"gtc\",safe_cex_types::OrderTimeInForce::ImmediateOrCancel=>\"ioc\",safe_cex_types::OrderTimeInForce::FillOrKill=>\"fok\",safe_cex_types::OrderTimeInForce::PostOnly=>\"post\"});serde_json::json!({\"variant\":name})}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "variant": null
+        }
+      },
+      {
+        "input": {
+          "time_in_force": "GOOD_TILL_TIME"
+        },
+        "output": {
+          "variant": "gtc"
+        }
+      },
+      {
+        "input": {
+          "ti": "GOOD_TILL_TIME",
+          "po": true
+        },
+        "output": {
+          "variant": "post"
+        }
+      },
+      {
+        "input": {
+          "time_in_force": null,
+          "ti": "FILL_OR_KILL",
+          "post_only": false
+        },
+        "output": {
+          "variant": "fok"
+        }
+      },
+      {
+        "input": {
+          "ti": "IMMEDIATE_OR_CANCEL",
+          "po": false
+        },
+        "output": {
+          "variant": "ioc"
+        }
+      },
+      {
+        "input": {
+          "ti": "IMMEDIATE_OR_CANCEL",
+          "po": true
+        },
+        "output": {
+          "variant": null
+        }
+      },
+      {
+        "input": {
+          "ti": "FILL_OR_KILL",
+          "po": true
+        },
+        "output": {
+          "variant": null
+        }
+      },
+      {
+        "input": {
+          "ti": "ALL_OR_NONE"
+        },
+        "output": {
+          "variant": null
+        }
+      },
+      {
+        "input": {
+          "time_in_force": "bad",
+          "ti": "GOOD_TILL_TIME"
+        },
+        "output": {
+          "variant": null
+        }
+      },
+      {
+        "input": {
+          "ti": "GOOD_TILL_TIME",
+          "po": null
+        },
+        "output": {
+          "variant": null
+        }
+      },
+      {
+        "input": {
+          "ti": "GOOD_TILL_TIME",
+          "post_only": null,
+          "po": false
+        },
+        "output": {
+          "variant": "gtc"
+        }
+      },
+      {
+        "input": {
+          "ti": "GOOD_TILL_TIME",
+          "po": 0
+        },
+        "output": {
+          "variant": null
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::order_semantics::alias": {
+    "api": {
+      "kind": "function",
+      "name": "alias",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "full",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "lite",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed concrete borrowed property selection used by the two metadata decoders: full nonnull own JSON member wins; null/missing falls to lite. Observations inspect actual selected values, Some(null) versus None, and retained borrow identity. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
+    "call": "{let parent=if $value[\"present\"].as_bool().unwrap(){Some(&$value[\"value\"])}else{None};let d=$type(parent,\"full\",\"lite\");serde_json::json!({\"present\":d.is_some(),\"value\":d,\"borrowed\":d.map(|v|{let p=parent.unwrap();p.get(\"full\").is_some_and(|x|std::ptr::eq(x,v))||p.get(\"lite\").is_some_and(|x|std::ptr::eq(x,v))}).unwrap_or(false)})}",
+    "cases": [
+      {
+        "input": {
+          "present": false
+        },
+        "output": {
+          "present": false,
+          "value": null,
+          "borrowed": false
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": {}
+        },
+        "output": {
+          "present": false,
+          "value": null,
+          "borrowed": false
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": {
+            "full": null,
+            "lite": false
+          }
+        },
+        "output": {
+          "present": true,
+          "value": false,
+          "borrowed": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": {
+            "full": 0,
+            "lite": true
+          }
+        },
+        "output": {
+          "present": true,
+          "value": 0,
+          "borrowed": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": {
+            "lite": null
+          }
+        },
+        "output": {
+          "present": true,
+          "value": null,
+          "borrowed": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": {
+            "full": {
+              "x": 1
+            },
+            "lite": 2
+          }
+        },
+        "output": {
+          "present": true,
+          "value": {
+            "x": 1
+          },
+          "borrowed": true
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::order_semantics::get_grvt_trigger_metadata": {
+    "api": {
+      "kind": "function",
+      "name": "get_grvt_trigger_metadata",
+      "signature": {
+        "inputs": [
+          [
+            "order",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::map::Map",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_grvt::records::GrvtTriggerMetadata",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed source getGrvtTriggerMetadata nullish metadata/trigger/tpsl selectors, exact trigger-kind and trigger-by unions, Number coercion and finite filter, boolean-only optional close/split fields. Native enum identities, option presence and price bits are observed; no serialization roundtrip claim. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
+    "call": "{match $type($value.as_object().unwrap()){Ok(None)=>serde_json::json!({\"present\":false}),Ok(Some(d))=>serde_json::json!({\"present\":true,\"kind\":match d.r#type{crate::types::GrvtTriggerKind::StopLoss=>\"stop\",crate::types::GrvtTriggerKind::TakeProfit=>\"take\"},\"price\":d.trigger_price.map(|v|format!(\"{:016x}\",v.to_bits())),\"by\":d.trigger_type.map(|v|match v{safe_cex_types::OrderStopTriggerType::LastPrice=>\"last\",safe_cex_types::OrderStopTriggerType::MarkPrice=>\"mark\",safe_cex_types::OrderStopTriggerType::IndexPrice=>\"index\"}),\"close\":d.close,\"split\":d.is_split_position}),Err(e)=>serde_json::json!({\"error\":e.message})}}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "present": false
+        }
+      },
+      {
+        "input": {
+          "metadata": {
+            "trigger": {
+              "trigger_type": "UNKNOWN"
+            }
+          }
+        },
+        "output": {
+          "present": false
+        }
+      },
+      {
+        "input": {
+          "m": {
+            "t": {
+              "tt": "STOP_LOSS",
+              "t": {
+                "tp": "-0",
+                "tb": "LAST",
+                "cp": false,
+                "is": true
+              }
+            }
+          }
+        },
+        "output": {
+          "present": true,
+          "kind": "stop",
+          "price": "8000000000000000",
+          "by": "last",
+          "close": false,
+          "split": true
+        }
+      },
+      {
+        "input": {
+          "metadata": {
+            "trigger": {
+              "trigger_type": "TAKE_PROFIT",
+              "tpsl": {
+                "trigger_price": "12.5",
+                "trigger_by": "MARK",
+                "close_position": true,
+                "is_split_position": false
+              }
+            }
+          }
+        },
+        "output": {
+          "present": true,
+          "kind": "take",
+          "price": "4029000000000000",
+          "by": "mark",
+          "close": true,
+          "split": false
+        }
+      },
+      {
+        "input": {
+          "m": {
+            "t": {
+              "tt": "STOP_LOSS",
+              "t": {
+                "tp": "Infinity",
+                "tb": "INDEX",
+                "cp": 0
+              }
+            }
+          }
+        },
+        "output": {
+          "present": true,
+          "kind": "stop",
+          "price": null,
+          "by": "index",
+          "close": null,
+          "split": null
+        }
+      },
+      {
+        "input": {
+          "m": {
+            "t": {
+              "tt": "TAKE_PROFIT"
+            }
+          }
+        },
+        "output": {
+          "present": true,
+          "kind": "take",
+          "price": null,
+          "by": null,
+          "close": null,
+          "split": null
+        }
+      },
+      {
+        "input": {
+          "m": {
+            "t": {
+              "tt": "STOP_LOSS",
+              "t": {
+                "tp": [],
+                "tb": "unknown",
+                "is": "true"
+              }
+            }
+          }
+        },
+        "output": {
+          "present": true,
+          "kind": "stop",
+          "price": "0000000000000000",
+          "by": null,
+          "close": null,
+          "split": null
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::order_semantics::symbol_to_instrument_id": {
+    "api": {
+      "kind": "function",
+      "name": "symbol_to_instrument_id",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed source terminal ASCII-case-insensitive _PERP replacement: preserve prefix, whitespace and nonterminal occurrences. This text decoder returns its actual native String directly; UTF-8 boundary remains unchanged. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
+    "call": "{serde_json::json!($type($value.as_str().unwrap()))}",
+    "cases": [
+      {
+        "input": "ETH_USDT_PERP",
+        "output": "ETH_USDT_Perp"
+      },
+      {
+        "input": "a_perp",
+        "output": "a_Perp"
+      },
+      {
+        "input": "a_pErP",
+        "output": "a_Perp"
+      },
+      {
+        "input": "a_PERP_x",
+        "output": "a_PERP_x"
+      },
+      {
+        "input": "a_PERP ",
+        "output": "a_PERP "
+      },
+      {
+        "input": "_PERP",
+        "output": "_Perp"
+      },
+      {
+        "input": "PERP",
+        "output": "PERP"
+      },
+      {
+        "input": "a_PERP_PERP",
+        "output": "a_PERP_Perp"
+      },
+      {
+        "input": "\ud83d\udca0_perp",
+        "output": "\ud83d\udca0_Perp"
+      },
+      {
+        "input": "",
+        "output": ""
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::order_semantics::convert_interval": {
+    "api": {
+      "kind": "function",
+      "name": "convert_interval",
+      "signature": {
+        "inputs": [
+          [
+            "interval",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_num::table_lookup::TableHit",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_grvt::types::GrvtCandlestickInterval",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed twelve exact own interval mappings and source ordinary-object inherited values; only missing entries choose one minute. Observations match each native interval variant and inherited ProtoMember identity before output projection. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
+    "call": "{match $type($value.as_str().unwrap()){safe_cex_num::TableHit::Mapped(d)=>serde_json::json!({\"mapped\":match d{crate::types::GrvtCandlestickInterval::Ci1M=>\"Ci1M\",crate::types::GrvtCandlestickInterval::Ci3M=>\"Ci3M\",crate::types::GrvtCandlestickInterval::Ci5M=>\"Ci5M\",crate::types::GrvtCandlestickInterval::Ci15M=>\"Ci15M\",crate::types::GrvtCandlestickInterval::Ci30M=>\"Ci30M\",crate::types::GrvtCandlestickInterval::Ci1H=>\"Ci1H\",crate::types::GrvtCandlestickInterval::Ci2H=>\"Ci2H\",crate::types::GrvtCandlestickInterval::Ci4H=>\"Ci4H\",crate::types::GrvtCandlestickInterval::Ci6H=>\"Ci6H\",crate::types::GrvtCandlestickInterval::Ci12H=>\"Ci12H\",crate::types::GrvtCandlestickInterval::Ci1D=>\"Ci1D\",crate::types::GrvtCandlestickInterval::Ci1W=>\"Ci1W\",crate::types::GrvtCandlestickInterval::Ci8H=>\"Ci8H\",crate::types::GrvtCandlestickInterval::Ci3D=>\"Ci3D\",crate::types::GrvtCandlestickInterval::Ci5D=>\"Ci5D\",crate::types::GrvtCandlestickInterval::Ci2W=>\"Ci2W\",crate::types::GrvtCandlestickInterval::Ci3W=>\"Ci3W\",crate::types::GrvtCandlestickInterval::Ci4W=>\"Ci4W\"}}),safe_cex_num::TableHit::Inherited(d)=>serde_json::json!({\"inherited\":match d{safe_cex_num::ProtoMember::ToString=>\"toString\",safe_cex_num::ProtoMember::Prototype=>\"prototype\",_=>panic!(\"unreviewed inherited test value\")}}),safe_cex_num::TableHit::Missing=>serde_json::json!({\"missing\":true})}}",
+    "cases": [
+      {
+        "input": "1m",
+        "output": {
+          "mapped": "Ci1M"
+        }
+      },
+      {
+        "input": "3m",
+        "output": {
+          "mapped": "Ci3M"
+        }
+      },
+      {
+        "input": "5m",
+        "output": {
+          "mapped": "Ci5M"
+        }
+      },
+      {
+        "input": "15m",
+        "output": {
+          "mapped": "Ci15M"
+        }
+      },
+      {
+        "input": "30m",
+        "output": {
+          "mapped": "Ci30M"
+        }
+      },
+      {
+        "input": "1h",
+        "output": {
+          "mapped": "Ci1H"
+        }
+      },
+      {
+        "input": "2h",
+        "output": {
+          "mapped": "Ci2H"
+        }
+      },
+      {
+        "input": "4h",
+        "output": {
+          "mapped": "Ci4H"
+        }
+      },
+      {
+        "input": "6h",
+        "output": {
+          "mapped": "Ci6H"
+        }
+      },
+      {
+        "input": "12h",
+        "output": {
+          "mapped": "Ci12H"
+        }
+      },
+      {
+        "input": "1d",
+        "output": {
+          "mapped": "Ci1D"
+        }
+      },
+      {
+        "input": "1w",
+        "output": {
+          "mapped": "Ci1W"
+        }
+      },
+      {
+        "input": "bad",
+        "output": {
+          "mapped": "Ci1M"
+        }
+      },
+      {
+        "input": "1M",
+        "output": {
+          "mapped": "Ci1M"
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "mapped": "Ci1M"
+        }
+      },
+      {
+        "input": "toString",
+        "output": {
+          "inherited": "toString"
+        }
+      },
+      {
+        "input": "__proto__",
+        "output": {
+          "inherited": "prototype"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::signing_metadata::get_instrument_signing_metadata": {
+    "api": {
+      "kind": "function",
+      "name": "get_instrument_signing_metadata",
+      "signature": {
+        "inputs": [
+          [
+            "market_id",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "info",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        },
+                        {
+                          "primitive": "f64"
+                        },
+                        {
+                          "primitive": "f64"
+                        }
+                      ]
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed source signing metadata validation: lowercase 0x prefix with 1..64 hexadecimal digits and binary64 safe integer exponents, retaining signed zero/negative values. Raw JSON text preserves lexical negative zero; native borrowed hash pointer and exponent bits are observed before serialization. Independent native outputs below are authored from the reviewed source contract; selected production execution passes on native and wasm.",
+    "call": "{let info:serde_json::Value=serde_json::from_str($value.as_str().unwrap()).unwrap();match $type(\"BTC\",Some(&info)){Ok((hash,base,quote))=>serde_json::json!({\"hash\":hash,\"base\":format!(\"{:016x}\",base.to_bits()),\"quote\":format!(\"{:016x}\",quote.to_bits()),\"borrowed\":std::ptr::eq(hash.as_ptr(),info[\"ih\"].as_str().unwrap().as_ptr())}),Err(e)=>serde_json::json!({\"error\":e})}}",
+    "cases": [
+      {
+        "input": "{\"ih\":\"0xF\",\"bd\":-0.0,\"qd\":-2}",
+        "output": {
+          "hash": "0xF",
+          "base": "8000000000000000",
+          "quote": "c000000000000000",
+          "borrowed": true
+        }
+      },
+      {
+        "input": "{\"ih\":\"0x1234\",\"bd\":9007199254740991,\"qd\":0}",
+        "output": {
+          "hash": "0x1234",
+          "base": "433fffffffffffff",
+          "quote": "0000000000000000",
+          "borrowed": true
+        }
+      },
+      {
+        "input": "{}",
+        "output": {
+          "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
+        }
+      },
+      {
+        "input": "{\"ih\":\"0X1\",\"bd\":1,\"qd\":2}",
+        "output": {
+          "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
+        }
+      },
+      {
+        "input": "{\"ih\":\"0x\",\"bd\":1,\"qd\":2}",
+        "output": {
+          "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
+        }
+      },
+      {
+        "input": "{\"ih\":\"0xG\",\"bd\":1,\"qd\":2}",
+        "output": {
+          "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
+        }
+      },
+      {
+        "input": "{\"ih\":\"0x1\",\"bd\":1.5,\"qd\":2}",
+        "output": {
+          "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
+        }
+      },
+      {
+        "input": "{\"ih\":\"0x1\",\"bd\":9007199254740992,\"qd\":2}",
+        "output": {
+          "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
+        }
+      },
+      {
+        "input": "{\"ih\":\"0x1\",\"bd\":\"1\",\"qd\":2}",
+        "output": {
+          "error": "Market BTC does not have valid GRVT signing metadata (ih/bd/qd); refresh markets before placing an order"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::builder::create_grvt_builder_info": {
+    "api": {
+      "kind": "function",
+      "name": "create_grvt_builder_info",
+      "signature": {
+        "inputs": [
+          [
+            "testnet",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "bool"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "builder_address",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "builder_fee_rate",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_grvt::records::GrvtBuilderInfo",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Individually reviewed source builder address/fee construction: absent fields select the network/default fee, explicit empty address remains present, address lowercases and original fee text survives numeric conversion. Native record fields and raw fee bits are observed directly. Selected production execution passes on native and wasm.",
+    "call": "{match $type($value[\"testnet\"].as_bool(),$value[\"address\"].as_str(),$value[\"fee\"].as_str()){Ok(d)=>serde_json::json!({\"builder\":d.builder,\"fee\":d.builder_fee,\"raw_bits\":format!(\"{:016x}\",d.builder_fee_int.to_bits())}),Err(e)=>serde_json::json!({\"error\":e})}}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "builder": "0xee8f3559f298fffa79b8253437969d15b5dccff3",
+          "fee": "0.03",
+          "raw_bits": "4072c00000000000"
+        }
+      },
+      {
+        "input": {
+          "testnet": true
+        },
+        "output": {
+          "builder": "0xb0108ae4c07218ce320e5e22dd911a01c2042162",
+          "fee": "0.03",
+          "raw_bits": "4072c00000000000"
+        }
+      },
+      {
+        "input": {
+          "address": "",
+          "fee": "-0"
+        },
+        "output": {
+          "builder": "",
+          "fee": "-0",
+          "raw_bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "address": "0xABC\u00c4",
+          "fee": "0.00005"
+        },
+        "output": {
+          "builder": "0xabc\u00e4",
+          "fee": "0.00005",
+          "raw_bits": "3ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "fee": "bad"
+        },
+        "output": {
+          "error": "Invalid GRVT builder fee rate: bad"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::builder::get_string_field": {
+    "api": {
+      "kind": "function",
+      "name": "get_string_field",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": null,
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Actual source field admission accepts only native strings and preserves explicitly empty text. Independent absent/null/nonstring witnesses and native borrow identity distinguish admission from coercion or copied output. Selected production execution passes on native and wasm.",
+    "call": "{let value=if $value[\"present\"].as_bool().unwrap(){Some(&$value[\"value\"])}else{None};let d=$type(value);serde_json::json!({\"present\":d.is_some(),\"text\":d,\"borrowed\":d.map(|d|std::ptr::eq(d.as_ptr(),value.unwrap().as_str().unwrap().as_ptr())).unwrap_or(false)})}",
+    "cases": [
+      {
+        "input": {
+          "present": false
+        },
+        "output": {
+          "present": false,
+          "text": null,
+          "borrowed": false
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": ""
+        },
+        "output": {
+          "present": true,
+          "text": "",
+          "borrowed": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": "text"
+        },
+        "output": {
+          "present": true,
+          "text": "text",
+          "borrowed": true
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": null
+        },
+        "output": {
+          "present": false,
+          "text": null,
+          "borrowed": false
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": 7
+        },
+        "output": {
+          "present": false,
+          "text": null,
+          "borrowed": false
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": true
+        },
+        "output": {
+          "present": false,
+          "text": null,
+          "borrowed": false
+        }
+      },
+      {
+        "input": {
+          "present": true,
+          "value": []
+        },
+        "output": {
+          "present": false,
+          "text": null,
+          "borrowed": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::builder::get_valid_address": {
+    "api": {
+      "kind": "function",
+      "name": "get_valid_address",
+      "signature": {
+        "inputs": [
+          [
+            "values",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "core::option::Option",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "borrowed_ref": {
+                                  "lifetime": "'a",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'a",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Reviewed source ordered candidate admission delegates actual Ethereum address validation and returns the first valid original string. Native selected text and borrowed pointer/selected index are inspected independently; no normalization or last-candidate substitution is permitted. Selected production execution passes on native and wasm.",
+    "call": "{let values:Vec<Option<&str>>=$value.as_array().unwrap().iter().map(|v|v.as_str()).collect();let d=$type(&values);serde_json::json!({\"address\":d,\"index\":d.and_then(|d|values.iter().position(|v|v.is_some_and(|v|std::ptr::eq(v.as_ptr(),d.as_ptr()))))})}",
+    "cases": [
+      {
+        "input": [],
+        "output": {
+          "address": null,
+          "index": null
+        }
+      },
+      {
+        "input": [
+          null,
+          "bad",
+          "0x0000000000000000000000000000000000000001",
+          "0x0000000000000000000000000000000000000002"
+        ],
+        "output": {
+          "address": "0x0000000000000000000000000000000000000001",
+          "index": 2
+        }
+      },
+      {
+        "input": [
+          "0x0000000000000000000000000000000000000002",
+          "0x0000000000000000000000000000000000000001"
+        ],
+        "output": {
+          "address": "0x0000000000000000000000000000000000000002",
+          "index": 0
+        }
+      },
+      {
+        "input": [
+          "0x1",
+          "",
+          null
+        ],
+        "output": {
+          "address": null,
+          "index": null
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::public_lifecycle::TimerCallback": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::boxed::Box",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::FnMut",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::boxed::Box",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::FnMut",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Box<dyn FnMut()->Result<(),ExchangeError>> retains a batch timer callback and its original error. The actual alias executes the timer error path; this is a callable capability, not an encoded-input parser.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::public_feeds::FeedHandler": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "V"
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "V"
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "At the registered bool binding, Rc<dyn Fn(bool)->Result<(),ExchangeError>> retains a feed callback. Native true/false calls distinguish success and its original error; no arbitrary-V claim.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::public_feeds::HandlerArray": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_grvt::public_feeds::HandlerSlot",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_grvt::public_feeds::HandlerSlot",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "V"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "At the registered bool binding this is a shared Vec of HandlerSlot<bool>; slots retain Hole, Undefined and callback capabilities. Native shared identity and both callback boolean effects are checked. HandlerSlot has no data decoder; actual trait probes must verify that absence.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::public_feeds::FeedCleanup": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Rc<dyn Fn()->Result<(),ExchangeError>> is a retained cleanup capability, not a serialized cleanup description. Native invocation retains its original cleanup error.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::public_feeds::LevelProjector": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "V"
+                                },
+                                {
+                                  "generic": "V"
+                                },
+                                {
+                                  "generic": "V"
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "V"
+                                },
+                                {
+                                  "generic": "V"
+                                },
+                                {
+                                  "generic": "V"
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "At the registered bool binding this is Rc<dyn Fn(bool,bool,bool)->Result<bool,ExchangeError>>. Native three-argument calls retain distinct boolean results; no JSON-to-level or arbitrary-V admission claim.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::builder_workflow::JsPromise": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_grvt::builder_workflow::JsResult",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "At the registered bool binding, Pin<Box<dyn Future<Output=Result<bool,bool>>>> is a retained future, not a data decoder. Actual polled native success(false) and error(true) are checked.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::builder_workflow::Reaction": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "tuple": []
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "tuple": []
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Pin<Box<dyn Future<Output=()>>> retains an effectful continuation. The actual future is polled and its captured native flag changes; no serialized task admission is claimed.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::private_feeds::TimerCallback": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": null
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": null
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Rc<dyn Fn()> retains a timer callback. Repeated actual calls update the captured native counter; no timer description or wire decoder is present.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::private_feeds::Predicate": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::FnMut",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "generic": "V"
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "safe_cex_venue_grvt::builder_workflow::JsResult",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "generic": "V"
+                              }
+                            },
+                            {
+                              "type": {
+                                "primitive": "bool"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "target": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::FnMut",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "generic": "V"
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "core::result::Result",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "primitive": "bool"
+                              }
+                            },
+                            {
+                              "type": {
+                                "generic": "V"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "category": "non-decoder",
+    "reason": "At the exact registered static/bool binding this is dyn FnMut(bool)->Result<bool,bool>. The actual alias retains native success and error values; the object lifetime and bool instantiation do not imply arbitrary-V admission.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::private_feeds::Visitor": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::FnMut",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "generic": "V"
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "safe_cex_venue_grvt::builder_workflow::JsResult",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "generic": "V"
+                              }
+                            },
+                            {
+                              "type": {
+                                "tuple": []
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "target": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::FnMut",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "generic": "V"
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "core::result::Result",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "tuple": []
+                              }
+                            },
+                            {
+                              "type": {
+                                "generic": "V"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "category": "non-decoder",
+    "reason": "At the exact registered static/bool binding this is dyn FnMut(bool)->Result<(),bool>. Native calls retain success and the original boolean error; no serialized visitor or generic-wide permission.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::session_host::Callback": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "V"
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_grvt::builder_workflow::JsResult",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "generic": "V"
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "reason": "At the registered bool binding this is Rc<dyn Fn(bool)->Result<bool,bool>>; it is a retained native host callback. Actual calls distinguish returned false from thrown true.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::account_runtime::Iteration": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::FnMut",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "generic": "V"
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "safe_cex_venue_grvt::builder_workflow::JsResult",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "generic": "V"
+                              }
+                            },
+                            {
+                              "type": {
+                                "primitive": "bool"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "target": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::FnMut",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "generic": "V"
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "core::result::Result",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "primitive": "bool"
+                              }
+                            },
+                            {
+                              "type": {
+                                "generic": "V"
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "category": "non-decoder",
+    "reason": "At the exact registered static/bool binding this is dyn FnMut(bool)->Result<bool,bool>. Native calls retain the break boolean and original error; it does not parse an encoded iteration plan.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open."
+  },
+  "safe_cex_venue_grvt::public_lifecycle::AddedMarkets": {
+    "generics": {
+      "params": [
+        {
+          "name": "M",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": {
+                "resolved_path": {
+                  "path": "safe_cex_types::Market",
+                  "args": null
+                }
+              },
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::cell::RefCell",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::rc::Rc",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::cell::RefCell",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "M"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::cell::RefCell",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::rc::Rc",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::cell::RefCell",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "generic": "M"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "decoder",
+    "reason": "The exact registered AddedMarkets<bool> is a real RefCell<Vec<Rc<RefCell<bool>>>> sequence decoder. Retain element order and native bool values, refusing nonboolean elements; the source default Market parameter is retained in AST identity and is not universally instantiated.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open.",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        true,
+        false
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      true,
+      [
+        0
+      ],
+      [
+        null
+      ]
+    ],
+    "observation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(d)=>{let rows=d.borrow();serde_json::json!({\"values\":rows.iter().map(|v|*v.borrow()).collect::<Vec<_>>(),\"distinct\":rows.len()<2||!std::rc::Rc::ptr_eq(&rows[0],&rows[1])})},Err(_)=>serde_json::json!({\"error\":true})}}",
+      "cases": [
+        {
+          "input": [],
+          "output": {
+            "values": [],
+            "distinct": true
+          }
+        },
+        {
+          "input": [
+            true,
+            false
+          ],
+          "output": {
+            "values": [
+              true,
+              false
+            ],
+            "distinct": true
+          }
+        },
+        {
+          "input": [
+            false,
+            true
+          ],
+          "output": {
+            "values": [
+              false,
+              true
+            ],
+            "distinct": true
+          }
+        },
+        {
+          "input": [
+            0
+          ],
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_grvt::private_commands::StreamFeed": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "decoder",
+    "reason": "Actual Rc<RefCell<Vec<String>>> is a real ordered string sequence decoder. Observe native text/order and refusal of wrong element kinds, preserving the shared UTF-8 boundary.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open.",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        "second",
+        "first"
+      ]
+    ],
+    "negative": [
+      null,
+      {},
+      true,
+      [
+        "ok",
+        1
+      ]
+    ],
+    "observation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(d)=>serde_json::json!({\"values\":d.borrow().clone()}),Err(_)=>serde_json::json!({\"error\":true})}}",
+      "cases": [
+        {
+          "input": [],
+          "output": {
+            "values": []
+          }
+        },
+        {
+          "input": [
+            "second",
+            "first"
+          ],
+          "output": {
+            "values": [
+              "second",
+              "first"
+            ]
+          }
+        },
+        {
+          "input": [
+            "first",
+            "second"
+          ],
+          "output": {
+            "values": [
+              "first",
+              "second"
+            ]
+          }
+        },
+        {
+          "input": [
+            "ok",
+            1
+          ],
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_grvt::builder_workflow::JsResult": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": {
+                "generic": "V"
+              },
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "generic": "V"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "generic": "V"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "decoder",
+    "reason": "At the exact bool/bool registration, Result<bool,bool> is a real externally tagged result decoder. Native Ok(false) and Err(true) remain distinct; wrong tags and payload kinds refuse.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open.",
+    "shape": "union",
+    "positive": [
+      {
+        "Ok": false
+      },
+      {
+        "Err": true
+      }
+    ],
+    "negative": [
+      null,
+      [],
+      true,
+      {
+        "Other": false
+      },
+      {
+        "Ok": 0
+      },
+      {
+        "Err": null
+      }
+    ],
+    "observation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(Ok(v))=>serde_json::json!({\"ok\":v}),Ok(Err(v))=>serde_json::json!({\"err\":v}),Err(_)=>serde_json::json!({\"error\":true})}}",
+      "cases": [
+        {
+          "input": {
+            "Ok": false
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "Err": true
+          },
+          "output": {
+            "err": true
+          }
+        },
+        {
+          "input": {
+            "Ok": true
+          },
+          "output": {
+            "ok": true
+          }
+        },
+        {
+          "input": {
+            "Err": 0
+          },
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_grvt::composition::NonceIds": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "indexmap::map::IndexMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "indexmap::map::IndexMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "decoder",
+    "reason": "Actual Rc<RefCell<IndexMap<String,String>>> is a real ordered map decoder. Native key/value vectors retain nonlexical insertion order and text; nonstring values refuse.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open.",
+    "shape": "map",
+    "sample": {
+      "z": "0x02",
+      "a": "0x01"
+    },
+    "negative": [
+      null,
+      [],
+      true,
+      {
+        "id": false
+      }
+    ],
+    "observation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(d)=>{let rows=d.borrow();serde_json::json!({\"keys\":rows.keys().collect::<Vec<_>>(),\"values\":rows.values().collect::<Vec<_>>()})},Err(_)=>serde_json::json!({\"error\":true})}}",
+      "cases": [
+        {
+          "input": {
+            "z": "0x02",
+            "a": "0x01"
+          },
+          "output": {
+            "keys": [
+              "z",
+              "a"
+            ],
+            "values": [
+              "0x02",
+              "0x01"
+            ]
+          }
+        },
+        {
+          "input": {
+            "second": "b",
+            "first": "a"
+          },
+          "output": {
+            "keys": [
+              "second",
+              "first"
+            ],
+            "values": [
+              "b",
+              "a"
+            ]
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "keys": [],
+            "values": []
+          }
+        },
+        {
+          "input": {
+            "id": false
+          },
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_grvt::composition::NonceTimes": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "indexmap::map::IndexMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "primitive": "f64"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "indexmap::map::IndexMap",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "alloc::string::String",
+                                            "args": null
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "primitive": "f64"
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "decoder",
+    "reason": "Actual Rc<RefCell<IndexMap<String,Option<f64>>>> is a real ordered map decoder. Raw text native observations retain present None versus missing keys, order and binary64 signed-zero bits; no string-to-number coercion is admitted.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open.",
+    "shape": "map",
+    "sample": {
+      "second": null,
+      "first": 2.5
+    },
+    "negative": [
+      null,
+      [],
+      true,
+      {
+        "id": false
+      },
+      {
+        "id": "1"
+      }
+    ],
+    "observation": {
+      "call": "{match serde_json::from_str::<$type>($value.as_str().unwrap()){Ok(d)=>{let rows=d.borrow();serde_json::json!({\"keys\":rows.keys().collect::<Vec<_>>(),\"values\":rows.values().map(|v|v.map(|v|format!(\"{:016x}\",v.to_bits()))).collect::<Vec<_>>()})},Err(_)=>serde_json::json!({\"error\":true})}}",
+      "cases": [
+        {
+          "input": "{\"second\":null,\"first\":-0.0}",
+          "output": {
+            "keys": [
+              "second",
+              "first"
+            ],
+            "values": [
+              null,
+              "8000000000000000"
+            ]
+          }
+        },
+        {
+          "input": "{\"z\":2.5,\"a\":0}",
+          "output": {
+            "keys": [
+              "z",
+              "a"
+            ],
+            "values": [
+              "4004000000000000",
+              "0000000000000000"
+            ]
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "keys": [],
+            "values": []
+          }
+        },
+        {
+          "input": "{\"id\":\"1\"}",
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_grvt::public_feeds::MarketRef": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Market",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "core::cell::RefCell",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Market",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "decoder",
+    "reason": "Actual Rc<RefCell<Market>> is a real shared Market decoder. Two independently authored valid maps expose native id/symbol/active, optional false versus absence, nested numeric bits and present-null info. Shared Market decoder obligations are not replaced by these alias observations.",
+    "evidence": "Exact compiler source and expanded targets, generics, actual root artifacts and registry-fixed native identities are retained. Ordinary native decoder/conversion trait probes and direct data observations pass on native and wasm for these eighteen selected complete aliases (six runtime and twelve explicit classifications per target). tests/accepted_aliases.rs supplies independent actual alias/container/callback/future witnesses. The real borrowed Fields<bool> decoder and whole-crate/local source coverage remain separate and open.",
+    "shape": "map",
+    "sample": {
+      "id": "native-id",
+      "symbol": "NATIVE",
+      "base": "B",
+      "quote": "Q",
+      "active": false,
+      "precision": {
+        "amount": 0.125,
+        "price": 0.25
+      },
+      "limits": {
+        "amount": {
+          "min": 0.5,
+          "max": 10
+        },
+        "leverage": {
+          "min": 1,
+          "max": 20
+        }
+      },
+      "isPerpetual": false,
+      "info": null,
+      "takerFee": 0.1,
+      "makerFee": 0.2
+    },
+    "negative": [
+      null,
+      [],
+      true,
+      {}
+    ],
+    "observation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(d)=>{let d=d.borrow();serde_json::json!({\"id\":d.id,\"symbol\":d.symbol,\"active\":d.active,\"perpetual\":d.is_perpetual,\"spot\":d.is_spot,\"amount\":format!(\"{:016x}\",d.precision.amount.to_bits()),\"price\":format!(\"{:016x}\",d.precision.price.to_bits()),\"max_leverage\":format!(\"{:016x}\",d.limits.leverage.max.to_bits()),\"info_present_null\":d.info.as_ref().is_some_and(serde_json::Value::is_null)})},Err(_)=>serde_json::json!({\"error\":true})}}",
+      "cases": [
+        {
+          "input": {
+            "id": "native-id",
+            "symbol": "NATIVE",
+            "base": "B",
+            "quote": "Q",
+            "active": false,
+            "precision": {
+              "amount": 0.125,
+              "price": 0.25
+            },
+            "limits": {
+              "amount": {
+                "min": 0.5,
+                "max": 10
+              },
+              "leverage": {
+                "min": 1,
+                "max": 20
+              }
+            },
+            "isPerpetual": false,
+            "info": null,
+            "takerFee": 0.1,
+            "makerFee": 0.2
+          },
+          "output": {
+            "id": "native-id",
+            "symbol": "NATIVE",
+            "active": false,
+            "perpetual": false,
+            "spot": null,
+            "amount": "3fc0000000000000",
+            "price": "3fd0000000000000",
+            "max_leverage": "4034000000000000",
+            "info_present_null": true
+          }
+        },
+        {
+          "input": {
+            "id": "second-id",
+            "symbol": "SECOND",
+            "base": "B",
+            "quote": "Q",
+            "active": true,
+            "precision": {
+              "amount": 0.5,
+              "price": 0.25
+            },
+            "limits": {
+              "amount": {
+                "min": 0.5,
+                "max": 10
+              },
+              "leverage": {
+                "min": 1,
+                "max": 20
+              }
+            },
+            "isPerpetual": true,
+            "info": null,
+            "takerFee": 0.1,
+            "makerFee": 0.2
+          },
+          "output": {
+            "id": "second-id",
+            "symbol": "SECOND",
+            "active": true,
+            "perpetual": true,
+            "spot": null,
+            "amount": "3fe0000000000000",
+            "price": "3fd0000000000000",
+            "max_leverage": "4034000000000000",
+            "info_present_null": true
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  },
   "safe_cex_venue_grvt::builder::get_eip712_domain": {
     "api": {
       "kind": "function",
@@ -6661,9 +11057,9 @@
         }
       },
       {
-        "input": "💠_1m",
+        "input": "\ud83d\udca0_1m",
         "output": {
-          "mapped": "💠_1m"
+          "mapped": "\ud83d\udca0_1m"
         }
       },
       {

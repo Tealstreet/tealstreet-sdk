@@ -310,76 +310,209 @@ fn kind_side(base: &PlaceOrderOpts) -> String {
         .unwrap_or_default()
 }
 
-// ts: BybitExchange.fetchPositionMode
-pub(crate) fn fetch_position_mode(rt: &Rt, symbol: Js) -> Result<Js, Thrown> {
-    let symbol = text(&symbol)?;
-    let body_rt = rt.clone();
-    Ok(rt.spawn(Box::pin(async move {
-        let rt = body_rt;
-        let venue = venue(&rt)?;
-        let error = |e: Thrown| Rc::new(to_json(&e.value).unwrap_or(Value::Null));
-        let mode = crate::position_controls::fetch_position_mode(
-            &symbol,
-            || {
-                let positions = serde_json::to_value(venue.base.store.positions().to_vec())
-                    .map_err(|e| error(Thrown::error("TypeError", &e.to_string())))?;
-                Ok(Rc::new(positions.as_array().cloned().unwrap_or_default()))
-            },
-            |symbol| Ok(venue.get_category_for_symbol(symbol).into()),
-            |endpoint, config| {
-                let xhr = rt.this.get("xhr").map_err(error)?;
-                let pending = xhr
-                    .call_method(
-                        "get",
-                        vec![Js::str(endpoint), from_json(&Value::Object(config))],
-                    )
-                    .map_err(error)?;
-                Ok(async move {
-                    let response = await_js(pending).await.map_err(error)?;
-                    Ok(Rc::new(
-                        to_json(&response.get("data").map_err(error)?).map_err(error)?,
-                    ))
-                })
-            },
-            |row, _| {
-                to_json(
-                    &rt.this
-                        .call_method("mapPosition", vec![from_json(row)])
-                        .map_err(error)?,
-                )
-                .map_err(error)
-            },
-            |positions| {
-                if let Some(positions) = positions {
-                    rt.this
-                        .get("store")
-                        .and_then(|store| {
-                            store.call_method(
-                                "addOrUpdatePositions",
-                                vec![Js::array(positions.iter().map(from_json).collect())],
-                            )
-                        })
-                        .map_err(error)?;
+// ts: getBybitResponseMeta and its normalization helpers. Retained status
+// values share the receiver's JSON.parse capability for raw proxy envelopes.
+fn position_response_meta(rt: &Rt, data: &Js) -> Result<Js, Thrown> {
+    let envelope = if data.is_object() || data.is_array() {
+        data.clone()
+    } else {
+        Js::object(vec![])
+    };
+    let raw = envelope.get("raw_response")?;
+    let raw = if raw.is_nullish() {
+        envelope.get("rawResponse")?
+    } else {
+        raw
+    };
+    let raw = if matches!(raw, Js::String(_)) {
+        rt.global("JSON")?
+            .call_method("parse", vec![raw])
+            .unwrap_or(Js::Undefined)
+    } else {
+        raw
+    };
+    let raw = if raw.is_object() && !raw.is_array() {
+        raw
+    } else {
+        Js::object(vec![])
+    };
+    let mut code = Js::Undefined;
+    let mut message = Js::Undefined;
+    for candidate in [&envelope, &raw] {
+        if code.is_undefined() {
+            for key in ["retCode", "ret_code", "code"] {
+                let value = candidate.get(key)?;
+                let number = match &value {
+                    Js::Number(number) => Some(*number),
+                    Js::String(_) => {
+                        let value = text(&value)?;
+                        let trimmed = safe_cex_num::js_trim(&value);
+                        (!trimmed.is_empty()).then(|| safe_cex_num::number_from_string(trimmed))
+                    }
+                    _ => None,
+                };
+                if let Some(number) = number.filter(|n| n.is_finite()) {
+                    code = Js::Number(number);
+                    break;
                 }
-                Ok(())
-            },
-            |message, msg, extra| {
-                rt.this
-                    .call_method(
-                        "emitAndLogError",
-                        vec![
-                            message.as_ref().map_or(Js::Undefined, from_json),
-                            msg.map_or(Js::Undefined, Js::str),
-                            extra.map_or(Js::Undefined, |e| from_json(&Value::Object(e))),
-                        ],
-                    )
-                    .map_err(error)?;
-                Ok(())
-            },
-        )
-        .await
-        .map_err(|e| Thrown::new(from_json(&e)))?;
-        Ok(mode.as_ref().map_or(Js::Undefined, from_json))
+            }
+        }
+        if message.is_undefined() {
+            for key in ["retMsg", "ret_msg", "message", "msg"] {
+                let value = candidate.get(key)?;
+                if matches!(value, Js::String(_)) {
+                    let value = text(&value)?;
+                    let trimmed = safe_cex_num::js_trim(&value);
+                    if !trimmed.is_empty() {
+                        message = Js::str(trimmed);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+    Ok(Js::object(vec![
+        (
+            "isSuccess",
+            Js::Bool(if code.is_undefined() {
+                message.strict_equals(&Js::str("OK"))
+            } else {
+                code.strict_equals(&Js::Number(0.))
+            }),
+        ),
+        (
+            "hasExplicitStatus",
+            Js::Bool(!code.is_undefined() || !message.is_undefined()),
+        ),
+        ("retCode", code),
+        ("retMsg", message),
+    ]))
+}
+
+// ts: BybitExchange.fetchPositionMode. Mapping and Store publication never
+// project a native Position through JSON.
+pub(crate) fn fetch_position_mode(rt: &Rt, symbol: Js) -> Result<Js, Thrown> {
+    fetch_position_mode_body(rt, symbol, true)
+}
+
+// ts: BybitInverseExchange.fetchPositionMode — direct retMsg policy and
+// optional map, rather than the primary normalized-status/array-only policy.
+pub(crate) fn fetch_inverse_position_mode(rt: &Rt, symbol: Js) -> Result<Js, Thrown> {
+    fetch_position_mode_body(rt, symbol, false)
+}
+
+fn fetch_position_mode_body(rt: &Rt, symbol: Js, primary: bool) -> Result<Js, Thrown> {
+    let rt = rt.clone();
+    Ok(rt.clone().spawn(Box::pin(async move {
+        let store = rt.this.get("store")?;
+        let selected_symbol = symbol.clone();
+        let found = store.get("positions")?.call_method(
+            "find",
+            vec![Js::function("positionModeSymbol", move |_, args| {
+                Ok(Js::Bool(
+                    crate::binding::value::arg(&args, 0)
+                        .get("symbol")?
+                        .strict_equals(&selected_symbol),
+                ))
+            })],
+        )?;
+        let mode = if found.is_nullish() {
+            Js::Undefined
+        } else {
+            found.get("positionMode")?
+        };
+        if mode.truthy() {
+            return Ok(mode);
+        }
+        let endpoint = crate::types::ENDPOINTS["POSITIONS"].as_str().unwrap();
+        let data = await_js(rt.this.get("xhr")?.call_method(
+            "get",
+            vec![
+                Js::str(endpoint),
+                Js::object(vec![(
+                    "params",
+                    Js::object(vec![
+                ("category", rt.this.call_method("getCategoryForSymbol", vec![symbol.clone()])?),
+                ("symbol", symbol.clone()),
+            ]),
+                )]),
+            ],
+        )?)
+        .await?
+        .get("data")?;
+        let meta = if primary {
+            position_response_meta(&rt, &data)?
+        } else {
+            Js::Undefined
+        };
+        if !primary && !get_key(&data, "retMsg")?.strict_equals(&Js::str("OK")) {
+            rt.this
+                .call_method("emitAndLogError", vec![get_key(&data, "retMsg")?])?;
+            return Ok(Js::str("oneway"));
+        }
+        let result = if data.is_nullish() {
+            Js::Undefined
+        } else {
+            data.get("result")?
+        };
+        let list = if result.is_nullish() {
+            Js::Undefined
+        } else {
+            result.get("list")?
+        };
+        let rows = list.array_items().unwrap_or_default();
+        if primary && !meta.get("isSuccess")?.truthy() && rows.is_empty() {
+            let message = meta.get("retMsg")?;
+            let code = meta.get("retCode")?;
+            let fallback = if message.truthy() {
+                message
+            } else if !code.is_undefined() {
+                Js::str(&format!(
+                    "Bybit positions request failed with code {}",
+                    text(&code)?
+                ))
+            } else {
+                Js::str("Bybit positions request returned malformed status payload")
+            };
+            rt.this.call_method(
+                "emitAndLogError",
+                vec![
+                    fallback,
+                    Js::str("Bybit fetchPositionMode failed"),
+                    Js::object(vec![
+                        ("endpoint", Js::str(endpoint)),
+                        ("symbol", symbol),
+                        ("retCode", code),
+                        ("retMsg", meta.get("retMsg")?),
+                        ("hasExplicitStatus", meta.get("hasExplicitStatus")?),
+                    ]),
+                ],
+            )?;
+            return Ok(Js::str("oneway"));
+        }
+        if !primary && !list.is_nullish() && !list.is_array() {
+            return Err(Thrown::type_error(
+                "data?.result?.list?.map is not a function",
+            ));
+        }
+        let mapped = if !primary && list.is_nullish() {
+            Js::Undefined
+        } else {
+            Js::array(
+                rows.into_iter()
+                    .map(|row| {
+                        rt.this
+                            .call_method("mapPosition", vec![row.unwrap_or(Js::Undefined)])
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        };
+        store.call_method("addOrUpdatePositions", vec![mapped.clone()])?;
+        if mapped.get("length")?.truthy() {
+            mapped.get("0")?.get("positionMode")
+        } else {
+            Ok(Js::str("oneway"))
+        }
     })))
 }
 

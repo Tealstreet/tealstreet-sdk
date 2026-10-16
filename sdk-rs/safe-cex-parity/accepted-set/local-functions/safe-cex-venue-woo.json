@@ -1,0 +1,12 @@
+{
+  "safe-cex-venue-woo/src/api.rs::LOCAL_FUNCTION:visit": {
+    "category": "non-decoder",
+    "reason": "Two nested visit helpers (query and sorted_query) flatten an outbound request Value into encoded query pairs using JS String coercion and root collation. Outbound serialization only.",
+    "sourceSha256": "7a4288ffac9ed1776886d535651d37bcea40d70873f7c5eccaa42b099905ffdb"
+  },
+  "safe-cex-venue-woo/src/v3_public.rs::LOCAL_FUNCTION:sorted": {
+    "category": "non-decoder",
+    "reason": "Inside map_woo_v3_candles: stable top-down merge sort of already typed Candle rows by timestamp, preserving source comparator semantics. No raw input.",
+    "sourceSha256": "65a0fea71b5a259b2f36fbcc89555f332753f3472a044271d65b09e2e1315e4a"
+  }
+}

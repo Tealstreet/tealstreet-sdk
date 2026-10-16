@@ -1,9 +1,10 @@
 # Rust venue construction through the registry
 
 Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, `breakoutprop`, Bybit (`bybit`, `bybitdemo`, `bybitspot`),
+`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, `breakoutprop`, Bybit (`bybit`, `bybitdemo`, `bybitspot`, `bybitinverse`),
 Coinbase (`coinbase`, `coinbasespot`), `cryptocom`, `phemex`,
 the Kraken family (`kraken`, `krakenspot`),
+the Orderly family (`kodiakfi`, `mode`, `salsadex`, `tealstreet-dex`, `what`, `woofi`),
 `hyperliquid` and `hyperliquidspot`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), `polymarket`, `woo` and `weex`, 2026-10-16 (`src/rust_venues.rs`,
@@ -53,11 +54,11 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   - `blofin`, built with `BlofinNativeExchange::new` from a registry-built
     `BaseExchange` and `BlofinDependencies` (runtime, the common HTTP builder,
     optional externalPublicData provider, remote-signer account name).
-  - `bybit`, `bybitdemo` and `bybitspot`, built with `BybitExchange::create`. The host supplies
+  - `bybit`, `bybitdemo`, `bybitspot` and `bybitinverse`, built with `BybitExchange::create`. The host supplies
     the wire, HTTP host, runtime clocks and external-data factory. Hosted signing
     uses the shared signer bridge for both the source receiver and typed API
     clients; account names and availability follow the same capability. Native
-    sockets start on the direct path. `tests/native_host_bybit.rs` verifies both
+    sockets start on the direct path. `tests/native_host_bybit.rs` verifies all four
     names over local HTTP, including HMAC bytes with empty local credentials.
   - `coinbase` and `coinbasespot`, one constructor around `CoinbaseExchange::new`.
     `CoinbaseDependencies` carries the shared HTTP/runtime hosts, signing cache,
@@ -65,6 +66,10 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     its cache and routes hosted signing through the existing shared HTTP host.
     `tests/native_host_coinbase.rs` runs both names over local HTTP/WS servers and
     checks Coinbase Spot's source external-provider refusal.
+  - `kodiakfi`, `mode`, `salsadex`, `tealstreet-dex`, `what` and `woofi`, built
+    with `native_exchange::OrderlyExchange::new` on the shared js_runtime.
+    `RustVenueHost::orderly(name)` supplies the runtime, per-options HTTP
+    capability and external-public-data factory for the selected family name.
   - `okx`, `okxdemo`, `okxeu` and `okxeudemo`, one shared constructor around
     `OkxExchange::new`; the name picks the class. `OkxDependencies` carries the
     runtime and a `JsHttpHost`; the native host builds it with js_runtime
@@ -104,7 +109,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bybitinverse`, `hyrotrader`, `kucoin`, `mexc`, `lighter`
+follow-up PR. Expected next: `hyrotrader`, `kucoin`, `mexc`, `lighter`
 and `weex`.
 
 Each follow-up does four things:
@@ -214,6 +219,19 @@ BaseExchange. Empty-secret startup/placement/cancellation and signer-refusal
 proofs run in native_host_bingx; the API skips local signing whenever that
 capability is present, including when local credentials remain configured.
 
+Orderly-family Rust construction covers kodiakfi, mode, salsadex, tealstreet-dex,
+what and woofi. `RustVenueHost::orderly(name)` supplies their shared runtime,
+per-options HTTP capability and external-public-data factory. The native host
+retains the selected family name while routing the final signed request through
+the shared transport stack. `tests/native_host_orderly.rs` verifies the actual
+Ed25519 signature server-side for every family entry. The shared hosted signer
+and account name now reach each per-options HTTP client and typed availability.
+TypeScript still signs private HTTP locally before its hosted adapter, and its
+private WS never reads remoteSigner. Thus local secrets remain required for
+private HTTP and WS, while public HTTP still uses the hosted adapter. Empty
+secrets preserve the source private HTTP error; private WS enters the already
+approved shared onOpen recovery. `native_host_orderly_hosted` compares these
+valid/empty-secret cases for all six names with actual source.
 
 ## Hyperliquid native host
 
@@ -262,9 +280,13 @@ and native sockets; private fills forward to the constructed venue's emitter
 through a weak reference. Native date conversion retains the shared UTC-host
 assumption. KuCoin futures and Spot share the hosted account with both HTTP
 clients, source options and typed availability through the common signer bridge.
-Private WS obtains its token through that signed HTTP path. MEXC still refuses
-hosted signing until its capability is connected. `tests/native_host_kucoin_mexc.rs` constructs all
-three entries and verifies actual signed account reads server-side, including
+Private WS obtains its token through that signed HTTP path. MEXC shares the
+hosted account between configured HTTP, typed availability and private WS login,
+including the socket account name. Public HTTP retains its source signing bypass.
+Signer errors and absent WS signatures retain the source error message and send
+no login or private filters. Its native HTTP/WS witness is
+`tests/native_host_mexc_hosted.rs`. `tests/native_host_kucoin_mexc.rs` constructs
+all three entries and verifies actual signed account reads server-side, including
 KuCoin's signed passphrase and MEXC's stable account identity.
 `native_host_kucoin_hosted` additionally compares actual TypeScript request
 metadata, callback headers, unlimited cancellation and private subscription

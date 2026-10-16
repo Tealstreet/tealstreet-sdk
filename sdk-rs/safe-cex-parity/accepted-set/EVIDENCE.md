@@ -531,3 +531,41 @@ policy regressions pass. Fresh compiler preflight also retains seven refusals
 for changed source/raw target/expanded target/generic bounds, caller redirect,
 missing serde_json origin and unknown owner. The focused temporary contract
 is not an installed production classification.
+
+## Exact inherited constant-method witnesses
+
+`inherited-constant-outputs/safe-cex-venue-grvt.json` separately reviews four actual indexed GRVT
+Exchange methods: fetch_symbol_max_leverage, change_position_mode,
+change_margin_type and fetch_public_trades. Each inherits the maintained TS
+BaseExchange rejection. The finite policy pins the complete normalized compiler
+API, actual package/manifest, raw-method role, Rust method span and source hash,
+TS base method lines/excerpt and whole-file hash, venue inheritance source hash,
+native binding fixture hash, and exact adapter/cases. Unreviewed methods cannot
+use the flag, and no unit-input or omitted-entry exception is added. The two
+existing Num serializer constants and all their guards remain unchanged.
+
+Distinct real inputs call the actual production Exchange methods and observe
+native Error name/message, HTTP count, Store balance bits/orders/positions/markets,
+notifications, socket count, logs, reports and clock state. No input echo stands
+in for native output. The complete control fixture retains all eleven compiler
+APIs, including the ordinary typed constructor and six independently reviewed
+nonconstant adapters. Its selected owner receipt is separate from any complete
+GRVT package or matrix claim; production classifications remain consumer-owned.
+
+The native control uses fresh pinned rustdoc discovery, then instruments a
+byte-preserving copy of the production library without cfg(test). Two separate
+post-validation emitter mutations alter the four native error-name observations
+or HTTP-count observations. Each must compile, produce eight named output
+mismatches for this actual owner, and fail the native witness assertion; restored
+execution must pass. Compiler or discovery refusals cannot count as controls.
+Three additional executed pure-policy mutations remove the maintained-source,
+fixture or adapter pin and must fail their named refusal assertion. The control
+registry retains every old control and adds three tests/five mutations, for
+126 tests and 149 mutations. The long complete control suite is not rerun here.
+
+Focused execution passes all three new tests and five executed mutations:
+the native test completes in 171 seconds with the complete eleven-API owner,
+eight expected mismatches for each compiled mutation, then restored zero
+failures. The 15 new/existing contract-policy tests, all 368 wiring tests and
+parity checking (7,459 rows / 17,198 public Rust items) pass. No whole-package
+GRVT, wasm or full accepted-set matrix clearance is claimed by this policy PR.

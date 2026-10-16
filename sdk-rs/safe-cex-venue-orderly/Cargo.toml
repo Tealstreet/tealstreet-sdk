@@ -20,5 +20,6 @@ base64.workspace = true
 bs58 = "=0.5.1"
 regex.workspace = true
 
-[dev-dependencies]
 serde_json.workspace = true
+safe-cex-exchange = { path = "../safe-cex-exchange" }
+safe-cex-transport = { path = "../safe-cex-transport" }

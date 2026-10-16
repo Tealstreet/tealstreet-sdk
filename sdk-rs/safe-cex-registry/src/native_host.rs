@@ -187,11 +187,6 @@ impl RustVenueHost for NativeVenueHost {
         &self,
         options: &safe_cex_types::ExchangeOptions,
     ) -> Result<crate::rust_venues::MexcDependencies, ExchangeError> {
-        if self.remote.is_some() || options.remote_signer.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for mexc on the native host",
-            ));
-        }
         let http = safe_cex_venue_mexc::client::create_api(
             native_http_options(
                 &self.runtime,
@@ -199,7 +194,7 @@ impl RustVenueHost for NativeVenueHost {
                 safe_cex_types::ExchangeName::Mexc,
                 options,
                 safe_cex_transport::RestRequest::default(),
-                None,
+                self.remote.clone(),
             ),
             &safe_cex_transport::TransportRegistry::default(),
             Rc::new(NativeRetryClock(self.runtime.clone())),
@@ -286,6 +281,42 @@ impl RustVenueHost for NativeVenueHost {
         )
     }
     #[expect(clippy::arc_with_non_send_sync)]
+    fn orderly(
+        &self,
+        name: safe_cex_types::ExchangeName,
+    ) -> Result<safe_cex_venue_orderly::native_exchange::OrderlyDependencies, ExchangeError> {
+        let runtime = self.runtime.clone();
+        let adapter = self.adapter.clone();
+        let remote = self.remote.clone();
+        Ok(
+            safe_cex_venue_orderly::native_exchange::OrderlyDependencies {
+                runtime: self.runtime.clone(),
+                http: Rc::new(move |options| {
+                    if remote.is_none() && options.remote_signer.is_some() {
+                        return Err(ExchangeError::new(
+                            "Orderly remoteSigner requires a native hosted signer capability",
+                        ));
+                    }
+                    let http = safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                        runtime.clone(),
+                        Arc::new(SourceApiRest {
+                            name: name.clone(),
+                            runtime: runtime.clone(),
+                            adapter: adapter.clone(),
+                            options: options.clone(),
+                        }),
+                        remote.clone(),
+                    );
+                    http.configure_exchange(name.clone())
+                        .map_err(|error| error.to_exchange_error())?;
+                    Ok(http)
+                }),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
+    #[expect(clippy::arc_with_non_send_sync)]
     fn asterdex(
         &self,
     ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
@@ -303,7 +334,8 @@ impl RustVenueHost for NativeVenueHost {
                     }
                     let http = safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                         runtime.clone(),
-                        Arc::new(AsterRest {
+                        Arc::new(SourceApiRest {
+                            name: safe_cex_types::ExchangeName::Asterdex,
                             runtime: runtime.clone(),
                             adapter: adapter.clone(),
                             options: options.clone(),
@@ -705,12 +737,13 @@ impl RestAdapter for HyperliquidHttp {
 
 // The source API factory supplies its base URL after choosing primary/secondary
 // options. Route the final post-signing request through the shared HTTP stack.
-struct AsterRest {
+struct SourceApiRest {
+    name: safe_cex_types::ExchangeName,
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
     options: safe_cex_types::ExchangeOptions,
 }
-impl RestAdapter for AsterRest {
+impl RestAdapter for SourceApiRest {
     fn execute(
         &self,
         mut request: safe_cex_transport::RestRequest,
@@ -719,7 +752,7 @@ impl RestAdapter for AsterRest {
             let client = native_client(
                 &self.runtime,
                 &self.adapter,
-                safe_cex_types::ExchangeName::Asterdex,
+                self.name.clone(),
                 &self.options,
                 request.clone(),
                 None,

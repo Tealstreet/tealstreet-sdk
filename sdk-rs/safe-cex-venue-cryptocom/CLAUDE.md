@@ -10,9 +10,9 @@ for `fetchSymbolMaxLeverage`, `scheduleCancel` and `fetchPublicTrades`;
 `fetchHistoricalFills` returns the source's empty list. Registry wiring belongs
 to the registry lane. Tunnel installation currently rejects explicitly.
 
-Disposal must close the typed BaseExchange before source socket teardown:
-the shared facade's `isDisposed` accessor has no setter. Assigning the source
-flag alone leaves pending startup continuations active. `tests/exchange_binding.rs`
+Disposal follows the source flag write and public/private socket teardown.
+The shared writable `isDisposed` accessor updates the typed base flag without
+calling full BaseExchange.dispose, preserving the source's inherited listeners. `tests/exchange_binding.rs`
 holds an HTTP response across disposal and checks that no market update, ticker
 request or socket construction follows. It also checks read purity, public-only
 startup and private subscription ordering across failed/successful auth acks.
@@ -310,3 +310,20 @@ call is needed. This preserves the source's inherited event listeners while
 disposing public then private sockets. The binding lifecycle regression checks
 the flag and retained update listener; shared js_runtime's live-source disposal
 oracle checks ordering and abrupt completion.
+
+The accepted-contract string slice reviews seven concrete wire enums already
+using String admission and private Serde remote companions. Direct native
+variant/serialization tests, seven compiling tagged-map mutation controls and a
+closed fresh-rustdoc production probe selector accompany the per-crate shard.
+See STRING_CONTRACT_REVIEW.md and scripts/string-contracts.mjs. Scope is these
+seven original native/default census owners; the other owners, aliases,
+construction records, locals, features and target execution remain separate
+obligations. No decoder behavior or manifest classification is changed.
+
+Native/default accepted-contract review for six concrete scalar wire records and
+eight finite carrier enum APIs is documented in RECORD_CARRIER_CONTRACT_REVIEW.md.
+The closed selector is scripts/record-carrier-contracts.mjs; native field/variant
+observations and mutation controls run independently of compiler shape discovery.
+This is fourteen original census owners and six specific Clone reviews; other
+owners, aliases, construction entries, locals, features and WASM execution remain
+separate obligations.
