@@ -1582,9 +1582,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "0d8b4b86c55396eb579bd68f6e155eeb2e6e834cf053216eff00d0950fc001fa",
+      "producer_sha256": "a7cb4f8e4b7af097b56f060af0e5f446fc4630e31bd54ddd72048f5221d6c49e",
       "classification": "no-owned-latch",
-      "reason": "JS BaseExchange callbacks own venue/arguments and delegate snapshot, order and overlay futures to existing core owners. The merged factory now receives the existing base and the privacy getter dispatches through the venue; both are synchronous, with no RefCell borrow across await."
+      "reason": "JS BaseExchange callbacks own venue/arguments and delegate snapshot, order and overlay futures to existing core owners. The merged factory now receives the existing base and the privacy getter dispatches through the venue; both are synchronous, with no RefCell borrow across await. Reviewed writable isDisposed accessor: getter and setter share one existing core Cell; assignment is synchronous, reserves no task/listener/waiter, and adds no await boundary. Source-sequencing regression is disposed_assignment_matches_actual_venue_cleanup_sequence."
     },
     {
       "owner": "src/js_runtime/builtins.rs::chain_value",
