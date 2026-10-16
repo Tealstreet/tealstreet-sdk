@@ -99,21 +99,22 @@ pub(super) fn extract(h: &Host, value: Js, keys: &[&str]) -> Result<Js, Thrown> 
             is_nullish: Js::is_nullish,
             undefined: || Js::Undefined,
             get_property: |_, v, k| v.get_key(k),
-            empty_array: |_| Js::array(vec![]),
+            empty_array: |_| Js::array(std::vec![]),
         },
     )
 }
 pub(super) fn omit(h: &Host, value: Js) -> Result<Js, Thrown> {
-    h.global("omitUndefined")?.call(Js::Undefined, vec![value])
+    h.global("omitUndefined")?
+        .call(Js::Undefined, std::vec![value])
 }
 pub(super) fn iterator(_: &Host, value: &Js) -> Result<Js, Thrown> {
     let values = match value {
         Js::Array(_) => value.clone(),
-        Js::Map(_) => value.call_method("entries", vec![])?,
-        Js::Set(_) => value.call_method("values", vec![])?,
+        Js::Map(_) => value.call_method("entries", std::vec![])?,
+        Js::Set(_) => value.call_method("values", std::vec![])?,
         _ => return Err(Thrown::type_error("value is not iterable")),
     };
-    Ok(Js::object(vec![
+    Ok(Js::object(std::vec![
         ("values", values),
         ("index", Js::Number(0.0)),
     ]))
@@ -135,7 +136,7 @@ pub(super) fn map(
         return Err(Thrown::type_error("value.map is not a function"));
     }
     let n = length(value)?;
-    let mut out = vec![None; n];
+    let mut out = std::vec![None; n];
     for (i, slot) in out.iter_mut().enumerate() {
         if value.has_own(&i.to_string()) {
             *slot = Some(callback(at(value, i)?, i)?);
@@ -151,7 +152,7 @@ pub(super) fn filter(
         return Err(Thrown::type_error("value.filter is not a function"));
     }
     let n = length(value)?;
-    let mut out = vec![];
+    let mut out = std::vec![];
     for i in 0..n {
         if value.has_own(&i.to_string()) {
             let v = at(value, i)?;
@@ -163,15 +164,15 @@ pub(super) fn filter(
     Ok(Js::array(out))
 }
 pub(super) fn new_map(h: &Host, value: Js) -> Result<Js, Thrown> {
-    h.global("Map")?.call(Js::Undefined, vec![value])
+    h.global("Map")?.call(Js::Undefined, std::vec![value])
 }
 pub(super) fn set(h: &Host, value: Js) -> Result<Js, Thrown> {
-    h.global("Set")?.call(Js::Undefined, vec![value])
+    h.global("Set")?.call(Js::Undefined, std::vec![value])
 }
 pub(super) fn default_config(
     value: crate::symbol_settings::WeexDefaultSymbolConfig,
 ) -> Result<Js, Thrown> {
-    Ok(Js::object(vec![
+    Ok(Js::object(std::vec![
         ("marginType", from_typed(&value.margin_type)?),
         ("positionMode", from_typed(&value.position_mode)?),
         ("crossLeverage", Js::Number(value.cross_leverage)),

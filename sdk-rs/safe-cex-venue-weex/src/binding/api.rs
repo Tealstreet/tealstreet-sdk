@@ -37,7 +37,7 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
         define: v::define,
         starts_with: |_, value, prefix| {
             Ok(value
-                .call_method("startsWith", vec![Js::str(prefix)])?
+                .call_method("startsWith", std::vec![Js::str(prefix)])?
                 .truthy())
         },
         uppercase_method: |_, value| {
@@ -48,7 +48,7 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
                 if method.is_nullish() {
                     Ok(Js::Undefined)
                 } else {
-                    method.call(value.clone(), vec![])
+                    method.call(value.clone(), std::vec![])
                 }
             }
         },
@@ -77,7 +77,10 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
             .map_err(v::coercion)?;
             Ok(Js::str(&query))
         },
-        stringify: |h, value| h.global("JSON.stringify")?.call(Js::Undefined, vec![value]),
+        stringify: |h, value| {
+            h.global("JSON.stringify")?
+                .call(Js::Undefined, std::vec![value])
+        },
         callback: |h, callback| {
             let weak = h.weak();
             Ok(Js::function("", move |_, a| {
@@ -108,13 +111,13 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
                 to_typed(&exchange.get("name")?)?,
             )?;
             let apply = std::rc::Rc::new(move |response: &Js| -> Result<(), Thrown> {
-                let data = transform.call(Js::Undefined, vec![response.get("data")?])?;
+                let data = transform.call(Js::Undefined, std::vec![response.get("data")?])?;
                 response.set("data", data)
             });
             let fulfilled = apply.clone();
             xhr.get("interceptors")?.get("response")?.call_method(
                 "use",
-                vec![
+                std::vec![
                     Js::function("weexTransformResponse", move |_, args| {
                         let response = arg(&args, 0);
                         fulfilled(&response)?;
@@ -137,7 +140,7 @@ pub(super) fn runtime() -> WeexApiRuntime<Host, Js, Thrown> {
             client
                 .get("interceptors")?
                 .get(kind)?
-                .call_method("use", vec![callback])?;
+                .call_method("use", std::vec![callback])?;
             Ok(())
         },
         clock_ms: |h| Ok(Js::Number(h.0.now())),
@@ -159,7 +162,7 @@ fn install_retry(h: &Host, client: &Js) -> Result<(), Thrown> {
     let weak = h.weak();
     client.call_method(
         "__configureRetry",
-        vec![Js::object(vec![
+        std::vec![Js::object(std::vec![
             (
                 "retries",
                 Js::Number(crate::retry::WEEX_RETRY_CONFIG.retries as f64),
@@ -253,7 +256,7 @@ fn header_runtime() -> WeexHeaderRuntime<Host, Js, Thrown> {
         invoke: |_, f, this, value| {
             f.call(
                 this.clone(),
-                value.map(|s| vec![Js::utf16(s)]).unwrap_or_default(),
+                value.map(|s| std::vec![Js::utf16(s)]).unwrap_or_default(),
             )
         },
         entries: |_, v| {
