@@ -25,7 +25,7 @@ fn event(v: Value) -> EventValue {
     EventValue::from_json(v)
 }
 fn arr(v: EventValue) -> EventValue {
-    EventValue::Array(Rc::new(RefCell::new(vec![v])))
+    EventValue::array(vec![v])
 }
 fn wire(v: &EventValue) -> Value {
     match v {
@@ -39,12 +39,10 @@ fn wire(v: &EventValue) -> Value {
             }
         }
         EventValue::Bool(v) => json!(v),
-        EventValue::String(s) => json!(s),
-        EventValue::Enum(e) => e.wire(),
-        EventValue::Array(a) => a.borrow().iter().map(wire).collect(),
-        EventValue::Object(o) => o
-            .borrow()
-            .fields
+        EventValue::String(s) => json!(String::from_utf16(s).unwrap()),
+        EventValue::Array(a) => array_values(a).iter().map(wire).collect(),
+        EventValue::Object(_) => v
+            .spread()
             .iter()
             .map(|(k, v)| (k.clone(), wire(v)))
             .collect(),
@@ -171,7 +169,7 @@ impl Host {
         }
     }
     fn json(&self) -> Value {
-        json!({"sent":self.sent.borrow().iter().map(wire).collect::<Vec<_>>(),"timers":self.timers.borrow().iter().map(|t|json!({"delay":t.delay,"id":t.id})).collect::<Vec<_>>(),"cleared":self.cleared.borrow().iter().map(wire).collect::<Vec<_>>(),"cleanup":*self.cleaned.borrow(),"handlers":self.state.handlers.borrow().iter().map(|(k,v)|(k.clone(),json!(v.len()))).collect::<serde_json::Map<_,_>>(),"topics":self.state.topics.borrow().iter().map(|(k,v)|(k.clone(),json!(v))).collect::<serde_json::Map<_,_>>(),"nextId":self.state.next_subscription_id.get(),"candles":*self.candles.borrow(),"books":*self.book_values.borrow(),"gets":self.gets.borrow().iter().map(|(v,s,l)|json!({"client":if *v==Venue::Spot{"xhr"}else{"publicXhr"},"endpoint":if *v==Venue::Spot{"/api/v3/depth"}else{"/fapi/v1/depth"},"symbol":s,"limit":l})).collect::<Vec<_>>(),"applies":self.applies.borrow().iter().map(|(d,p)|json!({"u":wire(&d.get("u").unwrap()),"previous":p})).collect::<Vec<_>>(),"ops":*self.ops.borrow(),"failures":self.failures.borrow().iter().map(|e|json!({"original":Rc::ptr_eq(e,&self.primary),"name":e.name,"message":e.message,"code":e.code,"response":e.response})).collect::<Vec<_>>(),"inner":self.state.inner.borrow().iter().map(|(k,v)|(k.clone(),json!({"loaded":v.snapshot_loaded.get(),"updates":v.updates.borrow().iter().map(wire).collect::<Vec<_>>()}))).collect::<serde_json::Map<_,_>>()})
+        json!({"sent":self.sent.borrow().iter().map(wire).collect::<Vec<_>>(),"timers":self.timers.borrow().iter().map(|t|json!({"delay":t.delay,"id":t.id})).collect::<Vec<_>>(),"cleared":self.cleared.borrow().iter().map(wire).collect::<Vec<_>>(),"cleanup":*self.cleaned.borrow(),"handlers":self.state.handlers.borrow().iter().map(|(k,v)|(k.clone(),json!(v.len()))).collect::<serde_json::Map<_,_>>(),"topics":self.state.topics.borrow().iter().map(|(k,v)|(k.clone(),json!(v))).collect::<serde_json::Map<_,_>>(),"nextId":self.state.next_subscription_id.get(),"candles":*self.candles.borrow(),"books":*self.book_values.borrow(),"gets":self.gets.borrow().iter().map(|(v,s,l)|json!({"client":if *v==Venue::Spot{"xhr"}else{"publicXhr"},"endpoint":if *v==Venue::Spot{"/api/v3/depth"}else{"/fapi/v1/depth"},"symbol":s,"limit":l})).collect::<Vec<_>>(),"applies":self.applies.borrow().iter().map(|(d,p)|json!({"u":wire(&d.read("u").unwrap()),"previous":p})).collect::<Vec<_>>(),"ops":*self.ops.borrow(),"failures":self.failures.borrow().iter().map(|e|json!({"original":Rc::ptr_eq(e,&self.primary),"name":e.name,"message":e.message,"code":e.code,"response":e.response})).collect::<Vec<_>>(),"inner":self.state.inner.borrow().iter().map(|(k,v)|(k.clone(),json!({"loaded":v.snapshot_loaded.get(),"updates":v.updates.borrow().iter().map(wire).collect::<Vec<_>>()}))).collect::<serde_json::Map<_,_>>()})
     }
 }
 impl ListenerHost for Host {
@@ -276,12 +274,12 @@ impl ListenerHost for Host {
             let EventValue::Array(a) = data.get(key).unwrap() else {
                 panic!("authored levels")
             };
-            a.borrow()
+            array_values(&a)
                 .iter()
                 .map(|r| {
                     vec![
-                        r.get("0").unwrap().text().unwrap(),
-                        r.get("1").unwrap().text().unwrap(),
+                        r.read("0").unwrap().text().unwrap(),
+                        r.read("1").unwrap().text().unwrap(),
                     ]
                 })
                 .collect::<Vec<_>>()
@@ -290,7 +288,7 @@ impl ListenerHost for Host {
             &mut b.borrow_mut(),
             &rows("bids"),
             &rows("asks"),
-            data.get("lastUpdateId")?.number()?,
+            data.read("lastUpdateId")?.number()?,
             &mut s.borrow_mut(),
         );
         Ok(())
@@ -303,7 +301,7 @@ impl ListenerHost for Host {
         self.ops.borrow_mut().push("buffer");
         let mut out = vec![];
         for u in updates {
-            if u.get("u")?.number()? > id.number()? {
+            if u.read("u")?.number()? > id.number()? {
                 self.buffered.borrow_mut().push(u.clone());
                 out.push(u);
             }

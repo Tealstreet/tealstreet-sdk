@@ -2155,6 +2155,20 @@ impl BaseWebSocket {
         }
         Ok(())
     }
+    /// Source `if (this.ws) this.ws.close()`: close the current transport only.
+    /// Keep superclass timers, listeners, generation and retained handles intact.
+    pub fn close_current_websocket(&self) {
+        let (native, relay) = {
+            let state = self.state.borrow();
+            (state.native.clone(), state.relay.clone())
+        };
+        if let Some(socket) = native {
+            socket.close();
+        }
+        if let Some(socket) = relay {
+            socket.close(1000, "");
+        }
+    }
     pub fn is_force_closed(&self) -> bool {
         self.state.borrow().force_closed
     }
@@ -3790,6 +3804,50 @@ mod tests {
             Poll::Ready(result) => result,
             Poll::Pending => panic!("future unexpectedly pending"),
         }
+    }
+
+    #[test]
+    fn close_current_websocket_retains_native_superclass_state() {
+        let (socket, _, runtime, _) = fixture();
+        socket.close_current_websocket();
+        run(socket.create_websocket("wss://fixture".into(), vec![], None)).unwrap();
+        let generation = socket.state.borrow().generation;
+        let owned = socket.owned_tasks.len();
+        assert!(owned > 0);
+        socket.state.borrow_mut().timer_ids.insert(Timer::Ping, 42);
+        socket.close_current_websocket();
+        assert_eq!(runtime.socket.closed.get(), 1);
+        assert_eq!(socket.state.borrow().generation, generation);
+        assert_eq!(socket.state.borrow().timer_ids.get(&Timer::Ping), Some(&42));
+        assert_eq!(socket.owned_tasks.len(), owned);
+        assert!(socket.has_websocket());
+        assert!(!socket.is_force_closed());
+        assert!(Rc::ptr_eq(
+            socket.state.borrow().native.as_ref().unwrap(),
+            &(runtime.socket.clone() as Rc<dyn WsSocket>)
+        ));
+    }
+
+    #[test]
+    fn close_current_websocket_retains_relay_superclass_state() {
+        let (socket, runtime, host) = managed_relay_fixture();
+        runtime.pump();
+        let relay = socket.state.borrow().relay.clone().unwrap();
+        let generation = socket.state.borrow().generation;
+        let owned = socket.owned_tasks.len();
+        let receiver = socket.state.borrow().relay_task;
+        let io = host.sockets.borrow().last().unwrap().clone();
+        let closed = io.closed.get();
+        socket.close_current_websocket();
+        assert!(io.closed.get() > closed);
+        assert_eq!(socket.state.borrow().generation, generation);
+        assert_eq!(socket.state.borrow().relay_task, receiver);
+        assert_eq!(socket.owned_tasks.len(), owned);
+        assert!(!socket.is_force_closed());
+        assert!(Rc::ptr_eq(
+            socket.state.borrow().relay.as_ref().unwrap(),
+            &relay
+        ));
     }
 
     #[test]

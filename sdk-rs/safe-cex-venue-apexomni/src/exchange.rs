@@ -34,6 +34,7 @@ pub trait ApexHost {
     fn create_api(
         &self,
         options: &ExchangeOptions,
+        exchange: Rc<BaseExchange>,
         max_rps: Option<u8>,
     ) -> Result<(), ExchangeError>;
     fn create_websocket(
@@ -153,8 +154,12 @@ impl ApexOmniExchange {
             recently_cancelled_orders: RefCell::new(HashMap::new()),
             recent_ws_executions: RefCell::new(Vec::new()),
         });
-        venue.host.create_api(&venue.base.options(), Some(5))?;
-        venue.host.create_api(&venue.base.options(), None)?;
+        venue
+            .host
+            .create_api(&venue.base.options(), venue.base.clone(), Some(5))?;
+        venue
+            .host
+            .create_api(&venue.base.options(), venue.base.clone(), None)?;
         venue.host.create_websocket(Rc::downgrade(&venue), false)?;
         venue.host.create_websocket(Rc::downgrade(&venue), true)?;
         Ok(venue)
@@ -506,6 +511,9 @@ impl ApexOmniExchange {
         let response = self
             .request("get", "/v3/open-orders", J::Undefined, J::Undefined, false)
             .await?;
+        if self.base.is_disposed() {
+            return Ok(Vec::new());
+        }
         let rows = property(&response, "data")?;
         let now = self.base.runtime.now_ms();
         self.recently_cancelled_orders
@@ -665,6 +673,9 @@ impl ApexOmniExchange {
         let response = self
             .request("get", "/v3/account", J::Undefined, J::Undefined, false)
             .await?;
+        if self.base.is_disposed() {
+            return Ok(Vec::new());
+        }
         let account = property(&response, "data")?;
         let account_positions = property(account, "positions")?;
         let mut positions = Vec::new();
