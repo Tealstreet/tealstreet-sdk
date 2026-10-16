@@ -98,3 +98,6 @@ pub mod class_construction;
 pub mod socket_classes;
 
 pub mod exchange_class;
+
+pub mod binding;
+pub use binding::exchange::{WooDependencies, WooExchange};
