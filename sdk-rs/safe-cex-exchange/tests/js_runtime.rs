@@ -464,6 +464,11 @@ fn library_dayjs_subtracts_calendar_months_and_minutes() {
             .unwrap()
             .truthy()
     );
+    let stamp = run(&g, "dayjs", vec![Js::Number(1_706_659_200_123.0)]);
+    let iso = stamp.call_method("toISOString", vec![]).unwrap();
+    assert_eq!(stringify(&g, iso), r#""2024-01-31T00:00:00.123Z""#);
+    let invalid = run(&g, "dayjs", vec![Js::Null]);
+    assert!(invalid.call_method("toISOString", vec![]).is_err());
 }
 
 #[test]
@@ -712,10 +717,10 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
     let xhr = client::create(http.clone(), Js::object(vec![]));
     let adapter = Rc::new(client::JsRestAdapter::new(xhr));
     let exchange_runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
-    let run = |url: &str| {
+    let run = |method: &str, url: &str| {
         let adapter = adapter.clone();
         let request = RestRequest {
-            method: "get".into(),
+            method: method.into(),
             url: url.into(),
             params: Some(json!({"instId": "BTC-USDT-SWAP"})),
             ..Default::default()
@@ -740,13 +745,17 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
             )),
         )
     };
-    let ok = to_json(&run("/ok").unwrap()).unwrap();
+    let ok = to_json(&run("get", "/ok").unwrap()).unwrap();
     assert_eq!(ok, json!({"status": 200.0, "body": {"ok": true}}));
     assert_eq!(
         http.sent.borrow()[0]["params"],
         json!({"instId": "BTC-USDT-SWAP"})
     );
-    let rejected = run("/fail").unwrap_err();
+    let upper =
+        to_json(&run("GET", "/ok").expect("an uppercase verb dispatches like Axios")).unwrap();
+    assert_eq!(upper, ok);
+    assert_eq!(http.sent.borrow()[1]["method"], json!("get"));
+    let rejected = run("get", "/fail").unwrap_err();
     assert_eq!(
         to_json(
             &rejected
@@ -816,8 +825,8 @@ fn emitter_on_and_off_follow_listener_identity() {
         Ok(Js::Undefined)
     });
     let other = Js::function("other", |_, _| Ok(Js::Undefined));
-    emitter
-        .call_method("on", vec![Js::str("markets:changed"), listener.clone()])
+    // `this.on/off` are the emitter's own members bound to it (base.ts:454).
+    this.call_method("on", vec![Js::str("markets:changed"), listener.clone()])
         .unwrap();
     emitter
         .call_method("emit", vec![Js::str("markets:changed"), Js::Number(1.0)])
@@ -828,8 +837,7 @@ fn emitter_on_and_off_follow_listener_identity() {
     emitter
         .call_method("emit", vec![Js::str("markets:changed"), Js::Number(2.0)])
         .unwrap();
-    emitter
-        .call_method("off", vec![Js::str("markets:changed"), listener])
+    this.call_method("off", vec![Js::str("markets:changed"), listener])
         .unwrap();
     emitter
         .call_method("emit", vec![Js::str("markets:changed"), Js::Number(3.0)])

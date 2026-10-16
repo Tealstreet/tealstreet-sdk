@@ -531,6 +531,25 @@ fn dayjs_add(ms: f64, amount: f64, unit: &str) -> f64 {
     }
 }
 
+/// Date#toISOString: `YYYY-MM-DDTHH:mm:ss.sssZ` in UTC; None for an invalid date.
+fn iso_string(ms: f64) -> Option<String> {
+    if !ms.is_finite() {
+        return None;
+    }
+    let days = ms.div_euclid(DAY_MS) as i64;
+    let in_day = ms.rem_euclid(DAY_MS) as i64;
+    let (y, m, d) = civil_from_days(days);
+    let (h, min, s, milli) = (
+        in_day / 3_600_000,
+        in_day / 60_000 % 60,
+        in_day / 1000 % 60,
+        in_day % 1000,
+    );
+    Some(format!(
+        "{y:04}-{m:02}-{d:02}T{h:02}:{min:02}:{s:02}.{milli:03}Z"
+    ))
+}
+
 fn dayjs_ms(v: &Js, now: f64) -> Result<f64, Thrown> {
     Ok(match v {
         Js::Undefined => now,
@@ -595,6 +614,14 @@ fn dayjs(ms: f64) -> Js {
             ("subtract", shift(-1.0)),
             ("isBefore", order(Ordering::Less)),
             ("isAfter", order(Ordering::Greater)),
+            (
+                "toISOString",
+                func("toISOString", move |_| {
+                    iso_string(ms)
+                        .map(|s| Js::str(&s))
+                        .ok_or_else(|| Thrown::error("RangeError", "Invalid time value"))
+                }),
+            ),
         ],
     )
 }
