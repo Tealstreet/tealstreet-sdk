@@ -26,6 +26,7 @@ safe-cex-venue-polymarket.workspace = true
 safe-cex-venue-cryptocom.workspace = true
 safe-cex-venue-phemex.workspace = true
 safe-cex-venue-hyperliquid.workspace = true
+safe-cex-venue-woo.workspace = true
 serde.workspace = true
 serde_json.workspace = true
 

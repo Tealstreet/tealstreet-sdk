@@ -11,9 +11,11 @@ after(() => fs.rmSync(target, {recursive: true, force: true}));
 execFileSync(process.execPath, [path.resolve(__dirname, '../ci-deps.cjs'), target]);
 const actual = JSON.parse(fs.readFileSync(path.join(target, 'package.json'), 'utf8'));
 const venue = JSON.parse(fs.readFileSync(path.join(root, 'packages/safe-cex/package.json'), 'utf8'));
-// These are the direct imports of the real Apex API/trading source oracles.
+// Direct runtime dependencies exercised by the shared isolated oracle bundle.
 // A transitive package of another major cannot satisfy that dependency contract.
-for (const name of ['@noble/hashes', 'bignumber.js', '@ethersproject/bignumber']) {
+for (const name of ['axios', 'qs', 'create-hmac', 'axios-retry', 'nanoid', 'tiny-emitter',
+  'bignumber.js', '@noble/hashes', '@ethersproject/bignumber', '@noble/ed25519', 'bs58',
+  'lodash', 'p-iteration', 'dayjs', 'ethers']) {
   test(`isolated model oracle declares the maintained ${name} selector`, () => {
     assert.equal(typeof venue.dependencies[name], 'string', `maintained venue selector ${name}`);
     assert.equal(actual.dependencies[name], venue.dependencies[name], `isolated bundle direct selector ${name}`);
@@ -24,3 +26,20 @@ test('isolated model oracle keeps the repository lockfile bytes and package mana
   assert.equal(actual.packageManager, manifest.packageManager);
   assert.deepEqual(fs.readFileSync(path.join(target, 'yarn.lock')), fs.readFileSync(path.join(root, 'yarn.lock')));
 });
+
+// Read the real signing entrypoints so a new external source import also needs
+// an explicit direct selector, including package-root normalization for subpaths.
+for (const file of ['backpack/backpack.signing.ts', 'orderly/orderly.encryption.ts']) {
+  test(`isolated oracle covers every external signing import in ${file}`, () => {
+    const ts = require('typescript');
+    const source = fs.readFileSync(path.join(root, 'packages/safe-cex/src/exchanges', file), 'utf8');
+    const imports = ts.preProcessFile(source).importedFiles.map(item => item.fileName)
+      .filter(name => !name.startsWith('.'));
+    assert.ok(imports.length > 0, 'real source external imports discovered');
+    for (const specifier of imports) {
+      const name = specifier.split('/').slice(0, specifier.startsWith('@') ? 2 : 1).join('/');
+      assert.equal(typeof venue.dependencies[name], 'string', `maintained source dependency ${specifier}`);
+      assert.equal(actual.dependencies[name], venue.dependencies[name], `isolated source dependency ${specifier}`);
+    }
+  });
+}
