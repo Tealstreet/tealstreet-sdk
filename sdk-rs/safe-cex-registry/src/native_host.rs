@@ -494,7 +494,7 @@ impl RustVenueHost for NativeVenueHost {
                 (self.adapter)()?,
                 self.remote.clone(),
             ),
-            external_public_data: None,
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError> {
