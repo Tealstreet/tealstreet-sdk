@@ -68,7 +68,7 @@ constructors, free-function decoder candidates and custom trait methods, even
 without Deserialize. Raw-input functions remain candidates when they return unit
 and mutate an output argument. Generic bounds and local aliases participate in
 discovery. Unsupported trait receivers and uninstantiated decoder defaults fail
-closed unless `../accepted-set/receiver-traits.json` reviews them against a
+closed unless `../accepted-set/receiver-traits/<crate>.json` reviews them against a
 whole-source pin (`non-decoder` or `delegated` only). `PatchSource` counts as raw input. Owner-local compiler trait probes cover
 block-local declarations rustdoc omits. Nested functions and local Visitor/Seed
 helpers require explicit whole-source fingerprints; decoder helpers also name
@@ -108,11 +108,11 @@ raw decoder needs an adapter and positive witnesses; a typed constructor needs
 its reason. Record arrays use Serde's field order, not JSON map insertion order.
 Observed methods normally require distinct inputs and outputs. Only the two
 `Capture` serializer metadata constructors listed in
-`../accepted-set/constant-outputs.json` may set `constantOutput: true`. Their
+`../accepted-set/constant-outputs/<crate>.json` may set `constantOutput: true`. Their
 actual compiler package, API, body span, whole-source hash, native adapter and
 cases are pinned. Both distinct metadata inputs still execute; this is no
 permission for other constant methods, altered adapters or decoder exemptions.
-The bounded `construction.json` policy classifies Clone/Copy on private-field
+The bounded `construction/<crate>.json` policy classifies Clone/Copy on private-field
 types, including service handles whose shared ownership is intentional.
 
 `outstanding-defects.json` records owed defects with crate and agent owners,
@@ -152,7 +152,7 @@ annotation checks, not fresh runtime behavior proofs.
 
 Two exact nongeneric function-pointer aliases (`RetryCondition` in Bitunix and
 `BlofinApiFactory` in Blofin) have reviewed compiler signatures in
-`../accepted-set/function-pointer-aliases.json`. Their source identity, complete
+`../accepted-set/function-pointer-aliases/<crate>.json`. Their source identity, complete
 raw/expanded ASTs, every nested authenticated compiler root and selected workspace
 package are pinned. Native probes require invariant equality with independently
 authored Rust types and execute the ordinary alias Serde/conversion checks. This
@@ -179,7 +179,7 @@ Explicit `--contracts=<file.json>` fixture inputs remain supported; a directory
 is also accepted. Storage changes no contract classification or native proof.
 
 Eleven GRVT aliases use the existing reviewed fixed-instantiation registry in
-`../accepted-set/generic-aliases.json`. Each pins its exact source, raw/expanded
+`../accepted-set/generic-aliases/<crate>.json`. Each pins its exact source, raw/expanded
 compiler targets, original generics (including defaults/lifetimes), canonical
 root and independently authored invariant Rust type. The selected arguments
 are explicit bool or bool/bool, and static lifetimes for three unsized FnMut
@@ -193,7 +193,7 @@ classifications and borrowed production-path coverage remain separate obligation
 
 The transport provider's `TransportFuture<'static,bool>` and
 `RestFuture<'static,bool>` have separate finite identities in
-`../accepted-set/generic-aliases.json`. Their exact raw/expanded compiler ASTs
+`../accepted-set/generic-aliases/<crate>.json`. Their exact raw/expanded compiler ASTs
 retain `Result<bool,TransportError>` and `Result<bool,RestFailure>` respectively,
 including the original lifetime/type parameters. The existing reviewed alias
 path emits invariant equality against independently authored native Rust types
@@ -215,3 +215,10 @@ the existing exact definition event. The scope scanner still reports every
 export attribute; an unrelated exported macro in the same file remains refused.
 The registered numeric-output controls test both retained coverage and nearby
 position refusal. Provider native observations retain the parsed attribute span.
+
+Reviewed policy maps are split per crate under `../accepted-set/<table>/` and
+loaded through `scripts/accepted-policy-files.mjs::loadPolicy`. Existing compiler,
+source-pin and native evidence checks receive the same merged records. Keep the
+flat JSON maps deleted when merging older branches. See
+[`POLICY-FILES.md`](../accepted-set/POLICY-FILES.md) for table names, ownership,
+migration and complete cutover equality proof.

@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -87,7 +88,7 @@ async function nativeProbe(mode) {
   const doc=JSON.parse(fs.readFileSync(path.join(metadata.target_directory,'doc',target.name+'.json')));
   const artifacts=cargo(['check','--locked','-p',pkg.name,'--lib','--jobs=1','--message-format=json']).trim().split('\n').map(line=>JSON.parse(line)).filter(row=>row.reason==='compiler-artifact');
   const sysroot=spawnSync('rustc',['--print','sysroot'],{cwd:root,encoding:'utf8'});assert.equal(sysroot.status,0);
-  const found=inventory(doc,{defaultTraits:JSON.parse(fs.readFileSync(new URL('../accepted-set/default-traits.json',import.meta.url))),receiverTraits:JSON.parse(fs.readFileSync(new URL('../accepted-set/receiver-traits.json',import.meta.url))),readSource:file=>fs.readFileSync(path.resolve(root,file))});
+  const found=inventory(doc,{defaultTraits:loadPolicy('default-traits'),receiverTraits:loadPolicy('receiver-traits'),readSource:file=>fs.readFileSync(path.resolve(root,file))});
   const aliases=found.publicAliases.filter(alias=>alias.name===name);assert.equal(aliases.length,1);
   const members=metadata.packages.filter(pkg=>metadata.workspace_members.includes(pkg.id));
   const externalTypeAliases=found.externalTypeAliases.filter(row=>row.name===name).map(row=>({...row,artifact:aliasTargetIdentity(row,artifacts,members,sysroot.stdout.trim())}));

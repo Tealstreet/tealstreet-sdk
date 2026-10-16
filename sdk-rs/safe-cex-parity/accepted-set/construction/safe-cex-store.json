@@ -1,0 +1,8 @@
+{
+  "safe_cex_store::virtual_clock::VirtualClock": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Data/configuration or shared service handle; duplication carries no one-use validation authority. Public constructors and serialized fields remain independently classified."
+  }
+}
