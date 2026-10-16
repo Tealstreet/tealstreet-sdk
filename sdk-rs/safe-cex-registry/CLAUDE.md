@@ -122,3 +122,8 @@ Their native host inputs retain each API's signing/transport/retry middleware.
 Private MEXC fills must reach the venue emitter; retain the weak callback when
 adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
 native request signatures against a local server.
+
+The Bybit host also constructs `Bybitspot` after its distinct Spot receiver is
+bound. Native Bybit loopback HTTP coverage includes Spot for local and hosted
+signing; its existing registry dependency edge and caller-owned limiter API
+remain shared across these constructors. Inverse/HyroTrader await their bindings.

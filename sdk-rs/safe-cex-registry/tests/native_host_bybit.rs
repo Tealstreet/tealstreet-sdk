@@ -49,7 +49,11 @@ fn assert_signed(request: &support::Seen) {
 #[test]
 fn bybit_and_demo_construct_and_sign_through_native_registry() {
     support::run_local(async {
-        for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+        ] {
             let h = support::venue_harness(
                 name.clone(),
                 Rc::new(account),
@@ -124,7 +128,11 @@ impl RemoteSigner for HostedBybit {
 #[test]
 fn bybit_and_demo_use_hosted_signer_without_local_credentials() {
     support::run_local(async {
-        for name in [ExchangeName::Bybit, ExchangeName::Bybitdemo] {
+        for name in [
+            ExchangeName::Bybit,
+            ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
+        ] {
             let signer = Rc::new(HostedBybit::default());
             let h = support::venue_harness(
                 name.clone(),

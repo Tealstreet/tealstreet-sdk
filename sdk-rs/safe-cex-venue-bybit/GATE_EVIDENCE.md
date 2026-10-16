@@ -3703,3 +3703,31 @@ and uncompiled; it is not an accepted oracle or part of the delivery commit.
 No startup mutation ran, and its row remains pending with zero new row credit.
 Final checkpoint formatting and workspace build must be measured against the
 checkpoint SHA separately from the accepted three-row local-order delivery.
+
+## Spot production facade and registry (ddi2il-18, first variant)
+
+`tests/spot_binding.rs` constructs `BybitExchange::create(Bybitspot, ...)`, then
+calls the concrete Exchange trait and typed core preflight over scripted HTTP
+and real core socket orchestration. Five E2Es pin spot/1x market mapping,
+tickers, account and validation/balance, empty positions with no position query,
+order reads/placement/batch/amend/cancel, exact inherited refusals, public/private
+startup, loaded flags, order-only private subscribe after auth, both socket
+closures and Brazil's local order retirement. Caller IDs are sent verbatim;
+invalid and split IDs reject before any write.
+
+`python3 sdk-rs/safe-cex-venue-bybit/scripts/spot-binding-controls.py` compiled
+17 independent trait-consumer mutations: start, get_account, validate_account,
+fetch_positions, fetch_orders, fetch_markets, fetch_tickers, place_order,
+place_orders, update_order, cancel_orders, set_leverage, change_position_mode,
+change_margin_type, fetch_symbol_max_leverage, schedule_cancel and
+fetch_public_trades. Each failed an executed assertion, with no compiler error;
+source restored byte-identically and all five Spot tests passed. The runner
+writes temporary output under `/tmp`, never repository evidence artifacts.
+Removing the Bybitspot RUST_VENUES entry separately compiled and failed the
+exact registry membership assertion, then the entry was restored.
+
+The existing source-driven Spot read/write and variant account-refresh oracles
+remain separate from these production construction proofs. The source class is
+carried by the discriminated Rust `BybitExchange` type with a distinct Spot
+receiver and class_name; that API representation choice is declared on its
+class/constructor rows. No Inverse or HyroTrader constructor claim is made here.

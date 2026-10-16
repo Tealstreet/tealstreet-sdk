@@ -172,6 +172,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Bybit, bybit_constructor),
     (ExchangeName::Bybitdemo, bybit_constructor),
+    (ExchangeName::Bybitspot, bybit_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
     (ExchangeName::Coinbasespot, coinbase_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),

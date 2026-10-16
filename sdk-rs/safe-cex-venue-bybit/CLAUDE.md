@@ -511,3 +511,16 @@ flags. The shared native typed-value bridge preserves nonfinite numbers and
 signed zero before request formatting or result projection. Concrete regressions
 cover leverage clamping and ticker results; restoring either former JSON bridge
 makes its corresponding regression fail.
+
+The Spot facade now uses the same explicit dependency carrier while installing
+its own source members in `binding/members/spot.rs`. Startup keeps Spot's
+sequential awaited operands, skips the primary fee overlay and key cache, and
+subscribes the private socket only to orders. Markets are spot/1x, positions
+are empty without a REST query, and unsupported leverage/mode methods keep
+BaseExchange's exact rejection. Native generic host adapters call the shared
+lodash import rather than implementing a venue-local `times` policy.
+`tests/spot_binding.rs` exercises the trait, request category, caller-ID guard,
+public/private startup, Brazil local cancellation and disposal. The compiled
+`spot-binding-controls.py` runner disables 17 trait consumers one at a time;
+every control must fail a runtime assertion and the final five tests must pass.
+The registry reuses its existing Bybit dependency/layers edge for Spot.

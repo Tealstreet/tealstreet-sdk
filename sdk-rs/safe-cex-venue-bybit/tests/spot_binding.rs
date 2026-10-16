@@ -77,6 +77,14 @@ fn spot_methods_use_spot_requests_and_inherited_refusals() {
         h.drive(h.venue().validate_account()).unwrap().error,
         "".into()
     );
+    assert_eq!(
+        h.drive(h.venue().validate_account())
+            .unwrap()
+            .balance
+            .unwrap()
+            .free,
+        1000.
+    );
     assert!(h.drive(h.venue().fetch_positions(None)).unwrap().is_empty());
     assert!(h.wire.calls("/v5/position/list").is_empty());
     let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
@@ -241,5 +249,48 @@ fn brazil_spot_cancel_retires_the_local_order_fallback() {
     .unwrap();
     h.drive(h.venue().cancel_orders(orders)).unwrap();
     assert!(h.store.orders().is_empty());
+    h.venue().dispose().unwrap();
+}
+
+#[test]
+fn spot_caller_id_is_verbatim_and_rejected_before_writes_when_invalid_or_split() {
+    let h = support::harness_as(ExchangeName::Bybitspot, support::options(), scripted);
+    let market = h.drive(h.venue().fetch_markets()).unwrap();
+    safe_cex_store::Store::update(
+        h.store.as_ref(),
+        safe_cex_store::StoreUpdate {
+            markets: Some(market),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let order: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
+        "symbol":"BTCUSDT", "side":"buy", "type":"limit", "amount":0.01,
+        "price":25000, "clientOrderId":"Caller_A-17"
+    }))
+    .unwrap();
+    let venue = h.venue();
+    h.drive(Box::pin(venue.base().place_order(venue, order.clone())))
+        .unwrap();
+    assert_eq!(
+        h.wire.calls("/v5/order/create")[0].body["orderLinkId"],
+        "Caller_A-17"
+    );
+    let count = h.wire.requests.borrow().len();
+    for (id, amount) in [("invalid id", 0.01), ("Caller_A-17", 201.)] {
+        let mut input = order.clone();
+        input.client_order_id = Some(id.into());
+        input.amount = amount;
+        assert!(
+            h.drive(Box::pin(venue.base().place_order(venue, input)))
+                .is_err()
+        );
+        assert_eq!(
+            h.wire.requests.borrow().len(),
+            count,
+            "invalid or split caller ID must write nothing"
+        );
+    }
     h.venue().dispose().unwrap();
 }

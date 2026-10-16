@@ -386,17 +386,21 @@ impl crate::spot_exchange_reads::SpotExchangeHost for Rt {
     where
         F: FnMut(Js) -> Result<Js, Thrown>,
     {
-        if !callee.is_callable() {
-            return Err(Thrown::type_error("times is not a function"));
-        }
-        let count = count.to_number()?.trunc();
-        // lodash times returns [] outside [1, MAX_SAFE_INTEGER].
-        if !(1. ..=9_007_199_254_740_991.).contains(&count) {
-            return Ok(Js::array(vec![]));
-        }
+        // Invoke the shared imported lodash operation; this host only bridges its
+        // synchronous callback into the borrowed generic body.
+        let indices = callee.call(
+            Js::Undefined,
+            vec![
+                count,
+                Js::function("timesIndex", |_, args| Ok(arg(&args, 0))),
+            ],
+        )?;
         let mut out = vec![];
-        for index in 0..count as u64 {
-            out.push(body(Js::Number(index as f64))?);
+        for index in indices
+            .array_values()
+            .ok_or_else(|| Thrown::type_error("times result is not iterable"))?
+        {
+            out.push(body(index)?);
         }
         Ok(Js::array(out))
     }

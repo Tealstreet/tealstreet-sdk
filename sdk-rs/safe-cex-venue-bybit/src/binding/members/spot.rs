@@ -261,7 +261,7 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
 }
 
 // ts: BybitSpotExchange.start — preserve the source's sequential awaited array operands.
-fn start(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
+pub(crate) fn start(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
     Ok(rt.clone().spawn(Box::pin(async move {
         let this = &rt.this;
         await_js(rt.shared.globals.get("virtualClock")?.call_method("start", vec![])?).await?;

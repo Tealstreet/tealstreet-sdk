@@ -1,7 +1,7 @@
 # Rust venue construction through the registry
 
 Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`), Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
+`bitgetusdc`), `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`, `bybitspot`), Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), `polymarket` and `woo`, 2026-10-16 (`src/rust_venues.rs`,
@@ -37,7 +37,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   - `blofin`, built with `BlofinNativeExchange::new` from a registry-built
     `BaseExchange` and `BlofinDependencies` (runtime, the common HTTP builder,
     optional externalPublicData provider, remote-signer account name).
-  - `bybit` and `bybitdemo`, built with `BybitExchange::create`. The host supplies
+  - `bybit`, `bybitdemo` and `bybitspot`, built with `BybitExchange::create`. The host supplies
     the wire, HTTP host, runtime clocks and external-data factory. Hosted signing
     uses the shared signer bridge for both the source receiver and typed API
     clients; account names and availability follow the same capability. Native
@@ -87,7 +87,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bybitspot`, `bybitinverse`, `hyrotrader`, `kucoin`, `mexc`, `lighter`
+follow-up PR. Expected next: `bybitinverse`, `hyrotrader`, `kucoin`, `mexc`, `lighter`
 and `weex`.
 
 Each follow-up does four things:
@@ -250,3 +250,10 @@ findings, live-source registry equivalence and all 88 layer assertions. Strict
 host all-target and wasm library clippy passed. Independently removing each of
 the three production table entries compiled and failed its native construction
 test with exit 101; exact source restoration passed both native test functions.
+
+Spot uses the same explicit native host and existing registry layer edge to the
+Bybit crate, with its distinct `BybitSpotExchange` receiver. The Bybit native
+HTTP tests include Spot for local HMAC and secretless hosted signing. Its
+category/market/leverage, order writes and order-only private subscriptions are
+covered by `safe-cex-venue-bybit/tests/spot_binding.rs`. Inverse and HyroTrader
+remain separate follow-ups.

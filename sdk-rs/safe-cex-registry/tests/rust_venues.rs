@@ -729,6 +729,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Blofin,
             ExchangeName::Bybit,
             ExchangeName::Bybitdemo,
+            ExchangeName::Bybitspot,
             ExchangeName::Coinbase,
             ExchangeName::Coinbasespot,
             ExchangeName::Hyperliquid,
