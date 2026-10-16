@@ -102,6 +102,11 @@ runtime; the infallible protocol hook still permits core transport cleanup.
 The Weex source-member witness covers timer/listener cleanup, superclass order,
 direct and typed calls, repeated disposal and guard reset after errors.
 
+The returned JS websocket handle uses `close_current_websocket()` for `ws.close()`.
+This closes only the current transport and preserves the superclass force-closed
+flag and retained handles. The raw-close source witness executes both Crypto.com
+no-super disposal overrides and contrasts them with the source `forceClose()`.
+
 Socket options use `None` for omitted SDK tuning and `Some(options)` for explicit
 RWS options, including an empty object. Make absence a distinct representable
 state rather than a default value. Header presence does not select tuning.
