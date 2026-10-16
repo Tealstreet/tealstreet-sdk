@@ -70,6 +70,20 @@ UTF-8 boundary, with live lone-surrogate refusals and scalar/astral/whitespace
 positives. Capturing only outside the public decoder would leave direct callers
 unrepaired; compiling bypass controls pin the capture in both decoder families.
 
+The seven private Serde companions live at module scope and use `serde(remote)`;
+they introduce no additional `Deserialize` entrypoints. The public entries retain
+their map/string admission checks and correlated account-mode checks.
+`accepted_native_guards` observes native fields, optional presence and numeric bits,
+and rejects complete valid sequence or tagged-object forms through owned,
+borrowed, qualified and text decoding. Run the six compiled guard-removal controls
+serially with `node safe-cex-venue-kucoin/tests/accepted-native-controls.mjs` from
+`sdk-rs`; the runner restores production bytes and reruns all seven tests.
+
+`accepted_exchange_members` exercises connected native book callbacks and cleanup.
+The futures case proves a valid change emits before cleanup, then suppresses the
+next valid change. Run `node safe-cex-venue-kucoin/tests/accepted-book-cleanup-control.mjs`
+alone for the compiled handler-removal failure and exact restoration proof.
+
 Account-mode Serialize emits native fields directly, without an intermediate
 `json!` Value that would erase infinities before the ingress output guard.
 The wire serializer still gives JavaScript's null for non-finite JSON values;

@@ -97,28 +97,25 @@ pub struct KucoinSpotWsServer {
     pub ping_interval: f64,
     pub ping_timeout: f64,
 }
+// Private Serde companion; the public entry retains its admission checks.
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(remote = "KucoinSpotWsServer")]
+#[serde(rename_all = "camelCase")]
+struct KucoinSpotWsServerWire {
+    endpoint: String,
+    encrypt: bool,
+    protocol: String,
+    ping_interval: f64,
+    ping_timeout: f64,
+}
+
 impl<'de> Deserialize<'de> for KucoinSpotWsServer {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Wire {
-            endpoint: String,
-            encrypt: bool,
-            protocol: String,
-            ping_interval: f64,
-            ping_timeout: f64,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(deserializer)?;
         input
             .decode_with(|decoder| {
-                let wire = Wire::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    endpoint: wire.endpoint,
-                    encrypt: wire.encrypt,
-                    protocol: wire.protocol,
-                    ping_interval: wire.ping_interval,
-                    ping_timeout: wire.ping_timeout,
-                })
+                KucoinSpotWsServerWire::deserialize(safe_cex_types::strict_decode::object(decoder))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -131,22 +128,24 @@ pub struct KucoinSpotWsTokenData {
     pub token: String,
     pub instance_servers: Vec<KucoinSpotWsServer>,
 }
+// Private Serde companion; the public entry retains its admission checks.
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(remote = "KucoinSpotWsTokenData")]
+#[serde(rename_all = "camelCase")]
+struct KucoinSpotWsTokenDataWire {
+    token: String,
+    instance_servers: Vec<KucoinSpotWsServer>,
+}
+
 impl<'de> Deserialize<'de> for KucoinSpotWsTokenData {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Wire {
-            token: String,
-            instance_servers: Vec<KucoinSpotWsServer>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(deserializer)?;
         input
             .decode_with(|decoder| {
-                let wire = Wire::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    token: wire.token,
-                    instance_servers: wire.instance_servers,
-                })
+                KucoinSpotWsTokenDataWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
             })
             .map_err(serde::de::Error::custom)
     }
@@ -162,26 +161,27 @@ pub struct KucoinSpotWsTokenResponse {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub msg: Option<String>,
 }
+// Private Serde companion; the public entry retains its admission checks.
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(remote = "KucoinSpotWsTokenResponse")]
+#[serde(rename_all = "camelCase")]
+struct KucoinSpotWsTokenResponseWire {
+    code: String,
+    #[serde(default, deserialize_with = "present")]
+    data: Option<KucoinSpotWsTokenData>,
+    #[serde(default, deserialize_with = "present")]
+    msg: Option<String>,
+}
+
 impl<'de> Deserialize<'de> for KucoinSpotWsTokenResponse {
     fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Wire {
-            code: String,
-            #[serde(default, deserialize_with = "present")]
-            data: Option<KucoinSpotWsTokenData>,
-            #[serde(default, deserialize_with = "present")]
-            msg: Option<String>,
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(deserializer)?;
         input
             .decode_with(|decoder| {
-                let wire = Wire::deserialize(safe_cex_types::strict_decode::object(decoder))?;
-                Ok(Self {
-                    code: wire.code,
-                    data: wire.data,
-                    msg: wire.msg,
-                })
+                KucoinSpotWsTokenResponseWire::deserialize(safe_cex_types::strict_decode::object(
+                    decoder,
+                ))
             })
             .map_err(serde::de::Error::custom)
     }

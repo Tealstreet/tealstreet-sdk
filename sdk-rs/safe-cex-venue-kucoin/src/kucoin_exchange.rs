@@ -21,7 +21,11 @@ use safe_cex_exchange::{
 };
 use safe_cex_store::virtual_clock::VirtualClock;
 use safe_cex_transport::{TransportRegistry, rate_limit::RateLimitClock};
-use safe_cex_types::*;
+use safe_cex_types::{
+    Candle, ExchangeAccount, ExchangeOptions, Execution, ExecutionsOptions, Market, OHLCVOptions,
+    Order, OrderBook, PlaceOrderOpts, Position, PositionSide, PublicTrade, Ticker, UpdateOrderOpts,
+    ValidateAccountResult,
+};
 use std::{cell::RefCell, rc::Rc};
 
 /// Host collaborators of both KuCoin classes.
