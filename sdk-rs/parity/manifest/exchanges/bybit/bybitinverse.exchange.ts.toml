@@ -374,9 +374,9 @@ note = "BybitInverseExchange: exact eager ticker GET with supplied category, str
 ts = "BybitInverseExchange.parseTickers"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/exchange_state.rs::parse_tickers"
+rs = "safe-cex-venue-bybit/src/exchange_state.rs::parse_inverse_class_tickers"
 status = "divergent"
-note = "CHOSEN Extracted pure mapper to safe-cex-venue-bybit/src/exchange_state.rs::parse_tickers; shares the linear implementation, independently compared against the inverse source. CHOSEN typed owned-market boundary: inherited Object.prototype keys can produce a ticker with missing id/symbol in TypeScript, while Rust skips a symbol absent from the owned market map. This is a key MEMBERSHIP difference, not an ordering or numeric spelling difference; prototype emulation is possible but absent. Source-driven witnesses pin both sides. Numeric values retain NaN, Infinity and signed zero in the returned typed tickers."
+note = "CHOSEN Extracted pure mapper to safe-cex-venue-bybit/src/exchange_state.rs::parse_inverse_class_tickers (renamed Rust target: safe-cex-venue-bybit/src/exchange_state.rs::parse_inverse_class_tickers); shares parse_tickers_family with the primary class but keeps volume24h on inverse markets, independently compared against the inverse source. CHOSEN typed owned-market boundary: inherited Object.prototype keys can produce a ticker with missing id/symbol in TypeScript, while Rust skips a symbol absent from the owned market map. This is a key MEMBERSHIP difference, not an ordering or numeric spelling difference; prototype emulation is possible but absent. Source-driven witnesses pin both sides. Numeric values retain NaN, Infinity and signed zero in the returned typed tickers."
 
 [[symbol]]
 ts = "BybitInverseExchange.fetchMarkets"

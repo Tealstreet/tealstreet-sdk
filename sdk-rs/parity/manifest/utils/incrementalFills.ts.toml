@@ -11,6 +11,30 @@ status = "ported"
 note = ""
 
 [[symbol]]
+ts = "cleanFloat"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-store/src/incremental_fills.rs::clean_float"
+status = "ported"
+note = "Number(n.toPrecision(15)) via the exact decimal expansion, with toPrecision's ties-away-from-zero (Rust's {:e} ties to even) and -0 printing as 0; nonfinite passes through."
+
+[[symbol]]
+ts = "decimalsOf"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-store/src/incremental_fills.rs::decimals_of"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "subtractDecimals"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-store/src/incremental_fills.rs::subtract_decimals"
+status = "ported"
+note = ""
+
+[[symbol]]
 ts = "createIncrementalFills"
 kind = "const-fn"
 layer = "mirror"

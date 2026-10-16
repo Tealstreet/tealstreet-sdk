@@ -1,0 +1,99 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/bybit/bybit.options.ts"
+rust_files = [ "safe-cex-venue-bybit/src/options.rs" ]
+
+[[symbol]]
+ts = "BYBIT_GREEK_UNITS"
+kind = "const"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/options.rs::BYBIT_GREEK_UNITS"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "num"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/options.rs::num"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "strikeOf"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/options.rs::strike_of"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "mapBybitOptionInstrument"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/options.rs::map_bybit_option_instrument"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "mapBybitOptionGreeks"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/options.rs::map_bybit_option_greeks"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "mapBybitOptionTicker"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "mapBybitCoinGreeks"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "matchesOptionQuery"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "buildOptionChain"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "optionExpiries"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/options.rs::option_expiries"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "isOptionMarket"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "isBybitOptionSymbol"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/options.rs::is_bybit_option_symbol"
+status = "ported"
+note = ""

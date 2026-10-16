@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs" ]
 
 [[symbol]]
 ts = "BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS"
@@ -328,7 +328,55 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/exchange.rs::BybitExchange::get_category_for_symbol"
 status = "ported"
-note = "Concrete linear method always returns linear and does not inspect its symbol argument. Eight actual-source inputs include empty, unknown, inherited-name, whitespace and scalar/astral Unicode strings. Native method output is checked directly; derived venue policies and request composition remain separate."
+note = "Routes by symbol so a row routes before its market loads: option symbols to option, inverse symbols (isBybitInverseSymbol) to inverse when inverseEnabled, everything else to linear. Native method output is checked directly against the maintained member; request composition remains separate."
+
+[[symbol]]
+ts = "BybitExchange.tradesCategoryOf"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.optionsEnabled"
+kind = "method"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/exchange.rs::BybitExchange::options_enabled"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.inverseEnabled"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/exchange.rs::BybitExchange::inverse_enabled", "safe-cex-venue-bybit/src/ledger_history.rs::inverse_enabled" ]
+status = "ported"
+note = "Split: BybitExchange::inverse_enabled reads typed ExchangeOptions for the native constructor and category routing; ledger_history.rs::inverse_enabled is the same predicate over the SnapshotHost owner for the host-replayed ledger and income bodies. Both require enableInverseMarkets and no externalPublicData. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::inverse_enabled."
+
+[[symbol]]
+ts = "BybitExchange#remainingInStoreUnits"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/primary_local_order_writes.rs::remaining_in_store_units"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/primary_local_order_writes.rs::remaining_in_store_units. Returns the object-literal fields (remaining, and extra.remainingNative for inverse) for the record and update bodies to spread; Math.round via safe_cex_num::math_round."
+
+[[symbol]]
+ts = "BybitExchange#publicSocketFor"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/stream_delegation.rs::public_socket_for"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::public_socket_for. Socket handles are host-supplied getters; the inverse socket is read only when getCategoryForSymbol says inverse."
+
+[[symbol]]
+ts = "BybitExchange.get inversePublicWebsocket"
+kind = "accessor"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "BybitExchange.getTickerSymbolsForCategory"
@@ -422,9 +470,9 @@ note = "Split under MANIFEST-SPEC section 10: safe-cex-venue-bybit/src/local_ord
 ts = "BybitExchange.recordRecentlyPlacedOrderFromOpts"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/spot_order_writes.rs::record_recently_placed_order_from_opts"
+rs = "safe-cex-venue-bybit/src/primary_local_order_writes.rs::record_recently_placed_order_from_opts"
 status = "ported"
-note = "Collapse under MANIFEST-SPEC section 8: the primary and Spot field initializers are byte-identical under named-class source extraction and share safe-cex-venue-bybit/src/spot_order_writes.rs::record_recently_placed_order_from_opts as their actual implementation. The raw parseFloat callable is read before argument evaluation and invoked bare; row fields, conditional reduce-only clearing, fractional clock and source fallback values are retained. The shared oracle preserves 56 record profiles, ten option profiles and ten update profiles, plus one separate strict receiver dependency profile; this row covers the 66 record/option profiles and the dependency profile; the existing Spot source/native tests also remain required. Two compiled controls are bound to the proof revision in GATE_EVIDENCE.md. Concrete class and host composition remain pending."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/primary_local_order_writes.rs::record_recently_placed_order_from_opts. No longer a collapse with Spot: the primary body spreads remainingInStoreUnits (inverse rows hold remaining in the coin and extra.remainingNative). Both share spot_order_writes.rs::record_with_remaining, which evaluates the remaining fields at the object-literal position. The raw parseFloat callable is read before argument evaluation and invoked bare. Witness: 56 record, 10 option, 10 update and 1 dependency profile on linear BTCUSDT plus 4 inverse record and 5 inverse update profiles, native before Node."
 
 [[symbol]]
 ts = "BybitExchange#recordRecentlyPlacedOrder"
@@ -595,6 +643,14 @@ status = "ported"
 note = "Body port: read linear settle coins, maintained mapSeries invokes current helper sequentially, then resolve preserve method before one-level flatten and return its native result. Deferred host awaits/method bindings preserve eager versus continued effects and original flattened row identities. Market/settle selection and preserve implementation remain their own rows. Renamed Rust target: safe-cex-venue-bybit/src/core_snapshot_readers.rs::fetch_orders."
 
 [[symbol]]
+ts = "BybitExchange#fetchCategoryRowsOrKeep"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/core_snapshot_readers.rs::fetch_category_rows_or_keep"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/core_snapshot_readers.rs::fetch_category_rows_or_keep. Over SnapshotHost; the fetch thunk is a host callback (option_orders_fetch, inverse/option_positions_fetch) and the keep filter is the keep_category callback. Witness: tests/core_snapshot_readers.rs keep profiles against the maintained member."
+
+[[symbol]]
 ts = "BybitExchange.fetchOrdersHelper"
 kind = "field-fn"
 layer = "adapted"
@@ -680,7 +736,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/exchange_state.rs::parse_tickers"
 status = "divergent"
-note = "CHOSEN: Extracted pure class mapper to safe-cex-venue-bybit/src/exchange_state.rs::parse_tickers, passing market and cached ticker snapshots explicitly. Deliberate typed-market KEY SET MEMBERSHIP divergence, not key order or key spelling: TS indexes a plain object and inherited constructor/toString/__proto__ keys can emit malformed tickers without id or symbol; Rust skips keys without an owned Market. Owned Rust maps have no prototype chain; this is a chosen typed-map representation boundary, not a claim that explicit JS prototype emulation is impossible. The live oracle pins both outcomes. Optional raw rows represent the source null result; typed markets/tickers preserve the shared model. Keeps decimal-prefix parseFloat, signed zero, nonfinite numeric results, expiring-contract funding zeros and cached fallback. Invalid null rows and failed JSON-object primitive coercion return Err instead of throwing; live class-method oracle checks both outcomes."
+note = "Primary class: an inverse market (isInverse) reads volume from turnover24h (coin) and quoteVolume from volume24h (USD contracts); other markets keep volume24h and volume24h * lastPrice. Shares parse_tickers_family with the inverse and spot classes, which keep the old volume semantics. Witness: scripts/check-exchange-state.mjs, 5 inverse-market cases per class (3228 cases) with a source-side volume assertion. Renamed Rust target: safe-cex-venue-bybit/src/exchange_state.rs::parse_tickers."
 
 [[symbol]]
 ts = "BybitExchange.fetchMarkets"
@@ -689,6 +745,54 @@ layer = "mirror"
 rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::fetch_markets"
 status = "ported"
 note = "Body port: eagerly starts linear market helper; only typed trading-markets failures may use a nonempty current cache, warning precedes a second store read, and original success/cache/error identity is retained. Live maintained-source oracle covers successful replies, empty cache, unbranded errors and log replacing the cached allocation. Helper/parser and store integration remain separate rows. Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::fetch_markets."
+
+[[symbol]]
+ts = "BybitExchange.fetchOptionMarkets"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::fetch_option_markets"
+status = "ported"
+note = "Renamed Rust target: safe-cex-venue-bybit/src/public_data_recovery.rs::fetch_option_markets. Base-coin request starts before the first await; retCode via get-key v with unary-plus coercion; per-coin cursor paging in series; mapBybitOptionInstrument is a host callback (native options.rs mapper in production). Any failure logs and keeps the stored option markets. Witness: 11 fetchOptionMarkets profiles in tests/public_data_recovery.rs with the real get-key and p-iteration."
+
+[[symbol]]
+ts = "BybitExchange.fetchOptionChain"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.fetchOptionExpiries"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange.fetchAccountGreeks"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#assertOptionsEnabled"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#refuseOptionSymbol"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/ledger_history.rs::refuse_option_symbol", "safe-cex-venue-bybit/src/position_controls.rs::refuse_option_symbol" ]
+status = "ported"
+note = "Split: ledger_history.rs::refuse_option_symbol serves the host-replayed history bodies over SnapshotHost; position_controls.rs::refuse_option_symbol serves the typed leverage/position-mode/margin bodies. Both throw \"Bybit has no <what> for options (<symbol>)\" for a truthy option symbol. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::refuse_option_symbol. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::refuse_option_symbol."
 
 [[symbol]]
 ts = "BybitExchange.fetchFees"
@@ -803,36 +907,36 @@ status = "ported"
 note = "Retains context/start/end/type forwarding and returned-Promise adoption; tested with the owned income range/body composition. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::fetch_income_history_range."
 
 [[symbol]]
-ts = "BybitExchange.get incomeContext"
+ts = "BybitExchange.get incomeContexts"
 kind = "accessor"
-layer = "mirror"
-rs = "safe-cex-venue-bybit/src/ledger_history.rs::income_context"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ledger_history.rs::income_contexts"
 status = "ported"
-note = "Fresh four-field context keeps original XHR and bound logger before linear/UNIFIED literals; reentrant logger getter retains the previously captured XHR. Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::income_context."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/ledger_history.rs::income_contexts. One context per traded category: linear, plus inverse when inverseEnabled. Replaces the removed incomeContext accessor."
 
 [[symbol]]
 ts = "BybitExchange.listenOHLCV"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv"
+rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv"
 status = "ported"
-note = "Exact synchronous BybitExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include callback invocation, argument mutation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcv."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcv. Routes through publicSocketFor(opts.symbol): the inverse socket for inverse symbols when it exists, else publicWebsocket; forwards original options and callback handles and returns the socket method result."
 
 [[symbol]]
 ts = "BybitExchange.listenOHLCVs"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcvs"
+rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs"
 status = "ported"
-note = "Exact synchronous BybitExchange bulk candle wrapper: forwards original options and callback to publicWebsocket.listenOHLCVs, deliberately discards the method return and propagates original lookup/call/callback errors. Native unit corresponds to source undefined. Receiver replacement and argument mutation are checked; full class/socket composition remains separate rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_ohlcvs."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_ohlcvs. Groups symbols by publicSocketFor in first-seen socket order (Map identity), then calls listenOHLCVs once per socket with {...opts, symbols}; discards the socket returns."
 
 [[symbol]]
 ts = "BybitExchange.listenOrderBook"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book"
+rs = "safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_order_book"
 status = "ported"
-note = "Exact synchronous BybitExchange body: resolves publicWebsocket, forwards original options/symbol and callback handles, and preserves receiver, returned value and original error identity. Maintained-source cases include unchanged symbol forwarding, callback invocation and socket replacement during method lookup. Class/socket construction remains separate pending rows. Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_order_book."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/stream_delegation.rs::listen_primary_order_book. Routes through publicSocketFor(symbol) and returns the socket method result."
 
 [[symbol]]
 ts = "BybitExchange._hasFullSizedPositionOppositeSide"
@@ -852,6 +956,22 @@ note = "CHOSEN: already-decoded immutable BybitPlaceOrderOpts reuse the maintain
 
 [[symbol]]
 ts = "BybitExchange.placeOrder"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#assertOptionOrderPlaceable"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitExchange#placeOptionOrder"
 kind = "field-fn"
 layer = ""
 rs = ""
@@ -966,9 +1086,9 @@ note = "CHOSEN: native immutable market-limit tuple is read at lookup rather tha
 ts = "BybitExchange.changePositionMode"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bybit/src/position_controls.rs::change_position_mode"
+rs = "safe-cex-venue-bybit/src/position_controls.rs::change_primary_position_mode"
 status = "divergent"
-note = "CHOSEN: primary async wrapper executes at native Future first poll and cancellation follows drop, whereas TypeScript invokes its helper eagerly and its promise remains active. Awaited body preserves explicit symbol reset, then exactly three helper arguments hedged/linear/USDT and original callback rejection. Standard declared string/bool inputs are retained; full class/helper composition remains separate rows. Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_position_mode."
+note = "Renamed Rust target: safe-cex-venue-bybit/src/position_controls.rs::change_primary_position_mode. CHOSEN: async wrapper executes at native Future first poll and cancellation follows drop. Refuses option symbols, then inverse symbols (\"Bybit position mode can only be changed on linear markets here\"), then delegates to the shared change_position_mode body (linear, USDT)."
 
 [[symbol]]
 ts = "BybitExchange.changePositionModeHelper"
