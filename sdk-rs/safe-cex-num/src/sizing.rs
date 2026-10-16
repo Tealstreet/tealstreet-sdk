@@ -225,28 +225,45 @@ pub fn calculate_total_account_leverage(notionals: &[f64], balance: f64) -> f64 
 pub fn calculate_total_notional(notionals: &[f64]) -> f64 {
     notionals.iter().fold(0.0, |sum, v| sum + v.abs())
 }
+/// A borrowed source row, preserving the account or currency object shape.
+#[derive(Clone, Copy, serde::Serialize)]
+#[serde(untagged)]
+pub enum BalanceSlice<'a> {
+    Account(&'a Balance),
+    Currency(&'a safe_cex_types::CurrencyBalance),
+}
+impl<'a> BalanceSlice<'a> {
+    pub fn as_balance(self) -> Option<&'a Balance> {
+        match self {
+            Self::Account(balance) => Some(balance),
+            Self::Currency(currency) => currency.as_balance(),
+        }
+    }
+}
 pub fn get_balance_slice<'a>(
     balance: Option<&'a Balance>,
     market: Option<&Market>,
-) -> Option<&'a Balance> {
+) -> Option<BalanceSlice<'a>> {
     let balance = balance?;
     let Some(market) = market else {
-        return Some(balance);
+        return Some(BalanceSlice::Account(balance));
     };
     let currency = get_margin_currency(Some(market), "");
     if currency.is_empty() {
-        return Some(balance);
+        return Some(BalanceSlice::Account(balance));
     }
     Some(
         balance
             .currencies
             .as_ref()
             .and_then(|v| v.get(currency))
-            .unwrap_or(balance),
+            .map(BalanceSlice::Currency)
+            .unwrap_or(BalanceSlice::Account(balance)),
     )
 }
 pub fn get_total_balance_from_balance(balance: Option<&Balance>, market: Option<&Market>) -> f64 {
     let total = get_balance_slice(balance, market)
+        .and_then(BalanceSlice::as_balance)
         .map(|v| v.total)
         .unwrap_or(0.0);
     if total == 0.0 || total.is_nan() {
