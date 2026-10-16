@@ -10,10 +10,10 @@ use crate::{
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     external::ExternalPublicData,
-    runtime::{ExchangeRuntime, RemoteSigner, ListenerCleanup},
+    runtime::{ExchangeRuntime, ListenerCleanup, RemoteSigner},
 };
-use safe_cex_transport::signing::RemoteSignerRequest;
 use safe_cex_store::Store;
+use safe_cex_transport::signing::RemoteSignerRequest;
 use safe_cex_transport::{
     RestAdapter, TransportError, TransportProvider,
     secondary::{RateLimitWrapper, create_api_with_secondary_key},
@@ -41,8 +41,6 @@ pub struct BaseExchangeParts {
     pub settings: ExchangeSettings,
     /// Required when `options.externalPublicData` is set.
     pub external_public_data: Option<ExternalPublicDataFactory>,
-    /// A hosted signer and its accountName: the account holds no secret.
-    pub remote_signer: Option<HostedSigner>,
 }
 
 /// exchange-server's browser relay for one account, with that account's name.
@@ -61,9 +59,10 @@ fn js_remote_signer(
         Ok(Js::Promise(Promise::spawn(
             &runtime,
             Box::pin(async move {
-                let response = signer.sign(request).await.map_err(|e| {
-                    Thrown::error("Error", &e.to_string())
-                })?;
+                let response = signer
+                    .sign(request)
+                    .await
+                    .map_err(|e| Thrown::error("Error", &e.to_string()))?;
                 let value = serde_json::to_value(&response)
                     .map_err(|e| Thrown::type_error(&e.to_string()))?;
                 Ok(super::value::from_json(&value))
@@ -71,7 +70,10 @@ fn js_remote_signer(
         )))
     });
     Js::object(vec![
-        ("accountName", account.map_or(Js::Undefined, |a| Js::str(&a))),
+        (
+            "accountName",
+            account.map_or(Js::Undefined, |a| Js::str(&a)),
+        ),
         ("sign", sign),
     ])
 }
@@ -110,7 +112,17 @@ pub fn create(
         runtime.clone(),
         parts.settings,
     );
-    if let Some((signer, account)) = parts.remote_signer {
+    let remote = context
+        .http
+        .borrow()
+        .as_ref()
+        .map(|http| -> Result<Option<HostedSigner>, Thrown> {
+            http.configure_exchange(core.name.clone())?;
+            Ok(http.hosted_signer())
+        })
+        .transpose()?
+        .flatten();
+    if let Some((signer, account)) = remote {
         core.signers.remote_signer = Some(signer.clone());
         options.set(
             "remoteSigner",
@@ -519,6 +531,15 @@ pub fn create(
     Ok((this, base))
 }
 
+/// Decode structural options without serializing executable host capabilities.
+/// The source object retains these handles; core receives them from its host.
+pub fn exchange_options(options: &Js) -> Result<ExchangeOptions, Thrown> {
+    let structural = options.spread_object()?;
+    structural.delete(&super::value::utf16("remoteSigner"));
+    structural.delete(&super::value::utf16("payloadSigner"));
+    to_typed(&structural)
+}
+
 type ClientRows = RefCell<Vec<(Arc<dyn RestAdapter>, Js)>>;
 
 /// ts: createApiWithSecondaryKey through the typed `create_api_with_secondary_key`, which
@@ -544,7 +565,7 @@ fn create_xhr_with_secondary_key(
         .map(|url| String::from_utf16_lossy(url));
     let rate_limit = other_member("rateLimit")?;
     let secondary_rate_limit = other_member("secondaryRateLimit")?;
-    let typed: ExchangeOptions = to_typed(&opts)?;
+    let typed: ExchangeOptions = exchange_options(&opts)?;
 
     let rows: ClientRows = RefCell::default();
     let failure: RefCell<Option<Thrown>> = RefCell::default();

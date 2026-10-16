@@ -231,7 +231,6 @@ fn base_exchange(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown
         store: rt.shared.store.clone(),
         settings: crate::binding::exchange::settings(),
         external_public_data: extra.external_public_data.clone(),
-        remote_signer: None,
     };
     let (this, base) = base_exchange::create(&rt.shared.sockets, parts, name, options, store)?;
     let _ = rt.shared.base.set(base);

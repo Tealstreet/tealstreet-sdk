@@ -927,3 +927,5 @@ indexer closed; native modules use free functions and trait impls only.
 `TealstreetTransport` over HOW adapters (bigInt = raw format) on a tunnel host that
 authenticates with the account's proxy token and checks expiry with the canonical
 `is_token_expired`. Proof: `safe-cex-registry/tests/native_host_tunnel.rs`.
+
+Hosted JS venues receive the signer through JsHttpHost, shared by Scope and BaseExchange assembly. Structural exchange_options decoding omits capability handles without altering the JS options object; never serialize hosted signers into the uninhabited JSON markers. The native host binds the exchange name before sending, wraps the existing RemoteSigningAdapter and propagates its effective configuration to source response hooks. Native registry tests exercise secretless validation and private websocket auth over real local sockets.

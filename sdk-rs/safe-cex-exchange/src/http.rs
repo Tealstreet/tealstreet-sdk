@@ -237,6 +237,13 @@ fn with_params_serializer(
         serialize: serializer.cloned(),
     })
 }
+/// The shared wire codec for a hosted signer's already-transformed output.
+pub(crate) fn remote_output_adapter(
+    inner: Arc<dyn RestAdapter>,
+    serializer: Option<&ParamsSerializer>,
+) -> Arc<dyn RestAdapter> {
+    with_params_serializer(inner, serializer, AdapterInput::RemoteOutput)
+}
 /// Factory-selected response transform, before shared response/error hooks.
 pub type ResponseTransform =
     Rc<dyn Fn(RestResponse, &RestRequest) -> Result<RestResponse, HttpFailure>>;

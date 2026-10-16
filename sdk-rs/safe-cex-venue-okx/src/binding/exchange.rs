@@ -13,7 +13,7 @@ use safe_cex_exchange::{
     exchange::{BaseExchange, Exchange, ValidatedBatch, ValidatedOrder},
     journal::HistoricalPositionOptions,
     js_runtime::{
-        base_exchange::{ExternalPublicDataFactory, HostedSigner},
+        base_exchange::ExternalPublicDataFactory,
         client::JsHttpHost,
         promise::await_js,
         scope::{Scope, ScopeShared},
@@ -34,8 +34,6 @@ pub struct OkxDependencies {
     pub http: Rc<dyn JsHttpHost>,
     /// Provider for `options.externalPublicData`; required when that option is set.
     pub external_public_data: Option<ExternalPublicDataFactory>,
-    /// The account's hosted signer, when it holds no secret (exchange-server).
-    pub remote_signer: Option<HostedSigner>,
 }
 
 pub struct OkxExchange {
@@ -97,7 +95,6 @@ impl OkxExchange {
                     name: name.clone(),
                     options: options.clone(),
                     external_public_data: deps.external_public_data.clone(),
-                    remote_signer: deps.remote_signer.clone(),
                 },
             )
         });

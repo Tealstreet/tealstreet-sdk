@@ -16,6 +16,14 @@ use std::{cell::RefCell, rc::Rc};
 pub trait JsHttpHost {
     fn runtime(&self) -> Rc<dyn ExchangeRuntime>;
     fn send(&self, config: Js) -> JsFuture<'static>;
+    /// Bind a fresh host to the exchange whose createAPI clients use it.
+    fn configure_exchange(&self, _name: safe_cex_types::ExchangeName) -> Result<(), Thrown> {
+        Ok(())
+    }
+    /// Hosted account capability shared by JS HTTP and BaseExchange/WS auth.
+    fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
+        None
+    }
 }
 
 type Host = Rc<dyn JsHttpHost>;
@@ -408,13 +416,68 @@ impl RestAdapter for JsRestAdapter {
 struct RestHttpHost {
     runtime: Rc<dyn ExchangeRuntime>,
     adapter: std::sync::Arc<dyn RestAdapter>,
+    remote: Option<super::base_exchange::HostedSigner>,
+    exchange: RefCell<Option<safe_cex_types::ExchangeName>>,
 }
 
 pub fn rest_http_host(
     runtime: Rc<dyn ExchangeRuntime>,
     adapter: std::sync::Arc<dyn RestAdapter>,
 ) -> Rc<dyn JsHttpHost> {
-    Rc::new(RestHttpHost { runtime, adapter })
+    rest_http_host_signed(runtime, adapter, None)
+}
+
+/// The production wire host with one hosted account's signer. Scope assembly
+/// supplies the exchange name before any client sends a request.
+pub fn rest_http_host_signed(
+    runtime: Rc<dyn ExchangeRuntime>,
+    adapter: std::sync::Arc<dyn RestAdapter>,
+    remote: Option<super::base_exchange::HostedSigner>,
+) -> Rc<dyn JsHttpHost> {
+    Rc::new(RestHttpHost {
+        runtime,
+        adapter,
+        remote,
+        exchange: RefCell::new(None),
+    })
+}
+
+struct TransportSigner(Rc<dyn crate::runtime::RemoteSigner>);
+impl safe_cex_transport::signing::RemoteSigner for TransportSigner {
+    fn sign(
+        &self,
+        request: safe_cex_transport::signing::RemoteSignerRequest,
+    ) -> safe_cex_transport::TransportFuture<'_, safe_cex_transport::signing::RemoteSignerResponse>
+    {
+        self.0.sign(request)
+    }
+}
+
+/// Adapt the local availability-aware signer to the transport's Arc capability.
+#[allow(clippy::arc_with_non_send_sync)]
+pub fn transport_signer(
+    signer: Rc<dyn crate::runtime::RemoteSigner>,
+) -> std::sync::Arc<dyn safe_cex_transport::signing::RemoteSigner> {
+    std::sync::Arc::new(TransportSigner(signer))
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn signed_adapter(
+    runtime: Rc<dyn ExchangeRuntime>,
+    adapter: std::sync::Arc<dyn RestAdapter>,
+    remote: &super::base_exchange::HostedSigner,
+    exchange: safe_cex_types::ExchangeName,
+    serializer: Option<&crate::http::ParamsSerializer>,
+) -> std::sync::Arc<dyn RestAdapter> {
+    let clock = runtime.clone();
+    std::sync::Arc::new(safe_cex_transport::signing::create_remote_signing_adapter(
+        transport_signer(remote.0.clone()),
+        exchange,
+        remote.1.clone(),
+        std::sync::Arc::new(move || runtime.unique_id()),
+        std::sync::Arc::new(move || clock.now_ms().max(0.0) as u64),
+        crate::http::remote_output_adapter(adapter, serializer),
+    ))
 }
 
 fn optional_text(config: &Js, key: &str) -> Result<Option<String>, Thrown> {
@@ -426,7 +489,32 @@ fn optional_text(config: &Js, key: &str) -> Result<Option<String>, Thrown> {
     })
 }
 
-fn rest_request(config: &Js) -> Result<RestRequest, Thrown> {
+fn js_params_serializer(config: &Js) -> Result<Js, Thrown> {
+    let serializer = config.get("paramsSerializer")?;
+    if serializer.is_callable() {
+        Ok(serializer)
+    } else if serializer.is_object() {
+        super::scope::bound_member(&serializer, "serialize")
+    } else {
+        Ok(Js::Undefined)
+    }
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn hosted_params_serializer(config: &Js) -> Result<Option<crate::http::ParamsSerializer>, Thrown> {
+    let serialize = js_params_serializer(config)?;
+    Ok(serialize.is_callable().then(|| {
+        std::sync::Arc::new(move |params: &serde_json::Value| {
+            serialize
+                .call(Js::Undefined, vec![from_json(params)])
+                .and_then(|query| query.to_js_string())
+                .map(|query| String::from_utf16_lossy(&query))
+                .map_err(|error| safe_cex_transport::TransportError::Host(error.message()))
+        }) as crate::http::ParamsSerializer
+    }))
+}
+
+fn rest_request(config: &Js, serialize_query: bool) -> Result<RestRequest, Thrown> {
     let mut headers = indexmap::IndexMap::new();
     let config_headers = config.get("headers")?;
     if !config_headers.is_nullish() {
@@ -450,15 +538,8 @@ fn rest_request(config: &Js) -> Result<RestRequest, Thrown> {
     let mut url = optional_text(config, "url")?.unwrap_or_default();
     let mut params = config.get("params")?;
     // Axios: a configured paramsSerializer (function or `{ serialize }`) owns the query.
-    let serializer = config.get("paramsSerializer")?;
-    let serialize = if serializer.is_callable() {
-        serializer
-    } else if serializer.is_object() {
-        super::scope::bound_member(&serializer, "serialize")?
-    } else {
-        Js::Undefined
-    };
-    if serialize.is_callable() && !params.is_nullish() {
+    let serialize = js_params_serializer(config)?;
+    if serialize_query && serialize.is_callable() && !params.is_nullish() {
         let query = serialize.call(Js::Undefined, vec![params])?;
         let query = String::from_utf16_lossy(&query.to_js_string()?);
         if !query.is_empty() {
@@ -508,6 +589,33 @@ fn response_data(body: RestResponseBody) -> Js {
     }
 }
 
+fn effective_config(config: &Js, request: RestRequest) -> Result<Js, Thrown> {
+    let result = config.spread_object()?;
+    result.set("method", Js::str(&request.method))?;
+    result.set("url", Js::str(&request.url))?;
+    result.set(
+        "baseURL",
+        request.base_url.as_deref().map_or(Js::Undefined, Js::str),
+    )?;
+    let headers = Js::object(vec![]);
+    for (name, value) in request.headers {
+        headers.define(&name, Js::str(&value))?;
+    }
+    result.set("headers", headers)?;
+    result.set(
+        "params",
+        request.params.as_ref().map_or(Js::Undefined, from_json),
+    )?;
+    let data = match request.body {
+        None => Js::Undefined,
+        Some(RestBody::Untransformed(value)) => from_json(&value),
+        Some(RestBody::Transformed(value)) => from_json(value.value()),
+        Some(RestBody::Encoded(bytes)) => Js::str(&String::from_utf8_lossy(&bytes)),
+    };
+    result.set("data", data)?;
+    Ok(result)
+}
+
 fn js_response(response: RestResponse, config: Js) -> Js {
     let headers = Js::object(vec![]);
     for (name, value) in &response.headers {
@@ -526,21 +634,74 @@ fn js_response(response: RestResponse, config: Js) -> Js {
 }
 
 impl JsHttpHost for RestHttpHost {
+    fn configure_exchange(&self, name: safe_cex_types::ExchangeName) -> Result<(), Thrown> {
+        if self.remote.is_none() {
+            return Ok(());
+        }
+        let mut exchange = self.exchange.borrow_mut();
+        if exchange.as_ref().is_some_and(|current| current != &name) {
+            return Err(Thrown::error(
+                "Error",
+                "HTTP host already belongs to another exchange",
+            ));
+        }
+        *exchange = Some(name);
+        Ok(())
+    }
+    fn hosted_signer(&self) -> Option<super::base_exchange::HostedSigner> {
+        self.remote.clone()
+    }
     fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.runtime.clone()
     }
     fn send(&self, config: Js) -> JsFuture<'static> {
         let adapter = self.adapter.clone();
+        let remote = self.remote.clone();
+        let exchange = self.exchange.borrow().clone();
+        let runtime = self.runtime.clone();
         Box::pin(async move {
-            let request = rest_request(&config)?;
-            match adapter.execute(request).await {
-                Ok(response) => Ok(js_response(response, config)),
+            let adapter = if let Some(remote) = &remote {
+                signed_adapter(
+                    runtime,
+                    adapter,
+                    remote,
+                    exchange.ok_or_else(|| {
+                        Thrown::error("Error", "hosted HTTP host has no exchange")
+                    })?,
+                    hosted_params_serializer(&config)?.as_ref(),
+                )
+            } else {
+                adapter
+            };
+            let request = rest_request(&config, remote.is_none())?;
+            match adapter.execute_with_receipt(request).await {
+                Ok(execution) => {
+                    let config = if remote.is_some() {
+                        effective_config(&config, execution.config)?
+                    } else {
+                        config
+                    };
+                    Ok(js_response(execution.response, config))
+                }
                 // A status failure still carries the response; the client classifies it.
                 Err(RestFailure {
                     response: Some(response),
+                    request,
                     ..
-                }) => Ok(js_response(*response, config)),
+                }) => {
+                    let config = if remote.is_some() {
+                        effective_config(&config, *request)?
+                    } else {
+                        config
+                    };
+                    Ok(js_response(*response, config))
+                }
                 Err(failure) => {
+                    let config = if remote.is_some() {
+                        effective_config(&config, *failure.request)?
+                    } else {
+                        config
+                    };
                     let error = super::value::error_object("AxiosError", &failure.message);
                     if let Some(code) = &failure.code {
                         error.define("code", Js::str(code))?;

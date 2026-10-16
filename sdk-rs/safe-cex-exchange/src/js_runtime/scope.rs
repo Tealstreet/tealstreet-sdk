@@ -37,8 +37,10 @@ impl<X> ScopeShared<X> {
         globals: Js,
         extra: X,
     ) -> Self {
+        let sockets = JsSocketContext::new(runtime.clone());
+        *sockets.http.borrow_mut() = Some(http.clone());
         Self {
-            sockets: JsSocketContext::new(runtime.clone()),
+            sockets,
             runtime,
             http,
             store,

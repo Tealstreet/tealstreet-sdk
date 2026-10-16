@@ -82,7 +82,11 @@ Binance and OKX on a local gateway socket.
 `native_venue_host_signed` is one account's host with a hosted `remoteSigner`
 (exchange-server's browser relay) and its accountName; no secret is held. Binance
 installs the remote signing adapter on every client and signs Spot ws-auth
-through it; backpack refuses that host visibly until its signing is wired.
+through it. OKX-family, BloFin and Bitunix also share that hosted account for
+HTTP and private websocket auth. The JS host binds its exchange name during
+BaseExchange construction and injects the same signer into options and core
+availability; it refuses reuse for a different exchange. Bitunix retains the
+account name in its private auth request. Backpack still refuses hosted signing.
 `tests/native_host_remote_signer.rs` verifies the signer's HMAC server-side.
 `tests/native_host_tunnel.rs` runs `tealstreetTunnel` REST over a local tradetunnel
 (rpc.auth with the proxy token, rpc.http frames) with no direct venue request.

@@ -20,10 +20,10 @@ use safe_cex_exchange::{
     },
     exchange::ExchangeSettings,
     js_runtime::{
-        base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory, HostedSigner},
+        base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory},
         promise::await_js,
         scope::{Scope, ScopeShared, bound_member, scope_of},
-        value::{Js, Thrown, arg, from_typed, to_json, to_typed},
+        value::{Js, Thrown, arg, from_typed, to_json},
     },
 };
 use safe_cex_types::{ExchangeName, ExchangeOptions, exchange_metadata::get_exchange_metadata};
@@ -34,7 +34,6 @@ pub(crate) struct OkxExtra {
     pub name: ExchangeName,
     pub options: ExchangeOptions,
     pub external_public_data: Option<ExternalPublicDataFactory>,
-    pub remote_signer: Option<HostedSigner>,
 }
 
 impl OkxExtra {
@@ -93,14 +92,13 @@ fn client_order_id_rule(shared: Weak<OkxShared>) -> ClientOrderIdRule {
 fn base_constructor(scope: &OkxScope) -> Js {
     let shared = scope.shared.clone();
     Js::constructor("BaseExchange", move |_, a| {
-        let options: ExchangeOptions = to_typed(&arg(&a, 1))?;
+        let options: ExchangeOptions = base_exchange::exchange_options(&arg(&a, 1))?;
         let parts = BaseExchangeParts {
             name: shared.extra.name.clone(),
             options,
             store: shared.store.clone(),
             settings: settings(&shared.extra.name, Rc::downgrade(&shared))?,
             external_public_data: shared.extra.external_public_data.clone(),
-            remote_signer: shared.extra.remote_signer.clone(),
         };
         let (this, base) =
             base_exchange::create(&shared.sockets, parts, arg(&a, 0), arg(&a, 1), arg(&a, 2))?;
