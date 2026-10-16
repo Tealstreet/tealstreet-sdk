@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/registry.native.ts"
-rust_files = [ "safe-cex-registry/src/registry.rs", "safe-cex-registry/src/loaders.rs", "safe-cex-registry/src/module_host.rs", "safe-cex-registry/src/rust_venues.rs" ]
+rust_files = [ "safe-cex-registry/src/registry.rs", "safe-cex-registry/src/loaders.rs", "safe-cex-registry/src/rust_venues.rs" ]
 
 [[symbol]]
 ts = "require"

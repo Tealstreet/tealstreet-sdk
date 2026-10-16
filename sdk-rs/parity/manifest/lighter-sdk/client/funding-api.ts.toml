@@ -1,6 +1,6 @@
 [file]
 ts = "packages/lighter-sdk/src/client/funding-api.ts"
-rust_files = [ "safe-cex-venue-lighter/src/sdk_market_api.rs", "safe-cex-venue-lighter/src/sdk_account_api.rs" ]
+rust_files = [ "safe-cex-venue-lighter/src/sdk_market_api.rs" ]
 
 [[symbol]]
 ts = "FundingRate"
