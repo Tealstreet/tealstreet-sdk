@@ -1,5 +1,6 @@
 //! Host family on Bound; see the trait docs for each JS operation.
 use super::order_mapping::{account, js};
+use crate::binding::value::to_signing;
 use crate::{
     binding::{
         ops::{
@@ -20,7 +21,7 @@ use std::rc::Rc;
 
 impl OrderActionIterator for JsIterator {
     fn next(&mut self) -> SigningResult<Option<AccountValue>> {
-        Ok(self.step().map(|v| to_account(&v)))
+        Ok(self.step().map_err(to_signing)?.map(|v| to_account(&v)))
     }
     fn close_throw(&mut self, error: TransactionSigningError) -> TransactionSigningError {
         error

@@ -280,7 +280,7 @@ impl StreamHost for Rt {
         }
     }
     fn new_set(&self) -> Result<Js, Thrown> {
-        Ok(Js::Set(Rc::new(RefCell::new(vec![]))))
+        Ok(Js::new_set())
     }
     fn is_blob(&self, v: &Js) -> Result<bool, Thrown> {
         Ok(matches!(v,Js::Object(o) if o.class=="Blob"))

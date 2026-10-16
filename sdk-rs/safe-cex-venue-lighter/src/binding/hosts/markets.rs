@@ -39,7 +39,7 @@ impl MarketReadHost for Bound {
     }
     fn for_of(&self, array: AccountValue, body: ForOfBody) -> SigningResult<Option<AccountValue>> {
         let iterator = JsIterator::open(&to_js(&array)).map_err(to_signing)?;
-        while let Some(value) = iterator.step() {
+        while let Some(value) = iterator.step().map_err(to_signing)? {
             if let ForOfStep::Break(result) = body(to_account(&value))? {
                 return Ok(Some(result));
             }

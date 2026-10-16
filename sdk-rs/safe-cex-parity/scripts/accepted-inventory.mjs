@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { defaultTraitInventory } from './accepted-defaults.mjs';
+import { hyperliquidProjectionCompilerIdentity } from './accepted-hyperliquid-projection.mjs';
 
 // The pinned compiler, rather than derive syntax, owns the implementation inventory.
 export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, receiverTraits = {}, readSource } = {}) {
@@ -278,7 +279,8 @@ export function inventory(doc, { onlyOwners, onlyDefaultTraits, defaultTraits, r
     if (item.visibility === 'public' && item.inner.use) assert.ok(item.inner.use.id != null, `accepted-set: unresolved public reexport ${item.inner.use.name ?? item.name ?? item.inner.use.source ?? '<unnamed use>'}`);
     // Public aliases can hide an owner implementation. Private aliases are not public surface.
     if (item.inner.type_alias && item.crate_id === 0 && item.visibility === 'public') {
-      publicAliases.push({ name: paths.get(String(item.id))?.join('::') ?? item.name, ident: item.name, span: item.span, generics: normalize(item.inner.type_alias.generics), rawTarget: normalize(item.inner.type_alias.type), target: normalize(expanded(item.inner.type_alias.type)) });
+      const projectionIdentity = hyperliquidProjectionCompilerIdentity(doc, item, paths);
+      publicAliases.push({ name: paths.get(String(item.id))?.join('::') ?? item.name, ident: item.name, span: item.span, generics: normalize(item.inner.type_alias.generics), rawTarget: normalize(item.inner.type_alias.type), target: normalize(expanded(item.inner.type_alias.type)), ...(projectionIdentity ? { projectionIdentity } : {}) });
       const targets = [];
       collectExternalTypePaths(expanded(item.inner.type_alias.type), targets);
       for (const target of targets) externalTypeAliases.push({ name: paths.get(String(item.id))?.join('::') ?? item.name, ...target });

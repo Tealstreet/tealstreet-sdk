@@ -1,0 +1,290 @@
+{
+  "safe_cex_venue_hyperliquid::private_class::PrivateValue": {
+    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
+    "expectedType": "crate::realm::value::Value",
+    "suffix": "<crate::realm::Realm>",
+    "file": "safe-cex-venue-hyperliquid/src/private_class.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_hyperliquid::private_class::PrivateError": {
+    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
+    "expectedType": "crate::realm::value::Value",
+    "suffix": "<crate::realm::Realm>",
+    "file": "safe-cex-venue-hyperliquid/src/private_class.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_hyperliquid::public_class::PublicValue": {
+    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
+    "expectedType": "crate::realm::value::Value",
+    "suffix": "<crate::realm::Realm>",
+    "file": "safe-cex-venue-hyperliquid/src/public_class.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_hyperliquid::public_class::PublicError": {
+    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
+    "expectedType": "crate::realm::value::Value",
+    "suffix": "<crate::realm::Realm>",
+    "file": "safe-cex-venue-hyperliquid/src/public_class.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_hyperliquid::core_exchange_class::ExchangeValue": {
+    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
+    "expectedType": "crate::realm::value::Value",
+    "suffix": "<crate::realm::Realm>",
+    "file": "safe-cex-venue-hyperliquid/src/core_exchange_class.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "unsized": false
+  },
+  "safe_cex_venue_hyperliquid::core_exchange_class::ExchangeError": {
+    "canonical": "safe_cex_venue_hyperliquid::realm::value::Value",
+    "expectedType": "crate::realm::value::Value",
+    "suffix": "<crate::realm::Realm>",
+    "file": "safe-cex-venue-hyperliquid/src/core_exchange_class.rs",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "unsized": false
+  }
+}

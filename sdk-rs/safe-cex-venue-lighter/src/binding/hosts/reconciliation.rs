@@ -18,13 +18,14 @@ impl ReconciliationHost for Bound {
     }
     fn pair(&self, value: AccountValue) -> SigningResult<(AccountValue, AccountValue)> {
         let iterator = JsIterator::open(&to_js(&value)).map_err(to_signing)?;
-        let next = || {
-            iterator
+        let next = || -> SigningResult<AccountValue> {
+            Ok(iterator
                 .step()
-                .map_or(AccountValue::Undefined, |v| to_account(&v))
+                .map_err(to_signing)?
+                .map_or(AccountValue::Undefined, |v| to_account(&v)))
         };
-        let first = next();
-        let second = next();
+        let first = next()?;
+        let second = next()?;
         Ok((first, second))
     }
     fn spread_override(

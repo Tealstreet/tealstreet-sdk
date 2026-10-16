@@ -270,30 +270,5 @@ pub(super) fn call(rt: &Rt, n: &str, a: Vec<Js>) -> Result<Js, Thrown> {
 }
 
 pub(super) fn iterate(v: &Js) -> Result<Vec<Js>, Thrown> {
-    Ok(match v {
-        Js::Array(_) => v.array_values().unwrap(),
-        Js::Set(s) => s.borrow().clone(),
-        Js::Map(m) => m
-            .borrow()
-            .iter()
-            .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-            .collect(),
-        Js::String(u) => {
-            let mut out = vec![];
-            let mut i = 0;
-            while i < u.len() {
-                let width = if (0xd800..=0xdbff).contains(&u[i])
-                    && u.get(i + 1).is_some_and(|n| (0xdc00..=0xdfff).contains(n))
-                {
-                    2
-                } else {
-                    1
-                };
-                out.push(Js::utf16(&u[i..i + width]));
-                i += width;
-            }
-            out
-        }
-        _ => return Err(Thrown::type_error("value is not iterable")),
-    })
+    v.iterable_values()
 }

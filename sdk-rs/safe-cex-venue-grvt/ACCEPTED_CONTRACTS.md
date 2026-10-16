@@ -193,3 +193,42 @@ production position-size drift fails both fetch_positions observations while all
 The merged Fields tooling additionally proves native identity, member-order and
 removed-policy controls. These receipts retain the ordinary guards and do not
 complete the remaining nominal, receiver or local-scope review.
+
+## Composition owner batch
+
+Four further contracts retain all five compiler APIs on ClientOrderIdRule and
+the exchange, public-socket and private-socket composition owners. The validator
+executes 29 independent UTF-8 string cases at canonical decimal and reserved
+2^63 boundaries, including integers beyond Number's exact range. It does not
+convert client IDs to Number.
+
+Each member API uses Rc<Cell<i64>> values, with u32 socket timers and String
+private fill keys. Eight cases per owner inspect original values, Some/None,
+ordered keys, Rc pointer identity and mutation through the returned alias, while
+checking unrelated native fields and state. These finite native instantiations
+do not classify arbitrary generic values or JavaScript prototype behavior; the
+owned registry representation remains the declared boundary.
+
+The exchange's record_nonce wrapper has four independently authored cache cases.
+They retain both Rc handles and inspect native time bits, unknown times, real-ID
+sentinels, insertion order, earliest valid time and paired eviction at 200 entries.
+The actual maintained TypeScript validation arrow and recordNonce body match
+the corresponding 33 expectations. The source controls widen the reserved range
+and cache limit in memory and introduce a late duplicate validator; each requires
+a named failure and passes again with the original source.
+
+The 57 cases execute production Rust before projecting selected observations.
+Remaining owners and generic instantiations still need their own reviews.
+
+Six separately compiled native production controls widen the reserved client-ID
+boundary, remove each of the three member lookups, drop the real-ID delegate
+argument and overwrite the retained earliest timestamp. Each fails the intended
+owner with an observed-output mismatch; exact restoration passes all four owners.
+The production files are restored unchanged.
+
+The current 92-row stored union passes on native and target-specific Wasm: 79
+production runtime results and 13 explicit classifications per target, including
+all nineteen aliases. All 184 receipts pass the scoped ratchet without changing
+the standing defect ledger. Both maintained source tests, strict host/Wasm clippy,
+formatting and parity checks pass. The 109 remaining indexed nominal/function
+owners still need individual review.

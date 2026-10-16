@@ -1954,34 +1954,6 @@
       ]
     },
     {
-      "type": "safe_cex_transport::signing::SignedConfig",
-      "owner": {
-        "crate": "safe-cex-transport",
-        "agent": "codex-oerz4t"
-      },
-      "status": "outstanding",
-      "failures": [
-        "[native;] Deserialize accepted [null,null,null,{}]",
-        "[native;] qualified decoder accepted [null,null,null,{}]",
-        "[wasm32-unknown-unknown;] Deserialize accepted [null,null,null,{}]",
-        "[wasm32-unknown-unknown;] qualified decoder accepted [null,null,null,{}]"
-      ]
-    },
-    {
-      "type": "safe_cex_transport::signing::SigningConfig",
-      "owner": {
-        "crate": "safe-cex-transport",
-        "agent": "codex-oerz4t"
-      },
-      "status": "outstanding",
-      "failures": [
-        "[native;] Deserialize accepted [\"sample\",\"sample\",\"sample\",null,null,{}]",
-        "[native;] qualified decoder accepted [\"sample\",\"sample\",\"sample\",null,null,{}]",
-        "[wasm32-unknown-unknown;] Deserialize accepted [\"sample\",\"sample\",\"sample\",null,null,{}]",
-        "[wasm32-unknown-unknown;] qualified decoder accepted [\"sample\",\"sample\",\"sample\",null,null,{}]"
-      ]
-    },
-    {
       "type": "safe_cex_crypto::WsAuth",
       "owner": {
         "crate": "safe-cex-crypto",

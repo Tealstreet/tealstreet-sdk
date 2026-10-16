@@ -680,7 +680,18 @@ fn store_state(this: &Js, state: &BookState) -> Result<(), Thrown> {
         for (k, v) in typed.iter().filter(|(k, _)| !seen.contains(*k)) {
             next.push((Js::str(k), Js::str(v)));
         }
-        *map.borrow_mut() = next;
+        let mut slots = map.borrow_mut();
+        slots.retain(|(key, _)| next.iter().any(|(next, _)| next.same_value_zero(key)));
+        for (key, value) in next {
+            if let Some(slot) = slots
+                .iter_mut()
+                .find(|(existing, _)| existing.same_value_zero(&key))
+            {
+                slot.1 = value;
+            } else {
+                slots.push((key, value));
+            }
+        }
     }
     if let Js::Set(set) = this.get("recoveringOrderBooks")? {
         let typed = state.recovering.borrow();
@@ -699,7 +710,16 @@ fn store_state(this: &Js, state: &BookState) -> Result<(), Thrown> {
                 .filter(|k| !seen.contains(*k))
                 .map(|k| Js::str(k)),
         );
-        *set.borrow_mut() = next;
+        let mut slots = set.borrow_mut();
+        slots.retain(|key| next.iter().any(|next| next.same_value_zero(key)));
+        for value in next {
+            if !slots
+                .iter()
+                .any(|existing| existing.same_value_zero(&value))
+            {
+                slots.push(value);
+            }
+        }
     }
     Ok(())
 }

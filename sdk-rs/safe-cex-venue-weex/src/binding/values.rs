@@ -108,25 +108,15 @@ pub(super) fn omit(h: &Host, value: Js) -> Result<Js, Thrown> {
         .call(Js::Undefined, std::vec![value])
 }
 pub(super) fn iterator(_: &Host, value: &Js) -> Result<Js, Thrown> {
-    let values = match value {
-        Js::Array(_) => value.clone(),
-        Js::Map(_) => value.call_method("entries", std::vec![])?,
-        Js::Set(_) => value.call_method("values", std::vec![])?,
-        _ => return Err(Thrown::type_error("value is not iterable")),
-    };
-    Ok(Js::object(std::vec![
-        ("values", values),
-        ("index", Js::Number(0.0)),
-    ]))
+    value.iterator()
 }
 pub(super) fn next(_: &Host, iterator: &Js) -> Result<Option<Js>, Thrown> {
-    let values = iterator.get("values")?;
-    let index = iterator.get("index")?.to_number()? as usize;
-    if index >= length(&values)? {
-        return Ok(None);
+    let step = iterator.call_method("next", std::vec![])?;
+    if step.get("done")?.truthy() {
+        Ok(None)
+    } else {
+        step.get("value").map(Some)
     }
-    iterator.set("index", Js::Number((index + 1) as f64))?;
-    at(&values, index).map(Some)
 }
 pub(super) fn map(
     value: &Js,

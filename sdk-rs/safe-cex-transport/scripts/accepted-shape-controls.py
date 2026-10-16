@@ -2,6 +2,7 @@
 """Independently disconnect each Transport map/string admission guard, then restore."""
 from pathlib import Path
 import subprocess
+import sys
 
 ROOT = Path(__file__).resolve().parents[3]
 SDK = ROOT / "sdk-rs"
@@ -20,8 +21,10 @@ for owner, test in [
     ("ResolvedRouting", "resolved_routing_requires_an_object_and_preserves_native_fields"),
     ("RoutingOptions", "routing_options_require_an_object_and_preserve_native_fields"),
     ("SigningHeader", "signing::header_shape_tests::header_requires_object_and_preserves_native_fields"),
+    ("ResolvedTransport", "resolution_transport_requires_object_and_preserves_optional_flags"),
+    ("TransportMetadata", "resolution_metadata_requires_object_and_preserves_native_region_order"),
 ]:
-    source = "how_config.rs" if owner == "LatencyEntry" else "signing.rs" if owner == "SigningHeader" else "routing.rs"
+    source = "transport_resolution.rs" if owner in {"ResolvedTransport", "TransportMetadata"} else "how_config.rs" if owner == "LatencyEntry" else "signing.rs" if owner == "SigningHeader" else "routing.rs"
     add(PACKAGE / "src" / source, owner,
         f"{owner}Wire::deserialize(safe_cex_types::strict_decode::object(d))",
         f"{owner}Wire::deserialize(d)",
@@ -73,6 +76,10 @@ def execute(case, restored):
     print(f"{name}: {suffix} compiled named test {'PASS' if restored else 'FAIL'}", flush=True)
 
 
+if len(sys.argv) > 1:
+    requested = set(sys.argv[1:])
+    assert requested <= {case[1] for case in CASES}, requested
+    CASES = [case for case in CASES if case[1] in requested]
 snapshots = {case[0]: case[0].read_bytes() for case in CASES}
 try:
     for case in CASES:

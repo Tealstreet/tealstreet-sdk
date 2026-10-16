@@ -445,15 +445,12 @@ impl crate::classes::ClassHost for Rt {
         )
     }
     fn for_each_set(&self, s: Js, f: Rc<dyn Fn(Js) -> Result<(), Thrown>>) -> Result<(), Thrown> {
-        let mut i = 0;
-        loop {
-            let v = match &s {
-                Js::Set(s) => s.borrow().get(i).cloned(),
-                _ => return Err(Thrown::type_error("Set expected")),
-            };
-            let Some(v) = v else { break };
-            f(v)?;
-            i += 1;
+        if !matches!(s, Js::Set(_)) {
+            return Err(Thrown::type_error("Set expected"));
+        }
+        let mut iterator = Iter::new(s)?;
+        while let Some(value) = iterator.next()? {
+            f(value)?;
         }
         Ok(())
     }
