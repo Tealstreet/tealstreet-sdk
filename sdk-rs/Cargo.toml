@@ -95,6 +95,7 @@ safe-cex-transport = { path = "safe-cex-transport" }
 safe-cex-crypto = { path = "safe-cex-crypto" }
 safe-cex-exchange = { path = "safe-cex-exchange" }
 safe-cex-registry = { path = "safe-cex-registry" }
+safe-cex-venue-apexomni = { path = "safe-cex-venue-apexomni" }
 safe-cex-venue-asterdex = { path = "safe-cex-venue-asterdex" }
 safe-cex-venue-kucoin = { path = "safe-cex-venue-kucoin" }
 safe-cex-venue-mexc = { path = "safe-cex-venue-mexc" }
@@ -109,6 +110,7 @@ safe-cex-venue-bybit = { path = "safe-cex-venue-bybit" }
 safe-cex-venue-coinbase = { path = "safe-cex-venue-coinbase" }
 safe-cex-venue-okx = { path = "safe-cex-venue-okx" }
 safe-cex-venue-kraken = { path = "safe-cex-venue-kraken" }
+safe-cex-venue-grvt = { path = "safe-cex-venue-grvt" }
 safe-cex-venue-polymarket = { path = "safe-cex-venue-polymarket" }
 safe-cex-venue-woo = { path = "safe-cex-venue-woo" }
 safe-cex-venue-weex = { path = "safe-cex-venue-weex" }

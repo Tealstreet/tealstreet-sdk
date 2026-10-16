@@ -151,6 +151,17 @@ requires (REST keeps the default). One TLS stack: rustls on the `ring` provider 
 native roots; do not add a dependency that pulls aws-lc. Run inside a tokio
 `LocalSet`. Proofs live in `safe-cex-registry/tests/native_host_*.rs`.
 
+`RestRequest::config_extensions` retains JSON-data adapter config separately from
+headers across terminal adapter calls and hosted signing. The shared JS client
+copies non-executable extension properties into it; callbacks and ordinary
+request fields keep their existing capabilities and typed paths. HOW alone
+projects truthy `grvtCookie`/`grvtAccountId` extensions into Cookie/account headers,
+matching the actual browser adapter. Direct HTTP keeps X-Ts-Grvt-Session source
+semantics. Unknown extension properties are retained, not emitted as HTTP headers
+or HOW arguments. The existing JSON data boundary applies to extension values;
+this is not an arbitrary executable Axios object carrier. The live source corpus
+in tests/grvt-config-source.cjs covers seven missing/truthy/falsy/overwrite cases.
+
 The native terminal combines baseURL and relative URLs using Axios
 buildFullPath/combineURLs semantics: exactly one joining slash, empty relative
 path retains baseURL, absolute/protocol-relative URLs remain absolute. The
