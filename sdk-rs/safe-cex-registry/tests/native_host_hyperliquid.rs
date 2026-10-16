@@ -260,10 +260,45 @@ fn hyperliquid_registry_uses_real_http_and_hosted_signing_without_a_secret() {
                     "overrideProxyUrl": proxy
                 }))
                 .unwrap();
-                let deps = host.hyperliquid(&options).unwrap();
+                let deps = host
+                    .hyperliquid(ExchangeName::Hyperliquid, &options)
+                    .unwrap();
                 assert!(Rc::ptr_eq(&deps.limiter, &limiter));
+                let spot_deps = host
+                    .hyperliquid(ExchangeName::Hyperliquidspot, &options)
+                    .unwrap();
                 assert!(
-                    Rc::ptr_eq(&other.hyperliquid(&options).unwrap().limiter, &limiter),
+                    Rc::ptr_eq(&spot_deps.limiter, &limiter),
+                    "Spot and perpetual accounts share one weight budget"
+                );
+                spot_deps
+                    .http
+                    .execute(RestRequest {
+                        method: "POST".into(),
+                        url: "/exchange".into(),
+                        base_url: Some(
+                            if testnet {
+                                "https://api.hyperliquid-testnet.xyz"
+                            } else {
+                                "https://api.hyperliquid.xyz"
+                            }
+                            .into(),
+                        ),
+                        body: Some(safe_cex_transport::RestBody::Untransformed(
+                            json!({"action":{"type":"scheduleCancel"},"nonce":1700000000000_u64}),
+                        )),
+                        ..Default::default()
+                    })
+                    .await
+                    .unwrap();
+                assert!(
+                    Rc::ptr_eq(
+                        &other
+                            .hyperliquid(ExchangeName::Hyperliquid, &options)
+                            .unwrap()
+                            .limiter,
+                        &limiter
+                    ),
                     "distinct account hosts share one weight budget"
                 );
                 let exchange = rust_constructor(&ExchangeName::Hyperliquid, host.clone())
@@ -302,9 +337,20 @@ fn hyperliquid_registry_uses_real_http_and_hosted_signing_without_a_secret() {
                 exchange.dispose().unwrap();
             }
             let calls = signer.calls.borrow();
-            assert_eq!(calls.len(), 2, "only trading calls go to the remote signer");
+            assert_eq!(calls.len(), 4, "only trading calls go to the remote signer");
+            assert_eq!(
+                calls
+                    .iter()
+                    .filter(|call| call["exchangeName"] == "hyperliquidspot")
+                    .count(),
+                2,
+                "Spot host adapter preserves the selected registry name"
+            );
             for call in calls.iter() {
-                assert_eq!(call["exchangeName"], "hyperliquid");
+                assert!(
+                    call["exchangeName"] == "hyperliquid"
+                        || call["exchangeName"] == "hyperliquidspot"
+                );
                 assert_eq!(call["accountName"], "hl-account");
                 assert_eq!(call["config"]["url"], "/exchange");
             }

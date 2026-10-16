@@ -10,13 +10,16 @@ This crate contains typed payloads, action composition, L1/user EIP-712 signing,
 order interpretation, pacing, API processing and host-bound exchange/socket
 algorithms. Raw class construction and arrow dispatch retain opaque native
 receivers over explicit host operations. A row census does not establish a live
-browser/venue binding; these tests use source executions and injected hosts.
+browser/venue binding. Production `HyperliquidExchange::new` and the Spot constructor
+below assemble the existing bodies through native hosts; their evidence uses
+source executions, scripted transports and loopback HTTP/WebSockets.
 
 `create_exchange_api` and `create_info_api` accept an adapter, error emitter and
 shared clock-backed `Rc<RateLimiter>`. The caller must supply regional/proxy and
 qs-repeat behavior; these factories neither install nor validate it. The shared
-`HttpClientOptions.params_serializer` seam exists. Concrete venue binding remains
-unproved. See `CLAUDE.md#api-execution-contract` and `#limiter-execution-contract`.
+`HttpClientOptions.params_serializer` seam exists. The native registry supplies
+these host inputs; `tests/native_host_hyperliquid.rs` checks the composed route.
+See `CLAUDE.md#api-execution-contract` and `#limiter-execution-contract`.
 Telemetry receives current request data without an extra parse before the provider.
 
 Read retries use the shared Hyperliquid all-POST predicate. Relative exchange
@@ -46,3 +49,38 @@ Preserved source quirks include scientific-exponent zero stripping in floatToWir
 short-vault right-padding and absolute exchange URL retry classification. Fixtures
 and historical controls remain intact. Local delivery requires formatting, locked
 workspace build and workspace host clippy; central wasm/wiring gates are separate.
+
+The family socket facade maps source `ws.close()` to the shared transport-only
+`close_current_websocket()` API. It closes the current native/relay connection
+while preserving `forceClosed`, generation and superclass resources. The private
+perpetual socket's source `dispose` has no super call; the production realm
+regression checks its wire close and unchanged force/parent-disposal flags against
+the actual TypeScript class, including a failing forceClose source mutation.
+
+Hyperliquid Spot uses `spot_binding::HyperliquidSpotExchange::new` over the same
+production family realm and native dependency shape. Its registry name is
+`Hyperliquidspot`; host callers now pass the selected name to
+`RustVenueHost::hyperliquid(name, options)`. Keep the caller-owned limiter shared
+with perpetual accounts. Spot preserves its source constructor's perpetual API
+factory import and source signing calls, including their default mainnet domain.
+Source methods without a Spot override keep BaseExchange's `Not implemented`
+error. Candle and order-book listeners invoke the Spot socket class and retain
+its cleanup behavior (candle cleanup removes the handler without a wire
+unsubscribe).
+
+Spot's `placeOrder`/`updateOrder` return the object produced by actual
+`omitUndefined` (`lodash/omitBy`) inside the realm. The native Exchange ABI returns
+`Vec<String>`, so the adapter reads values of enumerable numeric own keys in JS
+key order, skips missing indices, preserves string IDs, and spells number IDs
+with `js_number_string`. Batch placement preflights every caller ID before the
+first order, follows source mapSeries order, and combines the lowered IDs.
+It refuses other key/value types and lone-surrogate strings. This is a declared native output choice under
+[the typed output boundary](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary),
+not an assertion that source `omitUndefined` returns an array.
+
+The Store/DTO boundary uses the shared native typed codec rather than a JSON
+roundtrip. Missing Spot `oraclePx`/`funding` fields produce NaN in source and keep
+that value through native Store snapshots and lookup tables. Wire JSON still
+uses JSON.stringify semantics. Candle calendar arithmetic uses the shared
+`js_runtime` dayjs implementation; the realm adapter exposes the `subtract` and
+`valueOf` operations consumed by this source method.

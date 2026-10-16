@@ -106,6 +106,12 @@ non-decoder receipts are counted separately. Total decoders cannot be validated
 by an is_ok-only adapter. A new
 raw decoder needs an adapter and positive witnesses; a typed constructor needs
 its reason. Record arrays use Serde's field order, not JSON map insertion order.
+Observed methods normally require distinct inputs and outputs. Only the two
+`Capture` serializer metadata constructors listed in
+`../accepted-set/constant-outputs.json` may set `constantOutput: true`. Their
+actual compiler package, API, body span, whole-source hash, native adapter and
+cases are pinned. Both distinct metadata inputs still execute; this is no
+permission for other constant methods, altered adapters or decoder exemptions.
 The bounded `construction.json` policy classifies Clone/Copy on private-field
 types, including service handles whose shared ownership is intentional.
 
