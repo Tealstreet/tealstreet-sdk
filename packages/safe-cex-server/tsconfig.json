@@ -1,0 +1,17 @@
+{
+  "$schema": "https://json.schemastore.org/tsconfig",
+  "extends": "../../tsconfig.base.json",
+  "compilerOptions": {
+    "target": "ESNext",
+    "lib": ["dom", "dom.iterable", "esnext"],
+    "module": "ESNext",
+    "incremental": true,
+    "types": ["vitest/globals"]
+  },
+  "paths": {
+    "@tealstreet/safe-cex/src": ["../safe-cex/src"],
+    "@tealstreet/safe-cex/src/*": ["../safe-cex/src/*"]
+  },
+  "exclude": ["**/node_modules", "**/.*/*", "dist"],
+  "include": [".eslintrc.*", "**/*.ts", "**/*.tsx", "**/*.mts", "**/*.cjs", "**/*.mjs", "**/*.jsx", "**/*.json"]
+}
