@@ -16,6 +16,9 @@ use std::{
     cell::{Cell, RefCell},
     rc::Rc,
 };
+// ts: AsterDEXExchange.OPEN_INTEREST_POLL_INTERVAL_MS / OPEN_INTEREST_BATCH_SIZE; the class constants alias these.
+pub(crate) const OPEN_INTEREST_POLL_INTERVAL_MS: f64 = 15000.;
+pub(crate) const OPEN_INTEREST_BATCH_SIZE: usize = 25;
 
 #[derive(Clone, Debug, serde::Deserialize)]
 pub struct ExecutionOrder {
@@ -265,6 +268,7 @@ impl OrderExecution {
                         client_order_id: None,
                         close: None,
                         max_slippage_pct: None,
+                        implied_volatility: None,
                     };
                     orders.push(ExecutionOrder {
                         opts: AsterDEXPlaceOrderOpts {
@@ -398,6 +402,7 @@ impl OrderExecution {
                     client_order_id: None,
                     close: None,
                     max_slippage_pct: None,
+                    implied_volatility: None,
                 },
                 stp_mode: None,
             },
@@ -563,7 +568,7 @@ impl OrderExecution {
             }
             let mut values = self.interest(None, false).await?;
             if values.is_empty() {
-                let size = 25.min(symbols.len());
+                let size = OPEN_INTEREST_BATCH_SIZE.min(symbols.len());
                 let start = self.open_interest_cursor.get() % symbols.len();
                 let batch: Vec<_> = (0..size)
                     .map(|i| symbols[(start + i) % symbols.len()].clone())
@@ -584,12 +589,13 @@ impl OrderExecution {
         };
         if !self.owner.is_disposed() {
             let weak = Rc::downgrade(self);
-            self.owner.start_timeout(15000, move || {
-                if let Some(this) = weak.upgrade() {
-                    this.start_open_interest_polling();
-                }
-                Ok(())
-            })?;
+            self.owner
+                .start_timeout(OPEN_INTEREST_POLL_INTERVAL_MS as u64, move || {
+                    if let Some(this) = weak.upgrade() {
+                        this.start_open_interest_polling();
+                    }
+                    Ok(())
+                })?;
         }
         logged
     }

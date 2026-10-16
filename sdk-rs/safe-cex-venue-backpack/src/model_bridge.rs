@@ -25,6 +25,7 @@ pub fn options(o: &actions::Options) -> Result<PlaceOrderOpts, ExchangeError> {
         client_order_id: o.client_id.as_deref().map(text).transpose()?,
         max_slippage_pct: None,
         close: None,
+        implied_volatility: None,
     })
 }
 pub fn action(o: PlaceOrderOpts) -> actions::Options {
@@ -70,6 +71,7 @@ pub fn market(m: reads::Market<Value>) -> Result<Market, ExchangeError> {
                 min: m.limits[3][0],
                 max: m.limits[3][1],
             },
+            price: None,
         },
         contract_size: Some(m.contract_size),
         is_expiring: Some(m.future),
@@ -80,6 +82,7 @@ pub fn market(m: reads::Market<Value>) -> Result<Market, ExchangeError> {
         info: Some(prepared_json(&m.info)?),
         taker_fee: None,
         maker_fee: None,
+        option: None,
     })
 }
 pub fn position(p: reads::Position) -> Result<Position, ExchangeError> {
@@ -100,6 +103,7 @@ pub fn position(p: reads::Position) -> Result<Position, ExchangeError> {
         info: None,
         extra: None,
         last_update: Some(p.last_update),
+        option: None,
     })
 }
 pub fn ticker(t: reads::Ticker<Value>) -> Result<Ticker, ExchangeError> {
@@ -179,5 +183,6 @@ pub fn private_position(
         info: None,
         extra: None,
         last_update: Some(u.last_update),
+        option: None,
     })
 }

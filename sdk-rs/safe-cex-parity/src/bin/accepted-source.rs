@@ -204,11 +204,17 @@ fn main() {
     } else {
         std::collections::HashSet::new()
     };
-    for argument in arguments {
-        let path = std::path::Path::new(&argument);
-        for (name, line, column) in
-            safe_cex_parity::accepted_source::local_types(path, &macro_origins)
-                .expect("source parses")
+    let arguments: Vec<String> = arguments.collect();
+    let paths: Vec<&std::path::Path> = arguments.iter().map(std::path::Path::new).collect();
+    let recipes = safe_cex_parity::accepted_source::module_recipes(&paths).expect("sources parse");
+    for argument in &arguments {
+        let path = std::path::Path::new(argument);
+        for (name, line, column) in safe_cex_parity::accepted_source::local_types_with_recipes(
+            path,
+            &macro_origins,
+            &recipes,
+        )
+        .expect("source parses")
         {
             println!("{argument}\t{name}\t{line}\t{column}");
         }

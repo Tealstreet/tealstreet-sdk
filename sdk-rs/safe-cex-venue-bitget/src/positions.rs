@@ -91,6 +91,7 @@ pub fn map_uta_position(
         info: Some(p.clone()),
         last_update: Some(now()),
         extra: None,
+        option: None,
     })
 }
 
@@ -124,6 +125,7 @@ pub fn map_position(
                 last_update: Some(now()),
                 margin_size: None,
                 extra: None,
+                option: None,
             });
         }
     };
@@ -206,5 +208,6 @@ pub fn map_position(
         info: Some(p.clone()),
         last_update: Some(now()),
         extra: None,
+        option: None,
     })
 }

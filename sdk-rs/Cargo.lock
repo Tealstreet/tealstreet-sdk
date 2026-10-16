@@ -3677,6 +3677,8 @@ dependencies = [
  "safe-cex-store",
  "safe-cex-transport",
  "safe-cex-types",
+ "safe-cex-venue-backpack",
+ "safe-cex-venue-binance",
  "serde",
  "serde_json",
 ]
@@ -3836,7 +3838,11 @@ dependencies = [
 name = "safe-cex-venue-bitunix"
 version = "0.1.0"
 dependencies = [
+ "flate2",
+ "safe-cex-exchange",
  "safe-cex-num",
+ "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",
@@ -4080,6 +4086,17 @@ dependencies = [
  "serde",
  "serde_json",
  "syn 3.0.7",
+]
+
+[[package]]
+name = "safe-cex-venue-txflow"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-exchange",
+ "safe-cex-store",
+ "safe-cex-transport",
+ "safe-cex-types",
+ "serde_json",
 ]
 
 [[package]]

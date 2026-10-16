@@ -246,6 +246,7 @@ impl AccountFetch {
                         margin_size: None,
                         last_update: None,
                         extra: None,
+                        option: None,
                     });
                 }
             }

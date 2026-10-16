@@ -49,7 +49,6 @@ pub trait Host: 'static {
         new: Self::Value,
     ) -> Result<(), Self::Error>;
     fn truthy(&self, value: &Self::Value) -> bool;
-    fn nullish(&self, value: &Self::Value) -> bool;
     fn undefined(&self) -> Self::Value;
     fn null(&self) -> Self::Value;
     fn number(&self, n: f64) -> Self::Value;

@@ -29,6 +29,10 @@ pub struct Throttle {
     pub task: RefCell<Option<Box<dyn ExchangeTask>>>,
 }
 impl Throttle {
+    // Source windows: throttle(handleTickerUpdate, 1000) and throttle(updateTickerFromDepth, 100).
+    fn window_ms(&self) -> f64 {
+        if self.depth { 100.0 } else { 1000.0 }
+    }
     pub fn call(self: &Rc<Self>, data: Value) -> Result<(), ExchangeError> {
         let owner = self
             .owner
@@ -38,7 +42,7 @@ impl Throttle {
         if self
             .last
             .get()
-            .is_none_or(|last| now - last >= 1000.0 || now < last)
+            .is_none_or(|last| now - last >= self.window_ms() || now < last)
         {
             if let Some(task) = self.task.borrow_mut().take() {
                 task.cancel();
@@ -60,7 +64,7 @@ impl Throttle {
             *self.pending.borrow_mut() = Some(data);
             if self.task.borrow().is_none() {
                 let weak = Rc::downgrade(self);
-                let delay = (1000.0 - (now - self.last.get().unwrap())).max(0.0) as u64;
+                let delay = (self.window_ms() - (now - self.last.get().unwrap())).max(0.0) as u64;
                 let runtime = owner.runtime.clone();
                 let sleep = runtime.sleep(delay);
                 let report = runtime.clone();

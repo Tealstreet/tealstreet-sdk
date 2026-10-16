@@ -1253,10 +1253,6 @@ rs = "safe-cex-exchange/src/websocket.rs::WsRuntime"
 reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
 
 [[exempt]]
-rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::monotonic_ms"
-reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
-
-[[exempt]]
 rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::transport"
 reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
 
@@ -5537,10 +5533,6 @@ rs = "safe-cex-venue-cryptocom/src/socket_handlers.rs::SocketOps"
 reason = "C3: local live language/builtin/property/callee/receiver/Promise capability carrier; concrete JS adapter behavior remains external; no separately named TypeScript behavior."
 
 [[exempt]]
-rs = "safe-cex-venue-cryptocom/src/socket_handlers.rs::Listener"
-reason = "C3: retained native parser/channel/options and retry/cleanup context shared by two mapped public listeners; no separately named TypeScript behavior."
-
-[[exempt]]
 rs = "safe-cex-venue-cryptocom/src/socket_classes.rs::SocketClassOps"
 reason = "C3: local derived-class/field/super/newTarget/existing-member capability carrier; existing typed-host owning-class bridges remain disclosed FINDING; no separately named TypeScript behavior."
 
@@ -7015,10 +7007,6 @@ reason = "Native allocation glue for the shared std::error::Error origin carrier
 [[exempt]]
 rs = "safe-cex-exchange/src/runtime.rs::ExchangeErrorOrigin::error"
 reason = "Read-only native std::error::Error origin accessor used by the shared Error::source implementation; no TypeScript method or venue policy."
-
-[[exempt]]
-rs = "safe-cex-venue-mexc/src/ws_private.rs::MexcPrivateHandlers::new_with_fallible_hooks"
-reason = "Native callback construction adapter for existing mapped private frame handlers. It admits fallible seen/shield hooks while retaining the existing infallible constructor ABI; it adds no venue decision or TypeScript algorithm."
 
 [[exempt]]
 rs = "safe-cex-num/src/get_key.rs::array_lookup"

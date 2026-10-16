@@ -566,6 +566,7 @@ impl BingxPrivateEvents {
                     info: Some(update),
                     extra: None,
                     last_update: None,
+                    option: None,
                 };
                 self.parent
                     .base

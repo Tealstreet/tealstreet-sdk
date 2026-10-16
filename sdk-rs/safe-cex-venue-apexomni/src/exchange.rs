@@ -333,6 +333,7 @@ impl ApexOmniExchange {
             last_update: Some(self.base.runtime.now_ms()),
             margin_size: None,
             extra: None,
+            option: None,
         }))
     }
     // ts: ApexOmniExchange.mapOrder
@@ -741,6 +742,7 @@ impl ApexOmniExchange {
                     info: None,
                     margin_size: None,
                     extra: None,
+                    option: None,
                 });
             }
         }
@@ -804,6 +806,7 @@ impl ApexOmniExchange {
                         min: min_leverage,
                         max: max_leverage,
                     },
+                    price: None,
                 },
             ));
         }
@@ -834,6 +837,7 @@ impl ApexOmniExchange {
                 is_read_only: None,
                 taker_fee: None,
                 maker_fee: None,
+                option: None,
             });
         }
         Ok(markets)
