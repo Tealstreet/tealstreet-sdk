@@ -192,6 +192,10 @@ The native Kraken host shares its Futures nonce counter and Spot client-ID gener
 BingX uses `BingxExchange::new` with shared-js_runtime HTTP/socket dependencies.
 Its native-host E2E test verifies signed startup/placement/cancellation; the venue
 crate proves all 16 Exchange methods, retaining source-inherited rejections.
+The native host also supplies its shared hosted signer to both HTTP and
+BaseExchange. Empty-secret startup/placement/cancellation and signer-refusal
+proofs run in native_host_bingx; the API skips local signing whenever that
+capability is present, including when local credentials remain configured.
 
 
 ## Hyperliquid native host

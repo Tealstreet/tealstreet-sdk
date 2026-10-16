@@ -1741,13 +1741,13 @@
   },
   {
     "function": "new",
-    "body": "d0b8cec127f06ff7",
+    "body": "4c2f44aa3c532007",
     "call": "v . start ()",
     "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
   },
   {
     "function": "new",
-    "body": "d0b8cec127f06ff7",
+    "body": "4c2f44aa3c532007",
     "call": "v . fetch_historical_fills (o)",
     "file": "safe-cex-venue-bingx/src/binding/exchange.rs"
   },

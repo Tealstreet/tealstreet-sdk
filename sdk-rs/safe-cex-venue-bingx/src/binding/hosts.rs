@@ -193,6 +193,12 @@ impl Host {
     }
 }
 impl ExchangeHost for Host {
+    fn signers(&self) -> safe_cex_exchange::runtime::ExchangeSigners {
+        safe_cex_exchange::runtime::ExchangeSigners {
+            remote_signer: self.scope.http.hosted_signer().map(|hosted| hosted.0),
+            payload_signer: None,
+        }
+    }
     fn secondary(
         &self,
         options: &ExchangeOptions,
