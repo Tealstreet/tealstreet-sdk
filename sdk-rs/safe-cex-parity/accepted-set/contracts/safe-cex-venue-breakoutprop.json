@@ -5959,7 +5959,7 @@
     "evidence": "Reviewed production body and corresponding breakoutprop.exchange.ts method; account_auth tests exercise token/expiry mutation and request identity. The scoped accepted runner emits the exact native compiler classification receipt; behavioral test execution is recorded separately in GATE_EVIDENCE.md."
   },
   "safe_cex_venue_breakoutprop::account_auth::validate_account": {
-    "category": "non-decoder",
+    "category": "decoder",
     "api": {
       "kind": "function",
       "name": "validate_account",
@@ -6214,11 +6214,111 @@
         ]
       }
     },
-    "reason": "Validation eagerly invokes the session factory and awaits its already-typed Result<String,ExchangeError>. On rejection it sends data.message to the logger but returns data.msg with source truthy fallbacks. This is error-reporting/session orchestration; it provides no text/JSON response decoder. Logger errors propagate unchanged.",
-    "evidence": "Reviewed production body and corresponding breakoutprop.exchange.ts method; account_auth tests exercise successful/rejected sessions, distinct logger and return fields, and reporter errors. The scoped accepted runner emits the exact native compiler classification receipt; behavioral test execution is recorded separately in GATE_EVIDENCE.md."
+    "evidence": "Session validation maps data.message to the logger and distinct data.msg to the returned error object, using separate JS truthy fallbacks; logger errors propagate. Reviewed the actual Rust body and TS counterpart. Although these APIs orchestrate/report errors, they interpret raw error-response data; native cases therefore execute the projection and observe logger arguments/returned values instead of relying on an effect-only classification. Ready session fixtures claim no pending-future scheduling behavior. Independently authored expectations executed through actual native default probes; shared dependency and feature/wasm gates remain separate.",
+    "call": "{ let logs=std::cell::RefCell::new(Vec::<serde_json::Value>::new()); let logger_fails=$value[\"loggerFails\"]==true; let logger=|argument:serde_json::Value| {logs.borrow_mut().push(argument); if logger_fails {let mut error=safe_cex_exchange::runtime::ExchangeError::new(\"logger-rejected\"); error.name=\"FixtureLogger\".into(); Err(error)} else {Ok(())}}; let session_result:Result<String,safe_cex_exchange::runtime::ExchangeError>=if $value.get(\"sessionError\").is_some() {let detail=&$value[\"sessionError\"]; let mut error=safe_cex_exchange::runtime::ExchangeError::new(detail[\"message\"].as_str().unwrap()); error.response=detail.get(\"response\").cloned(); Err(error)} else {Ok(\"session\".into())}; let future=super::validate_account(||async move {session_result},&logger); let mut future=std::pin::pin!(future); let result=match std::future::Future::poll(future.as_mut(),&mut std::task::Context::from_waker(std::task::Waker::noop())) {std::task::Poll::Ready(value)=>value,std::task::Poll::Pending=>panic!(\"ready session fixture must complete\")}; match result {Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value,\"logs\":*logs.borrow()}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"error\":error.message,\"logs\":*logs.borrow()})} }",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "ok": true,
+          "value": {
+            "error": ""
+          },
+          "logs": []
+        }
+      },
+      {
+        "input": {
+          "sessionError": {
+            "message": "fallback",
+            "response": {
+              "data": {
+                "message": "logged",
+                "msg": "returned"
+              }
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "error": "returned"
+          },
+          "logs": [
+            "logged"
+          ]
+        }
+      },
+      {
+        "input": {
+          "sessionError": {
+            "message": "fallback",
+            "response": {
+              "data": {
+                "message": 0,
+                "msg": ""
+              }
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "error": "fallback"
+          },
+          "logs": [
+            "fallback"
+          ]
+        }
+      },
+      {
+        "input": {
+          "sessionError": {
+            "message": "",
+            "response": {
+              "data": {
+                "message": false,
+                "msg": null
+              }
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": {
+            "error": "Invalid API key or secret"
+          },
+          "logs": [
+            ""
+          ]
+        }
+      },
+      {
+        "input": {
+          "sessionError": {
+            "message": "fallback",
+            "response": {
+              "data": {
+                "message": "logged",
+                "msg": "returned"
+              }
+            }
+          },
+          "loggerFails": true
+        },
+        "output": {
+          "ok": false,
+          "name": "FixtureLogger",
+          "error": "logger-rejected",
+          "logs": [
+            "logged"
+          ]
+        }
+      }
+    ]
   },
   "safe_cex_venue_breakoutprop::quotes::report": {
-    "category": "non-decoder",
+    "category": "decoder",
     "api": {
       "kind": "function",
       "name": "report",
@@ -6325,8 +6425,94 @@
         "where_predicates": []
       }
     },
-    "reason": "This error-reporting effect selects error.response.data.msg by JS truthiness, otherwise error.message, then calls the fallible logger. It neither constructs typed market/quote records nor returns a decoded value; Result<(),ExchangeError> propagates the logger result.",
-    "evidence": "Reviewed production body and corresponding breakoutprop.exchange.ts method; quotes and logger_failure tests exercise message precedence and unchanged reporter metadata. The scoped accepted runner emits the exact native compiler classification receipt; behavioral test execution is recorded separately in GATE_EVIDENCE.md."
+    "evidence": "Error reporting projects response.data.msg with JS truthiness before invoking the logger; it retains an object value rather than coercing it to text and returns logger errors. Reviewed the actual Rust body and TS counterpart. Although these APIs orchestrate/report errors, they interpret raw error-response data; native cases therefore execute the projection and observe logger arguments/returned values instead of relying on an effect-only classification. Ready session fixtures claim no pending-future scheduling behavior. Independently authored expectations executed through actual native default probes; shared dependency and feature/wasm gates remain separate.",
+    "call": "{ let logs=std::cell::RefCell::new(Vec::<serde_json::Value>::new()); let logger_fails=$value[\"loggerFails\"]==true; let logger=|argument:serde_json::Value| {logs.borrow_mut().push(argument); if logger_fails {let mut error=safe_cex_exchange::runtime::ExchangeError::new(\"logger-rejected\"); error.name=\"FixtureLogger\".into(); Err(error)} else {Ok(())}}; let detail=&$value[\"sessionError\"]; let mut error=safe_cex_exchange::runtime::ExchangeError::new(detail[\"message\"].as_str().unwrap()); error.response=detail.get(\"response\").cloned(); let result=super::report(error,&logger).map(|()|serde_json::Value::Null); match result {Ok(value)=>serde_json::json!({\"ok\":true,\"value\":value,\"logs\":*logs.borrow()}),Err(error)=>serde_json::json!({\"ok\":false,\"name\":error.name,\"error\":error.message,\"logs\":*logs.borrow()})} }",
+    "cases": [
+      {
+        "input": {
+          "sessionError": {
+            "message": "fallback",
+            "response": {
+              "data": {
+                "message": "ignored",
+                "msg": "reported"
+              }
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": null,
+          "logs": [
+            "reported"
+          ]
+        }
+      },
+      {
+        "input": {
+          "sessionError": {
+            "message": "fallback",
+            "response": {
+              "data": {
+                "msg": 0
+              }
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": null,
+          "logs": [
+            "fallback"
+          ]
+        }
+      },
+      {
+        "input": {
+          "sessionError": {
+            "message": "",
+            "response": {
+              "data": {
+                "msg": {
+                  "code": 7
+                }
+              }
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "value": null,
+          "logs": [
+            {
+              "code": 7
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "sessionError": {
+            "message": "fallback",
+            "response": {
+              "data": {
+                "message": "ignored",
+                "msg": "reported"
+              }
+            }
+          },
+          "loggerFails": true
+        },
+        "output": {
+          "ok": false,
+          "name": "FixtureLogger",
+          "error": "logger-rejected",
+          "logs": [
+            "reported"
+          ]
+        }
+      }
+    ]
   },
   "safe_cex_venue_breakoutprop::portfolio_reads::fetch_balance": {
     "category": "non-decoder",

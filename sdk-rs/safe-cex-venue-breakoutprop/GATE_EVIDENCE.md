@@ -499,3 +499,27 @@ mutation selectors now target the remote schemas, including exactly 13 typed Vec
 fields rather than the duplicate public data-field declarations. Their runtime
 corpora and the broader crate gates still need a post-integration run before this
 PR is ready.
+
+# Per-crate contract storage integration
+
+After master #279/#286, only this PR's 62 Breakout rows moved to
+`accepted-set/contracts/safe-cex-venue-breakoutprop.json`; all 18 inherited master
+contract files were verified byte-identical. The deleted flat file was removed.
+The post-migration focused native run passed 62 receipts (41 executed runtime
+results and 21 explicit classifications), preserving exact compiler aliases.
+
+Two error-response projections now execute their raw-data observations rather
+than using effect-only classifications: validate_account distinguishes logged
+message from returned msg and truthy fallbacks; quotes::report retains object
+messages and propagates logger failure. All nine independently authored cases
+pass. The strengthened focused run passes 43 runtime results and 19 explicit
+classifications, still exactly 62 reviewed owners/aliases. An initial adapter
+build had a local variable shadowing error; it was corrected before execution
+and was not counted as a mutation failure.
+
+The full native venue suite passes 56 tests; scoped formatting and parity also
+pass (7459 rows, 17189 public Rust items). The ordinary accepted gate was rerun
+with #286 and refuses shared TransportFuture's Result-wrapped output against
+the current fixed local-future alias probe. That refusal remains visible; the
+shared policy owner is implementing finite support. These focused receipts do
+not claim a full dependency, feature or wasm accepted-gate pass.
