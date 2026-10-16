@@ -91,7 +91,9 @@ through its existing production binding and the same signed HTTP host; its local
 account-read test verifies the actual HMAC preimage. The JS host binds its exchange name during
 BaseExchange construction and injects the same signer into options and core
 availability; it refuses reuse for a different exchange. Bitunix retains the
-account name in its private auth request. Backpack still refuses hosted signing.
+account name in its private auth request. Backpack shares the hosted HTTP signer
+while its private websocket retains the source local-secret requirement;
+empty-secret authentication logs the source error and sends no subscription.
 `tests/native_host_remote_signer.rs` verifies the signer's HMAC server-side.
 `tests/native_host_tunnel.rs` runs `tealstreetTunnel` REST over a local tradetunnel
 (rpc.auth with the proxy token, rpc.http frames) with no direct venue request.
@@ -177,6 +179,11 @@ loopback `native_host_bitget_external_data` test covers all three names: gateway
 market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
 with no venue REST or private/public venue sockets in public-only mode.
 
+
+Paradex's native constructor supplies shared runtime HTTP and gateway inputs.
+Its loopback test observes distinct market precision axes and source read purity.
+Hosted remoteSigner remains an explicit refusal until SDK signing is bound.
+
 WEEX is registered through its concrete native binding and the shared signed HTTP
 host, gateway factory and UTC host date profile. `tests/native_host_weex.rs` checks
 its account read and exact request HMAC over loopback HTTP.
@@ -184,3 +191,10 @@ its account read and exact request HMAC over loopback HTTP.
 TxFlow is constructible only as the source Phase-0 scaffold. Native inputs build
 its HTTP client, while start emits the exact refusal before IO. Keep its existing
 source start boundary and test both mainnet/testnet construction without network.
+
+Breakout Prop constructs its DXtrade API/session/polling lifecycle through shared
+js_runtime. The native host preserves the selected transport and source session
+headers; remoteSigner DXtrade login refuses visibly. The native date realm is
+explicitly UTC for offset-less legacy timestamps, while embedding hosts supply
+their own local_to_utc policy. native_host_breakoutprop.rs proves actual native
+HTTP login/startup/reads/placement/cancellation with no websocket dial.

@@ -440,3 +440,71 @@ isolated fixture with a JSON file and with its per-crate directory produces
 exactly equal six native receipts (five runtime, one classification), zero
 failed owners in both runs. This proves loader compatibility, not workspace
 contract completion or any change to the standing ratchet.
+
+## GRVT fixed compiler alias identities
+
+Eleven finite entries in `generic-aliases.json` pin the actual GRVT declarations,
+including their original generic defaults and lifetimes. The selected arguments
+are explicit bool/bool pairs or bool, with static lifetimes for the three
+unsized FnMut aliases. Source defaults are neither deleted nor silently used as
+broader coverage. Every existing registry entry remains unchanged; the reviewed
+alias implementation and its caller, source, compiler-target and root guards
+are unchanged.
+
+Fresh pinned native/default compiler discovery on source base `71107baba8`
+reports 182 owners, 19 aliases and three construction obligations. All eleven
+new entries match that compiler's raw/expanded targets and original generics,
+and their roots are authenticated against its actual selected Cargo artifacts.
+Ordinary production policy routing chooses exactly the independently authored
+expected Rust types. One metadata-only native Rust compilation proves invariant
+type equality for all eleven aliases against the actual selected GRVT rmeta,
+with warnings denied; three unsized aliases use invariant function/pointer
+PhantomData. This is compiler identity evidence, not runtime decoder proof.
+
+All 21 focused reviewed/identity/callable/alias policy regressions pass. The
+actual eleven-entry compiler preflight additionally rejects changed source,
+raw/expanded targets, generics, caller redirects, missing Serde origins and
+unknown registry names. There is no new general generic-alias permission.
+
+AddedMarkets<bool> and JsResult<bool,bool> remain real decoders whose contracts
+and native value witnesses belong to the consumer review. Fields<bool> retains
+`Rc<RefCell<IndexMap<&'static str,bool>>>`: its static Deserialize bound compiles,
+and its DeserializeOwned bound is rejected as not general enough. The ordinary
+owned alias emitter therefore still refuses this owner; explicitly selecting
+the borrowed emitter compiles and hits its existing runtime refusal. Neither
+refusal is a passing native witness. Exact borrowed production-path support is
+separate work; no keys, dependencies, classification, runtime guard or standing
+debt changes in this registry addition.
+
+
+## Transport Result-bearing future identities
+
+Two separate finite entries in `generic-aliases.json` review
+`safe_cex_transport::provider::TransportFuture<'static,bool>` and
+`safe_cex_transport::provider::RestFuture<'static,bool>`. Their actual source
+outputs are `Result<T,TransportError>` and `Result<T,RestFailure>`; neither is
+the original local-future family with `Output=T`. Every prior registry entry
+is unchanged, and no shared helper or guard changes.
+
+Fresh Rust 1.99 native/default rustdoc plus selected Cargo check artifacts on
+source base `54537b8d0a` discover 108 transport owners, six aliases and nine
+construction obligations. Both declarations retain exact raw/expanded ASTs,
+original lifetime/type parameters and the authenticated Pin/Box/Future/Result
+sysroot roots. The existing reviewed alias path emits invariant equality
+against independently authored native types containing the actual local
+TransportError/RestFailure. Actual production alias probes without cfg(test)
+execute ordinary Serde and conversion checks: two explicit classifications,
+zero failed owners. These focused temporary control contracts establish the
+fixed capability identities; they are not installed production classifications
+or evidence of future polling or transport execution.
+
+All 24 focused reviewed/identity/callable/future/alias policy tests pass.
+Against the fresh compiler aliases, changed source, raw/expanded target, generic
+default, caller expected-type redirection, missing root identity, missing
+serde_json origin and unknown names each retain their existing refusal.
+There is no permission for arbitrary Result-bearing futures or generic arguments.
+
+The ordinary transport inventory now passes both future registrations and stops
+at the separate `safe_cex_transport::secondary::RateLimitWrapper` declaration:
+its lifetime-only generic target requires another exact compiler review. No
+whole-package or workspace gate clearance is claimed here.

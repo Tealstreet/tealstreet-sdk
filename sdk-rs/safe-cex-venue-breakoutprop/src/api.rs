@@ -34,6 +34,7 @@ pub struct ApiFailure {
     pub config: Option<Config>,
 }
 pub trait ApiWire {
+    fn rate_limit(&self, max_rps: f64) -> Result<(), ExchangeError>;
     fn request(
         &self,
         config: Config,
@@ -182,6 +183,9 @@ impl DxApi {
     }
 }
 impl DxClient for DxApi {
+    fn rate_limit(&self, max_rps: f64) -> Result<(), ExchangeError> {
+        self.wire.rate_limit(max_rps)
+    }
     fn request(&self, request: RestRequest) -> ExchangeFuture<'static, JsNumberInput> {
         self.this
             .upgrade()
