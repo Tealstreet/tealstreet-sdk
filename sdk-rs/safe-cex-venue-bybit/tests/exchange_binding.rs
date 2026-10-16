@@ -359,6 +359,59 @@ fn set_leverage_clamps_to_the_market_and_refreshes_the_position() {
 }
 
 #[test]
+fn set_leverage_keeps_native_nonfinite_numbers_until_the_source_clamp() {
+    for (leverage, expected) in [
+        (f64::INFINITY, "100"),
+        (f64::NEG_INFINITY, "1"),
+        (f64::NAN, "NaN"),
+        (-0.0, "1"),
+    ] {
+        let h = harness(options(), |wire| {
+            wire.ok("GET", "/v5/position/list", position_list("10"));
+            wire.ok("POST", "/v5/position/set-leverage", json!({}));
+        });
+        seed_market(&h);
+        h.drive(h.venue().set_leverage("BTCUSDT".into(), leverage, None))
+            .expect("setLeverage with a native number");
+        let calls = h.wire.calls("/v5/position/set-leverage");
+        assert_eq!(calls.len(), 1);
+        assert_eq!(
+            calls[0].body["buyLeverage"], expected,
+            "native leverage {leverage:?}"
+        );
+        assert_eq!(
+            calls[0].body["sellLeverage"], expected,
+            "native leverage {leverage:?}"
+        );
+    }
+}
+
+#[test]
+fn fetch_tickers_retains_nonfinite_numbers_at_the_typed_result() {
+    let h = harness(options(), |wire| {
+        wire.ok(
+            "GET",
+            "/v5/market/tickers",
+            json!({"category": "linear", "list": [{
+                "symbol": "BTCUSDT", "lastPrice": "-Infinity", "bid1Price": "NaN",
+                "ask1Price": "Infinity", "markPrice": "-0", "indexPrice": "25001",
+                "price24hPcnt": "0.012", "openInterest": "1000", "fundingRate": "0.0001",
+                "nextFundingTime": "1700003600000", "volume24h": "10", "turnover24h": "250000"
+            }]}),
+        );
+    });
+    seed_market(&h);
+    let tickers = h
+        .drive(h.venue().fetch_tickers())
+        .expect("native ticker result");
+    assert_eq!(tickers.len(), 1);
+    assert!(tickers[0].bid.is_nan());
+    assert_eq!(tickers[0].ask, f64::INFINITY);
+    assert_eq!(tickers[0].last, f64::NEG_INFINITY);
+    assert_eq!(tickers[0].mark.to_bits(), (-0.0f64).to_bits());
+}
+
+#[test]
 fn change_position_mode_switches_linear_usdt_and_refreshes() {
     let h = harness(options(), |w| {
         w.route(
@@ -535,6 +588,163 @@ fn start_loads_public_and_private_state_and_dials_both_sockets() {
         "the public socket subscribed the loaded market: {:?}",
         public.sent.borrow()
     );
+}
+
+#[test]
+fn start_with_external_data_keeps_the_account_overlay_and_private_snapshot() {
+    use safe_cex_exchange::{
+        exchange::BaseExchange,
+        external::ExternalPublicData,
+        runtime::{ExchangeError, ListenerCleanup},
+    };
+    use safe_cex_types::{Candle, OHLCVOptions, OrderBook};
+    use std::{
+        cell::{Cell, RefCell},
+        rc::Rc,
+    };
+
+    struct Gateway {
+        base: Rc<BaseExchange>,
+        connected: Rc<Cell<bool>>,
+        disposed: Rc<Cell<bool>>,
+    }
+    impl ExternalPublicData for Gateway {
+        fn connect(&self) {
+            self.connected.set(true);
+            let base = self.base.clone();
+            let runtime = base.runtime.clone();
+            drop(runtime.clone().spawn_local(Box::pin(async move {
+                runtime.sleep(500).await.unwrap();
+                let mut loaded = base.store.loaded().clone();
+                loaded.markets = true;
+                loaded.tickers = true;
+                base.store
+                    .update(
+                        safe_cex_store::StoreUpdate {
+                            loaded: Some(loaded),
+                            ..Default::default()
+                        },
+                        false,
+                    )
+                    .unwrap();
+            })));
+        }
+        fn dispose(&self) {
+            self.disposed.set(true);
+        }
+        fn is_initialized(&self) -> bool {
+            true
+        }
+        fn is_healthy(&self) -> bool {
+            true
+        }
+        fn last_message_timestamp(&self) -> Option<f64> {
+            None
+        }
+        fn listen_ohlcv(
+            &self,
+            _: OHLCVOptions,
+            _: Rc<dyn Fn(Candle)>,
+        ) -> Result<ListenerCleanup, ExchangeError> {
+            Err(ExchangeError::new("unexpected public listener"))
+        }
+        fn listen_order_book(
+            &self,
+            _: String,
+            _: Rc<dyn Fn(OrderBook)>,
+        ) -> Result<ListenerCleanup, ExchangeError> {
+            Err(ExchangeError::new("unexpected public listener"))
+        }
+    }
+    let connected = Rc::new(Cell::new(false));
+    let disposed = Rc::new(Cell::new(false));
+    let provider_base = Rc::new(RefCell::new(None::<Rc<BaseExchange>>));
+    let factory = {
+        let (connected, disposed, provider_base) =
+            (connected.clone(), disposed.clone(), provider_base.clone());
+        Rc::new(
+            move |_: &safe_cex_types::ExchangeOptionsExternalPublicData, base: Rc<BaseExchange>| {
+                *provider_base.borrow_mut() = Some(base.clone());
+                assert_eq!(
+                    base.store.markets()[0].taker_fee,
+                    Some(0.00055),
+                    "account overlay precedes provider construction"
+                );
+                Rc::new(Gateway {
+                    base,
+                    connected: connected.clone(),
+                    disposed: disposed.clone(),
+                }) as Rc<dyn ExternalPublicData>
+            },
+        )
+    };
+    let mut settings = options();
+    settings.external_public_data = Some(
+        serde_json::from_value(
+            json!({"type": "websocket", "url": "ws://gateway.local", "exchangeId": "bybit"}),
+        )
+        .unwrap(),
+    );
+    let h = support::harness_with_external(settings, factory, |wire| {
+        wire.ok("GET", "/v5/account/fee-rate", json!({"list": [{"symbol": "BTCUSDT", "takerFeeRate": "0.00055", "makerFeeRate": "0.0002"}]}));
+        wire.ok(
+            "GET",
+            "/v5/account/info",
+            json!({"marginMode": "ISOLATED_MARGIN", "unifiedMarginStatus": 6}),
+        );
+        wire.ok("GET", "/v5/user/query-api", json!({"vipLevel": "No VIP"}));
+        wire.ok(
+            "GET",
+            "/v5/order/realtime",
+            json!({"list": [], "nextPageCursor": ""}),
+        );
+        wire.ok("GET", "/v5/position/list", position_list("10"));
+        wire.ok("GET", "/v5/account/wallet-balance", wallet());
+    });
+    seed_market(&h);
+    let started = h.runtime.now.get();
+    h.drive(h.venue().start()).expect("external-data start");
+    assert!(connected.get());
+    assert!(
+        h.runtime.now.get() >= started + 500.,
+        "startup waits for external data"
+    );
+    assert!(
+        std::ptr::eq(
+            provider_base.borrow().as_ref().unwrap().as_ref(),
+            h.venue().base()
+        ),
+        "provider receives the actual exchange base"
+    );
+    let loaded = h.store.loaded().clone();
+    assert!(
+        loaded.markets && loaded.tickers && loaded.positions && loaded.orders && loaded.balance
+    );
+    assert!(h.wire.calls("/v5/market/instruments-info").is_empty());
+    assert!(h.wire.calls("/v5/market/tickers").is_empty());
+    assert_eq!(
+        h.wire.calls("/v5/account/fee-rate")[0].params["category"],
+        "linear"
+    );
+    assert_eq!(h.store.markets()[0].maker_fee, Some(0.0002));
+    assert!(!h.store.positions().is_empty());
+    assert!(
+        h.store
+            .positions()
+            .iter()
+            .all(|position| position.margin_type == Some(safe_cex_types::MarginType::Isolated)),
+        "external public data still probes private margin mode before the snapshot"
+    );
+    assert!(
+        h.runtime
+            .sockets
+            .borrow()
+            .iter()
+            .all(|(url, _)| !url.contains("/v5/public/")),
+        "external data suppresses venue public dials"
+    );
+    h.venue().dispose().unwrap();
+    assert!(disposed.get(), "disposal reaches the external provider");
 }
 
 fn place(

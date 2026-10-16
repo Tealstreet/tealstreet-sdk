@@ -492,7 +492,8 @@ post-market parser ordering. Its detached cache rejection reports the original
 value instead of the source's empty continuation (CHOSEN, divergent row).
 tests/primary_startup.rs compares 22 scenarios with the executed source member;
 that report is the only native-only effect it removes before comparison.
-Concrete binding to the Exchange trait is pending, as for every SnapshotHost body.
+The concrete Exchange binding now invokes this body through the shared
+js_runtime receiver; its independent SnapshotHost witness remains separate.
 
 The production binding now constructs linear and demo exchanges through
 `BybitExchange::create` and runs startup, snapshots and order writes through the
@@ -503,7 +504,10 @@ position stops through trading-stop or cancel-and-replace. Cancels filter virtua
 rows before category batching and retire already-gone orders. Demo reconciliation
 reads executions to exhaustion and fails closed at the page limit.
 `tests/exchange_binding.rs` drives the concrete trait over a scripted transport;
-its live-source order-write comparison covers 92 amend/cancel cases. The numeric
-typed-to-receiver boundary remains under audit: shared from_typed/to_typed project
-through JSON, so native nonfinite values require a separate repair before this
-binding can claim unrestricted number parity.
+its live-source order-write comparison covers 92 amend/cancel cases. External
+public-data startup also loads the account fee overlay and private margin probe;
+the provider receives this exchange's BaseExchange and startup awaits its loaded
+flags. The shared native typed-value bridge preserves nonfinite numbers and
+signed zero before request formatting or result projection. Concrete regressions
+cover leverage clamping and ticker results; restoring either former JSON bridge
+makes its corresponding regression fail.

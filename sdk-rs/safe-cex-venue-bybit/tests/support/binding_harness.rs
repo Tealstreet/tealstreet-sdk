@@ -386,6 +386,29 @@ pub fn harness_as(
     options: ExchangeOptions,
     script: impl FnOnce(&Wire),
 ) -> Harness {
+    configured_harness(name, options, None, script)
+}
+
+pub fn harness_with_external(
+    options: ExchangeOptions,
+    factory: safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
+    script: impl FnOnce(&Wire),
+) -> Harness {
+    configured_harness(ExchangeName::Bybit, options, Some(factory), script)
+}
+
+#[allow(
+    clippy::arc_with_non_send_sync,
+    reason = "browser-local adapters, as in production"
+)]
+fn configured_harness(
+    name: ExchangeName,
+    options: ExchangeOptions,
+    external_public_data: Option<
+        safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
+    >,
+    script: impl FnOnce(&Wire),
+) -> Harness {
     let runtime = Rc::new(Runtime::default());
     runtime.now.set(START_MS);
     let wire = Arc::new(Wire::default());
@@ -405,7 +428,7 @@ pub fn harness_as(
             rate_limit_clock: Arc::new(Clock(runtime.now.clone())),
             retry_clock: Rc::new(Clock(runtime.now.clone())),
             clock,
-            external_public_data: None,
+            external_public_data,
             relay_enabled: false,
         },
     )
