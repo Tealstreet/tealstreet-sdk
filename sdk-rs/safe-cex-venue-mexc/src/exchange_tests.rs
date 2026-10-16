@@ -3584,20 +3584,11 @@ fn mexc_metadata_wrapper_keeps_second_subscriber_origin_and_names_lazy_prefix() 
                 "metadata native warning-log severity"
             );
         }
-        let original = error
-            .source()
-            .unwrap()
-            .downcast_ref::<safe_cex_store::StoreMutationError>()
-            .unwrap();
-        let opaque = original
-            .source()
-            .unwrap()
-            .source()
-            .unwrap()
+        let opaque = error
             .source()
             .unwrap()
             .downcast_ref::<MetadataSubscriberOrigin>()
-            .unwrap();
+            .expect("metadata native source is the original subscriber cause");
         assert_eq!(
             opaque.0,
             if public_only { 401 } else { 402 },
@@ -4479,6 +4470,7 @@ fn mexc_validation_keeps_raw_detail_and_error_precedence() {
     let mut native = Vec::new();
     for (index, (data, message, wanted)) in cases.into_iter().enumerate() {
         let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
+        exchange.base = reporting_values::raw_reporting_base();
         exchange.xhr = Rc::new(AccountFailure {
             message: message.into(),
             response_data: Some(data),
@@ -4598,6 +4590,7 @@ fn mexc_snapshot_reporters_preserve_object_detail_and_listener_failure() {
     for method in ["fetchMarkets", "fetchTickers", "fetchPositions"] {
         for throws in [false, true] {
             let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
+            exchange.base = reporting_values::raw_reporting_base();
             exchange.xhr = Rc::new(AccountFailure {
                 message: "transport".into(),
                 response_data: Some(json!({"message":{"message":"inner detail","code":313}})),
@@ -4747,6 +4740,7 @@ fn mexc_four_borrowed_methods_price_unpolled_drop_and_first_poll() {
 #[test]
 fn mexc_account_reporting_checks_enhancement_before_message_coercion() {
     let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
+    exchange.base = reporting_values::raw_reporting_base();
     exchange.xhr = Rc::new(AccountFailure {
         message: "transport".into(),
         response_data: Some(
