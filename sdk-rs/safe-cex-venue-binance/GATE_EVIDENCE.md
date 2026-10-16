@@ -3477,3 +3477,46 @@ This reuse is an actual binary execution after input comparison, not a fresh
 Cargo test build. Earlier 17-test, guard-control and Clippy results keep their
 original provenance. Generator freshness, both formatter-toolchain tests,
 formatting and parity-check pass after the cutover (7,459 rows; 17,183 items).
+
+
+### Three reviewed predicate roles
+
+`order_logic`'s position-mode error recognizer compares the existing nested code
+strictly with numeric/string -4059. The deprecated balance predicate deliberately
+ignores account data and returns false. The post-only predicate classifies an
+existing error with numeric -5022, nullish code precedence and source-truthy
+message selection before shared fallible String coercion and substring checks.
+Each returns a Boolean predicate or coercion error, rather than decoding a
+representation into an owner. Each has its own reviewed compiler API and reason;
+this grants no exemption to another raw-input function.
+
+Three independently authored native tests call those actual public functions,
+including absent and present-null input, strict code types, nested/root fallback,
+message precedence and the actual native TypeError name. The existing live
+order-logic and rejection targets add 217 and 5,471 source comparisons. All five
+selected tests pass with zero ignored, both before controls and after restoration.
+
+`python3 sdk-rs/safe-cex-venue-binance/scripts/predicate-role-controls.py` completes
+three compiled wrong-result controls. Returning false from the position-mode or
+post-only predicate, and true from the deprecated balance predicate, fails each
+function's named native assertion. Every exact source restoration passes that
+same test. The final production source is byte-identical to the starting source;
+this tranche changes tests and classifications, not the predicate implementations.
+
+The maintained `predicate-role-contracts.mjs` completes fresh ordinary
+native/default compiler discovery and three explicit production non-decoder
+classification receipts with zero failed owners. These receipts validate the
+reviewed function APIs/classifications; they do not execute their predicate
+logic. The native fixtures, live oracles and behavioral controls above supply
+that separate execution evidence. Discovery remains 235 owners, 80 aliases and
+two construction policies; the three selected receipts exclude other owners,
+aliases, locals and feature/wasm coverage.
+
+Selected `accepted_predicate_roles` Clippy passes with warnings denied, as do
+formatting, frozen dependency installation and parity-check. After integrating
+master `cc32fd465b`, the Rust/dependency/test/oracle inputs compare unchanged
+against validated predicate revision `f38213c340`; the existing compiled native
+and two live targets execute five passing tests again. This is documented binary
+reuse after input comparison, not a fresh Cargo test build. Controls and Clippy
+keep their pre-merge provenance. Every master contract entry remains unchanged;
+only these three reviewed predicates are added to the Binance shard.

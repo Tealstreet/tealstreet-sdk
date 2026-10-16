@@ -1,7 +1,7 @@
 use super::*;
 use crate::public_feed::{self as feed, WeexPublicCallback, WeexPublicFeedRuntime};
 fn callback(h: &Host, callback: WeexPublicCallback<Js>) -> Result<Js, Thrown> {
-    let retained = matches!(
+    let retained = std::matches!(
         callback,
         WeexPublicCallback::CandleUnsubscribe { .. } | WeexPublicCallback::BookUnsubscribe { .. }
     )
@@ -49,33 +49,36 @@ pub(super) fn runtime() -> WeexPublicFeedRuntime<Host, Js, Thrown> {
         to_integer_string: |_, v| v::integer(&v),
         method: v::method,
         call_event: |_, f, this, event, handler| {
-            f.call(this, vec![Js::str(event), handler])?;
+            f.call(this, std::vec![Js::str(event), handler])?;
             Ok(())
         },
         disposed,
         create_socket: |h, url, protocols, options| {
-            h.call("createWebsocket", vec![url, protocols, options])
+            h.call("createWebsocket", std::vec![url, protocols, options])
         },
         set_socket: |h, socket| h.this().set("ws", socket),
         add_listener: |_, f, ws, event, handler| {
-            f.call(ws, vec![Js::str(event), handler])?;
+            f.call(ws, std::vec![Js::str(event), handler])?;
             Ok(())
         },
-        track_received: |h| call_unit(h, "trackLastReceived", vec![]),
+        track_received: |h| call_unit(h, "trackLastReceived", std::vec![]),
         parse: |h, units| parse(h, &units),
         subscription_id: |h| h.root("subscriptionId")?.to_number(),
         set_subscription_id: |h, id| h.this().set("subscriptionId", Js::Number(id)),
         send_pong: |h, id| frame(h, "PONG", None, id, false),
-        handle_pong: |h, ms| call_unit(h, "handlePongEvent", vec![Js::Number(ms)]),
+        handle_pong: |h, ms| call_unit(h, "handlePongEvent", std::vec![Js::Number(ms)]),
         warning_sink: |h| v::method(h, &parent(h)?, "log"),
         warning: |_, sink, message| {
-            sink.call(Js::Undefined, vec![Js::utf16(&message), Js::str("warning")])?;
+            sink.call(
+                Js::Undefined,
+                std::vec![Js::utf16(&message), Js::str("warning")],
+            )?;
             Ok(())
         },
-        record_stats: |h, key| call_unit(h, "recordMessageHandlerStats", vec![key]),
+        record_stats: |h, key| call_unit(h, "recordMessageHandlerStats", std::vec![key]),
         route_method: |h| v::method(h, &h.this(), "handleRoutedMessage"),
         route: |_, route, key, message| {
-            route.call(Js::Undefined, vec![key, message.clone()])?;
+            route.call(Js::Undefined, std::vec![key, message.clone()])?;
             Ok(())
         },
         interval: |_, value| {
@@ -88,15 +91,19 @@ pub(super) fn runtime() -> WeexPublicFeedRuntime<Host, Js, Thrown> {
         },
         make_callback: callback,
         add_handler: |h, key, handler| {
-            call_unit(h, "addHandler", vec![key.clone(), handler.clone()])
+            call_unit(h, "addHandler", std::vec![key.clone(), handler.clone()])
         },
         remove_handler: |h, key, handler| {
-            call_unit(h, "removeHandler", vec![key.clone(), handler.clone()])
+            call_unit(h, "removeHandler", std::vec![key.clone(), handler.clone()])
         },
-        subscribe: |h, topic| call_unit(h, "subscribeTopic", vec![topic.clone()]),
-        unsubscribe: |h, topic| call_unit(h, "unsubscribeTopic", vec![topic.clone()]),
+        subscribe: |h, topic| call_unit(h, "subscribeTopic", std::vec![topic.clone()]),
+        unsubscribe: |h, topic| call_unit(h, "unsubscribeTopic", std::vec![topic.clone()]),
         snapshot: |h, symbol, limit| {
-            parent_call(h, "fetchOrderBook", vec![symbol.clone(), Js::Number(limit)])
+            parent_call(
+                h,
+                "fetchOrderBook",
+                std::vec![symbol.clone(), Js::Number(limit)],
+            )
         },
         observe_snapshot: |h, pending, success, failure| {
             let retained = h.clone();
@@ -116,7 +123,7 @@ pub(super) fn runtime() -> WeexPublicFeedRuntime<Host, Js, Thrown> {
         books: |h| h.root("orderbooks"),
         put_book: |_, books, symbol, book| books.set_key(&symbol.to_js_string()?, book),
         invoke: |_, callback, value| {
-            callback.call(Js::Undefined, vec![value])?;
+            callback.call(Js::Undefined, std::vec![value])?;
             Ok(())
         },
         normalize_candle: v::candle,
@@ -127,7 +134,7 @@ pub(super) fn runtime() -> WeexPublicFeedRuntime<Host, Js, Thrown> {
         tickers_by_symbol: |h| h.root("store.tickersBySymbol"),
         ticker_updater: |h| v::method(h, &h.root("store")?, "updateTicker"),
         update_ticker: |_, update, symbol, patch| {
-            update.call(Js::Undefined, vec![symbol, patch])?;
+            update.call(Js::Undefined, std::vec![symbol, patch])?;
             Ok(())
         },
         update_price: |h, book, side, price, amount| {
@@ -135,10 +142,10 @@ pub(super) fn runtime() -> WeexPublicFeedRuntime<Host, Js, Thrown> {
             // overwrites amount; a new level starts with total=0 as ByPrice does.
             h.global("updateOrderBook")?.call(
                 Js::Undefined,
-                vec![
+                std::vec![
                     book.clone(),
                     Js::str(side),
-                    Js::object(vec![
+                    Js::object(std::vec![
                         ("price", price),
                         ("amount", amount),
                         ("total", Js::Number(0.0)),
@@ -149,7 +156,7 @@ pub(super) fn runtime() -> WeexPublicFeedRuntime<Host, Js, Thrown> {
         },
         calc_totals: |h, book| {
             h.global("calcOrderBookTotal")?
-                .call(Js::Undefined, vec![book.clone()])?;
+                .call(Js::Undefined, std::vec![book.clone()])?;
             Ok(())
         },
         base_dispose,
