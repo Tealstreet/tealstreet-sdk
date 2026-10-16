@@ -697,3 +697,24 @@ compile failure was fixed before runtime probing; it is not a negative control.
 All 76 tests in the integrated venue suite pass, and strict native all-targets
 clippy passes. Shared policy-table sharding and its ordinary gate refresh remain
 pending; the PR stays draft.
+
+# Per-crate reviewed policy storage integration
+
+After inheriting #315, only this PR's ProductionHost Clone row moves into
+construction/safe-cex-venue-breakoutprop.json. All 52 inherited master policy
+shards remain byte-identical; the deleted flat construction map is not restored.
+The direct native runner now uses loadPolicy for construction/default/receiver
+reviews. Five inherited-refusal source and fixture prerequisite hashes remain
+unchanged. Strict wasm32 library clippy passes.
+
+The post-split ordinary scoped gate still stops at the explicit shared
+safe_cex_transport::provider::NetworkFailure Clone/Copy construction review,
+tracked separately in #297. The finite inherited-refusal mechanism follows in
+#293; after it lands, this PR will add its five reviewed Breakout specs beside
+their actual Rust source and native fixture prerequisites. These are outstanding
+policy reviews, with no table fallback or classification bypass.
+
+The serialized post-split parity command exits zero: 7,459 rows and 17,204 public
+Rust items, with zero invention/status findings. Native all-targets clippy, wasm32
+library clippy, formatting and the 76-test venue suite pass. No accepted-set
+completion is claimed while the named shared and inherited-method reviews remain.
