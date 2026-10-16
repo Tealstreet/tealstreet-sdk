@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/webworker/handlers/BaseHandler.ts"
-rust_files = [ "safe-cex-webworker/src/handler.rs" ]
+rust_files = [ "safe-cex-webworker/src/handler.rs", "safe-cex-webworker/src/command_handlers.rs" ]
 
 [[symbol]]
 ts = "BaseHandler"
@@ -14,9 +14,9 @@ note = "FINDING owner: safe-cex-webworker audit. Annotation-only: stating Error-
 ts = "BaseHandler.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe-cex-webworker/src/handler.rs::BaseHandler::new"
+rs = [ "safe-cex-webworker/src/handler.rs::BaseHandler::new", "safe-cex-webworker/src/command_handlers.rs::HandlerContext", "safe-cex-webworker/src/command_handlers.rs::HandlerContext::exchange" ]
 status = "ported"
-note = "Renamed to safe-cex-webworker/src/handler.rs::BaseHandler::new. Constructor consumes the existing Exchange/Store trait and typed post/replay callbacks; unused inherited account/settings arguments remain in the concrete handlers that use them."
+note = "Renamed to safe-cex-webworker/src/handler.rs::BaseHandler::new. Constructor consumes the existing Exchange/Store trait and typed post/replay callbacks; unused inherited account/settings arguments remain in the concrete handlers that use them. Split members `safe-cex-webworker/src/command_handlers.rs::HandlerContext`, `safe-cex-webworker/src/command_handlers.rs::HandlerContext::exchange`; the six protected constructor inputs retained as a live context by the command handlers, and its read of the protected _exchange field."
 
 [[symbol]]
 ts = "BaseHandler.handle"
@@ -30,9 +30,9 @@ note = "Renamed to safe-cex-webworker/src/handler.rs::BaseHandler::handle."
 ts = "BaseHandler.bufferUntilMarketsLoaded"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-webworker/src/handler.rs::BaseHandler::buffer_until_markets_loaded"
+rs = [ "safe-cex-webworker/src/handler.rs::BaseHandler::buffer_until_markets_loaded", "safe-cex-webworker/src/command_handlers.rs::ChaserOrderHandler::buffer_until_markets_loaded", "safe-cex-webworker/src/command_handlers.rs::TwapHandler::buffer_until_markets_loaded", "safe-cex-webworker/src/command_handlers.rs::UiStateHandler::buffer_until_markets_loaded" ]
 status = "ported"
-note = "Renamed to safe-cex-webworker/src/handler.rs::BaseHandler::buffer_until_markets_loaded."
+note = "Renamed to safe-cex-webworker/src/handler.rs::BaseHandler::buffer_until_markets_loaded. Split members `safe-cex-webworker/src/command_handlers.rs::ChaserOrderHandler::buffer_until_markets_loaded`, `safe-cex-webworker/src/command_handlers.rs::TwapHandler::buffer_until_markets_loaded`, `safe-cex-webworker/src/command_handlers.rs::UiStateHandler::buffer_until_markets_loaded`; the inherited member as exposed on each command handler subclass, delegating to this body."
 
 [[symbol]]
 ts = "BaseHandler#_schedulePendingMarketsCheck"
@@ -70,9 +70,9 @@ note = "Renamed to safe-cex-webworker/src/handler.rs::BaseHandler::get_pending_t
 ts = "BaseHandler.dispose"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-webworker/src/handler.rs::BaseHandler::dispose"
+rs = [ "safe-cex-webworker/src/handler.rs::BaseHandler::dispose", "safe-cex-webworker/src/command_handlers.rs::ChaserOrderHandler::dispose", "safe-cex-webworker/src/command_handlers.rs::TwapHandler::dispose", "safe-cex-webworker/src/command_handlers.rs::UiStateHandler::dispose" ]
 status = "ported"
-note = "Renamed to safe-cex-webworker/src/handler.rs::BaseHandler::dispose."
+note = "Renamed to safe-cex-webworker/src/handler.rs::BaseHandler::dispose. Split members `safe-cex-webworker/src/command_handlers.rs::ChaserOrderHandler::dispose`, `safe-cex-webworker/src/command_handlers.rs::TwapHandler::dispose`, `safe-cex-webworker/src/command_handlers.rs::UiStateHandler::dispose`; the inherited member as exposed on each command handler subclass, delegating to this body."
 
 [[symbol]]
 ts = "BaseHandler#_resetPendingTimeoutReportEpisode"

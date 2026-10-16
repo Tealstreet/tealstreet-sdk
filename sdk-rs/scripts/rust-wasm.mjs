@@ -21,12 +21,13 @@ export const policy = JSON.parse(fs.readFileSync(path.join(sdk, 'rust-wasm.json'
  * the mirror had not picked it up yet would read as green.
  */
 const WORKFLOW_CANDIDATES = [
-    // Monorepo: the mirror's workflow, authored here (contributors cannot edit
-    // it on the mirror — CODEOWNERS + branch protection).
-    'mirrors/tealstreet-sdk/.github/workflows/ci.yml',
-    // The same file as seen from inside the mirror repo, where this slice is
-    // the whole tree.
-    '.github/workflows/ci.yml',
+    // The Rust tier's own workflow, authored in the monorepo at this path
+    // (contributors cannot edit it on the mirror - CODEOWNERS + branch
+    // protection) and exported to the mirror's root.
+    'mirrors/tealstreet-sdk/.github/workflows/rust.yml',
+    // The same file as seen from inside the mirror, where this slice is the
+    // whole tree.
+    '.github/workflows/rust.yml',
 ];
 
 export const workflows = WORKFLOW_CANDIDATES.map((rel) => ({ rel, path: path.join(root, rel) }))
