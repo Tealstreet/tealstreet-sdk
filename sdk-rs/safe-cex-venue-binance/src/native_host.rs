@@ -8,7 +8,7 @@ use crate::{
         ResponseReturn, ResponseTransform, RetryRead,
     },
     class_jobs::NativeFuture,
-    exchange_classes::{ExchangeDependencies, ExchangeImports, HttpMethod},
+    exchange_classes::{ExchangeDependencies, ExchangeImports, ExchangeState, HttpMethod, Method},
     lifecycle::TickTimer,
     orderbook::*,
     private_classes::{
@@ -24,19 +24,27 @@ use crate::{
     rest_history::PageCall,
 };
 use safe_cex_exchange::{
+    build_records::{BuildRecordsOptions, FoldableExchange, build_folded_position_records},
     http::{
-        HttpClient, HttpClientOptions, HttpHost, safe_cex_axios_create,
+        HttpClient, HttpClientOptions, HttpHost, install_transport_adapter, safe_cex_axios_create,
         safe_cex_axios_create_no_proxy,
     },
+    income_paging::{IncomePageParams, IncomeRangeOptions, paginate_income_range},
     native::{NativeHttpHost, nanoid},
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    runtime::{
+        ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeSigners, ExchangeTask, RemoteSigner,
+    },
     websocket::{BaseWebSocket, WsProtocol, WsRuntime},
 };
 use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{
-    RestAdapter, RestBody, RestFailure, RestRequest, RestResponse, TransportRegistry,
+    RestAdapter, RestAdapterVariant, RestBody, RestFailure, RestRequest, RestResponse,
+    TransportRegistry,
+    signature_rejection::is_binance_style_signature_rejection,
+    signing::{RemoteSignerRequest, RemoteSignerResponse},
     socket::SocketFrame,
 };
+use safe_cex_types::{Execution, ExecutionsOptions, IncomeRecord};
 use serde_json::{Map, Value};
 use std::{
     cell::{Cell, RefCell},
@@ -62,16 +70,54 @@ fn to_json(value: &EventValue) -> Result<Value, Failure> {
 }
 
 /// Production Binance dependencies over a native runtime and terminal HTTP adapter.
+/// `external` builds the externalPublicData provider for an exchange's base; the
+/// registry supplies it, since the providers live above the venue layer.
+/// `remote` is the account's hosted signer and its `accountName`, when it has one.
 pub fn native_dependencies(
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
+    external: ExternalFactory,
+    remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
 ) -> ExchangeDependencies {
+    let token = remote.as_ref().map(|(_, account)| match account {
+        Some(account) => record([("accountName", string(account.clone()))]),
+        None => record([]),
+    });
     ExchangeDependencies {
         runtime: runtime.clone(),
-        imports: native_imports(runtime, adapter),
-        signers: Default::default(),
-        remote_signer_token: None,
+        signers: ExchangeSigners {
+            remote_signer: remote.as_ref().map(|(signer, _)| signer.clone()),
+            payload_signer: None,
+        },
+        imports: native_imports(runtime, adapter, external, remote),
+        remote_signer_token: token,
         payload_signer_token: None,
+    }
+}
+/// The hosted signer as the transport's signing capability, for the HTTP client.
+struct TransportSigner(Rc<dyn RemoteSigner>);
+// Transport adapters deliberately use Arc while native futures remain local.
+#[allow(clippy::arc_with_non_send_sync)]
+fn transport_signer(
+    signer: Rc<dyn RemoteSigner>,
+) -> Arc<dyn safe_cex_transport::signing::RemoteSigner> {
+    Arc::new(TransportSigner(signer))
+}
+impl safe_cex_transport::signing::RemoteSigner for TransportSigner {
+    fn sign(
+        &self,
+        request: RemoteSignerRequest,
+    ) -> safe_cex_transport::TransportFuture<'_, RemoteSignerResponse> {
+        self.0.sign(request)
+    }
+    fn sign_query(
+        &self,
+        request: safe_cex_transport::query_signing::HttpSigningRequest,
+    ) -> safe_cex_transport::TransportFuture<
+        '_,
+        safe_cex_transport::query_signing::HttpSigningResponse,
+    > {
+        self.0.sign_query(request)
     }
 }
 
@@ -82,18 +128,32 @@ struct NativeImports {
     registry: TransportRegistry,
     clients: RefCell<Vec<Rc<NativeClient>>>,
     timers: Rc<NativeTimers>,
-    /// The exchange's emitAndLogError, bound during construction.
-    emitter: Rc<RefCell<Option<Emitter>>>,
+    /// The exchange, bound weakly during construction.
+    owner: Rc<RefCell<Weak<ExchangeState>>>,
+    external: ExternalFactory,
+    remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
     /// publicXhr (Futures/PM) or xhr (Spot): the order-book snapshot client.
     public_client: RefCell<Option<Rc<NativeClient>>>,
     this: Weak<NativeImports>,
 }
-type Emitter = Rc<dyn Fn(EventValue) -> Result<(), Failure>>;
-fn native_imports(runtime: Rc<dyn WsRuntime>, adapter: Arc<dyn RestAdapter>) -> Rc<NativeImports> {
+type ExternalFactory = Rc<
+    dyn Fn(
+        &safe_cex_types::ExchangeOptionsExternalPublicData,
+        Rc<safe_cex_exchange::exchange::BaseExchange>,
+    ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData>,
+>;
+fn native_imports(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: Arc<dyn RestAdapter>,
+    external: ExternalFactory,
+    remote: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
+) -> Rc<NativeImports> {
     Rc::new_cyclic(|this| NativeImports {
+        external,
+        remote,
         timers: native_timers(runtime.clone()),
         runtime,
-        emitter: Rc::new(RefCell::new(None)),
+        owner: Rc::new(RefCell::new(Weak::new())),
         public_client: RefCell::new(None),
         adapter,
         host: Rc::new(NativeHttpHost),
@@ -129,13 +189,14 @@ struct NativeClient {
     route: Option<(Rc<NativeClient>, Rc<NativeClient>)>,
     request: RefCell<Vec<RequestInterceptor>>,
     response: RefCell<Vec<ResponseStage>>,
-    retry: RefCell<Option<(u32, RetryRead)>>,
+    /// (retries, read classification, signature-rejection arm).
+    retry: RefCell<Option<(u32, RetryRead, bool)>>,
     transform: Cell<ResponseTransform>,
     limit: RefCell<Option<RateWindow>>,
-    emitter: Rc<RefCell<Option<Emitter>>>,
+    owner: Rc<RefCell<Weak<ExchangeState>>>,
 }
 enum ResponseStage {
-    Api(ResponseInterceptor, ResponseInterceptor),
+    Api(ResponseInterceptor, Option<ResponseInterceptor>),
     Guard(Fulfilled<EventValue>, Rejected<EventValue, Failure>),
 }
 /// axios-rate-limit: at most `max` request starts in any `per_ms` window.
@@ -205,19 +266,38 @@ async fn run_request(
         return Box::pin(run_request(imports, target.clone(), method, path, args)).await;
     }
     let mut attempt = 0u32;
+    // The config stamp: one signature resend per call, by retry or by interceptor.
+    let mut signature_retried = false;
     loop {
         wait_for_slot(&client, &imports.runtime).await?;
         let outcome = dispatch(&client, method, path, args.clone()).await;
         let retry = client.retry.borrow().clone();
-        if let (Err(Dispatch::Transport(error, _)), Some((retries, read))) = (&outcome, retry)
+        if let (Err(Dispatch::Transport(error, _)), Some((retries, read, signature))) =
+            (&outcome, retry)
             && attempt < retries
-            && error.is_retryable_network()
-            && read.matches_read(Some(method_name(method)), Some(path))
         {
-            attempt += 1;
-            continue;
+            let network = error.is_retryable_network()
+                && read.matches_read(Some(method_name(method)), Some(path));
+            let rejected = signature
+                && !signature_retried
+                && match &error.response {
+                    Some(response) => is_binance_style_signature_rejection(&response_data(
+                        response,
+                        client.transform.get(),
+                    ))
+                    .map_err(|e| failure(e.message))?,
+                    None => false,
+                };
+            if network || rejected {
+                signature_retried |= rejected;
+                attempt += 1;
+                continue;
+            }
         }
-        return respond(&client, outcome).await;
+        match respond(&client, outcome, !signature_retried).await? {
+            Some(data) => return Ok(data),
+            None => signature_retried = true,
+        }
     }
 }
 enum Dispatch {
@@ -236,9 +316,8 @@ async fn dispatch(
         ..Default::default()
     };
     match (method, &args) {
-        (HttpMethod::Get | HttpMethod::Delete, Some(config)) if !config.nullish() => {
-            let params = config.get("params").ok().filter(|p| !p.nullish());
-            request.params = params.map(|p| to_json(&p)).transpose().ok().flatten();
+        (HttpMethod::Get | HttpMethod::Delete, Some(params)) if !params.nullish() => {
+            request.params = to_json(params).ok();
         }
         (HttpMethod::Post | HttpMethod::Put, Some(data)) if !data.nullish() => {
             request.body = to_json(data).ok().map(RestBody::Untransformed);
@@ -410,10 +489,12 @@ fn error_value(error: &Failure) -> EventValue {
     );
     value
 }
+/// None asks the caller to resend once: a response interceptor saw a signature rejection.
 async fn respond(
     client: &Rc<NativeClient>,
     outcome: Result<(RestResponse, RestRequest), Dispatch>,
-) -> Result<EventValue, Failure> {
+    resend_allowed: bool,
+) -> Result<Option<EventValue>, Failure> {
     let transform = client.transform.get();
     let mut state: Result<EventValue, Failure> = match outcome {
         Ok((response, config)) => response_value(&response, &config, transform),
@@ -435,21 +516,28 @@ async fn respond(
         })
         .collect();
     let mut bindings = NativeResponseBindings {
-        emitter: client.emitter.clone(),
+        owner: client.owner.clone(),
+        resend_allowed,
+        resend_requested: false,
     };
     for stage in stages {
         state = match (stage, state) {
             (ResponseStage::Api(success, _), Ok(response)) => {
-                api_outcome(success(response, &mut bindings)?, None)
+                let outcome = success(response, &mut bindings)?;
+                if bindings.resend_requested {
+                    return Ok(None);
+                }
+                api_outcome(outcome, None)
             }
-            (ResponseStage::Api(_, failed), Err(error)) => {
+            (ResponseStage::Api(_, Some(failed)), Err(error)) => {
                 api_outcome(failed(error_value(&error), &mut bindings)?, Some(error))
             }
+            (ResponseStage::Api(_, None), Err(error)) => Err(error),
             (ResponseStage::Guard(success, _), Ok(response)) => success(response),
             (ResponseStage::Guard(_, rejected), Err(error)) => rejected(error)?.await,
         };
     }
-    state.and_then(|response| response.get("data"))
+    state.and_then(|response| response.get("data")).map(Some)
 }
 fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<EventValue, Failure> {
     match result {
@@ -469,6 +557,7 @@ fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<Even
             message,
             code,
             response,
+            emitted: _,
         }) => {
             let mut error = ExchangeError::new(message);
             error.name = name.into();
@@ -533,17 +622,42 @@ impl RequestBindings for NativeRequestBindings {
     }
 }
 struct NativeResponseBindings {
-    emitter: Rc<RefCell<Option<Emitter>>>,
+    owner: Rc<RefCell<Weak<ExchangeState>>>,
+    resend_allowed: bool,
+    resend_requested: bool,
 }
 impl ResponseBindings for NativeResponseBindings {
     fn emit(&mut self, message: EventValue) -> Result<(), Failure> {
-        let emit = self.emitter.borrow().clone();
-        let emit =
-            emit.ok_or_else(|| failure("response emitted before the exchange bound its emitter"))?;
-        emit(message)
+        let owner = self.owner.borrow().upgrade();
+        owner
+            .ok_or_else(|| failure("response emitted with no live exchange bound"))?
+            .emit(message)
+    }
+    // The truthy marker ends this pass; run_request re-dispatches the request once.
+    fn resend(&mut self, response: EventValue) -> Result<EventValue, Failure> {
+        if self.resend_allowed
+            && is_binance_style_signature_rejection(&to_json(&response.get("data")?)?)
+                .map_err(|e| failure(e.message))?
+        {
+            self.resend_requested = true;
+            return Ok(EventValue::Bool(true));
+        }
+        Ok(EventValue::Undefined)
     }
 }
 
+fn typed_options(options: &EventValue) -> Result<safe_cex_types::ExchangeOptions, Failure> {
+    // The signer is host-held (`imports.remote`); typed options cannot name it.
+    let view = match options {
+        EventValue::Object(object) => {
+            let mut record = object.borrow().clone();
+            record.fields.remove("remoteSigner");
+            EventValue::Object(Rc::new(RefCell::new(record)))
+        }
+        other => other.clone(),
+    };
+    crate::class_decode::decode(view).map_err(|e| failure(e.to_string()))
+}
 /// FactoryBindings: each factory call builds one NativeClient.
 struct Factorizer<'a> {
     imports: &'a NativeImports,
@@ -558,8 +672,7 @@ impl FactoryBindings for Factorizer<'_> {
         options: EventValue,
         exchange: EventValue,
     ) -> Result<EventValue, Failure> {
-        let typed: safe_cex_types::ExchangeOptions =
-            crate::class_decode::decode(options.clone()).map_err(|e| failure(e.to_string()))?;
+        let typed = typed_options(&options)?;
         let name: safe_cex_types::ExchangeName =
             serde_json::from_value(Value::String(exchange.get("name")?.text()?))
                 .map_err(|e| failure(e.to_string()))?;
@@ -588,8 +701,12 @@ impl FactoryBindings for Factorizer<'_> {
             options: typed,
             request,
             provider: Some(self.imports.runtime.transport()),
-            signer: None,
-            account_name: None,
+            signer: self
+                .imports
+                .remote
+                .as_ref()
+                .map(|(signer, _)| transport_signer(signer.clone())),
+            account_name: self.imports.remote.as_ref().and_then(|(_, a)| a.clone()),
             adapter: self.imports.adapter.clone(),
             host: self.imports.host.clone(),
             runtime: runtime.clone(),
@@ -614,17 +731,23 @@ impl FactoryBindings for Factorizer<'_> {
             retry: RefCell::new(None),
             transform: Cell::new(config.transform),
             limit: RefCell::new(None),
-            emitter: self.imports.emitter.clone(),
+            owner: self.imports.owner.clone(),
         });
         self.handle = record([("pendingClient", EventValue::Bool(true))]);
         Ok(self.handle.clone())
     }
-    fn retry(&mut self, _client: EventValue, retries: u32, read: RetryRead) -> Result<(), Failure> {
+    fn retry(
+        &mut self,
+        _client: EventValue,
+        retries: u32,
+        read: RetryRead,
+        signature: bool,
+    ) -> Result<(), Failure> {
         let client = self
             .pending
             .as_ref()
             .ok_or_else(|| failure("retry before create"))?;
-        *client.retry.borrow_mut() = Some((retries, read));
+        *client.retry.borrow_mut() = Some((retries, read, signature));
         Ok(())
     }
     fn request_use(
@@ -639,22 +762,37 @@ impl FactoryBindings for Factorizer<'_> {
         client.request.borrow_mut().push(handler);
         Ok(())
     }
+    // ts: installTransportAdapter(xhr, options, exchange.name, 'bigInt' | default)
     fn install(
         &mut self,
         _client: EventValue,
-        _options: EventValue,
+        options: EventValue,
         _name: EventValue,
-        _transform: ResponseTransform,
+        transform: ResponseTransform,
     ) -> Result<(), Failure> {
-        Err(failure(
-            "tealstreetTunnel needs the Tealstreet transport; the native direct host has no HOW tunnel",
-        ))
+        let http = self
+            .pending
+            .as_ref()
+            .and_then(|client| client.http.as_ref())
+            .ok_or_else(|| failure("install before create"))?;
+        let variant = match transform {
+            ResponseTransform::BigInt => RestAdapterVariant::BigInt,
+            ResponseTransform::Default => RestAdapterVariant::Default,
+        };
+        install_transport_adapter(
+            http,
+            &self.imports.registry,
+            &typed_options(&options)?,
+            Some(&self.imports.runtime.transport()),
+            variant,
+        );
+        Ok(())
     }
     fn response_use(
         &mut self,
         _client: EventValue,
         success: ResponseInterceptor,
-        failed: ResponseInterceptor,
+        failed: Option<ResponseInterceptor>,
     ) -> Result<(), Failure> {
         let client = self
             .pending
@@ -702,8 +840,8 @@ impl ExchangeImports for NativeImports {
         }
         Ok(handle)
     }
-    fn bind_emitter(&self, emit: Rc<dyn Fn(EventValue) -> Result<(), Failure>>) {
-        *self.emitter.borrow_mut() = Some(emit);
+    fn bind_owner(&self, owner: Weak<ExchangeState>) {
+        *self.owner.borrow_mut() = owner;
     }
     fn split(
         &self,
@@ -750,7 +888,7 @@ impl ExchangeImports for NativeImports {
             retry: RefCell::new(None),
             transform: Cell::new(ResponseTransform::Default),
             limit: RefCell::new(None),
-            emitter: self.emitter.clone(),
+            owner: self.owner.clone(),
         };
         let (route, handle) = register_client(self, Rc::new(route));
         if venue == Venue::Spot {
@@ -804,9 +942,12 @@ impl ExchangeImports for NativeImports {
     }
     fn external_provider(
         &self,
-        _options: &safe_cex_types::ExchangeOptionsExternalPublicData,
+        options: &safe_cex_types::ExchangeOptionsExternalPublicData,
     ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData> {
-        Rc::new(UnavailableExternalData(self.runtime.clone()))
+        match self.owner.borrow().upgrade() {
+            Some(owner) => (self.external)(options, owner.base.clone()),
+            None => Rc::new(UnavailableExternalData(self.runtime.clone())),
+        }
     }
     fn private_base(&self, parent: Rc<dyn PrivateParent>) -> Result<Rc<dyn PrivateBase>, Failure> {
         let ws_parent = parent
@@ -826,9 +967,25 @@ impl ExchangeImports for NativeImports {
         self.timers.clone()
     }
     fn remote_sign(&self, _signer: EventValue) -> Result<RemoteSignCall, Failure> {
-        Err(failure(
-            "remote signing is not available on the native direct host",
-        ))
+        let (signer, _) = self
+            .remote
+            .clone()
+            .ok_or_else(|| failure("remoteSigner is set but the host supplied no signer"))?;
+        Ok(Rc::new(move |request: EventValue| {
+            let signer = signer.clone();
+            let text =
+                serde_json::to_string(&to_json(&request)?).map_err(|e| failure(e.to_string()))?;
+            let request: RemoteSignerRequest =
+                serde_json::from_str(&text).map_err(|e| failure(e.to_string()))?;
+            Ok(Box::pin(async move {
+                let response = signer
+                    .sign(request)
+                    .await
+                    .map_err(|e| failure(e.to_string()))?;
+                let value = serde_json::to_value(&response).map_err(|e| failure(e.to_string()))?;
+                Ok(EventValue::from_json(value))
+            }) as ApiFuture)
+        }))
     }
     fn virtual_now(&self) -> f64 {
         VIRTUAL_CLOCK.get_current_time_ms()
@@ -852,24 +1009,137 @@ impl ExchangeImports for NativeImports {
     }
     fn paginate(
         &self,
-        _fetch: PageCall,
-        _opts: EventValue,
+        fetch: PageCall,
+        opts: EventValue,
     ) -> Result<NativeFuture<EventValue>, Failure> {
-        Err(failure(
-            "income range paging is not wired on the native host yet",
-        ))
+        let required = |key: &str| -> Result<f64, Failure> { opts.get(key)?.number() };
+        let optional = |key: &str| -> Result<Option<f64>, Failure> {
+            let value = opts.get(key)?;
+            if value.nullish() {
+                Ok(None)
+            } else {
+                value.number().map(Some)
+            }
+        };
+        let options = IncomeRangeOptions {
+            start_time: required("startTime")?,
+            end_time: required("endTime")?,
+            chunk_ms: required("chunkMs")?,
+            page_limit: required("pageLimit")?,
+            chunk_delay_ms: optional("chunkDelayMs")?,
+            max_pages_per_chunk: optional("maxPagesPerChunk")?,
+        };
+        let runtime = self.runtime.clone();
+        Ok(Box::pin(async move {
+            // ts: paginateIncomeRange — the shared pager over this venue's rethrowing page fetch.
+            let mut fetch_page =
+                move |page: IncomePageParams| -> ExchangeFuture<'static, Vec<IncomeRecord>> {
+                    let call = fetch(record([
+                        ("startTime", number(page.start_time)),
+                        ("endTime", number(page.end_time)),
+                        ("limit", number(page.limit)),
+                    ]));
+                    Box::pin(async move {
+                        let rows = call.map_err(into_exchange)?.await.map_err(into_exchange)?;
+                        crate::exchange_classes::income_records(&rows).map_err(into_exchange)
+                    })
+                };
+            let mut delay = move |ms: f64| runtime.sleep(ms.max(0.0) as u64);
+            let result = paginate_income_range(&mut fetch_page, options, &mut delay)
+                .await
+                .map_err(Rc::new)?;
+            Ok(record([
+                (
+                    "records",
+                    EventValue::from_json(
+                        serde_json::to_value(&result.records)
+                            .map_err(|e| failure(e.to_string()))?,
+                    ),
+                ),
+                ("truncated", EventValue::Bool(result.truncated)),
+                ("exhaustedChunks", number(result.exhausted_chunks)),
+                ("requests", number(result.requests)),
+            ]))
+        }))
     }
     fn iso(&self, time: EventValue) -> Result<String, Failure> {
         iso_string(time.number()?)
     }
     fn fold_closed_positions(
         &self,
-        _opts: EventValue,
-        _symbol_scoped: bool,
+        opts: EventValue,
+        symbol_scoped: bool,
     ) -> Result<NativeFuture<EventValue>, Failure> {
-        Err(failure(
-            "closed-position folding is not wired on the native host yet",
-        ))
+        // ts: BaseExchange#foldClosedPositionRecords over buildFoldedPositionRecords.
+        let owner = self
+            .owner
+            .borrow()
+            .upgrade()
+            .ok_or_else(|| failure("fold with no live exchange bound"))?;
+        let account = opts.get("account")?.text()?;
+        let bound = |key: &str| -> Result<Option<f64>, Failure> {
+            let value = opts.get(key)?;
+            if value.nullish() {
+                Ok(None)
+            } else {
+                value.number().map(Some)
+            }
+        };
+        let (from, to) = (bound("from")?, bound("to")?);
+        let now = self.runtime.now_ms();
+        Ok(Box::pin(async move {
+            let to = to.unwrap_or(now);
+            let from = from.unwrap_or(to - 30.0 * 24.0 * 60.0 * 60.0 * 1000.0);
+            let (fills_owner, income_owner) = (owner.clone(), owner.clone());
+            let store = owner.base.store.clone();
+            let mut settle = move |symbol: &str| {
+                store
+                    .markets_by_symbol()
+                    .get(symbol)
+                    .map(|market| market.quote.clone())
+                    .filter(|quote| !quote.is_empty())
+                    .unwrap_or_else(|| "USDT".into())
+            };
+            let mut exchange = FoldableExchange {
+                fetch_historical_fills: &mut move |options: ExecutionsOptions| {
+                    let owner = fills_owner.clone();
+                    Box::pin(async move {
+                        let args = vec![to_event(&options).map_err(into_exchange)?];
+                        let rows = crate::class_jobs::reaction(
+                            owner.invoke(Method::HistoricalFills, args),
+                        )
+                        .await
+                        .map_err(into_exchange)?;
+                        crate::class_decode::decode::<Vec<Execution>>(rows)
+                            .map_err(|e| ExchangeError::new(e.to_string()))
+                    })
+                },
+                fetch_income_history_range: Some(&mut move |from: f64, to: f64| {
+                    let owner = income_owner.clone();
+                    Box::pin(async move {
+                        let args = vec![number(from), number(to), EventValue::Undefined];
+                        let rows =
+                            crate::class_jobs::reaction(owner.invoke(Method::IncomeRange, args))
+                                .await
+                                .map_err(into_exchange)?;
+                        crate::exchange_classes::income_records(&rows).map_err(into_exchange)
+                    })
+                }),
+            };
+            let mut options = BuildRecordsOptions {
+                account: &account,
+                from,
+                to,
+                symbol_scoped,
+                resolve_settle_currency: &mut settle,
+            };
+            let result = build_folded_position_records(&mut exchange, &mut options)
+                .await
+                .map_err(|e| Rc::new(e.error))?;
+            serde_json::to_value(&result.records)
+                .map(EventValue::from_json)
+                .map_err(|e| failure(e.to_string()))
+        }))
     }
     fn loop_timer(&self, callback: TickTimer, interval: EventValue) -> Result<(), Failure> {
         let runtime = self.runtime.clone();
@@ -1346,7 +1616,7 @@ fn iso_string(ms: f64) -> Result<String, Failure> {
 
 /// externalPublicData on a host with no provider: every use fails visibly.
 struct UnavailableExternalData(Rc<dyn WsRuntime>);
-const NO_EXTERNAL: &str = "externalPublicData is not available on the native direct host";
+const NO_EXTERNAL: &str = "externalPublicData requested with no live exchange bound";
 impl safe_cex_exchange::external::ExternalPublicData for UnavailableExternalData {
     fn connect(&self) {
         self.0.report_exception(
@@ -1378,4 +1648,10 @@ impl safe_cex_exchange::external::ExternalPublicData for UnavailableExternalData
     ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
         Err(ExchangeError::new(NO_EXTERNAL))
     }
+}
+
+fn to_event(value: &impl serde::Serialize) -> Result<EventValue, Failure> {
+    serde_json::to_value(value)
+        .map(EventValue::from_json)
+        .map_err(|e| failure(e.to_string()))
 }

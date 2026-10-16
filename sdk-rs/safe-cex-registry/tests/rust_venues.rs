@@ -5,6 +5,7 @@ use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
+use safe_cex_registry::rust_venues::{BitunixDependencies, BlofinDependencies};
 use safe_cex_registry::{
     module_host::{ExchangeModule, ModuleError, NativeModuleHost},
     rust_venues::{
@@ -31,6 +32,7 @@ use safe_cex_venue_binance::{
     public_listeners::{self as listeners, Action, Book, ListenerHost, ListenerState, SyncState},
     request_weight::Failure,
 };
+use safe_cex_venue_okx::binding::exchange::OkxDependencies;
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
@@ -166,7 +168,10 @@ impl RestAdapter for Wire {
             .lock()
             .unwrap()
             .iter()
-            .find(|(path, _)| request.url.ends_with(path.as_str()))
+            .find(|(path, _)| {
+                let route = request.url.split('?').next().unwrap_or_default();
+                route.ends_with(path.as_str())
+            })
             .map(|(_, body)| body.clone());
         Box::pin(async move {
             let body =
@@ -178,6 +183,13 @@ impl RestAdapter for Wire {
                 body: RestResponseBody::Untransformed(body),
             })
         })
+    }
+}
+/// The scripted wire behind an `Rc`, as BloFin's HTTP builder returns.
+struct SharedWire(Arc<Wire>);
+impl RestAdapter for SharedWire {
+    fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+        self.0.execute(request)
     }
 }
 struct Host;
@@ -518,6 +530,64 @@ impl RustVenueHost for Venues {
             date_parse: Rc::new(|_| Ok(1_735_689_600_000.0)),
         })
     }
+    fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("bitunix");
+        let wire = self.wire.clone();
+        let runtime = self.runtime.clone();
+        Ok(BitunixDependencies {
+            runtime: self.runtime.clone(),
+            build: Rc::new(move |options| {
+                Ok(safe_cex_axios_create_no_proxy(HttpClientOptions {
+                    response_transform: None,
+                    params_serializer: None,
+                    exchange: ExchangeName::Bitunix,
+                    options: options.clone(),
+                    request: RestRequest::default(),
+                    provider: None,
+                    signer: None,
+                    account_name: None,
+                    adapter: wire.clone(),
+                    host: Rc::new(Host),
+                    runtime: runtime.clone(),
+                    store: None,
+                    stats: None,
+                    logs: None,
+                    every: vec![],
+                    periodic: vec![],
+                    next_id: Arc::new(|| "id".into()),
+                    signing_now: Arc::new(|| 0),
+                }))
+            }),
+            install: Rc::new(|_| Ok(())),
+            external_public_data: None,
+        })
+    }
+    fn blofin(&self) -> Result<BlofinDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("blofin");
+        let wire = self.wire.clone();
+        Ok(BlofinDependencies {
+            runtime: self.runtime.clone(),
+            http: Rc::new(move |_, base_url, budget| {
+                assert_eq!(
+                    base_url, "https://openapi.blofin.com",
+                    "REGISTRY blofin REST base"
+                );
+                assert_eq!(budget, 20_000, "REGISTRY blofin timeout budget");
+                Ok(Rc::new(SharedWire(wire.clone())) as Rc<dyn RestAdapter>)
+            }),
+            external_public_data: None,
+            remote_signer_account_name: None,
+        })
+    }
+    fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("okx");
+        let runtime: Rc<dyn ExchangeRuntime> = self.runtime.clone();
+        Ok(OkxDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(runtime, self.wire.clone()),
+            external_public_data: None,
+        })
+    }
 }
 fn venues() -> Rc<Venues> {
     Rc::new(Venues {
@@ -574,7 +644,18 @@ fn table_members_are_exactly_the_bound_venues() {
     let names: Vec<_> = RUST_VENUES.iter().map(|(name, _)| name.clone()).collect();
     assert_eq!(
         names,
-        [ExchangeName::Backpack, ExchangeName::Binance],
+        [
+            ExchangeName::Backpack,
+            ExchangeName::Binance,
+            ExchangeName::Binancepm,
+            ExchangeName::Binancespot,
+            ExchangeName::Bitunix,
+            ExchangeName::Blofin,
+            ExchangeName::Okx,
+            ExchangeName::Okxdemo,
+            ExchangeName::Okxeu,
+            ExchangeName::Okxeudemo,
+        ],
         "REGISTRY table membership is a deliberate, reviewed list"
     );
 }
@@ -648,6 +729,135 @@ fn binance_constructs_through_the_registry_and_reads_its_account() {
         *host.imports.requests.borrow(),
         ["/fapi/v3/balance"],
         "REGISTRY binance getAccount request"
+    );
+}
+
+#[test]
+fn binance_pm_and_spot_construct_through_the_registry_on_the_binance_inputs() {
+    for name in [ExchangeName::Binancepm, ExchangeName::Binancespot] {
+        let host = venues();
+        let exchange = construct(name.clone(), &host, json!({"key":"key","secret":"secret"}));
+        assert_eq!(exchange.name(), &name, "REGISTRY binance family name");
+        assert_eq!(
+            *host.calls.borrow(),
+            ["binance"],
+            "REGISTRY binance family reuses the binance host inputs once"
+        );
+    }
+}
+
+#[test]
+fn bitunix_constructs_through_the_registry_and_reads_its_markets() {
+    let host = venues();
+    let exchange = construct(
+        ExchangeName::Bitunix,
+        &host,
+        json!({"key":"k","secret":"s","publicDataOnly":true}),
+    );
+    assert_eq!(
+        exchange.name(),
+        &ExchangeName::Bitunix,
+        "REGISTRY bitunix name"
+    );
+    assert_eq!(
+        *host.calls.borrow(),
+        ["bitunix"],
+        "REGISTRY bitunix host inputs requested once"
+    );
+    host.wire.bodies.lock().unwrap().insert(
+        "/api/v1/futures/market/trading_pairs".into(),
+        json!({"code":0,"msg":"Success","data":[{
+            "symbol":"BTCUSDT","base":"BTC","quote":"USDT","minTradeVolume":"0.0001",
+            "maxLimitOrderVolume":"500","maxMarketOrderVolume":"300","basePrecision":3,
+            "quotePrecision":1,"maxLeverage":125,"minLeverage":1,"defaultLeverage":20,
+            "defaultMarginMode":"2","symbolStatus":"OPEN"
+        }]}),
+    );
+    let markets = run(&host.runtime, exchange.fetch_markets())
+        .unwrap_or_else(|e| panic!("REGISTRY bitunix fetchMarkets: {}", e.message));
+    assert_eq!(markets.len(), 1, "REGISTRY bitunix markets");
+    assert_eq!(markets[0].id, "BTC/USDT", "REGISTRY bitunix market id");
+}
+
+#[test]
+fn blofin_constructs_through_the_registry_and_reads_its_markets() {
+    let host = venues();
+    let exchange = construct(
+        ExchangeName::Blofin,
+        &host,
+        json!({"key":"k","secret":"s","passphrase":"p"}),
+    );
+    assert_eq!(
+        exchange.name(),
+        &ExchangeName::Blofin,
+        "REGISTRY blofin name"
+    );
+    assert_eq!(
+        *host.calls.borrow(),
+        ["blofin"],
+        "REGISTRY blofin host inputs requested once"
+    );
+    host.wire.bodies.lock().unwrap().insert(
+        "/api/v1/market/instruments".into(),
+        json!({"code":"0","msg":"success","data":[{
+            "instId":"BTC-USDT","baseCurrency":"BTC","quoteCurrency":"USDT","contractValue":"0.001",
+            "listTime":"1700000000000","expireTime":"0","maxLeverage":"150","minSize":"0.1",
+            "lotSize":"0.1","tickSize":"0.1","instType":"SWAP","contractType":"linear",
+            "maxLimitSize":"100000","maxMarketSize":"10000","state":"live"
+        }]}),
+    );
+    let markets = run(&host.runtime, exchange.fetch_markets())
+        .unwrap_or_else(|e| panic!("REGISTRY blofin fetchMarkets: {}", e.message));
+    assert_eq!(markets.len(), 1, "REGISTRY blofin markets");
+    assert_eq!(
+        markets[0].symbol, "BTCUSDT",
+        "REGISTRY blofin market symbol"
+    );
+}
+
+#[test]
+fn okx_family_constructs_through_the_registry_and_reads_its_markets() {
+    let opts = json!({"key": "key", "secret": "secret", "passphrase": "pass"});
+    for name in [
+        ExchangeName::Okx,
+        ExchangeName::Okxdemo,
+        ExchangeName::Okxeu,
+        ExchangeName::Okxeudemo,
+    ] {
+        let host = venues();
+        let exchange = construct(name.clone(), &host, opts.clone());
+        assert_eq!(exchange.name(), &name, "REGISTRY okx family name");
+        assert_eq!(
+            *host.calls.borrow(),
+            ["okx"],
+            "REGISTRY okx host inputs requested once"
+        );
+    }
+    let host = venues();
+    let exchange = construct(ExchangeName::Okx, &host, opts);
+    host.wire.bodies.lock().unwrap().insert(
+        "/api/v5/public/instruments".into(),
+        json!({"code": "0", "msg": "", "data": [{
+            "instId": "BTC-USDT-SWAP", "instType": "SWAP", "ctType": "linear", "ctVal": "0.01",
+            "ctValCcy": "BTC", "settleCcy": "USDT", "uly": "BTC-USDT", "instFamily": "BTC-USDT",
+            "baseCcy": "", "quoteCcy": "", "lotSz": "1", "tickSz": "0.1", "minSz": "1",
+            "maxLmtSz": "100000", "maxMktSz": "5000", "maxStopSz": "5000",
+            "maxTriggerSz": "100000", "maxTwapSz": "100000", "maxIcebergSz": "100000",
+            "lever": "100", "state": "live"
+        }]}),
+    );
+    let markets = run(&host.runtime, exchange.fetch_markets())
+        .unwrap_or_else(|e| panic!("REGISTRY okx fetchMarkets: {}", e.message));
+    assert_eq!(markets.len(), 1, "REGISTRY okx markets");
+    assert_eq!(markets[0].symbol, "BTCUSDT", "REGISTRY okx market symbol");
+    assert!(
+        host.wire
+            .requests
+            .lock()
+            .unwrap()
+            .iter()
+            .any(|u| u == "/api/v5/public/instruments"),
+        "REGISTRY okx fetchMarkets reached the scripted wire"
     );
 }
 

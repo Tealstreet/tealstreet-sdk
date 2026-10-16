@@ -122,7 +122,9 @@ A capability binding carries the actual callback and its origin together:
 base fallback, explicit empty override, or venue implementation. Only the SDK
 constructs base-fallback bindings; registering an override removes the brand.
 Support is never inferred from a returned empty vector or a separate boolean.
-The branded throwing defaults are `start` and `placeOrder`; the branded empty
+The branded throwing defaults are `start`, `placeOrder` and the three option
+reads (`fetchOptionChain`, `fetchOptionExpiries`, `fetchAccountGreeks`), which
+reject naming the venue rather than return an empty chain; the branded empty
 defaults are fills, income, income range, historical orders and closed PnL.
 `fetchOHLCV` is unbranded in the actual TS source despite older guidance saying
 otherwise. The journal-position default refuses: it never invents an empty
@@ -910,3 +912,8 @@ reconnection, and a `reconnecting` dial is refused rather than faked. The
 feature's dependencies are target-gated, so `--all-features` wasm builds stay
 I/O-free. Inherent `impl` blocks inside cfg-gated modules fail the parity
 indexer closed; native modules use free functions and trait impls only.
+
+`native_tealstreet_runtime(token)` is registerTealstreetTransport for a native host:
+`TealstreetTransport` over HOW adapters (bigInt = raw format) on a tunnel host that
+authenticates with the account's proxy token and checks expiry with the canonical
+`is_token_expired`. Proof: `safe-cex-registry/tests/native_host_tunnel.rs`.

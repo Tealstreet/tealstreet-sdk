@@ -87,6 +87,7 @@ impl BlofinNativeExchange {
             fetch_historical_orders: CapabilityBinding::implemented(|v, o| {
                 v.fetch_historical_orders(o)
             }),
+            ..Default::default()
         }
     }
 }

@@ -145,3 +145,23 @@ test('alias defaults respect lexical parameter scopes and nested applications wi
   alias(64, 'Cycle', [], applied(64, 'Cycle', []));
   assert.throws(() => inventory(doc), /recursive type alias needs explicit compiler resolution/);
 });
+test('unsupported receivers and uninstantiated defaults pass only with a reviewed source pin', async () => {
+  const { createHash } = await import('node:crypto');
+  const source = Buffer.from('impl Local for External {}\n');
+  const doc = fixture();
+  doc.index[0].inner.module.items.push(30);
+  doc.paths[40] = { crate_id: 5, path: ['dependency', 'External'], kind: 'struct' };
+  doc.index[30] = { id: 30, crate_id: 0, name: 'Local', visibility: 'public', inner: { trait: { items: [31], generics: { params: [] } } } };
+  doc.index[31] = { id: 31, name: 'read', span: { filename: 'src/lib.rs' }, inner: { function: { has_body: false, sig: { inputs: [['raw', { borrowed_ref: { type: { primitive: 'str' } } }]], output: null }, generics: { params: [] } } } };
+  doc.index[32] = { id: 32, crate_id: 0, span: { filename: 'src/lib.rs' }, inner: { impl: { trait: { id: 30, path: 'Local' }, for: { resolved_path: { id: 40, path: 'External' } }, items: [31] } } };
+  const key = 'production::Local::read for dependency::External';
+  assert.throws(() => inventory(doc, { readSource: () => source }), /production::Local::read for dependency::External: accepted-set assertion: decoder trait on unsupported receiver/);
+  const reviewed = { category: 'non-decoder', file: 'src/lib.rs', reason: 'Reviewed fixture body.', sourceSha256: createHash('sha256').update(source).digest('hex') };
+  assert.doesNotThrow(() => inventory(doc, { receiverTraits: { [key]: reviewed }, readSource: () => source }));
+  assert.throws(() => inventory(doc, { receiverTraits: { [key]: reviewed }, readSource: () => Buffer.from('changed') }), /reviewed source changed/);
+  assert.throws(() => inventory(doc, { receiverTraits: { [key]: { ...reviewed, category: 'decoder' } }, readSource: () => source }), /unknown category/);
+  doc.index[31].inner.function.has_body = true;
+  delete doc.index[32];
+  assert.throws(() => inventory(doc, { readSource: () => source }), /production::Local::read: accepted-set assertion: uninstantiated default decoder/);
+  assert.doesNotThrow(() => inventory(doc, { receiverTraits: { 'production::Local::read': reviewed }, readSource: () => source }));
+});
