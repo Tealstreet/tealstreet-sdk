@@ -18,7 +18,7 @@ impl Native for HyperliquidFastAssetCtx {
 }
 impl Native for PrePlacementEntry {
     fn native(&self) -> Value {
-        serde_json::json!({"type":(&self.r#type).native(),"price":bits(&self.price),"amount":bits(&self.amount),"timestamp":bits(&self.timestamp)})
+        serde_json::json!({"type":(&self.r#type).native(),"price":bits(&self.price),"amount":bits(&self.amount),"timestamp":bits(&self.timestamp),"cloid":self.cloid.as_ref().map(|v|(v).native()).unwrap_or_else(||serde_json::json!({"absent":true}))})
     }
 }
 impl Native for PendingOrderEntry {

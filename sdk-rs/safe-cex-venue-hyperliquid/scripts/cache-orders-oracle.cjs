@@ -2,7 +2,7 @@
 const fs=require('node:fs'),path=require('node:path'),vm=require('node:vm'),assert=require('node:assert/strict'),ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
 const root=path.resolve(__dirname,'../../..'),file=path.join(root,'packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.cross-cache.ts');
 const source=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true);
-const cacheNames=['clearStaleSessionStorage','clearPrePlacement','getPendingOrder','addPendingOrder','removePendingOrder'];const exchangeNames=['addToPrePlacementCache','matchPrePlacement','getPendingHip3Order','addPendingHip3Order','removePendingHip3Order'];const names=[...cacheNames,...exchangeNames.map(n=>'exchange.'+n)];
+const cacheNames=['clearStaleSessionStorage','clearPrePlacement','getPendingOrder','addPendingOrder','removePendingOrder'];const exchangeNames=['addToPrePlacementCache','matchPrePlacement','getPendingHip3Order','addPendingHip3Order','removePendingHip3Order','forgetPrePlacement','recordPlacement','getPlacementRecord','forgetPlacementRecord','matchPrePlacementTrigger'];const names=[...cacheNames,...exchangeNames.map(n=>'exchange.'+n)];
 const cls=source.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==='HyperliquidCrossCache');assert(cls);
 const methods=cacheNames.map(name=>{const n=cls.members.find(n=>n.name?.getText(source)===name);assert(n,name);return n.getText(source)}).join('\n');
 const exchangeFile=path.join(path.dirname(file),"hyperliquid.exchange.ts");const exchangeSource=ts.createSourceFile(exchangeFile,fs.readFileSync(exchangeFile,"utf8"),ts.ScriptTarget.Latest,true);const exchangeClass=exchangeSource.statements.find(n=>ts.isClassDeclaration(n)&&n.name.text==="HyperliquidExchange");const exchangeMethods=exchangeNames.map(name=>{const n=exchangeClass.members.find(n=>n.name?.getText(exchangeSource)===name);assert(n,name);return n.getText(exchangeSource)}).join("\n");
@@ -28,6 +28,7 @@ const bindings={
  __defineData:(object,key,value)=>invoke('defineData',{object:native(object),key:units(key),value:native(value)},()=>{Object.defineProperty(object,key,{value,writable:true,enumerable:true,configurable:true});return true}),
  __now:()=>invoke('now',[],()=>{if(globalCase.clockThrows)throw globalCase.error;return globalCase.now}),
  __keys:v=>invoke('objectKeys',native(v),()=>Object.keys(v)),
+ __imported:name=>invoke('imported',[name],()=>{if(globalCase.fail==='imported')throw globalCase.error;return globalCase.build}),
  __index:(object,key)=>invoke('index',{object:native(object),key:native(key)},()=>object[key]),
  __delete:(object,key)=>invoke('delete',{object:native(object),key:native(key)},()=>{"use strict";return delete object[key]}),
  __older:(now,timestamp,threshold)=>invoke('olderThan',{now:native(now),timestamp:native(timestamp),milliseconds:native(threshold)},()=>now-timestamp>threshold,v=>v),
@@ -42,6 +43,7 @@ const bindings={
 function transformer(context){const f=ts.factory;const call=(name,args)=>f.createCallExpression(f.createIdentifier(name),undefined,args);const visit=n=>{
  if(ts.isDeleteExpression(n)&&ts.isElementAccessExpression(n.expression))return call('__delete',[ts.visitNode(n.expression.expression,visit),ts.visitNode(n.expression.argumentExpression,visit)]);
  if(ts.isElementAccessExpression(n))return call('__index',[ts.visitNode(n.expression,visit),ts.visitNode(n.argumentExpression,visit)]);
+ if(ts.isCallExpression(n)&&ts.isIdentifier(n.expression)&&n.expression.text==='placementRecordFromWire')return call('__call',[call('__imported',[f.createStringLiteral(n.expression.text)]),f.createIdentifier('undefined'),...n.arguments.map(a=>ts.visitNode(a,visit))]);
  if(ts.isCallExpression(n)&&ts.isPropertyAccessExpression(n.expression)&&n.expression.expression.getText()==='Date')return call('__now',[]);
  if(ts.isCallExpression(n)&&ts.isPropertyAccessExpression(n.expression)&&n.expression.expression.getText()==='Object'&&n.expression.name.text==='keys')return call('__keys',[ts.visitNode(n.arguments[0],visit)]);
  if(ts.isTypeOfExpression(n)&&ts.isIdentifier(n.expression)&&n.expression.text==='sessionStorage')return f.updateTypeOfExpression(n,call('__global',[]));
@@ -76,14 +78,18 @@ function orderedTransformer(context){const f=ts.factory;const visit=n=>{
  }
  return ts.visitEachChild(n,visit,context);
 };return s=>ts.visitNode(s,visit);}
-const context={...bindings,exports:{},getCrossCache:()=>invoke('singleton',[],()=>{if(globalCase.singletonThrows)throw globalCase.error;return globalCase.cache}),JSON:{parse:v=>invoke('parse',native(v),()=>JSON.parse(v)),stringify:v=>invoke('stringify',native(v),()=>JSON.stringify(v))},MAX_SEEN_FILLS:500,PRE_PLACEMENT_STORAGE_KEY:'tealstreet_hip3_prePlacement',PENDING_ORDERS_STORAGE_KEY:'tealstreet_hip3_pendingOrders'};
+// Every top-level module constant comes from the actual source declarations, so a new
+// storage key cannot silently resolve to a ReferenceError inside a source catch block.
+const moduleConstants={};for(const statement of source.statements){if(!ts.isVariableStatement(statement))continue;for(const d of statement.declarationList.declarations){if(!ts.isIdentifier(d.name)||!d.initializer)continue;if(!ts.isStringLiteral(d.initializer)&&!ts.isNumericLiteral(d.initializer)&&!ts.isBinaryExpression(d.initializer))continue;moduleConstants[d.name.text]=vm.runInNewContext(d.initializer.getText(source));}}
+assert.deepEqual(Object.keys(moduleConstants).sort(),['MAX_PLACEMENT_RECORDS','MAX_SEEN_FILLS','PENDING_ORDERS_STORAGE_KEY','PLACEMENT_RECORDS_STORAGE_KEY','PLACEMENT_RECORD_TTL_MS','PRE_PLACEMENT_STORAGE_KEY'],'cache module constant inventory');
+const context={...bindings,exports:{},getCrossCache:()=>invoke('singleton',[],()=>{if(globalCase.singletonThrows)throw globalCase.error;return globalCase.cache}),JSON:{parse:v=>invoke('parse',native(v),()=>JSON.parse(v)),stringify:v=>invoke('stringify',native(v),()=>JSON.stringify(v))},...moduleConstants};
 vm.runInNewContext(ts.transpileModule(`class Cache {${methods}}\nclass Exchange {${exchangeMethods}}\nexports.Cache=Cache;exports.Exchange=Exchange;`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS},transformers:{before:[orderedTransformer,transformer]}}).outputText,context);
 const cases=[];
 function add(name,label,configure=()=>{},args=[]){
  ids=new WeakMap();tags=new WeakMap();symbols=new Map();nextId=1;calls=[];depth=0;recording=false;
  const error=tag({sentinel:label},'error'),cache=Object.create(context.exports.Cache.prototype);
  cache.workerPrePlacementCache=tag(new Map(),'preMap');cache.workerPendingOrdersCache=tag(new Map(),'pendingMap');
- const g=globalCase={cache,error,record:{},pre:{},now:120000,storage:null};
+ const g=globalCase={cache,error,record:{},pre:{},now:120000,storage:null,build:tag(function placementRecordFromWire(){if(g.fail==='placementRecordFromWire')throw error;return tag({record:arguments[0]?.c},'record')},'function')};
  cache.getSessionStorage=()=>{if(g.fail==='getSessionStorage')throw error;return g.storage};
  cache.getPrePlacementKey=(coin,side)=>`${coin}|${side}`;
  cache.readPrePlacementCache=()=>{if(g.fail==='readPrePlacementCache')throw error;return g.pre};
@@ -94,7 +100,7 @@ function add(name,label,configure=()=>{},args=[]){
  cache.addPrePlacement=()=>{if(g.fail==='addPrePlacement')throw error;return g.delegateResult};
  cache.matchPrePlacement=()=>{if(g.fail==='matchPrePlacement')throw error;return g.delegateResult};
  configure(g);
- if(name.startsWith('exchange.'))for(const member of ['getPendingOrder','addPendingOrder','removePendingOrder'])cache[member]=()=>{if(g.fail===member)throw error;return g.delegateResult};
+ if(name.startsWith('exchange.'))for(const member of ['getPendingOrder','addPendingOrder','removePendingOrder','removePrePlacementByCloid','getPlacementRecord','removePlacementRecord','matchPrePlacementTrigger','addPlacementRecord'])cache[member]=()=>{if(g.fail===member)throw error;return g.delegateResult};
  const input=native(cache),initialRecord=native(g.record),initialPre=native(g.pre),inputArgs=args.map(native);
  recording=true;let value,thrown;
  try{value=name.startsWith('exchange.')?context.exports.Exchange.prototype[name.slice(9)].apply({},args):cache[name](...args)}catch(e){thrown=native(e)}
@@ -123,12 +129,19 @@ for(const label of ['missing','empty','read throws','write throws','clock throws
 for(const [label,id,price]of [['base','order',91.25],['overwrite','order',17.5],['lone','\ud800',-0],['prototype','__proto__',Infinity]])add('addPendingOrder',label,g=>g.record={order:{type:'old',price:1,timestamp:0}},[id,'limit',price]);
 for(const label of ['clock throws','read throws','write throws','broadcast throws','record null','setter throws','nonwritable slot','proxy rejects'])add('addPendingOrder',label,g=>{if(label==='clock throws')g.clockThrows=true;if(label==='read throws')g.fail='readPendingOrdersCache';if(label==='write throws')g.fail='writePendingOrdersCache';if(label==='broadcast throws')g.fail='broadcastCacheUpdate';if(label==='record null')g.record=null;if(label==='setter throws')Object.defineProperty(g.record,'order',{enumerable:true,set(){throw g.error}});if(label==='proxy rejects')g.record=new Proxy(g.record,{set(){return false}});if(label==='nonwritable slot')Object.defineProperty(g.record,'order',{value:{price:17.5},enumerable:true,writable:false})},['order','limit',91.25]);
 for(const label of ['base','missing','lone','read throws','write throws','broadcast throws','delete throws','record null'])add('removePendingOrder',label,g=>{g.record=label==='missing'?{}:{order:{price:91.25,timestamp:0}};if(label==='read throws')g.fail='readPendingOrdersCache';if(label==='write throws')g.fail='writePendingOrdersCache';if(label==='broadcast throws')g.fail='broadcastCacheUpdate';if(label==='delete throws')Object.defineProperty(g.record,'order',{configurable:false});if(label==='record null')g.record=null},[label==='lone'?'\ud800':'order']);
-const delegateArgs={addToPrePlacementCache:['BTC','buy','limit',91.25,17.5],matchPrePlacement:['BTC','buy',91.25,17.5],getPendingHip3Order:['order'],addPendingHip3Order:['order','limit',91.25],removePendingHip3Order:['order']};
-const delegateMembers={addToPrePlacementCache:'addPrePlacement',matchPrePlacement:'matchPrePlacement',getPendingHip3Order:'getPendingOrder',addPendingHip3Order:'addPendingOrder',removePendingHip3Order:'removePendingOrder'};
-for(const name of exchangeNames)for(const label of ['result','undefined','null','singleton throws','method throws','getter throws','lone/signed zero','opaque result identity']){
+const delegateArgs={addToPrePlacementCache:['BTC','buy','limit',91.25,17.5],matchPrePlacement:['BTC','buy',91.25,17.5],getPendingHip3Order:['order'],addPendingHip3Order:['order','limit',91.25],removePendingHip3Order:['order'],forgetPrePlacement:['BTC','buy','0x0123456789abcdef0123456789abcdef'],getPlacementRecord:['0x0123456789abcdef0123456789abcdef'],forgetPlacementRecord:['0x0123456789abcdef0123456789abcdef'],matchPrePlacementTrigger:['BTC','sell',17.5]};
+const delegateMembers={addToPrePlacementCache:'addPrePlacement',matchPrePlacement:'matchPrePlacement',getPendingHip3Order:'getPendingOrder',addPendingHip3Order:'addPendingOrder',removePendingHip3Order:'removePendingOrder',forgetPrePlacement:'removePrePlacementByCloid',getPlacementRecord:'getPlacementRecord',forgetPlacementRecord:'removePlacementRecord',matchPrePlacementTrigger:'matchPrePlacementTrigger'};
+for(const name of exchangeNames.filter(n=>n!=='recordPlacement'))for(const label of ['result','undefined','null','singleton throws','method throws','getter throws','lone/signed zero','opaque result identity']){
  const args=delegateArgs[name].slice();if(label==='lone/signed zero'){args[0]='\ud800';if(args.length>2)args[args.length-1]=-0;}
  add('exchange.'+name,label,g=>{g.delegateResult=label==='undefined'?undefined:label==='null'?null:{type:'limit',price:91.25,extra:17.5};if(label==='singleton throws')g.singletonThrows=true;if(label==='method throws')g.fail=delegateMembers[name];if(label==='getter throws')Object.defineProperty(g.cache,delegateMembers[name],{get(){throw g.error},configurable:false})},args);
 }
 for(const args of [['BTC','buy'],['BTC','buy',91.25]])add('exchange.matchPrePlacement','omitted optional arguments',g=>g.delegateResult={type:'limit',price:17.5},args);
-assert.equal(cases.length,95,'independent7+9+17+12+8+42');
-console.log(JSON.stringify({names,cases,iterationStop:94,scope:'ten lifecycle/delegation source methods; explicit opaque native primitive/callee bindings; no class/constructor/singleton implementation claim'}));
+add('exchange.addToPrePlacementCache','cloid argument',g=>g.delegateResult=undefined,['BTC','buy','limit',91.25,17.5,'0x0123456789abcdef0123456789abcdef']);
+const wire=(c)=>({a:0,b:true,p:'91.25',s:'0.5',r:false,t:{limit:{tif:'Gtc'}},...c===undefined?{}:{c}});
+for(const label of ['mixed wires','empty wires','clock throws','singleton throws','builder throws','add throws','cloid getter throws','imported throws','add getter throws']){
+ const wires=label==='empty wires'?[]:[wire('0xa'),wire(),wire(''),wire('0xb')];
+ if(label==='cloid getter throws')Object.defineProperty(wires[0],'c',{get(){throw globalCase.error},enumerable:true});
+ add('exchange.recordPlacement',label,g=>{if(label==='clock throws')g.clockThrows=true;if(label==='singleton throws')g.singletonThrows=true;if(label==='builder throws')g.fail='placementRecordFromWire';if(label==='add throws')g.fail='addPlacementRecord';if(label==='imported throws')g.fail='imported';if(label==='add getter throws')Object.defineProperty(g.cache,'addPlacementRecord',{get(){throw g.error},configurable:false})},[wires,'BTC-PERP']);
+}
+assert.equal(cases.length,137,'independent7+9+17+12+8+72+2+1+9');
+console.log(JSON.stringify({names,cases,iterationStop:136,scope:'fifteen lifecycle/delegation source methods; explicit opaque native primitive/callee bindings; no class/constructor/singleton implementation claim'}));

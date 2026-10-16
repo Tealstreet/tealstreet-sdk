@@ -823,8 +823,8 @@ fn root_base_offline_recovery_eager_dispatch_identity_and_throw_prefix() {
 mod js_sockets {
     use super::*;
     use safe_cex_exchange::js_runtime::{
-        sockets::{JsSocketContext, base_websocket, base_websocket_class},
-        value::Js,
+        sockets::{JsSocketContext, base_websocket, base_websocket_class, core_of},
+        value::{Js, arg},
     };
     use safe_cex_transport::socket::SocketFrame;
 
@@ -986,5 +986,193 @@ mod js_sockets {
             connects.get() >= 1,
             "a failed connect is retried through connectAndSubscribe"
         );
+    }
+
+    fn assembled(runtime: &Rc<Runtime>, venue: &Rc<dyn Exchange>) -> Rc<JsSocketContext> {
+        let context = JsSocketContext::new(runtime.clone());
+        *context.venue.borrow_mut() = Some(Rc::downgrade(venue));
+        context
+    }
+
+    #[test]
+    fn transport_close_reaches_close_listeners_but_not_the_base_on_close_member() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = assembled(&runtime, &venue);
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let ws = socket
+            .call_method("createWebsocket", vec![Js::str("wss://venue")])
+            .unwrap();
+        let events = Rc::new(RefCell::new(vec![]));
+        {
+            let events = events.clone();
+            let on_close = Js::function("onClose", move |_, a| {
+                let event = arg(&a, 0);
+                events.borrow_mut().push((
+                    event.get("code")?.to_display(),
+                    event.get("reason")?.to_display(),
+                    event.get("wasClean")?.to_display(),
+                ));
+                Ok(Js::Undefined)
+            });
+            ws.call_method("addEventListener", vec![Js::str("close"), on_close])
+                .unwrap();
+        }
+        let base_member = socket.get("onClose").unwrap();
+        ws.call_method("addEventListener", vec![Js::str("close"), base_member])
+            .unwrap();
+        let io = live_socket(&runtime);
+        io.events.borrow_mut().push_back(WsEvent::Close {
+            code: Some(4001),
+            reason: "bye".into(),
+        });
+        runtime.pump();
+        assert_eq!(
+            *events.borrow(),
+            [("4001".to_owned(), "bye".to_owned(), "true".to_owned())],
+            "the transport close is delivered once, to the derived listener"
+        );
+        let base = core_of(&context, &socket).unwrap().base().unwrap();
+        assert_eq!(
+            base.diagnostics().lifetime_close_count,
+            1,
+            "the core handled the close itself, and the skipped base member did not repeat it"
+        );
+    }
+
+    #[test]
+    fn watchdog_thresholds_come_from_the_receiver_only_when_it_defines_them() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = assembled(&runtime, &venue);
+        let socket = base_websocket(&context, Js::object(vec![]));
+        let base = core_of(&context, &socket).unwrap().base().unwrap();
+        assert_eq!(base.get_watchdog_stale_threshold_ms(), None);
+        assert_eq!(base.get_watchdog_ping_threshold_ms(), None);
+        for (member, value) in [
+            ("getWatchdogStaleThresholdMs", Js::Number(180_000.0)),
+            ("getWatchdogPingThresholdMs", Js::Number(45_000.0)),
+        ] {
+            socket
+                .define(member, Js::function(member, move |_, _| Ok(value.clone())))
+                .unwrap();
+        }
+        assert_eq!(base.get_watchdog_stale_threshold_ms(), Some(180_000.0));
+        assert_eq!(base.get_watchdog_ping_threshold_ms(), Some(45_000.0));
+        socket
+            .define(
+                "getWatchdogStaleThresholdMs",
+                Js::function("getWatchdogStaleThresholdMs", |_, _| Ok(Js::Undefined)),
+            )
+            .unwrap();
+        assert_eq!(
+            base.get_watchdog_stale_threshold_ms(),
+            None,
+            "undefined ?? default"
+        );
+    }
+
+    #[test]
+    fn treat_any_message_as_pong_and_ping_at_reach_the_core() {
+        let (venue, runtime, store, _) = fixture();
+        let context = assembled(&runtime, &venue);
+        let socket = base_websocket(&context, Js::object(vec![]));
+        socket
+            .define("treatAnyMessageAsPong", Js::Bool(true))
+            .unwrap();
+        socket
+            .call_method("createWebsocket", vec![Js::str("wss://venue")])
+            .unwrap();
+        let base = core_of(&context, &socket).unwrap().base().unwrap();
+        assert!(base.treat_any_message_as_pong.get());
+        // ts: ping() { this.pingAt = performance.now(); ... } then the pong arrives.
+        let sent_at = runtime.now.get();
+        socket.set("pingAt", Js::Number(sent_at)).unwrap();
+        assert_eq!(socket.get("pingAt").unwrap().as_f64(), Some(sent_at));
+        runtime.now.set(sent_at + 100.0);
+        socket.call_method("handlePongEvent", vec![]).unwrap();
+        assert_eq!(store.latency(), 50.0, "latency is half the ping round trip");
+    }
+
+    /// A socket whose connectAndSubscribe counts redials and registers `this.onClose`.
+    fn closing_socket(
+        context: &Rc<JsSocketContext>,
+        derived_closes: Option<Rc<Cell<usize>>>,
+    ) -> (Js, Rc<Cell<usize>>) {
+        let socket = base_websocket(context, Js::object(vec![]));
+        if let Some(closes) = derived_closes {
+            // ts: a subclass `onClose` arrow field replaces the base member.
+            socket
+                .define(
+                    "onClose",
+                    Js::function("onClose", move |_, _| {
+                        closes.set(closes.get() + 1);
+                        Ok(Js::Undefined)
+                    }),
+                )
+                .unwrap();
+        }
+        let connects = Rc::new(Cell::new(0));
+        let (counter, this) = (connects.clone(), socket.clone());
+        socket
+            .define(
+                "connectAndSubscribe",
+                Js::function("connectAndSubscribe", move |_, _| {
+                    counter.set(counter.get() + 1);
+                    let ws = this.call_method("createWebsocket", vec![Js::str("wss://venue")])?;
+                    ws.call_method(
+                        "addEventListener",
+                        vec![Js::str("close"), this.get("onClose")?],
+                    )
+                }),
+            )
+            .unwrap();
+        socket.call_method("connectAndSubscribe", vec![]).unwrap();
+        (socket, connects)
+    }
+
+    fn close_transport_and_wait(runtime: &Rc<Runtime>) {
+        let io = live_socket(runtime);
+        io.events.borrow_mut().push_back(WsEvent::Close {
+            code: Some(1006),
+            reason: "gone".into(),
+        });
+        runtime.pump();
+        for _ in 0..10 {
+            runtime.advance(10_000.0);
+        }
+    }
+
+    #[test]
+    fn a_derived_on_close_owns_the_transport_close_and_the_core_does_not_reconnect() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = assembled(&runtime, &venue);
+        let derived_closes = Rc::new(Cell::new(0));
+        let (socket, connects) = closing_socket(&context, Some(derived_closes.clone()));
+        close_transport_and_wait(&runtime);
+        assert_eq!(derived_closes.get(), 1, "the derived onClose ran once");
+        assert_eq!(
+            connects.get(),
+            1,
+            "the core scheduled no reconnect of its own"
+        );
+        let base = core_of(&context, &socket).unwrap().base().unwrap();
+        assert_eq!(
+            base.diagnostics().lifetime_close_count,
+            0,
+            "no core close handling"
+        );
+    }
+
+    #[test]
+    fn without_a_derived_on_close_the_core_keeps_its_reconnect() {
+        let (venue, runtime, _store, _) = fixture();
+        let context = assembled(&runtime, &venue);
+        let (socket, connects) = closing_socket(&context, None);
+        close_transport_and_wait(&runtime);
+        assert!(
+            connects.get() >= 2,
+            "the core reconnected through connectAndSubscribe"
+        );
+        let base = core_of(&context, &socket).unwrap().base().unwrap();
+        assert_eq!(base.diagnostics().lifetime_close_count, 1);
     }
 }

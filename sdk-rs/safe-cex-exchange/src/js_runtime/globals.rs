@@ -34,17 +34,36 @@ fn json_quote(text: &[u16], out: &mut Vec<u16>) {
     out.push(b'"' as u16);
 }
 
-/// JSON.stringify(value) without replacer/indent; `None` is the undefined result.
-fn json_stringify(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
-    let mut value = value.clone();
-    if value.is_object() || value.is_array() {
+/// SerializeJSONProperty with an optional callable replacer; `None` is undefined.
+fn json_stringify(
+    holder: &Js,
+    key: &[u16],
+    replacer: Option<&Js>,
+    stack: &mut Vec<Js>,
+) -> Result<Option<Vec<u16>>, Thrown> {
+    let mut value = holder.get_key(key)?;
+    if value.is_object()
+        || value.is_array()
+        || value.is_callable()
+        || matches!(value, Js::BigInt(_))
+    {
         let to_json_member = value.get("toJSON")?;
         if to_json_member.is_callable() {
-            value = to_json_member.call(value.clone(), vec![Js::str("")])?;
+            value = to_json_member.call(value.clone(), vec![Js::utf16(key)])?;
         }
     }
+    if let Some(replacer) = replacer {
+        value = replacer.call(holder.clone(), vec![Js::utf16(key), value])?;
+    }
+    let container = value.is_object() || value.is_array();
+    if container {
+        if stack.iter().any(|ancestor| ancestor.same_reference(&value)) {
+            return Err(Thrown::type_error("Converting circular structure to JSON"));
+        }
+        stack.push(value.clone());
+    }
     let lit = |t: &str| Ok(Some(t.encode_utf16().collect()));
-    match &value {
+    let result = match &value {
         Js::Undefined | Js::Function(_) => Ok(None),
         Js::Null => lit("null"),
         Js::Bool(b) => lit(if *b { "true" } else { "false" }),
@@ -57,13 +76,15 @@ fn json_stringify(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
             Ok(Some(out))
         }
         Js::Array(items) => {
-            let items: Vec<Option<Js>> = items.borrow().clone();
+            // Capture length once, then read each live slot after earlier replacer calls.
+            let length = items.borrow().len();
             let mut out = vec![b'[' as u16];
-            for (i, item) in items.iter().enumerate() {
+            for i in 0..length {
                 if i > 0 {
                     out.push(b',' as u16);
                 }
-                match item.as_ref().map(json_stringify).transpose()?.flatten() {
+                let key: Vec<u16> = i.to_string().encode_utf16().collect();
+                match json_stringify(&value, &key, replacer, stack)? {
                     Some(text) => out.extend(text),
                     None => out.extend("null".encode_utf16()),
                 }
@@ -74,8 +95,9 @@ fn json_stringify(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
         Js::Object(_) => {
             let mut out = vec![b'{' as u16];
             let mut first = true;
-            for (key, member) in value.own_entries()? {
-                let Some(text) = json_stringify(&member)? else {
+            // Key enumeration precedes traversal; getters/replacers can alter later values.
+            for key in value.own_keys() {
+                let Some(text) = json_stringify(&value, &key, replacer, stack)? else {
                     continue;
                 };
                 if !first {
@@ -90,7 +112,132 @@ fn json_stringify(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
             Ok(Some(out))
         }
         Js::Promise(_) | Js::Map(_) | Js::Set(_) => lit("{}"),
+    };
+    if container {
+        stack.pop();
     }
+    result
+}
+
+/// GetIterator's values over the iterables the runtime models; `None` has no @@iterator.
+fn iterate(value: &Js) -> Option<Vec<Js>> {
+    match value {
+        Js::Array(_) => value.array_values(),
+        Js::Map(entries) => Some(
+            entries
+                .borrow()
+                .iter()
+                .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
+                .collect(),
+        ),
+        Js::Set(values) => Some(values.borrow().clone()),
+        Js::String(units) => {
+            let mut out = vec![];
+            let mut i = 0;
+            while i < units.len() {
+                let pair = (0xD800..=0xDBFF).contains(&units[i])
+                    && matches!(units.get(i + 1), Some(0xDC00..=0xDFFF));
+                let width = if pair { 2 } else { 1 };
+                out.push(Js::utf16(&units[i..i + width]));
+                i += width;
+            }
+            Some(out)
+        }
+        _ => None,
+    }
+}
+
+/// How V8 names an operand in a TypeError (`number 5`, `string "x"`, `object null`).
+fn v8_operand(value: &Js) -> String {
+    match value {
+        Js::Undefined => "undefined".to_owned(),
+        Js::Null => "object null".to_owned(),
+        Js::String(_) => format!("string \"{}\"", value.to_display()),
+        Js::Bool(_) | Js::Number(_) | Js::BigInt(_) => {
+            format!("{} {}", value.type_of(), value.to_display())
+        }
+        _ => value.type_of().to_owned(),
+    }
+}
+
+fn not_iterable(value: &Js) -> Thrown {
+    Thrown::type_error(&format!(
+        "{} is not iterable (cannot read property Symbol(Symbol.iterator))",
+        v8_operand(value)
+    ))
+}
+
+/// `new Map(iterable)`: AddEntriesFromIterable through Map.prototype.set.
+fn map_from_entries(iterable: &Js) -> Result<Js, Thrown> {
+    let map = Js::new_map();
+    if iterable.is_nullish() {
+        return Ok(map);
+    }
+    let entries = iterate(iterable).ok_or_else(|| not_iterable(iterable))?;
+    if let Js::Map(slots) = &map {
+        for entry in entries {
+            if !entry.is_object() {
+                return Err(Thrown::type_error(&format!(
+                    "Iterator value {} is not an entry object",
+                    entry.to_display()
+                )));
+            }
+            // Map.prototype.set stores a -0 key as +0.
+            let key = entry.get("0")?;
+            let key = if key.as_f64() == Some(0.0) {
+                Js::Number(0.0)
+            } else {
+                key
+            };
+            let value = entry.get("1")?;
+            let mut slots = slots.borrow_mut();
+            match slots.iter_mut().find(|(k, _)| k.same_value_zero(&key)) {
+                Some(slot) => slot.1 = value,
+                None => slots.push((key, value)),
+            }
+        }
+    }
+    Ok(map)
+}
+
+/// `Array.from(items, mapFn, thisArg)` over iterables, else array-likes by `length`.
+fn array_from(a: &[Js]) -> Result<Js, Thrown> {
+    let items = arg(a, 0);
+    let map_fn = arg(a, 1);
+    let mapping = !map_fn.is_undefined();
+    if mapping && !map_fn.is_callable() {
+        return Err(Thrown::type_error(&format!(
+            "{} is not a function",
+            v8_operand(&map_fn)
+        )));
+    }
+    let values = match iterate(&items) {
+        Some(values) => values,
+        None if items.is_nullish() => return Err(not_iterable(&items)),
+        None => {
+            let length = items.get("length")?.to_number()?;
+            let length = if length.is_nan() || length <= 0.0 {
+                0.0
+            } else {
+                length.trunc().min(9_007_199_254_740_991.0)
+            };
+            if length > f64::from(u32::MAX) {
+                return Err(Thrown::error("RangeError", "Invalid array length"));
+            }
+            (0..length as usize)
+                .map(|k| items.get(&k.to_string()))
+                .collect::<Result<_, _>>()?
+        }
+    };
+    if !mapping {
+        return Ok(Js::array(values));
+    }
+    let this = arg(a, 2);
+    let mut out = Vec::with_capacity(values.len());
+    for (k, value) in values.into_iter().enumerate() {
+        out.push(map_fn.call(this.clone(), vec![value, Js::Number(k as f64)])?);
+    }
+    Ok(Js::array(out))
 }
 
 /// application/x-www-form-urlencoded byte serializer (URLSearchParams).
@@ -189,12 +336,11 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
-    def(
-        "parseFloat",
-        Js::function("parseFloat", |_, a| {
-            Ok(Js::Number(arg(&a, 0).parse_float()?))
-        }),
-    );
+    // Number.parseFloat === parseFloat: one function object under both names.
+    let parse_float = Js::function("parseFloat", |_, a| {
+        Ok(Js::Number(arg(&a, 0).parse_float()?))
+    });
+    def("parseFloat", parse_float.clone());
     def(
         "parseInt",
         Js::function("parseInt", |_, a| {
@@ -218,16 +364,32 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             })
         }),
     );
-    def(
-        "Number",
-        Js::function("Number", |_, a| {
-            Ok(Js::Number(if a.is_empty() {
-                0.0
-            } else {
-                a[0].to_number()?
-            }))
-        }),
-    );
+    // ts: Number(value) is ToNumeric, then a BigInt rounds to the nearest double.
+    let number = Js::function("Number", |_, a| {
+        Ok(Js::Number(match a.first() {
+            None => 0.0,
+            Some(value) => match super::ops::to_numeric(value)? {
+                Js::BigInt(n) => n.to_string().parse().unwrap_or(f64::NAN),
+                numeric => numeric.to_number()?,
+            },
+        }))
+    });
+    for (key, value) in [
+        (
+            "isFinite",
+            Js::function("isFinite", |_, a| {
+                Ok(Js::Bool(
+                    matches!(arg(&a, 0), Js::Number(n) if n.is_finite()),
+                ))
+            }),
+        ),
+        ("MAX_SAFE_INTEGER", Js::Number(9_007_199_254_740_991.0)),
+        ("NaN", Js::Number(f64::NAN)),
+        ("parseFloat", parse_float),
+    ] {
+        let _ = number.define(key, value);
+    }
+    def("Number", number);
     def(
         "Boolean",
         Js::function("Boolean", |_, a| Ok(Js::Bool(arg(&a, 0).truthy()))),
@@ -323,10 +485,13 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     );
     def(
         "Array",
-        Js::object(vec![(
-            "isArray",
-            Js::function("isArray", |_, a| Ok(Js::Bool(arg(&a, 0).is_array()))),
-        )]),
+        Js::object(vec![
+            (
+                "isArray",
+                Js::function("isArray", |_, a| Ok(Js::Bool(arg(&a, 0).is_array()))),
+            ),
+            ("from", Js::function("from", |_, a| array_from(&a))),
+        ]),
     );
     def(
         "Object",
@@ -400,10 +565,15 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 "stringify",
                 Js::function("stringify", |_, a| {
                     let v = arg(&a, 0);
-                    if v.is_undefined() || v.is_callable() {
-                        return Ok(Js::Undefined);
-                    }
-                    Ok(json_stringify(&v)?.map_or(Js::Undefined, |t| Js::utf16(&t)))
+                    let replacer = arg(&a, 1);
+                    let holder = Js::object(vec![("", v)]);
+                    Ok(json_stringify(
+                        &holder,
+                        &[],
+                        replacer.is_callable().then_some(&replacer),
+                        &mut Vec::new(),
+                    )?
+                    .map_or(Js::Undefined, |t| Js::utf16(&t)))
                 }),
             ),
             (
@@ -417,6 +587,7 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             ),
         ]),
     );
+    let random_rt = rt.clone();
     let math = |name: &'static str, f: fn(f64) -> f64| {
         (
             name,
@@ -466,6 +637,14 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                         arg(&a, 0).to_number()?,
                         arg(&a, 1).to_number()?,
                     )))
+                }),
+            ),
+            (
+                "random",
+                Js::function("random", move |_, _| {
+                    Ok(Js::Number(
+                        scope_of(&random_rt)?.exchange_runtime().random(),
+                    ))
                 }),
             ),
         ]),
@@ -539,12 +718,56 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let date_rt = rt.clone();
     def(
         "Date",
+        Js::object(vec![
+            (
+                "now",
+                Js::function("now", move |_, _| {
+                    Ok(Js::Number(scope_of(&date_rt)?.now().floor()))
+                }),
+            ),
+            (
+                "parse",
+                Js::function("parse", |_, a| {
+                    // ExchangeRuntime has no host-timezone hook, so offset-less date-times
+                    // (local time per ECMAScript) are read as UTC: a UTC-host assumption.
+                    let text = arg(&a, 0).to_js_string()?;
+                    Ok(Js::Number(safe_cex_num::js_date_parse_utf16(&text, |ms| {
+                        ms
+                    })))
+                }),
+            ),
+        ]),
+    );
+    let performance_rt = rt.clone();
+    def(
+        "performance",
         Js::object(vec![(
             "now",
             Js::function("now", move |_, _| {
-                Ok(Js::Number(scope_of(&date_rt)?.now().floor()))
+                Ok(Js::Number(
+                    scope_of(&performance_rt)?
+                        .exchange_runtime()
+                        .monotonic_now_ms(),
+                ))
             }),
         )]),
+    );
+    let console = |severity: &'static str| {
+        let rt = rt.clone();
+        Js::function(severity, move |_, a| {
+            let mut parts = Vec::with_capacity(a.len());
+            for value in &a {
+                parts.push(String::from_utf16_lossy(&value.to_js_string()?));
+            }
+            scope_of(&rt)?
+                .exchange_runtime()
+                .console(severity, &parts.join(" "));
+            Ok(Js::Undefined)
+        })
+    };
+    def(
+        "console",
+        Js::object(vec![("error", console("error")), ("warn", console("warn"))]),
     );
     let clock_rt = rt.clone();
     def(
@@ -556,7 +779,10 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             }),
         )]),
     );
-    def("Map", Js::constructor("Map", |_, _| Ok(Js::new_map())));
+    def(
+        "Map",
+        Js::constructor("Map", |_, a| map_from_entries(&arg(&a, 0))),
+    );
     def(
         "WsDirectFallback",
         Js::constructor("WsDirectFallback", |_, a| {

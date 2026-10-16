@@ -1226,6 +1226,9 @@ impl venue::cache_orders::CacheOrdersHost for Host {
     fn singleton(&mut self) -> Result<N, N> {
         panic!("outside core class finite witness: CacheOrdersHost::singleton")
     }
+    fn imported(&mut self, name: &str) -> Result<N, N> {
+        panic!("outside core class finite witness: CacheOrdersHost::imported {name}")
+    }
 }
 impl venue::cross_cache::CrossCacheHost for Host {
     fn null(&self) -> N {

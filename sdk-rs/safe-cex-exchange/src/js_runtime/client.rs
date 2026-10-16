@@ -24,10 +24,13 @@ fn spawn(host: &Host, body: JsFuture<'static>) -> Js {
     Js::Promise(Promise::spawn(&host.runtime(), body))
 }
 
+/// One `interceptors.*.use(onFulfilled, onRejected)` registration.
+type Interceptor = (Js, Js);
+
 #[derive(Default)]
 struct ClientState {
-    requests: Vec<Js>,
-    responses: Vec<Js>,
+    requests: Vec<Interceptor>,
+    responses: Vec<Interceptor>,
     retries: u32,
     retry_condition: Option<Js>,
     /// axios-rate-limit windows `(maxRequests, perMilliseconds, sent)`; a chained
@@ -39,11 +42,13 @@ struct ClientState {
 pub fn create(host: Host, defaults: Js) -> Js {
     let state = Rc::new(RefCell::new(ClientState::default()));
     let client = Js::object_with_class("Axios", vec![("defaults", defaults.clone())]);
-    let use_fn = |list: fn(&mut ClientState) -> &mut Vec<Js>| {
+    let use_fn = |list: fn(&mut ClientState) -> &mut Vec<Interceptor>| {
         let state = state.clone();
         Js::function("use", move |_, a| {
-            list(&mut state.borrow_mut()).push(arg(&a, 0));
-            Ok(Js::Number(0.0))
+            let mut state = state.borrow_mut();
+            let list = list(&mut state);
+            list.push((arg(&a, 0), arg(&a, 1)));
+            Ok(Js::Number((list.len() - 1) as f64))
         })
     };
     let _ = client.define(
@@ -199,17 +204,50 @@ fn dispatch(
     })
 }
 
+/// Axios' `promise.then(onFulfilled, onRejected)` link: a missing handler passes
+/// the settlement through; a rejection handler's return recovers the chain.
+async fn chain_step(interceptor: &Interceptor, current: Result<Js, Thrown>) -> Result<Js, Thrown> {
+    let (on_fulfilled, on_rejected) = interceptor;
+    match current {
+        Ok(value) if on_fulfilled.is_callable() => {
+            await_js(on_fulfilled.call(Js::Undefined, vec![value])?).await
+        }
+        Err(error) if on_rejected.is_callable() => {
+            await_js(on_rejected.call(Js::Undefined, vec![error.value])?).await
+        }
+        settled => settled,
+    }
+}
+
+/// One axios chain: request interceptors (LIFO), the adapter, response
+/// interceptors (FIFO), all links of one promise chain.
 async fn send_once(
     host: &Host,
     state: &Rc<RefCell<ClientState>>,
     defaults: &Js,
     request: Js,
 ) -> Result<Js, Thrown> {
-    let mut config = merged_config(defaults, &request)?;
-    let interceptors: Vec<Js> = state.borrow().requests.iter().rev().cloned().collect();
-    for interceptor in interceptors {
-        config = await_js(interceptor.call(Js::Undefined, vec![config])?).await?;
+    let mut current = Ok(merged_config(defaults, &request)?);
+    let requests: Vec<Interceptor> = state.borrow().requests.iter().rev().cloned().collect();
+    for interceptor in &requests {
+        current = chain_step(interceptor, current).await;
     }
+    current = match current {
+        Ok(config) => dispatch_request(host, state, config).await,
+        Err(error) => Err(error),
+    };
+    let responses: Vec<Interceptor> = state.borrow().responses.clone();
+    for interceptor in &responses {
+        current = chain_step(interceptor, current).await;
+    }
+    current
+}
+
+async fn dispatch_request(
+    host: &Host,
+    state: &Rc<RefCell<ClientState>>,
+    config: Js,
+) -> Result<Js, Thrown> {
     throttle(host, state).await;
     let response = host.send(config.clone()).await?;
     if !response.get("config")?.is_object() {
@@ -218,11 +256,6 @@ async fn send_once(
     let status = response.get("status")?.to_number().unwrap_or(200.0);
     if !(200.0..300.0).contains(&status) {
         return Err(axios_error(&response, &config)?);
-    }
-    let mut response = response;
-    let interceptors: Vec<Js> = state.borrow().responses.clone();
-    for interceptor in interceptors {
-        response = await_js(interceptor.call(Js::Undefined, vec![response])?).await?;
     }
     Ok(response)
 }
