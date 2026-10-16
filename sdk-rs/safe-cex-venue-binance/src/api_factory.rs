@@ -89,10 +89,16 @@ pub enum ApiRejection {
         message: String,
         code: EventValue,
         response: EventValue,
+        /// ts: `__binanceEmitted`, so the failure handler does not emit it again.
+        emitted: bool,
     },
 }
 pub trait ResponseBindings {
     fn emit(&mut self, message: EventValue) -> Result<(), Failure>;
+    /// Binds `resendOnSignatureRejection(xhr, response, isBinanceStyleSignatureRejection)`:
+    /// the resend promise, or undefined. Hosts decide through
+    /// `safe_cex_transport::signature_rejection`.
+    fn resend(&mut self, response: EventValue) -> Result<EventValue, Failure>;
 }
 pub type ResponseInterceptor =
     Rc<dyn Fn(EventValue, &mut dyn ResponseBindings) -> Result<ResponseReturn, Failure>>;
@@ -104,7 +110,15 @@ pub trait FactoryBindings {
         options: EventValue,
         exchange: EventValue,
     ) -> Result<EventValue, Failure>;
-    fn retry(&mut self, client: EventValue, retries: u32, read: RetryRead) -> Result<(), Failure>;
+    /// axios-retry with networkErrorOnRead(read), OR'd with
+    /// signatureRejectedResponse(isBinanceStyleSignatureRejection) when `signature`.
+    fn retry(
+        &mut self,
+        client: EventValue,
+        retries: u32,
+        read: RetryRead,
+        signature: bool,
+    ) -> Result<(), Failure>;
     fn request_use(
         &mut self,
         client: EventValue,
@@ -121,7 +135,7 @@ pub trait FactoryBindings {
         &mut self,
         client: EventValue,
         success: ResponseInterceptor,
-        failure: ResponseInterceptor,
+        failure: Option<ResponseInterceptor>,
     ) -> Result<(), Failure>;
 }
 #[derive(Clone, Copy)]
@@ -217,8 +231,23 @@ fn has_code(data: &EventValue) -> bool {
         _ => false,
     }
 }
+// Last, so a resend is not put through any later interceptor twice.
+fn resend_response() -> ResponseInterceptor {
+    Rc::new(|response, b| {
+        let resent = b.resend(response.clone())?;
+        Ok(ResponseReturn::Value(if resent.nullish() {
+            response
+        } else {
+            resent
+        }))
+    })
+}
 fn success_response() -> ResponseInterceptor {
     Rc::new(|response, b| {
+        let resent = b.resend(response.clone())?;
+        if resent.truthy() {
+            return Ok(ResponseReturn::Value(resent));
+        }
         let data = response.get("data")?;
         if data.truthy()
             && matches!(data, EventValue::Object(_) | EventValue::Array(_))
@@ -242,6 +271,7 @@ fn success_response() -> ResponseInterceptor {
                 message: msg.text()?,
                 code,
                 response,
+                emitted: true,
             }))
         } else {
             Ok(ResponseReturn::Value(response))
@@ -260,7 +290,10 @@ fn failure_response() -> ResponseInterceptor {
         let response = error.get("response")?;
         let code = optional(optional(response, "data")?, "code")?;
         let msg = optional(optional(error.get("response")?, "data")?, "msg")?;
-        if msg.truthy() && !silent(&code) {
+        // A retried request's rejection comes back through this handler twice (its
+        // own chain, then the original's): emit it once.
+        if msg.truthy() && !silent(&code) && !error.get("__binanceEmitted")?.truthy() {
+            error.define("__binanceEmitted", EventValue::Bool(true));
             b.emit(error.get("response")?.get("data")?.get("msg")?)?;
         }
         Ok(ResponseReturn::Rejected(ApiRejection::Original(error)))
@@ -330,7 +363,7 @@ fn create(
         Family::Pm => RetryRead::ReadsAndPath(endpoint(p::ENDPOINTS, "LISTEN_KEY")),
         Family::Spot => RetryRead::Reads,
     };
-    b.retry(client.clone(), 3, read)?;
+    b.retry(client.clone(), 3, read, !public)?;
     b.request_use(
         client.clone(),
         request(options.clone(), exchange.clone(), family, public),
@@ -339,7 +372,9 @@ fn create(
         b.install(client.clone(), options, exchange.get("name")?, transform)?;
     }
     if matches!(family, Family::Futures) && !public {
-        b.response_use(client.clone(), success_response(), failure_response())?;
+        b.response_use(client.clone(), success_response(), Some(failure_response()))?;
+    } else if !public {
+        b.response_use(client.clone(), resend_response(), None)?;
     }
     Ok(client)
 }
