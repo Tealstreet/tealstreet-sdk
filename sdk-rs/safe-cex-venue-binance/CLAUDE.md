@@ -217,6 +217,22 @@ ordinary compiler discovery and those three production classification receipts.
 Those receipts classify the functions; they do not execute their predicate logic
 or discharge another function, owner, alias, local or feature configuration.
 
+The Futures/PM response-message functions and their private shared helper have
+observed native String/error-name contracts; the websocket rejection mapper has
+actual Option<OrderRejectReason> variant/absence witnesses before serialization.
+These functions preserve their fallback behavior: non-object response payloads
+produce empty text, and the typed Map API for rejection reasons is exercised with
+actual maps. Do not replace those output contracts with string-only/map-only
+admission checks. `tests/accepted_error_outputs.rs` supplies public native
+witnesses. `scripts/error-output-contracts.mjs` performs fresh ordinary compiler
+discovery and four actual production output probes, including a direct call to
+the private helper. `scripts/error-output-controls.py` changes one result at a
+time, requires the changed owner's compiled native output mismatch, restores
+exact bytes and requires all four outputs to pass. A private-helper mutation
+also affects its two public callers; the private owner's own result must fail.
+Compiler errors do not count. Run these probes serially and keep other owners,
+aliases, locals and feature/wasm claims outside this focused evidence.
+
 The public-factory response witness now pins the repaired shared provenance
 boundary: direct quoted HTTP text parses once; HOW custom-parser strings pass
 through the venue parser again (source ts-bug). The original equal-response

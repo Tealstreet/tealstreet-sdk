@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
 import { reviewedGenericAliasProbe } from './accepted-reviewed-aliases.mjs';
@@ -8,7 +9,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 
-const pointerSpecs = JSON.parse(fs.readFileSync(new URL('../accepted-set/function-pointer-aliases.json', import.meta.url)));
+const pointerSpecs = loadPolicy('function-pointer-aliases');
 function pointerFixture(name) {
   const spec = pointerSpecs[name];
   const workspace = fileURLToPath(new URL('../..', import.meta.url));

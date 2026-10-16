@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -32,8 +33,8 @@ async function probe(index, mutate) {
   // Discover all compiler declarations first. This later exact-alias selection
   // is a focused policy control, never a whole-package zero-missing claim.
   const found = inventory(doc, {
-    defaultTraits: JSON.parse(fs.readFileSync(new URL('../accepted-set/default-traits.json', import.meta.url))),
-    receiverTraits: JSON.parse(fs.readFileSync(new URL('../accepted-set/receiver-traits.json', import.meta.url))),
+    defaultTraits: loadPolicy('default-traits'),
+    receiverTraits: loadPolicy('receiver-traits'),
     readSource: file => fs.readFileSync(path.resolve(root, file)),
   });
   const aliases = found.publicAliases.filter(alias => alias.name === name);

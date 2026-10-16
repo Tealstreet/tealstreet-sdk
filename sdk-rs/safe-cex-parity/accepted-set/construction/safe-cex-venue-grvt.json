@@ -1,0 +1,9 @@
+{
+  "safe_cex_venue_grvt::public_subscriptions::NumberKey": {
+    "traits": [
+      "core::clone::Clone",
+      "core::marker::Copy"
+    ],
+    "reason": "Reviewed public_subscriptions.rs::NumberKey: Clone and Copy retain the same canonical u64 key bits. new normalizes equal zero/NaN keys for map equality; copying preserves those already selected bits and does not revalidate, allocate a subscription, or create a one-use token See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect. Decoder/API acceptance and native behavior remain separate obligations; this is a construction-capability classification, not an executed proof."
+  }
+}
