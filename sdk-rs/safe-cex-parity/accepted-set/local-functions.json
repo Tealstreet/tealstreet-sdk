@@ -73,13 +73,13 @@
   "safe-cex-parity/src/bin/accepted-source.rs::LOCAL_FUNCTION:source": {
     "category": "decoder-helper",
     "reason": "Reads the canonical provider module file and parses its actual Rust source; production number_output_provider observations execute this helper over independently authored valid and refused module chains.",
-    "sourceSha256": "69e76031b59b87d29027698203e0707800846063f3b4a2dffe09ff89eb0d03d7",
+    "sourceSha256": "e8ab387803be042584b2011c48c9bf288bfb02c765f650cf38293759a5c4ba1d",
     "runtimeOwner": "accepted_source::number_output_provider"
   },
   "safe-cex-parity/src/bin/accepted-source.rs::LOCAL_FUNCTION:module": {
     "category": "non-decoder",
     "reason": "Inspects already parsed module declarations for exactly one unconditional external module; no raw input is decoded here.",
-    "sourceSha256": "69e76031b59b87d29027698203e0707800846063f3b4a2dffe09ff89eb0d03d7"
+    "sourceSha256": "e8ab387803be042584b2011c48c9bf288bfb02c765f650cf38293759a5c4ba1d"
   },
   "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:fields": {
     "category": "non-decoder",
