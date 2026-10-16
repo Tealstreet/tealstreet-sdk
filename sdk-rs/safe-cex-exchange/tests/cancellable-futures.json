@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "161 production creator candidates discovered across all potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "167 production creator candidates discovered across all potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -123,12 +123,26 @@
         "async-block",
         "async-block",
         "async-block",
+        "async-block",
+        "async-block",
+        "async-block",
         "async-block"
       ],
-      "producer_sha256": "90cc35b7b53c7ee16e3b40c741af0686fe3fc16815a125e9a2a706fbb11ab4f7",
+      "producer_sha256": "c5eb68753939ff552794cebee964a5435e51b3b3aea650af1e7ec7b679f0a776",
       "classification": "delegated",
       "delegate": "registered concrete capability callback / BaseExchange validated placement",
       "reason": "default owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
+    },
+    {
+      "owner": "src/capabilities.rs::ExchangeCapabilities::fetch_account_greeks",
+      "boundaries": [
+        "future-signature",
+        "future-return"
+      ],
+      "producer_sha256": "45725ebdfcc2d3036d3e9f0b740b9395e1c44861b7d69f3ca328940a3a3a51d4",
+      "classification": "delegated",
+      "delegate": "registered concrete capability callback / BaseExchange validated placement",
+      "reason": "fetch_account_greeks owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
     },
     {
       "owner": "src/capabilities.rs::ExchangeCapabilities::fetch_closed_pnl",
@@ -184,6 +198,28 @@
       "classification": "delegated",
       "delegate": "registered concrete capability callback / BaseExchange validated placement",
       "reason": "fetch_income_history_range owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
+    },
+    {
+      "owner": "src/capabilities.rs::ExchangeCapabilities::fetch_option_chain",
+      "boundaries": [
+        "future-signature",
+        "future-return"
+      ],
+      "producer_sha256": "5582418492bf446c036c63f2efc77c0d3b0abeab9edc38c165dbe6a4140137e7",
+      "classification": "delegated",
+      "delegate": "registered concrete capability callback / BaseExchange validated placement",
+      "reason": "fetch_option_chain owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
+    },
+    {
+      "owner": "src/capabilities.rs::ExchangeCapabilities::fetch_option_expiries",
+      "boundaries": [
+        "future-signature",
+        "future-return"
+      ],
+      "producer_sha256": "ee568e26352cc8e5b4694f602f6871f9a9e05bd3f06c0dd1fbbb6e310e3eb452",
+      "classification": "delegated",
+      "delegate": "registered concrete capability callback / BaseExchange validated placement",
+      "reason": "fetch_option_expiries owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
     },
     {
       "owner": "src/capabilities.rs::PlaceOrderBinding as Default::default",
@@ -845,7 +881,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "f907fbb465bc3477fec84fb899d0bd483adc51f3c46864899c380706342af02e"
+          "sha256": "e737d9ae8b4c4f8c2a6ef81c5c8a4b48e6d78fd35ae944de0fd7eae2aae3f3d2"
         }
       ],
       "guards": [
@@ -908,6 +944,17 @@
         "future-return"
       ],
       "producer_sha256": "99fe51aa20d3a01b0a2821daee4de7caba97064144b47a8bb7691d3c14485437",
+      "classification": "immediate",
+      "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
+    },
+    {
+      "owner": "src/exchange.rs::Exchange::fetch_account_greeks",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block"
+      ],
+      "producer_sha256": "01adc0a524df523c4fecd5026c624c3e60bb8bb990c7c23632469eeef78daed0",
       "classification": "immediate",
       "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
     },
@@ -1034,6 +1081,28 @@
         "async-block"
       ],
       "producer_sha256": "b8ef1f80fc7d7d209b4e7276690a62cdb96f7e25a1953898b8f2e029ac09fc55",
+      "classification": "immediate",
+      "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
+    },
+    {
+      "owner": "src/exchange.rs::Exchange::fetch_option_chain",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block"
+      ],
+      "producer_sha256": "f9ca26dd9bbf07542c7274b26ba3d659e157b68d2faf92bacd7c8dd84261924b",
+      "classification": "immediate",
+      "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
+    },
+    {
+      "owner": "src/exchange.rs::Exchange::fetch_option_expiries",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block"
+      ],
+      "producer_sha256": "d06617b246f23727e93e72afd8ce7812d5c9ffa78ccb5a1936d8b220ecc246fd",
       "classification": "immediate",
       "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
     },
@@ -1573,7 +1642,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "f907fbb465bc3477fec84fb899d0bd483adc51f3c46864899c380706342af02e"
+          "sha256": "e737d9ae8b4c4f8c2a6ef81c5c8a4b48e6d78fd35ae944de0fd7eae2aae3f3d2"
         }
       ],
       "guards": [
@@ -1959,7 +2028,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "1c773a68a1f0268b567ca0f7d0387eae755e74f1c2d40fa7d1ccfa138968c19f"
+          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2004,7 +2073,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "1c773a68a1f0268b567ca0f7d0387eae755e74f1c2d40fa7d1ccfa138968c19f"
+          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2108,7 +2177,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "1c773a68a1f0268b567ca0f7d0387eae755e74f1c2d40fa7d1ccfa138968c19f"
+          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2152,7 +2221,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "1c773a68a1f0268b567ca0f7d0387eae755e74f1c2d40fa7d1ccfa138968c19f"
+          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
         }
       ],
       "guards": [

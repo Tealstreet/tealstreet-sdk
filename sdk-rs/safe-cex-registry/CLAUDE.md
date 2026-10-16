@@ -3,10 +3,14 @@
 The behavioral reference is [the exchange guidance](../../packages/safe-cex/src/exchanges/CLAUDE.md).
 
 `registry` holds ordered descriptors from both TS registries; `loaders` holds
-47 executable web/native pairs backed by the explicit `module_host` contracts.
+48 executable web/native pairs backed by the explicit `module_host` contracts.
 Descriptors support inspection without invoking hosts. Constructor capabilities
 call supplied factories; concrete venue host/facade assembly is separate.
 The SDK facade is one layer above registry.
+
+`rust_venues` maps bound venue names to Rust constructors, chosen per name by
+`ConstructionPath::Rust`. The default, `ModuleHost`, is today's route, and the
+Rust path never falls back to the module host. See [CONSTRUCTION.md](CONSTRUCTION.md).
 
 `safe-cex-types::gateway` holds the shared gateway wire declarations below all
 venues. `public_data` holds thresholds and candle subscription-key mapping. Provider lifecycle, socket IO, Store writes and delegation are implemented
@@ -38,7 +42,7 @@ Native future polling replaces JavaScript Promise microtask scheduling and is
 an explicit CHOSEN boundary. This wrapper is distinct from the executable venue loader entries and does
 not complete any venue constructor. `tests/native_load` executes the
 actual TypeScript initializer and observes native constructor identity and call
-order; the 47 entry functions in each registry have their own source/native witnesses.
+order; the 48 entry functions in each registry have their own source/native witnesses.
 
 Gateway opaque data and the raw provider frame use canonical retained JSON capture
 before Value construction. The public-data provider gate asserts literal reserved-
@@ -55,3 +59,25 @@ source's retained loaded object. In-process seeding rereads that handle after
 parent notification; copy it only when constructing a parent update. The
 reentrant seed witness is in tests/public_data_providers.rs. Provider policy
 choices cite MANIFEST-SPEC.md#public-data-provider-choice.
+
+`native_host::native_venue_host()` is the production `RustVenueHost` (direct
+transport, real HTTP); `native_venue_host_with` takes a runtime and adapter
+factory. Native registry builds always carry it, since a feature cannot be
+enabled for this crate's own tests without a lateral self-edge; wasm builds do
+not. `tests/native_host_binance.rs` constructs Binance through
+`rust_constructor` against local HTTP/WS servers and verifies the HMAC
+server-side; `native_host_backpack.rs` reads markets through the real adapter.
+
+The native host builds `externalPublicData` providers for venues, which cannot
+reach this crate: the websocket gateway runs `ExternalPublicDataProvider` over a
+native `GatewayHost` (runtime dials and timers) with the exchange Store as parent;
+the gateway always delivers whole batches, so the owned Store copy is current.
+The in-process variant cannot be named in native options (its capability type is
+uninhabited) and fails visibly until a host-registered source exists.
+`tests/native_host_external_data.rs` starts Binance on a local gateway socket.
+
+`native_venue_host_signed` is one account's host with a hosted `remoteSigner`
+(exchange-server's browser relay) and its accountName; no secret is held. Binance
+installs the remote signing adapter on every client and signs Spot ws-auth
+through it; backpack refuses that host visibly until its signing is wired.
+`tests/native_host_remote_signer.rs` verifies the signer's HMAC server-side.

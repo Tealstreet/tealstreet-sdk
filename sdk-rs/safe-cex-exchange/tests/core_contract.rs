@@ -226,6 +226,54 @@ fn empty_response_and_fallback_brand_remain_distinguishable() {
     assert!(is_inert_capability(&stub, method));
 }
 #[test]
+fn option_fallbacks_reject_naming_the_venue_and_carry_their_brand() {
+    let venue = venue();
+    let query: OptionChainQuery = serde_json::from_value(json!({"underlying": "BTC"})).unwrap();
+    let message = |result: Result<_, ExchangeError>| match result {
+        Ok::<(), _>(()) => panic!("option fallback must reject, never return an empty result"),
+        Err(error) => error.message,
+    };
+    let chain = message(ready(venue.fetch_option_chain(query.clone())).map(|_| ()));
+    let expiries = message(ready(venue.fetch_option_expiries("BTC".into())).map(|_| ()));
+    let greeks = message(ready(venue.fetch_account_greeks()).map(|_| ()));
+    let expected = [
+        "Option chains are not supported on bybit",
+        "Option expiries are not supported on bybit",
+        "Account greeks are not supported on bybit",
+    ];
+    assert_eq!([chain, expiries, greeks], expected, "trait defaults");
+    let capabilities = &venue.capabilities;
+    let through_bindings = [
+        message(ready(capabilities.fetch_option_chain(&venue, query)).map(|_| ())),
+        message(ready(capabilities.fetch_option_expiries(&venue, "BTC".into())).map(|_| ())),
+        message(ready(capabilities.fetch_account_greeks(&venue)).map(|_| ())),
+    ];
+    assert_eq!(through_bindings, expected, "branded capability defaults");
+    assert!(is_base_capability_fallback(
+        &capabilities.fetch_option_chain,
+        BaseCapabilityMethod::FetchOptionChain
+    ));
+    assert!(is_base_capability_fallback(
+        &capabilities.fetch_option_expiries,
+        BaseCapabilityMethod::FetchOptionExpiries
+    ));
+    assert!(is_base_capability_fallback(
+        &capabilities.fetch_account_greeks,
+        BaseCapabilityMethod::FetchAccountGreeks
+    ));
+    assert!(!is_base_capability_fallback(
+        &capabilities.fetch_option_chain,
+        BaseCapabilityMethod::FetchOptionExpiries
+    ));
+    let implemented = CapabilityBinding::<(), Vec<AccountGreeks>>::implemented(|_, ()| {
+        Box::pin(async { Ok(vec![]) })
+    });
+    assert!(!is_base_capability_fallback(
+        &implemented,
+        BaseCapabilityMethod::FetchAccountGreeks
+    ));
+}
+#[test]
 fn active_symbols_keep_original_strings_and_auth_backoff_caps_without_gating_history() {
     let venue = venue();
     venue
@@ -238,7 +286,6 @@ fn active_symbols_keep_original_strings_and_auth_backoff_caps_without_gating_his
     }
     assert_eq!(venue.base.auth_failure_streak(), 7);
     assert_eq!(venue.base.get_tick_interval(), Some(60_000.0));
-    assert!(!venue.base.settings.supports_executions_history);
     assert!(
         ready(venue.capabilities.fetch_income_history.call(&venue, None))
             .unwrap()

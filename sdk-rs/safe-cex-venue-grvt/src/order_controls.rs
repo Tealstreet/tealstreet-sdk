@@ -293,6 +293,7 @@ fn replacement(opts: &UpdateOrderOpts) -> Result<PlaceOrderOpts, ExchangeError> 
         client_order_id: None,
         max_slippage_pct: None,
         close: None,
+        implied_volatility: None,
     };
     if matches!(order.r#type, OrderType::StopLoss | OrderType::TakeProfit) {
         let info = match order.info.as_ref() {

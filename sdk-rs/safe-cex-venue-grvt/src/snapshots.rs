@@ -194,6 +194,7 @@ pub fn get_fake_positions(
                 info: None,
                 extra: None,
                 last_update: None,
+                option: None,
             })
         })
         .collect()

@@ -91,6 +91,8 @@ pub struct PreparedWebSocket {
 }
 
 pub trait WsProtocol {
+    fn dispose(&self) {}
+
     fn recovers_after_offline(&self) -> bool {
         true
     }
@@ -2029,6 +2031,7 @@ impl BaseWebSocket {
         Ok(())
     }
     pub fn dispose(&self) {
+        self.protocol.dispose();
         let (native, relay, tasks) = {
             let mut s = self.state.borrow_mut();
             s.force_closed = true;
@@ -4130,6 +4133,8 @@ mod tests {
         s.track_connected();
         p.disposed.set(true);
         p.snapshot_gate.set(true);
+        r.pump();
+        // The rejection reaction waits one scheduler turn, as in source.
         r.pump();
         assert_eq!(p.snapshots.get(), 1);
         assert!(

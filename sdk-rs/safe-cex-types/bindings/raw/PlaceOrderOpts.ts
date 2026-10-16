@@ -4,4 +4,8 @@ import type { OrderStopTriggerType } from "./OrderStopTriggerType";
 import type { OrderTimeInForce } from "./OrderTimeInForce";
 import type { OrderType } from "./OrderType";
 
-export type PlaceOrderOpts = { symbol: string, type: OrderType, side: OrderSide, amount: number, price?: number, triggerPrice?: number, stopLoss?: number, takeProfit?: number, reduceOnly?: boolean, timeInForce?: OrderTimeInForce, triggerType?: OrderStopTriggerType, tpTriggerType?: OrderStopTriggerType, slTriggerType?: OrderStopTriggerType, clientOrderId?: string, maxSlippagePct?: number, close?: boolean, };
+export type PlaceOrderOpts = { symbol: string, type: OrderType, side: OrderSide, amount: number, price?: number, triggerPrice?: number, stopLoss?: number, takeProfit?: number, reduceOnly?: boolean, timeInForce?: OrderTimeInForce, triggerType?: OrderStopTriggerType, tpTriggerType?: OrderStopTriggerType, slTriggerType?: OrderStopTriggerType, clientOrderId?: string, maxSlippagePct?: number, close?: boolean, 
+/**
+ * Price an option order by implied volatility, as a fraction. Option markets only.
+ */
+impliedVolatility?: number, };
