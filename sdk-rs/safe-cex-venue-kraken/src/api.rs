@@ -78,7 +78,10 @@ fn has_retried_signature<H: ApiHost>(h: &H, config: &H::Value) -> ReadResult<H, 
 
 /// ts: krakenspot.api isKrakenSpotSignatureRejection — `Array.isArray(data?.error) &&
 /// data.error.some((error) => String(error).includes('EAPI:Invalid signature'))`.
-pub fn is_kraken_spot_signature_rejection<H: ErrorHost>(h: &H, data: &H::Value) -> ReadResult<H, bool> {
+pub fn is_kraken_spot_signature_rejection<H: ErrorHost>(
+    h: &H,
+    data: &H::Value,
+) -> ReadResult<H, bool> {
     let errors = opt(h, data, "error")?;
     if !h.is_array(&errors) {
         return Ok(false);

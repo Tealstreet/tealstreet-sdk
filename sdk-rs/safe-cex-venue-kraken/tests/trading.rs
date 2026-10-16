@@ -725,11 +725,7 @@ fn api_family(spot: bool, floor: usize) {
                 "rejected" => {
                     let response = h.original.response.clone().unwrap_or(cfg.clone());
                     (
-                        complete(
-                            api.rejected(h.original.clone()),
-                            &h,
-                            prefix,
-                        ),
+                        complete(api.rejected(h.original.clone()), &h, prefix),
                         Some(response),
                     )
                 }
