@@ -1116,3 +1116,16 @@ Kraken/KuCoin Spot and Bybit/OKX Demo construction tests exercise actual facades
 assertion failures in both affected families, restores exact factory bytes and
 requires all four witnesses to pass. The runtime test also covers source getters,
 truthiness, inherited false defaults and original getter-error identity.
+
+The shared BigInt `toString` member honors radix 2 through 36, defaults omitted
+or undefined radix to decimal, truncates numeric radix arguments, and rejects
+out-of-range values with RangeError. Radix conversion uses the existing shared
+ToNumber profile; BigInt radix arguments retain its TypeError. Extracted methods
+read the actual call receiver and refuse non-BigInt values. Native arbitrary
+precision conversion supplies lowercase digits without losing integer bits.
+`tests/js_bigint_radix.rs` compares 472 engine cases against Node across every
+valid base, signed/large integers, defaults and scalar/array coercion boundaries.
+`tests/js_bigint_radix_controls.py` sequentially injects decimal-only output,
+incorrect rounding and base-two refusal; each must compile, fail the named source
+comparison and pass again after exact restoration. No venue-local radix shim is
+required.

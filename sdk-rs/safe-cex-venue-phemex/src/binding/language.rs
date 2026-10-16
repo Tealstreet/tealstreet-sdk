@@ -216,8 +216,14 @@ impl OrderHost for Host {
             settings: super::exchange::settings(&self.rt)?,
             external_public_data: self.rt.shared.extra.external_public_data.clone(),
         };
-        let (this, base) =
-            base_exchange::create(&self.rt.shared.sockets, parts, name, opts, store)?;
+        let (this, base) = base_exchange::create(
+            &self.rt.shared.sockets,
+            parts,
+            name,
+            opts,
+            store,
+            |_| Ok(()),
+        )?;
         self.rt
             .shared
             .base

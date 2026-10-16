@@ -326,16 +326,12 @@ impl RustVenueHost for NativeVenueHost {
         self.remote.clone()
     }
     fn apexomni(&self) -> Result<safe_cex_venue_apexomni::ApexDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for apexomni on the native host",
-            ));
-        }
         Ok(safe_cex_venue_apexomni::ApexDependencies {
             runtime: self.runtime.clone(),
-            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                 self.runtime.clone(),
                 (self.adapter)()?,
+                self.remote.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
