@@ -106,12 +106,19 @@ non-decoder receipts are counted separately. Total decoders cannot be validated
 by an is_ok-only adapter. A new
 raw decoder needs an adapter and positive witnesses; a typed constructor needs
 its reason. Record arrays use Serde's field order, not JSON map insertion order.
-Observed methods normally require distinct inputs and outputs. Only the two
-`Capture` serializer metadata constructors listed in
-`../accepted-set/constant-outputs/<crate>.json` may set `constantOutput: true`. Their
-actual compiler package, API, body span, whole-source hash, native adapter and
-cases are pinned. Both distinct metadata inputs still execute; this is no
-permission for other constant methods, altered adapters or decoder exemptions.
+Observed methods normally require distinct inputs and outputs. The two
+`Capture` serializer metadata constructors in `../accepted-set/constant-outputs/<crate>.json`
+and exact reviewed venue inherited refusals in `../accepted-set/inherited-constant-outputs/<crate>.json`
+may set `constantOutput: true`. Only individually installed GRVT, BreakoutProp,
+and Bitget policy records qualify; adding a package name alone grants no method
+permission. Their actual compiler package, API, body span,
+whole-source hash, native adapter and cases are pinned. Inherited refusals also
+pin the maintained TS base method lines, base/venue file hashes and native
+harness bytes. Distinct genuine inputs still execute and observe native Error
+identity/message, zero HTTP and unchanged Store/notification/runtime state.
+Every compiler-listed API remains in the complete owner contract; get_account
+and schedule_cancel behavior tests do not invent indexed entries or unit-input
+permissions. Unknown constant methods and changed adapters remain refused.
 The bounded `construction/<crate>.json` policy classifies Clone/Copy on private-field
 types, including service handles whose shared ownership is intentional.
 
@@ -222,3 +229,17 @@ source-pin and native evidence checks receive the same merged records. Keep the
 flat JSON maps deleted when merging older branches. See
 [`POLICY-FILES.md`](../accepted-set/POLICY-FILES.md) for table names, ownership,
 migration and complete cutover equality proof.
+
+
+The one exact GRVT `composition::Fields<bool>` borrowed map has a separate
+`shape: "borrowed-map"` route contract with the complete `borrowedRoutes`
+matrix from `scripts/accepted-grvt-fields.mjs`. Its existing fixed compiler
+identity is retained. Twelve immutable JSON texts each execute static text,
+static borrowed Value, and owned Value admission separately. Actual ordered
+keys and bool payloads are observed; text keys must retain their exact offsets
+and borrowed Value keys must point into the retained Value, outside the source
+text. Escaped text keys and nonempty owned Values refuse; an owned empty map
+admits. Every ordinary alternate trait detector still runs. The general borrowed
+AliasProbe guard and DeserializeOwned bound remain unchanged. The finite route
+policy cannot classify another alias, type argument, target, package or adapter;
+a reviewed consumer contract and all 36 route witnesses are still required.

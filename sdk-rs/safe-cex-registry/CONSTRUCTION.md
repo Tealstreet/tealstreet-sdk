@@ -224,8 +224,14 @@ what and woofi. `RustVenueHost::orderly(name)` supplies their shared runtime,
 per-options HTTP capability and external-public-data factory. The native host
 retains the selected family name while routing the final signed request through
 the shared transport stack. `tests/native_host_orderly.rs` verifies the actual
-Ed25519 signature server-side for every family entry. Native hosted remoteSigner
-is refused explicitly until that capability is wired.
+Ed25519 signature server-side for every family entry. The shared hosted signer
+and account name now reach each per-options HTTP client and typed availability.
+TypeScript still signs private HTTP locally before its hosted adapter, and its
+private WS never reads remoteSigner. Thus local secrets remain required for
+private HTTP and WS, while public HTTP still uses the hosted adapter. Empty
+secrets preserve the source private HTTP error; private WS enters the already
+approved shared onOpen recovery. `native_host_orderly_hosted` compares these
+valid/empty-secret cases for all six names with actual source.
 
 ## Hyperliquid native host
 

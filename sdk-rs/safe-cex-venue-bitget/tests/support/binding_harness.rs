@@ -1,4 +1,4 @@
-//! Scripted transport and runtime for driving the production BitgetExchange.
+// Scripted transport and runtime for driving the production BitgetExchange.
 use safe_cex_exchange::js_runtime::{
     client::JsHttpHost,
     promise::JsFuture,

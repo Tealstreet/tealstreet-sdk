@@ -7,7 +7,9 @@ Keep each record's existing compiler owner or source-helper key unchanged.
 
 The tables are `construction`, `default-traits`, `receiver-traits`,
 `generic-aliases`, `function-pointer-aliases`, `constant-outputs`,
-`local-functions` and `local-type-helpers`. Contracts already use the independent
+`local-functions` and `local-type-helpers`. The separate finite
+`inherited-constant-outputs` table uses the same layout for individually reviewed
+constant method witnesses. Contracts already use the independent
 `contracts/<crate>.json` layout and `loadContracts()`.
 
 JavaScript readers import `loadPolicy` from `scripts/accepted-policy-files.mjs`
