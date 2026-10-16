@@ -110,6 +110,9 @@ fn historical_fills_concrete_reporter_preserves_original_listener_error() {
             limit: None,
         },
         || std::future::ready(Ok(false)),
+        |_| -> std::future::Ready<Result<Vec<safe_cex_types::Execution>, ExchangeError>> {
+            unreachable!("classic routing")
+        },
         |_| Ok(None),
         || Ok("USDT-FUTURES".into()),
         |_| {
