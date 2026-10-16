@@ -45,6 +45,20 @@ native owner with a function-output assertion. Compiler failures do not count.
 The script restores exact source bytes after every fault and requires all eight
 owners to pass after each restoration. Raw receipts remain outside the checkout.
 
+The measured baseline and all five restorations passed eight runtime owners,
+with zero failed owners and zero classification-only receipts. Each of the five
+compiled faults produced exactly one failed owner at the expected behavioral
+assertion. In particular, the negative-zero fault observed `0000000000000000`
+instead of `8000000000000000`, and accepting zero event time changed both the
+result bits and the lazy clock count from one to zero. The fixed 98 TS
+expectations passed before every native run.
+
+After integrating master `b5a2696998`, the native gate passed again with eight
+runtime receipts and no failures/classifications. All 38 master contract rows,
+including the eight alias rows, remain unchanged beside these eight additions.
+The frozen dependency install, script syntax and whitespace checks passed;
+`parity:check` passed 7,459 rows and 17,206 public Rust items with zero findings.
+
 These are bounded function witnesses under the canonical
 [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary),
 [typed output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) and
