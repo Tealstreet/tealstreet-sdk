@@ -283,6 +283,22 @@ impl RustVenueHost for NativeVenueHost {
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
+    fn polymarket(
+        &self,
+    ) -> Result<safe_cex_venue_polymarket::binding::exchange::PolymarketDependencies, ExchangeError>
+    {
+        Ok(
+            safe_cex_venue_polymarket::binding::exchange::PolymarketDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                    self.remote.clone(),
+                ),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
 }
 
 // The source API factory supplies its base URL after choosing primary/secondary
