@@ -24,6 +24,7 @@ pub struct JsSocketContext {
     pub venue: RefCell<Option<Weak<dyn Exchange>>>,
     pub ids: Cell<u64>,
     pub cores: RefCell<Vec<(Js, Rc<SocketCore>)>>,
+    prototype: OnceCell<Js>,
 }
 
 impl JsSocketContext {
@@ -33,15 +34,21 @@ impl JsSocketContext {
             venue: RefCell::new(None),
             ids: Cell::new(0),
             cores: RefCell::default(),
+            prototype: OnceCell::new(),
         })
     }
 }
+
+/// Event listeners registered on one `ws` handle, in registration order.
+pub type ListenerList = Rc<RefCell<Vec<(String, Js)>>>;
 
 pub struct SocketCore {
     pub context: Rc<JsSocketContext>,
     pub this: RefCell<Js>,
     pub base: OnceCell<Rc<BaseWebSocket>>,
-    pub listeners: RefCell<Vec<(String, Js)>>,
+    /// Listeners of the current `ws` handle; a new createWebsocket replaces them,
+    /// as a replaced socket object takes its listeners with it.
+    pub listeners: RefCell<ListenerList>,
     pub on_close_member: RefCell<Option<Js>>,
 }
 
@@ -59,8 +66,8 @@ impl JsProtocol {
     }
     fn emit(&self, event: &str, payload: Js) -> Result<(), ExchangeError> {
         let core = self.core()?;
-        let listeners: Vec<Js> = core
-            .listeners
+        let current = core.listeners.borrow().clone();
+        let listeners: Vec<Js> = current
             .borrow()
             .iter()
             .filter(|(e, _)| e == event)
@@ -106,6 +113,15 @@ impl WsProtocol for JsProtocol {
     fn on_open(&self, _socket: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
         let result = self.emit("open", Js::object(vec![("type", Js::str("open"))]));
         Box::pin(async move { result })
+    }
+    fn on_error(&self, _socket: &BaseWebSocket, message: &str) -> Result<(), ExchangeError> {
+        self.emit(
+            "error",
+            Js::object(vec![
+                ("type", Js::str("error")),
+                ("message", Js::str(message)),
+            ]),
+        )
     }
     fn on_message(
         &self,
@@ -167,10 +183,47 @@ fn ex(e: ExchangeError) -> Thrown {
     Thrown::from(e)
 }
 
+/// `BaseWebSocket.prototype`: the base members TS declares as methods, so a
+/// derived arrow field can shadow them and still reach them via `super`.
+fn base_prototype(context: &Rc<JsSocketContext>) -> Js {
+    context
+        .prototype
+        .get_or_init(|| {
+            let weak = Rc::downgrade(context);
+            Js::object(vec![(
+                "dispose",
+                Js::function("dispose", move |this, _| {
+                    if let Some(context) = weak.upgrade()
+                        && let Some(core) = core_of(&context, &this)
+                        && let Some(base) = core.base.get()
+                    {
+                        base.dispose();
+                    }
+                    Ok(Js::Undefined)
+                }),
+            )])
+        })
+        .clone()
+}
+
+/// The `BaseWebSocket` class: construct with `(parent)`; `prototype` is shared by
+/// every socket of this context.
+pub fn base_websocket_class(context: &Rc<JsSocketContext>) -> Js {
+    let ctx = context.clone();
+    let class = Js::constructor("BaseWebSocket", move |_, a| {
+        Ok(base_websocket(&ctx, arg(&a, 0)))
+    });
+    let _ = class.define("prototype", base_prototype(context));
+    class
+}
+
 /// `new BaseWebSocket(parent)`: socket object with the base members the ported
 /// socket bodies read. The returned object owns its core.
 pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
     let socket = Js::object_with_class("BaseWebSocket", vec![("parent", parent.clone())]);
+    if let Js::Object(o) = &socket {
+        *o.proto.borrow_mut() = Some(base_prototype(context));
+    }
     let core = Rc::new(SocketCore {
         context: context.clone(),
         this: RefCell::new(socket.clone()),
@@ -208,6 +261,19 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
     let _ = socket.define("pingAt", Js::Number(0.0));
     let _ = socket.define("messageHandlers", Js::object(vec![]));
     let _ = socket.define("lastReceived", Js::Number(0.0));
+    // TS field initializers. The Rust core owns ping/pong and reconnect timing,
+    // so these are the derived classes' own state, not views of the core.
+    for (field, value) in [
+        ("lastCloseTime", Js::Number(0.0)),
+        ("onCloseCount", Js::Number(0.0)),
+        ("reconnecting", Js::Bool(false)),
+        ("pingSent", Js::Bool(false)),
+        ("pingTimeoutId", Js::Undefined),
+        ("pongMissTimeoutId", Js::Undefined),
+        ("lastReceivedTimer", Js::Undefined),
+    ] {
+        let _ = socket.define(field, value);
+    }
     {
         let core = core.clone();
         def(
@@ -356,11 +422,31 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
     {
         let core = core.clone();
         def(
-            "dispose",
-            Js::function("dispose", move |_, _| {
-                if let Some(base) = core.base.get() {
-                    base.dispose();
-                }
+            "retryFailedConnect",
+            Js::function("retryFailedConnect", move |_, a| {
+                let message = arg(&a, 0).to_js_string()?;
+                core.base()?
+                    .retry_failed_connect(&String::from_utf16_lossy(&message))
+                    .map_err(ex)?;
+                Ok(Js::Undefined)
+            }),
+        );
+    }
+    {
+        let core = core.clone();
+        def(
+            "recordCloseDiagnostics",
+            Js::function("recordCloseDiagnostics", move |_, a| {
+                let code = arg(&a, 0);
+                let code = if code.is_undefined() {
+                    None
+                } else {
+                    Some(code.to_number()? as u16)
+                };
+                let options = arg(&a, 1);
+                let synthetic =
+                    !options.is_nullish() && options.get("syntheticIfNoSocket")?.truthy();
+                core.base()?.record_close_diagnostics(code, synthetic);
                 Ok(Js::Undefined)
             }),
         );
@@ -389,14 +475,34 @@ pub fn core_of(context: &JsSocketContext, socket: &Js) -> Option<Rc<SocketCore>>
 
 fn ws_handle(core: &Rc<SocketCore>) -> Js {
     let ws = Js::object_with_class("WebSocket", vec![]);
+    let listeners: ListenerList = Rc::default();
+    *core.listeners.borrow_mut() = listeners.clone();
     {
-        let core = core.clone();
+        let listeners = listeners.clone();
         let _ = ws.define(
             "addEventListener",
             Js::function("addEventListener", move |_, a| {
-                core.listeners
+                let (event, listener) = (arg(&a, 0).to_display(), arg(&a, 1));
+                let mut list = listeners.borrow_mut();
+                // EventTarget ignores a second registration of the same listener.
+                if !list
+                    .iter()
+                    .any(|(e, f)| *e == event && f.same_reference(&listener))
+                {
+                    list.push((event, listener));
+                }
+                Ok(Js::Undefined)
+            }),
+        );
+    }
+    {
+        let _ = ws.define(
+            "removeEventListener",
+            Js::function("removeEventListener", move |_, a| {
+                let (event, listener) = (arg(&a, 0).to_display(), arg(&a, 1));
+                listeners
                     .borrow_mut()
-                    .push((arg(&a, 0).to_display(), arg(&a, 1)));
+                    .retain(|(e, f)| !(*e == event && f.same_reference(&listener)));
                 Ok(Js::Undefined)
             }),
         );
