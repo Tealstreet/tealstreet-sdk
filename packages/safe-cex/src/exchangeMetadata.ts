@@ -1665,6 +1665,31 @@ const GrvtMetadata: ExchangeMetadata = {
   },
 };
 
+const TxFlowMetadata: ExchangeMetadata = {
+  ...defaultMetaData,
+  exchangeName: 'txflow' as ExchangeName,
+  prettyName: 'TxFlow',
+  logo: '/static/exchanges/logos/TXFLOW/logo.svg',
+  lightLogo: '/static/exchanges/logos/TXFLOW/light.png',
+  darkLogo: '/static/exchanges/logos/TXFLOW/dark.png',
+  refImage: '',
+  requiresApplicationId: true,
+  enabled: false,
+  enabledInDev: true,
+  enableInPreview: false,
+  supportsTestnet: true,
+  defaultQuote: 'USDC',
+  supportsPartialStops: false,
+  supportsInfinityStops: false,
+  features: {
+    kline: false,
+    orderbook: false,
+    orders: false,
+    positions: false,
+    balance: false,
+  },
+};
+
 const ApexOmniMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   supportsPublicOnly: true,
@@ -2269,6 +2294,7 @@ export const exchangeMetadata: {
   what: WhatMetadata,
   hyperliquid: HyperliquidMetadata,
   hyperliquidspot: HyperliquidSpotMetadata,
+  txflow: TxFlowMetadata,
   apexomni: ApexOmniMetadata,
   kucoin: KucoinMetadata,
   kucoinspot: KucoinSpotMetadata,
