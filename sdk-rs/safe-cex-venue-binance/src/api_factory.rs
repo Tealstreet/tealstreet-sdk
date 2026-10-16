@@ -148,12 +148,12 @@ fn recv(options: &EventValue, default: f64) -> Result<EventValue, Failure> {
     let extra = if options.nullish() {
         EventValue::Undefined
     } else {
-        options.get("extra")?
+        options.read("extra")?
     };
     let value = if extra.nullish() {
         EventValue::Undefined
     } else {
-        extra.get("recvWindow")?
+        extra.read("recvWindow")?
     };
     Ok(nullish(value, number(default)))
 }
@@ -165,15 +165,15 @@ fn endpoint(table: &[(&str, &'static str)], key: &str) -> &'static str {
         .1
 }
 fn public_config(config: EventValue, b: &mut dyn RequestBindings) -> Result<EventValue, Failure> {
-    let next = EventValue::object(config.spread());
-    next.define(
+    let next = EventValue::record_object(config.spread());
+    next.write(
         "headers",
         b.headers_from(record([(
             "Content-Type",
             string("application/json, charset=utf-8"),
         )]))?,
     );
-    next.define("timeout", number(20000.0));
+    next.write("timeout", number(20000.0));
     b.mark_skip(next)
 }
 fn request(
@@ -200,14 +200,14 @@ fn request(
             Family::Spot => (None, s::PUBLIC_ENDPOINTS, s::RECV_WINDOW),
         };
         if let Some(listen) = listen {
-            if config.get("url")?.same(&string(listen)) && !options.get("testnet")?.truthy() {
+            if config.read("url")?.same(&string(listen)) && !options.read("testnet")?.truthy() {
                 return Ok(RequestReturn::Value(b.mark_skip(config)?));
             }
         }
-        if publics.contains(&config.get("url")?.text()?.as_str()) {
+        if publics.contains(&config.read("url")?.text()?.as_str()) {
             return Ok(RequestReturn::Value(public_config(config, b)?));
         }
-        let name = exchange.get("name")?;
+        let name = exchange.read("name")?;
         let window = recv(&options, window)?;
         Ok(RequestReturn::Future(b.sign(
             config,
@@ -225,8 +225,7 @@ fn silent(code: &EventValue) -> bool {
 fn has_code(data: &EventValue) -> bool {
     match data {
         EventValue::Object(o) => {
-            let o = o.borrow();
-            o.fields.contains_key("code") || o.prototype.as_ref().is_some_and(has_code)
+            data.has_own("code") || o.proto.borrow().as_ref().is_some_and(has_code)
         }
         _ => false,
     }
@@ -248,14 +247,14 @@ fn success_response() -> ResponseInterceptor {
         if resent.truthy() {
             return Ok(ResponseReturn::Value(resent));
         }
-        let data = response.get("data")?;
+        let data = response.read("data")?;
         if data.truthy()
             && matches!(data, EventValue::Object(_) | EventValue::Array(_))
             && has_code(&data)
-            && data.get("code")?.number()? < 0.0
+            && data.read("code")?.number()? < 0.0
         {
-            let code = data.get("code")?;
-            let value = data.get("msg")?;
+            let code = data.read("code")?;
+            let value = data.read("msg")?;
             let msg = if value.truthy() {
                 value
             } else {
@@ -282,19 +281,19 @@ fn optional(value: EventValue, key: &str) -> Result<EventValue, Failure> {
     if value.nullish() {
         Ok(EventValue::Undefined)
     } else {
-        value.get(key)
+        value.read(key)
     }
 }
 fn failure_response() -> ResponseInterceptor {
     Rc::new(|error, b| {
-        let response = error.get("response")?;
+        let response = error.read("response")?;
         let code = optional(optional(response, "data")?, "code")?;
-        let msg = optional(optional(error.get("response")?, "data")?, "msg")?;
+        let msg = optional(optional(error.read("response")?, "data")?, "msg")?;
         // A retried request's rejection comes back through this handler twice (its
         // own chain, then the original's): emit it once.
-        if msg.truthy() && !silent(&code) && !error.get("__binanceEmitted")?.truthy() {
-            error.define("__binanceEmitted", EventValue::Bool(true));
-            b.emit(error.get("response")?.get("data")?.get("msg")?)?;
+        if msg.truthy() && !silent(&code) && !error.read("__binanceEmitted")?.truthy() {
+            error.write("__binanceEmitted", EventValue::Bool(true));
+            b.emit(error.read("response")?.read("data")?.read("msg")?)?;
         }
         Ok(ResponseReturn::Rejected(ApiRejection::Original(error)))
     })
@@ -307,7 +306,7 @@ fn create(
     api_type: EventValue,
     b: &mut impl FactoryBindings,
 ) -> Result<EventValue, Failure> {
-    let test = options.get("testnet")?.truthy();
+    let test = options.read("testnet")?.truthy();
     let urls = match family {
         Family::Futures => f::BASE_URL,
         Family::Spot => s::BASE_URL,
@@ -333,9 +332,9 @@ fn create(
     let timeout = recv(&options, window)?;
     let headers = record([]);
     if !public {
-        headers.define("X-MBX-APIKEY", options.get("key")?);
+        headers.write("X-MBX-APIKEY", options.read("key")?);
     }
-    headers.define("Content-Type", string("application/json, charset=utf-8"));
+    headers.write("Content-Type", string("application/json, charset=utf-8"));
     let transform = if matches!(family, Family::Futures) {
         ResponseTransform::BigInt
     } else {
@@ -368,8 +367,8 @@ fn create(
         client.clone(),
         request(options.clone(), exchange.clone(), family, public),
     )?;
-    if !matches!(family, Family::Spot) && options.get("tealstreetTunnel")?.truthy() {
-        b.install(client.clone(), options, exchange.get("name")?, transform)?;
+    if !matches!(family, Family::Spot) && options.read("tealstreetTunnel")?.truthy() {
+        b.install(client.clone(), options, exchange.read("name")?, transform)?;
     }
     if matches!(family, Family::Futures) && !public {
         b.response_use(client.clone(), success_response(), Some(failure_response()))?;
@@ -485,16 +484,16 @@ pub trait SpotAuthBindings {
 pub async fn build_spot_user_data_params(
     b: &mut impl SpotAuthBindings,
 ) -> Result<EventValue, Failure> {
-    let api_key = b.options()?.get("key")?;
+    let api_key = b.options()?.read("key")?;
     let timestamp = b.now()?;
     let payload = crate::spot_protocol::build_binance_spot_user_data_signature_payload(
         &api_key.text()?,
         timestamp,
         None,
     );
-    let remote = b.options()?.get("remoteSigner")?;
+    let remote = b.options()?.read("remoteSigner")?;
     let signature = if remote.truthy() {
-        let remote = b.options()?.get("remoteSigner")?;
+        let remote = b.options()?.read("remoteSigner")?;
         let sign = b.capture_remote_sign(remote)?;
         let extra = record([
             ("apiKey", api_key.clone()),
@@ -515,23 +514,23 @@ pub async fn build_spot_user_data_params(
             ("exchangeName", string("binancespot")),
             (
                 "accountName",
-                b.options()?.get("remoteSigner")?.get("accountName")?,
+                b.options()?.read("remoteSigner")?.read("accountName")?,
             ),
             ("wsAuth", auth),
         ]);
         let result = sign(request)?.await?;
-        if result.get("error")?.truthy() || !result.get("wsAuthSignature")?.truthy() {
+        if result.read("error")?.truthy() || !result.read("wsAuthSignature")?.truthy() {
             return Err(Rc::new(safe_cex_exchange::runtime::ExchangeError::new(
                 fallback(
-                    result.get("error")?,
+                    result.read("error")?,
                     string("Remote signer returned no Binance Spot WebSocket signature"),
                 )
                 .text()?,
             )));
         }
-        result.get("wsAuthSignature")?
+        result.read("wsAuthSignature")?
     } else {
-        let secret = b.options()?.get("secret")?;
+        let secret = b.options()?.read("secret")?;
         b.hmac_sha256_hex(secret, payload)?
     };
     Ok(record([
@@ -550,7 +549,7 @@ pub fn utf8_hmac_sha256_hex(secret: EventValue, payload: String) -> Result<Event
         ));
     };
     Ok(string(safe_cex_crypto::hmac_sha256(
-        secret.as_bytes(),
+        EventValue::String(secret).text()?.as_bytes(),
         payload.as_bytes(),
         safe_cex_crypto::Encoding::Hex,
     )))

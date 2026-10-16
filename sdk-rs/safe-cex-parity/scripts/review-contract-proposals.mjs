@@ -121,7 +121,7 @@ export function targetProposals(doc, row, context) {
 }
 
 function command(program, args, cwd, env = {}) {
-  const result = spawnSync(program, args, { cwd, env: { ...process.env, CARGO_BUILD_JOBS: '2', ...env }, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
+  const result = spawnSync(program, args, { cwd, env: { ...process.env, ...env }, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024 });
   assert.equal(result.status, 0, `${program} ${args.join(' ')} failed\n${result.error ?? ''}\n${result.stderr}`);
   return result.stdout;
 }
@@ -145,11 +145,14 @@ function testIndex(crateRoot, repository) {
 export function main(args) {
   const values = new Map();
   for (const arg of args) {
-    assert.match(arg, /^--(?:crate|census|out)=.+$/, 'usage: node review-contract-proposals.mjs --crate=PACKAGE --census=/absolute/census.json [--out=/tmp/proposals.json]');
+    assert.match(arg, /^--(?:crate|census|out|jobs)=.+$/, 'usage: node review-contract-proposals.mjs --crate=PACKAGE --census=/absolute/census.json [--out=/tmp/proposals.json] [--jobs=1|2]');
     const split = arg.indexOf('='); const key = arg.slice(2, split);
     assert.ok(!values.has(key), `duplicate --${key}`); values.set(key, arg.slice(split + 1));
   }
   assert.ok(values.has('crate') && values.has('census'), '--crate and --census are required');
+  const jobs = values.get('jobs') ?? '2';
+  assert.match(jobs, /^[12]$/, '--jobs must be 1 or 2; follow the selected crate Cargo limits');
+  const cargoEnv = { CARGO_BUILD_JOBS: jobs };
   const workspace = fs.realpathSync(path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..'));
   const repository = path.dirname(workspace);
   const output = values.has('out') ? path.resolve(values.get('out')) : undefined;
@@ -162,7 +165,7 @@ export function main(args) {
   const census = JSON.parse(fs.readFileSync(values.get('census'), 'utf8'));
   const rows = census.rows?.filter(row => row.crate === values.get('crate'));
   assert.ok(rows?.length, `no census rows for ${values.get('crate')}`);
-  const metadata = JSON.parse(command('cargo', ['metadata', '--no-deps', '--locked', '--format-version=1'], workspace));
+  const metadata = JSON.parse(command('cargo', ['metadata', '--no-deps', '--locked', '--format-version=1'], workspace, cargoEnv));
   const packages = metadata.packages.filter(pkg => pkg.name === values.get('crate') && metadata.workspace_members.includes(pkg.id));
   assert.equal(packages.length, 1, 'one actual workspace compiler package required');
   const pkg = packages[0];
@@ -174,7 +177,7 @@ export function main(args) {
     const target = pkg.targets.find(target => target.name === row.target && target.kind.some(kind => ['lib', 'cdylib', 'bin'].includes(kind)));
     assert.ok(target, `stale census target ${row.target}`);
     if (row.error) { targets.push({ crate: row.crate, target: row.target, blocked: row.error, proposals: [], receiverRefusals: row.receiverDiagnostics }); continue; }
-    command('cargo', ['rustdoc', '--locked', '-p', pkg.name, '--jobs=2', ...(target.kind.includes('bin') ? ['--bin', target.name] : ['--lib']), '--', '-Z', 'unstable-options', '--output-format=json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all'], workspace, { RUSTC_BOOTSTRAP: '1' });
+    command('cargo', ['rustdoc', '--locked', '-p', pkg.name, `--jobs=${jobs}`, ...(target.kind.includes('bin') ? ['--bin', target.name] : ['--lib']), '--', '-Z', 'unstable-options', '--output-format=json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all'], workspace, { ...cargoEnv, RUSTC_BOOTSTRAP: '1' });
     const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, 'doc', `${target.name.replaceAll('-', '_')}.json`), 'utf8'));
     assert.equal(doc.index[String(doc.root)].name, target.name.replaceAll('-', '_'), 'actual compiler target root required');
     targets.push(targetProposals(doc, row, { workspace, repository, testReferences: references, existingClassification: (name, kind) => (kind === 'construction' ? construction : contracts)[name] }));
@@ -182,7 +185,7 @@ export function main(args) {
   const report = {
     format: 'accepted-contract-review-proposals-v1', status: 'needs-human-review', gatePermission: false,
     head: command('git', ['rev-parse', 'HEAD'], repository).trim(), censusHead: census.head,
-    compiler: command('rustc', ['-Vv'], workspace).trim(), configuration: 'native/default', package: pkg.name, targets,
+    compiler: command('rustc', ['-Vv'], workspace).trim(), configuration: 'native/default', cargoJobs: Number(jobs), package: pkg.name, targets,
     instructions: 'Review the TS/tooling input contract and each source body. Author expected outputs independently. Execute actual native witnesses before copying a reviewed classification into contracts.json. This report is not a contract, exemption, runtime receipt or passing gate.',
   };
   const text = JSON.stringify(report, null, 2) + '\n';

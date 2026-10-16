@@ -195,13 +195,17 @@ impl Realm {
         &mut self,
         value: &Value,
     ) -> Result<T, Thrown> {
-        let json = self.to_serde(value)?;
-        serde_json::from_value(json).map_err(|e| self.type_error(&format!("typed boundary: {e}")))
+        let value = self.capture_typed_value(value, 0)?;
+        safe_cex_exchange::js_runtime::value::to_typed(&value)
+            .map_err(|error| self.typed_error(error))
     }
-    pub(crate) fn from_typed<T: serde::Serialize>(&mut self, value: &T) -> Result<Value, Thrown> {
-        let json = serde_json::to_value(value)
-            .map_err(|e| self.type_error(&format!("typed boundary: {e}")))?;
-        Ok(self.from_serde(&json))
+    pub(crate) fn from_typed<T: serde::Serialize + ?Sized>(
+        &mut self,
+        value: &T,
+    ) -> Result<Value, Thrown> {
+        let value = safe_cex_exchange::js_runtime::value::from_typed(value)
+            .map_err(|error| self.typed_error(error))?;
+        self.restore_typed_value(&value)
     }
     pub(crate) fn js_text(&self, text: &str) -> JsString {
         JsString(text.encode_utf16().collect())

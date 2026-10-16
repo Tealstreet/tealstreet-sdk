@@ -21,3 +21,5 @@ pub mod private_session;
 pub mod rest_data;
 pub mod start_order_formatting;
 pub mod websocket_data;
+
+pub mod binding;

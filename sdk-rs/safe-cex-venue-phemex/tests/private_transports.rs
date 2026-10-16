@@ -624,7 +624,8 @@ impl session::SyncHost for Host {
     fn disposed(&mut self) -> Result<bool, E> {
         Ok(self.disposed.get())
     }
-    fn account(&mut self) -> impl Future<Output = Result<V, E>> {
+    type AccountRead = Deferred;
+    fn account(&mut self) -> Deferred {
         let effect = self.effect("account", vec![]);
         let positions = if has(&self.input, "positions") {
             self.input.get("positions")
@@ -1133,4 +1134,30 @@ fn actual_typescript_sync() {
 #[test]
 fn actual_typescript_api() {
     run("api", 16)
+}
+
+#[test]
+fn reconciliation_starts_account_read_before_the_future_is_polled() {
+    let mut host = Host::new(object(vec![
+        ("symbols", array(vec![V::Text(u("BTCUSDT"))])),
+        ("timer", V::Num(7.0)),
+    ]));
+    let effects = host.effects.clone();
+    let future = session::sync_positions_and_balance(&mut host);
+    assert_eq!(
+        effects.borrow().len(),
+        1,
+        "PRIVATE eager account read begins before polling"
+    );
+    assert_eq!(
+        effects.borrow()[0].values()[0].text(),
+        Some(u("account")),
+        "PRIVATE eager account read identity"
+    );
+    drop(future);
+    assert!(
+        matches!(host.timer, V::Undefined),
+        "PRIVATE eager timeout reset"
+    );
+    assert!(host.symbols.is_empty(), "PRIVATE eager sync queue snapshot");
 }

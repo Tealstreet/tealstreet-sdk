@@ -217,6 +217,7 @@
   "registryConstructors": {
     "from": "safe-cex-registry",
     "venues": [
+      "safe-cex-venue-apexomni",
       "safe-cex-venue-asterdex",
       "safe-cex-venue-backpack",
       "safe-cex-venue-binance",
@@ -227,6 +228,8 @@
       "safe-cex-venue-blofin",
       "safe-cex-venue-bybit",
       "safe-cex-venue-coinbase",
+      "safe-cex-venue-cryptocom",
+      "safe-cex-venue-phemex",
       "safe-cex-venue-okx",
       "safe-cex-venue-kraken",
       "safe-cex-venue-grvt",

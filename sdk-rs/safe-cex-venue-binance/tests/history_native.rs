@@ -1,8 +1,11 @@
+#[path = "support/canonical_value.rs"]
+mod canonical_value;
+use canonical_value::category;
 use safe_cex_num::{BuiltinIdentity, ProtoMember, PrototypeRealm};
 use safe_cex_types::{ExecutionPositionSide, OrderSide, OrderStatus, OrderType, PositionSide};
 use safe_cex_venue_binance::{
     order_history_native::map_binance_historical_order_native,
-    private_event_value::{EventValue, PrivateEnum},
+    private_event_value::{EventOps, EventValue},
 };
 use serde_json::{Value, json};
 use std::rc::Rc;
@@ -28,24 +31,22 @@ fn normalized(value: &EventValue) -> Value {
         EventValue::Undefined => json!({"undefined":true}),
         EventValue::Null => Value::Null,
         EventValue::Bool(v) => json!(v),
-        EventValue::String(v) => json!(v),
+        EventValue::String(v) => json!(String::from_utf16(v).unwrap()),
         EventValue::Number(n) => {
             json!({"number":if *n==0.0&&n.is_sign_negative(){"-0".into()}else{safe_cex_num::js_number_string(*n)}})
         }
-        EventValue::Enum(v) => v.wire(),
-        EventValue::Object(record) => Value::Object(
-            record
-                .borrow()
-                .fields
+        EventValue::Object(_) => Value::Object(
+            value
+                .spread()
                 .iter()
                 .map(|(key, value)| (key.clone(), normalized(value)))
                 .collect(),
         ),
         EventValue::Builtin(reference) if reference.is_callable() => {
-            let EventValue::String(name) = value.get("name").unwrap() else {
+            let EventValue::String(name) = value.read("name").unwrap() else {
                 panic!("native callable name")
             };
-            json!({"function":name})
+            json!({"function":String::from_utf16(&name).unwrap()})
         }
         EventValue::Builtin(reference) => Value::Object(
             reference
@@ -62,22 +63,22 @@ fn standard_fields(result: &EventValue, changed: &str) {
         panic!("native historical order is a record")
     };
     assert_eq!(
-        record.borrow().fields.len(),
+        record.props.borrow().len(),
         13,
         "independent source return-object property count"
     );
     assert!(
-        matches!(result.get("id").unwrap(),EventValue::String(ref v) if v=="12"),
+        matches!(result.read("id").unwrap(),EventValue::String(v) if v.as_ref()=="12".encode_utf16().collect::<Vec<_>>()),
         "native historical id before wire"
     );
     assert!(
-        matches!(result.get("symbol").unwrap(),EventValue::String(ref v) if v=="BTCUSDT"),
+        matches!(result.read("symbol").unwrap(),EventValue::String(v) if v.as_ref()=="BTCUSDT".encode_utf16().collect::<Vec<_>>()),
         "native historical symbol before wire"
     );
     assert!(
         matches!(
-            result.get("side").unwrap(),
-            EventValue::Enum(PrivateEnum::Side(OrderSide::Buy))
+            category::<safe_cex_types::OrderSide>(&(result.read("side").unwrap())),
+            OrderSide::Buy
         ),
         "native historical side enum before wire"
     );
@@ -98,14 +99,14 @@ fn standard_fields(result: &EventValue, changed: &str) {
         );
     }
     assert!(
-        matches!(result.get("reduceOnly").unwrap(), EventValue::Bool(false)),
+        matches!(result.read("reduceOnly").unwrap(), EventValue::Bool(false)),
         "native historical reduce-only before wire"
     );
     if changed != "type" {
         assert!(
             matches!(
-                result.get("type").unwrap(),
-                EventValue::Enum(PrivateEnum::Type(OrderType::StopLoss))
+                category::<safe_cex_types::OrderType>(&(result.read("type").unwrap())),
+                OrderType::StopLoss
             ),
             "native historical original type enum before wire"
         );
@@ -113,15 +114,15 @@ fn standard_fields(result: &EventValue, changed: &str) {
     if changed != "status" {
         assert!(
             matches!(
-                result.get("status").unwrap(),
-                EventValue::Enum(PrivateEnum::Status(OrderStatus::Closed))
+                category::<safe_cex_types::OrderStatus>(&(result.read("status").unwrap())),
+                OrderStatus::Closed
             ),
             "native historical status enum before wire"
         );
     }
     if changed != "positionSide" {
         assert!(
-            matches!(result.get("positionSide").unwrap(),EventValue::Enum(PrivateEnum::Execution(value)) if *value==ExecutionPositionSide::Side(PositionSide::Long)),
+            matches!(category::<safe_cex_types::ExecutionPositionSide>(&(result.read("positionSide").unwrap())), value if value==ExecutionPositionSide::Side(PositionSide::Long)),
             "native historical position-side enum before wire"
         );
     }
@@ -169,7 +170,7 @@ fn historical_native_referents_and_entire_record_precede_original_source_compari
                     name
                 };
                 assert!(
-                    matches!(result.get(output_field).unwrap().get("name").unwrap(),EventValue::String(ref value) if value==expected),
+                    matches!(result.get(output_field).unwrap().read("name").unwrap(),EventValue::String(value) if value.as_ref()==expected.encode_utf16().collect::<Vec<_>>()),
                     "native inherited historical callable name"
                 );
             }

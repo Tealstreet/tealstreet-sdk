@@ -93,9 +93,9 @@ async fn call(b: &mut impl LifecycleBindings, k: LifecycleAsync) -> Result<Event
     b.capture_async(k)?(vec![])?.await
 }
 fn loaded(b: &mut impl LifecycleBindings, keys: &[&str]) -> Result<EventValue, Failure> {
-    let out = EventValue::object(b.read(LifecycleRead::Loaded)?.spread());
+    let out = EventValue::record_object(b.read(LifecycleRead::Loaded)?.spread());
     for key in keys {
-        out.define(key, EventValue::Bool(true))
+        out.write(key, EventValue::Bool(true))
     }
     Ok(out)
 }
@@ -132,8 +132,8 @@ async fn start(b: &mut impl LifecycleBindings, overlay: bool) -> Result<(), Fail
             return Ok(());
         }
         let log = b.capture(LifecycleSync::Log)?;
-        let ticker_length = tickers.get("length")?;
-        let market_length = markets.get("length")?;
+        let ticker_length = tickers.read("length")?;
+        let market_length = markets.read("length")?;
         let count = min(ticker_length.number()?, market_length.number()?);
         log(vec![string(format!(
             "Loaded {} Binance markets",
@@ -216,15 +216,13 @@ fn unpack(v: EventValue) -> Result<(EventValue, EventValue), Failure> {
             }
         )));
     }
-    Ok((v.get("balance")?, v.get("positions")?))
+    Ok((v.read("balance")?, v.read("positions")?))
 }
 fn plus_one(v: &EventValue) -> Result<EventValue, Failure> {
     match v {
         EventValue::String(_)
         | EventValue::Array(_)
         | EventValue::Object(_)
-        | EventValue::Enum(_)
-        | EventValue::Inherited(_)
         | EventValue::Builtin(_) => Ok(string(format!("{}1", v.text()?))),
         _ => Ok(number(v.number()? + 1.0)),
     }
@@ -298,9 +296,9 @@ pub async fn tick_futures(
                 let update = b.capture(LifecycleSync::Update)?;
                 let out = record([("balance", balance)]);
                 if version.same(&sync(b, LifecycleSync::Version, vec![])?) {
-                    out.define("positions", positions)
+                    out.write("positions", positions)
                 }
-                out.define("loaded", loaded(b, &["balance", "positions"])?);
+                out.write("loaded", loaded(b, &["balance", "positions"])?);
                 update(vec![out])?;
                 times.account.set(b.now()?);
             }

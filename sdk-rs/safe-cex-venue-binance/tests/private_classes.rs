@@ -1,3 +1,6 @@
+#[path = "support/canonical_value.rs"]
+mod canonical_value;
+use canonical_value::category;
 use safe_cex_exchange::runtime::*;
 use safe_cex_venue_binance::{
     api_factory::RemoteSignCall, class_jobs::NativeFuture, listen_key::*, private_classes::*,
@@ -519,6 +522,82 @@ fn private_classes_bind_defaults_connection_auth_and_reopen() {
     }
 }
 #[test]
+fn shared_runtime_graph_enters_bound_private_orders_without_projection() {
+    use safe_cex_exchange::js_runtime::value::{Js, to_typed};
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let (owner, parent, _, _, _) = fixture(venue);
+        let nested = Js::object(vec![("live", Js::Number(1.0))]);
+        let data = Js::object(vec![
+            ("c", Js::str("client")),
+            ("i", Js::Number(42.0)),
+            ("X", Js::str("NEW")),
+            ("ot", Js::str("LIMIT")),
+            ("o", Js::str("LIMIT")),
+            ("s", Js::str("BTC")),
+            ("S", Js::str("BUY")),
+            ("p", Js::Number(f64::INFINITY)),
+            ("q", Js::str("-0")),
+            ("z", Js::Number(f64::NAN)),
+            ("nested", nested.clone()),
+        ]);
+        let event = if venue == Venue::Spot {
+            data.clone()
+        } else {
+            Js::object(vec![("o", data.clone())])
+        };
+        let events = Js::array(vec![event]);
+        let Js::Array(slots) = &events else {
+            unreachable!()
+        };
+        slots.borrow_mut().insert(0, None);
+        owner.handle_events(1, events).unwrap();
+        let effects = parent.effects.borrow();
+        let adds = effects
+            .iter()
+            .filter(|(op, _)| *op == PrivateOperation::AddOrder)
+            .collect::<Vec<_>>();
+        assert_eq!(adds.len(), 1, "SHARED bound forEach skips holes");
+        let row = &adds[0].1[0];
+        assert_eq!(
+            row.get("price").unwrap().as_f64(),
+            Some(f64::INFINITY),
+            "SHARED source parseFloat preserves infinity"
+        );
+        assert_eq!(
+            row.get("amount").unwrap().as_f64().unwrap().to_bits(),
+            (-0.0f64).to_bits(),
+            "SHARED source string parseFloat preserves negative zero"
+        );
+        assert!(
+            row.get("filled").unwrap().as_f64().unwrap().is_nan(),
+            "SHARED source NaN remains native"
+        );
+        let info = row.get("info").unwrap();
+        assert_eq!(
+            info.same_reference(&data),
+            venue != Venue::Futures,
+            "SHARED source info identity versus shallow spread"
+        );
+        assert!(
+            info.get("nested").unwrap().same_reference(&nested),
+            "SHARED nested reference survives source spread"
+        );
+        nested.set("live", Js::Number(f64::NEG_INFINITY)).unwrap();
+        assert_eq!(
+            info.get("nested").unwrap().get("live").unwrap().as_f64(),
+            Some(f64::NEG_INFINITY),
+            "SHARED late input mutation stays live"
+        );
+        let price: f64 = to_typed(&row.get("price").unwrap()).unwrap();
+        assert_eq!(
+            price,
+            f64::INFINITY,
+            "SHARED native typed output keeps infinity"
+        );
+    }
+}
+
+#[test]
 fn private_classes_route_events_to_native_bodies_and_eager_refresh() {
     for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
         let (owner, parent, base, timers, runtime) = fixture(venue);
@@ -543,20 +622,20 @@ fn private_classes_route_events_to_native_bodies_and_eager_refresh() {
         assert_eq!(adds.len(), 1, "independent native new-order call count");
         let row = &adds[0].1[0];
         assert!(
-            matches!(row.get("price").unwrap(),EventValue::Number(n)if n==12.3),
+            matches!(row.read("price").unwrap(),EventValue::Number(n)if n==12.3),
             "native bound private order price"
         );
         assert!(
-            matches!(row.get("amount").unwrap(),EventValue::Number(n)if n==3.6),
+            matches!(row.read("amount").unwrap(),EventValue::Number(n)if n==3.6),
             "native bound private order amount"
         );
-        assert!(matches!(row.get("filled").unwrap(),EventValue::Number(n)if n==1.1));
-        assert!(matches!(row.get("remaining").unwrap(),EventValue::Number(n)if n==3.6-1.1));
+        assert!(matches!(row.read("filled").unwrap(),EventValue::Number(n)if n==1.1));
+        assert!(matches!(row.read("remaining").unwrap(),EventValue::Number(n)if n==3.6-1.1));
         assert!(matches!(
-            row.get("type").unwrap(),
-            EventValue::Enum(PrivateEnum::Type(safe_cex_types::OrderType::Limit))
+            category::<safe_cex_types::OrderType>(&(row.read("type").unwrap())),
+            safe_cex_types::OrderType::Limit
         ));
-        assert!(matches!(row.get("lastUpdate").unwrap(),EventValue::Number(n)if n==21000.0));
+        assert!(matches!(row.read("lastUpdate").unwrap(),EventValue::Number(n)if n==21000.0));
         drop(effects);
         if venue != Venue::Spot {
             assert_eq!(
@@ -588,9 +667,9 @@ fn private_classes_route_events_to_native_bodies_and_eager_refresh() {
                 parent.effects.borrow().iter().any(|(op, args)| *op
                     == PrivateOperation::UpdateStore
                     && args[0]
-                        .get("loaded")
+                        .read("loaded")
                         .unwrap()
-                        .get("orders")
+                        .read("orders")
                         .unwrap()
                         .same(&EventValue::Bool(true))),
                 "native repaired orders mark loaded"
@@ -741,7 +820,7 @@ fn private_class_native_stages_before_actual_source() {
         assert_eq!(rows.len(), 1, "independent source-floor add-order count");
         let row = rows[0].1[0].clone();
         drop(effects);
-        let id = row.get("id").unwrap().text().unwrap();
+        let id = row.read("id").unwrap().text().unwrap();
         assert_eq!(
             id,
             if venue == Venue::Futures {
@@ -770,8 +849,8 @@ fn private_class_native_stages_before_actual_source() {
         assert_eq!(remaining, 2.5);
         assert_eq!(last, 21000.0, "native source-floor virtual fill clock");
         assert!(matches!(
-            row.get("type").unwrap(),
-            EventValue::Enum(PrivateEnum::Type(safe_cex_types::OrderType::Limit))
+            category::<safe_cex_types::OrderType>(&(row.read("type").unwrap())),
+            safe_cex_types::OrderType::Limit
         ));
         assert_eq!(
             base.received.get(),
@@ -820,9 +899,9 @@ fn private_class_native_stages_before_actual_source() {
                 .find(|(op, _)| *op == PrivateOperation::UpdateStore)
                 .unwrap()
                 .1[0]
-                .get("loaded")
+                .read("loaded")
                 .unwrap()
-                .get("orders")
+                .read("orders")
                 .unwrap();
             assert!(
                 loaded.same(&EventValue::Bool(true)),
@@ -1208,7 +1287,7 @@ impl ExchangeImports for Imports {
         owner: EventValue,
     ) -> Result<EventValue, Failure> {
         assert!(
-            opts.same(&owner.get("options")?),
+            opts.same(&owner.read("options")?),
             "native factory receives canonical options graph"
         );
         Ok(client(match kind {
@@ -1227,20 +1306,20 @@ impl ExchangeImports for Imports {
         rate: Option<safe_cex_venue_binance::private_session::RateHook>,
     ) -> Result<EventValue, Failure> {
         assert!(
-            opts.same(&owner.get("options")?),
+            opts.same(&owner.read("options")?),
             "native split receives canonical exchange options"
         );
         if let Some(rate) = rate {
-            assert_eq!(rate(client("primary"))?.get("label")?.text()?, "primary");
+            assert_eq!(rate(client("primary"))?.read("label")?.text()?, "primary");
         }
         Ok(if venue == Venue::Spot {
             client("route")
         } else {
-            EventValue::Array(Rc::new(RefCell::new(vec![
+            EventValue::array(vec![
                 client("route"),
                 client("primary"),
                 client("secondary"),
-            ])))
+            ])
         })
     }
     fn rate_limit(&self, client: EventValue, max: f64) -> Result<EventValue, Failure> {
@@ -1289,7 +1368,7 @@ impl ExchangeImports for Imports {
         if self.header_mode.get() == 4 && key == "status" {
             return Err(self.header_failure.borrow().as_ref().unwrap().clone());
         }
-        value.get(key)
+        value.read(key)
     }
     fn weight_header_get_member(
         &self,
@@ -1312,7 +1391,7 @@ impl ExchangeImports for Imports {
         Ok(HeaderGetMember::Callable(Rc::new(move |key| {
             reads.borrow_mut().push(format!("call:{key}"));
             assert!(
-                matches!(headers.get("receiver")?, EventValue::String(v) if v == "native-header"),
+                matches!(headers.read("receiver")?, EventValue::String(v) if v.as_ref()=="native-header".encode_utf16().collect::<Vec<_>>()),
                 "native imported header getter retains original receiver"
             );
             Ok(Some(json!(2.5)))
@@ -1534,7 +1613,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
                     .clients
                     .get(field)
                     .unwrap()
-                    .get("label")
+                    .read("label")
                     .unwrap()
                     .text()
                     .unwrap(),
@@ -1645,28 +1724,32 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
         );
         let snapshot = PrivateParent::balance(owner.state.as_ref()).unwrap();
         assert!(
-            matches!(snapshot.get("total").unwrap(), EventValue::Number(v) if v==f64::INFINITY),
+            matches!(snapshot.read("total").unwrap(), EventValue::Number(v) if v==f64::INFINITY),
             "native owner Store projection retains positive Infinity"
         );
         assert!(
-            matches!(snapshot.get("free").unwrap(),EventValue::Number(v) if v.is_nan()),
+            matches!(snapshot.read("free").unwrap(),EventValue::Number(v) if v.is_nan()),
             "native Store balance projection retains NaN"
         );
         assert!(
-            matches!(snapshot.get("used").unwrap(),EventValue::Number(v) if v==0.0 && v.is_sign_negative()),
+            matches!(snapshot.read("used").unwrap(),EventValue::Number(v) if v==0.0 && v.is_sign_negative()),
             "native Store balance projection retains negative zero"
         );
-        let nested = snapshot.get("currencies").unwrap().get("witness").unwrap();
+        let nested = snapshot
+            .read("currencies")
+            .unwrap()
+            .read("witness")
+            .unwrap();
         assert!(
-            matches!(nested.get("total").unwrap(),EventValue::Number(v) if v==f64::NEG_INFINITY),
+            matches!(nested.read("total").unwrap(),EventValue::Number(v) if v==f64::NEG_INFINITY),
             "native nested Store balance retains negative Infinity"
         );
         assert!(
-            matches!(nested.get("free").unwrap(),EventValue::Number(v) if v.is_nan()),
+            matches!(nested.read("free").unwrap(),EventValue::Number(v) if v.is_nan()),
             "native nested Store balance retains NaN"
         );
         assert!(
-            matches!(nested.get("used").unwrap(),EventValue::Number(v) if v==0.0 && v.is_sign_negative()),
+            matches!(nested.read("used").unwrap(),EventValue::Number(v) if v==0.0 && v.is_sign_negative()),
             "native nested Store balance retains negative zero"
         );
         let mut changed = store.balance().clone();
@@ -1681,7 +1764,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
         )
         .unwrap();
         assert!(
-            matches!(snapshot.get("total").unwrap(), EventValue::Number(v) if v==f64::INFINITY),
+            matches!(snapshot.read("total").unwrap(), EventValue::Number(v) if v==f64::INFINITY),
             "native previously read balance retains earlier positive Infinity after Store mutation"
         );
         // Native assertions above precede all source/output projection.
@@ -1851,7 +1934,7 @@ fn saved_spot_open_case(prototype_signature: bool) {
     }));
     parent
         .options
-        .define("remoteSigner", record([("accountName", string("fixture"))]));
+        .write("remoteSigner", record([("accountName", string("fixture"))]));
     run(&runtime, owner.connect_and_subscribe()).unwrap();
     assert_eq!(
         requests.borrow().len(),
@@ -1886,7 +1969,8 @@ fn saved_spot_open_case(prototype_signature: bool) {
         "native saved open invokes one signer"
     );
     let request = requests.borrow()[0].clone();
-    let EventValue::Number(request_timestamp) = request.get("lastMessageTimestamp").unwrap() else {
+    let EventValue::Number(request_timestamp) = request.read("lastMessageTimestamp").unwrap()
+    else {
         panic!("native signer request inherited timestamp is numeric")
     };
     assert_eq!(
@@ -1894,7 +1978,7 @@ fn saved_spot_open_case(prototype_signature: bool) {
         "native saved Spot open constructs signer request in original realm"
     );
     assert!(
-        matches!(request.get("type").unwrap(),EventValue::String(ref value) if value=="ws-auth"),
+        matches!(request.read("type").unwrap(),EventValue::String(value) if value.as_ref()=="ws-auth".encode_utf16().collect::<Vec<_>>()),
         "native signer request type before source"
     );
     assert!(
@@ -1908,8 +1992,8 @@ fn saved_spot_open_case(prototype_signature: bool) {
         Rc::ptr_eq(&PrototypeRealm::current(), &caller),
         "native saved open restores caller realm after queued completion"
     );
-    let EventValue::Number(caller_timestamp) = EventValue::object(Default::default())
-        .get("lastMessageTimestamp")
+    let EventValue::Number(caller_timestamp) = EventValue::record_object(Default::default())
+        .read("lastMessageTimestamp")
         .unwrap()
     else {
         panic!("native caller timestamp remains numeric")
@@ -1947,7 +2031,7 @@ fn saved_spot_open_case(prototype_signature: bool) {
         },
         "native decoded saved-open signature value"
     );
-    let actual = json!({"requestTimestamp":request_timestamp,"currentRealmTimestamp":caller_timestamp,"sentCount":base.frames.borrow().len(),"requestType":request.get("type").unwrap().text().unwrap(),"method":frame["method"],"signature":frame["params"]["signature"],"errorCount":base.errors.borrow().len(),"forceClosed":base.forced.get()});
+    let actual = json!({"requestTimestamp":request_timestamp,"currentRealmTimestamp":caller_timestamp,"sentCount":base.frames.borrow().len(),"requestType":request.read("type").unwrap().text().unwrap(),"method":frame["method"],"signature":frame["params"]["signature"],"errorCount":base.errors.borrow().len(),"forceClosed":base.forced.get()});
     let mut command = std::process::Command::new("node");
     command.arg(concat!(
         env!("CARGO_MANIFEST_DIR"),
@@ -2349,11 +2433,11 @@ fn exchange_class_sdk_dispatch_preserves_routes_defaults_and_capability_brands()
             );
             let body = imports.request_args.borrow()[0].clone().unwrap();
             assert!(
-                matches!(body.get("symbol").unwrap(), EventValue::String(v) if v == "BTCUSDT"),
+                matches!(body.read("symbol").unwrap(), EventValue::String(v) if v.as_ref()=="BTCUSDT".encode_utf16().collect::<Vec<_>>()),
                 "native SDK leverage request symbol"
             );
             assert!(
-                matches!(body.get("leverage").unwrap(), EventValue::Number(v) if v.to_bits() == 7.25_f64.to_bits()),
+                matches!(body.read("leverage").unwrap(), EventValue::Number(v) if v.to_bits() == 7.25_f64.to_bits()),
                 "native SDK leverage request retains exact native 7.25"
             );
             assert_eq!(
@@ -2397,7 +2481,7 @@ fn exchange_class_sdk_dispatch_preserves_routes_defaults_and_capability_brands()
                 .unwrap()
                 .unwrap();
             assert!(
-                matches!(request.get("limit").unwrap(), EventValue::Number(v) if v == 37.0),
+                matches!(request.read("limit").unwrap(), EventValue::Number(v) if v == 37.0),
                 "native optional history limit retains 37"
             );
             imports.requests.borrow_mut().clear();

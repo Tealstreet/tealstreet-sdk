@@ -110,9 +110,9 @@ note = "JavaScript whitespace delegates to safe-cex-num js_trim; JSON numeric fo
 ts = "BaseWebSocket"
 kind = "class"
 layer = "adapted"
-rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket", "safe-cex-exchange/src/websocket.rs::WsProtocol", "safe-cex-exchange/src/websocket.rs::WsHealth", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::diagnostics", "safe-cex-exchange/src/websocket.rs::OrderBookInnerState" ]
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::close_current_websocket", "safe-cex-exchange/src/websocket.rs::BaseWebSocket", "safe-cex-exchange/src/websocket.rs::WsProtocol", "safe-cex-exchange/src/websocket.rs::WsHealth", "safe-cex-exchange/src/websocket.rs::BaseWebSocket::diagnostics", "safe-cex-exchange/src/websocket.rs::OrderBookInnerState" ]
 status = "ported"
-note = "Adapted shared socket split: concrete lifecycle and state projections, protocol override hooks and guarded auth/dispatch helpers implement the same source contract. safe-cex-exchange/src/websocket.rs::BaseWebSocket safe-cex-exchange/src/websocket.rs::WsProtocol safe-cex-exchange/src/websocket.rs::WsHealth safe-cex-exchange/src/websocket.rs::BaseWebSocket::diagnostics safe-cex-exchange/src/websocket.rs::OrderBookInnerState"
+note = "Split member `safe-cex-exchange/src/websocket.rs::BaseWebSocket::close_current_websocket`. Host operation for source ws.close calls in venue overrides: forwards close to the current native/relay transport without invoking superclass disposal, force-close metadata, owned-task cancellation or handle removal. Native and relay state-retention witnesses live in websocket tests; Backpack three-surface source comparison is tests/disposal_binding.rs. Adapted shared socket split: concrete lifecycle and state projections, protocol override hooks and guarded auth/dispatch helpers implement the same source contract. safe-cex-exchange/src/websocket.rs::BaseWebSocket safe-cex-exchange/src/websocket.rs::WsProtocol safe-cex-exchange/src/websocket.rs::WsHealth safe-cex-exchange/src/websocket.rs::BaseWebSocket::diagnostics safe-cex-exchange/src/websocket.rs::OrderBookInnerState"
 
 [[symbol]]
 ts = "BaseWebSocket.constructor"
