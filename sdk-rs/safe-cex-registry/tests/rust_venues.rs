@@ -490,6 +490,7 @@ struct Venues {
     kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
 }
 impl RustVenueHost for Venues {
+    #[allow(clippy::arc_with_non_send_sync)]
     fn hyperliquid(
         &self,
         _: &ExchangeOptions,
@@ -499,7 +500,13 @@ impl RustVenueHost for Venues {
             safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
                 runtime: self.runtime.clone(),
                 http: self.wire.clone(),
-                limiter: safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+                limiter: Rc::new(safe_cex_venue_hyperliquid::rate_limit::RateLimiter::new(
+                    Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
+                        self.runtime.clone(),
+                    )),
+                    1200.0,
+                    60_000.0,
+                )),
                 signers: Default::default(),
             },
         )
