@@ -7,7 +7,7 @@ use crate::{
 };
 use safe_cex_exchange::js_runtime::{
     ops,
-    promise::{Promise, await_js},
+    promise::{Promise, PromiseWait, await_js},
     value::{Js, Thrown},
 };
 use std::{
@@ -17,10 +17,13 @@ use std::{
     task::{Context, Poll},
 };
 
-pub(crate) struct Operation(Promise);
+pub(crate) struct Operation {
+    promise: Promise,
+    waiter: std::cell::RefCell<PromiseWait>,
+}
 impl crate::order_adapters::Completion<Js, Thrown> for Operation {
     fn poll(&self, cx: &mut Context<'_>) -> Poll<Result<Js, Thrown>> {
-        Box::pin(self.0.wait()).as_mut().poll(cx)
+        Pin::new(&mut *self.waiter.borrow_mut()).poll(cx)
     }
 }
 pub(crate) type Call = (Js, Js);
@@ -85,10 +88,11 @@ impl AccountHost for Rt {
         Ok(())
     }
     fn resolve(&self, v: Js) -> Result<Rc<Operation>, Thrown> {
-        Ok(Rc::new(Operation(Promise::spawn(
-            &self.exchange_runtime(),
-            Box::pin(await_js(v)),
-        ))))
+        let promise = Promise::spawn(&self.exchange_runtime(), Box::pin(await_js(v)));
+        Ok(Rc::new(Operation {
+            waiter: std::cell::RefCell::new(promise.wait()),
+            promise,
+        }))
     }
     fn credentials(&self) -> Result<Js, Thrown> {
         self.this.call_method("getCredentials", vec![])
@@ -553,7 +557,7 @@ impl crate::state_sync::StateHost for Rt {
     ) -> Result<(), Thrown> {
         let rt = self.clone();
         super::retained_task(self, async move {
-            if let Err(e) = o.0.wait().await {
+            if let Err(e) = o.promise.wait().await {
                 if let Err(e) = f(e) {
                     rt.report(&e, "refreshPositions");
                 }

@@ -27,4 +27,3 @@ pub mod api_factory;
 pub mod classes;
 
 pub mod binding;
-pub use binding::exchange::{PolymarketDependencies, PolymarketExchange};

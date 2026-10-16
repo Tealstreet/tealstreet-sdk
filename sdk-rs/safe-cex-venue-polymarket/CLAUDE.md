@@ -23,9 +23,8 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 
 The first slice covers all 13 constants rows in `constants.rs`, plus four
 authentication records in `types.rs`: credentials,
-derivation request/response, and L2 headers. The API factory, signing and socket
-behavior remain pending; mapped REST method bodies are described below and do
-not constitute a complete exchange implementation.
+derivation request/response, and L2 headers. The declaration and method-body slices below record their narrower guarantees;
+the concrete binding above composes their factory, signing, and socket bodies.
 Future slices use the landed [shared core](../safe-cex-exchange/CLAUDE.md).
 
 The constants oracle executes the actual constants module, shared enum module,
@@ -172,8 +171,8 @@ bit patterns. The six precision controls cover four production branches and
 source cardinality with an independent performed-comparison guard.
 
 The first REST body is `public_reads::get_server_time`, over an injected shared
-HttpClient. API factory, constructor, authentication, retry and interceptors
-remain pending. This boundary accepts encoded JSON numbers and current native
+HttpClient. This scalar slice alone does not assemble factory, constructor,
+authentication, retry, or interceptors. This boundary accepts encoded JSON numbers and current native
 numbers through shared numeric ingress, never guessing that transformed strings
 should be parsed again. Non-number current data is an explicit CHOSEN refusal
 (the actual TS getter returns it unchanged). HTTP failures retain the entire
@@ -188,8 +187,8 @@ decoder or two-axis precision field.
 Four further public REST bodies map `getMarkets`, `getOrderBook`, `getOrderBooks`
 and `getPrices` through the same injected HttpClient and current-data decoder.
 They preserve source endpoints, methods, token parameter spelling, comma-join
-behavior and ordered batch bodies. Factory/constructor/interceptors remain
-pending. Strict owned wire records deliberately refuse unchecked shapes and
+behavior and ordered batch bodies. This read slice alone does not assemble factory/constructor/interceptors; the
+concrete binding above owns that assembly. Strict owned wire records deliberately refuse unchecked shapes and
 lone surrogates, drop unknown fields and do not retain JS response aliases.
 These methods do not normalize prices or map prediction-core domain objects.
 
