@@ -94,7 +94,8 @@ impl WsPingHost for Host {
         if matches!(v,N::Builtin(name)if name=="Math") && ["abs", "max"].contains(&k) {
             return Ok(N::Builtin(format!("Math.{k}")));
         }
-        if eq(v, &self.base.exchange) && ["log", "cancelOrders", "placeOrderWithCloid"].contains(&k) {
+        if eq(v, &self.base.exchange) && ["log", "cancelOrders", "placeOrderWithCloid"].contains(&k)
+        {
             return Ok(N::Builtin(k.into()));
         }
         if eq(v, &self.st.borrow().store) && k == "addOrUpdateOrder" {

@@ -525,8 +525,8 @@ fn case(family: &str, scene: &'static str) -> N {
                     N::Num(7.5),
                     s("0xmint1"),
                 ]
-                    .iter()
-                    .enumerate()
+                .iter()
+                .enumerate()
                 {
                     assert!(
                         eq(&pre_args[i + 1], v),

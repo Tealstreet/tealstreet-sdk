@@ -473,15 +473,24 @@ fn case(scene: &'static str) -> N {
             let hip = ["tp-hip3", "tp-deferred", "drop-observer"].contains(&scene);
             // HIP-3 stops, and core-perp stop ENTRIES (not reduce-only), are pre-cached.
             let reduce_only = scene == "tp-full";
-            let trigger = scene.starts_with("tp") || scene.starts_with("sl") || scene == "drop-observer";
+            let trigger =
+                scene.starts_with("tp") || scene.starts_with("sl") || scene == "drop-observer";
             assert_eq!(
                 count(&h, "addToPrePlacementCache"),
                 usize::from(trigger && (hip || !reduce_only)),
                 "DISPATCH native precache count"
             );
             // Market and TP/SL wires are recorded once, after signing and before the POST.
-            let signed = !["limit", "sign-error", "tp-invalid", "sl-nan", "wrong-type", "trailing", "missing-market"]
-                .contains(&scene);
+            let signed = ![
+                "limit",
+                "sign-error",
+                "tp-invalid",
+                "sl-nan",
+                "wrong-type",
+                "trailing",
+                "missing-market",
+            ]
+            .contains(&scene);
             assert_eq!(
                 count(&h, "recordPlacement"),
                 usize::from(signed),
