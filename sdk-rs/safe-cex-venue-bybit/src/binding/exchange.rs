@@ -208,7 +208,7 @@ impl BybitExchange {
                             }),
                         },
                         owner,
-                        is_demo: base.is_demo,
+                        is_demo: base.name == ExchangeName::Bybitdemo || base.is_demo,
                         rest_base_url: None,
                         clock: api_clock.clone(),
                         retry_clock: retry_clock.clone(),
