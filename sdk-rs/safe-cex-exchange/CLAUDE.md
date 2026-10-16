@@ -902,3 +902,13 @@ The exchanges-level audit and retained options gap are tracked in
 [the resolution](../parity/EXCHANGES_DIVERGENCE_RESOLUTION.md). Signer and income
 entrypoints execute their initial source calls before returning their futures;
 caller-drop and reporting choices cite MANIFEST-SPEC.md#exchange-runtime-callback-choice.
+
+## Native host (`native` feature)
+
+`native::native_runtime()` is the production `ExchangeRuntime` + `WsRuntime` on a
+tokio `LocalSet` over the direct transport; `NativeHttpHost` drives the adapter
+once. Sockets are plain (`enable_reconnecting` false): the core owns
+reconnection, and a `reconnecting` dial is refused rather than faked. The
+feature's dependencies are target-gated, so `--all-features` wasm builds stay
+I/O-free. Inherent `impl` blocks inside cfg-gated modules fail the parity
+indexer closed; native modules use free functions and trait impls only.

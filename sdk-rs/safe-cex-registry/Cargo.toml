@@ -16,3 +16,18 @@ serde_json.workspace = true
 
 [lints]
 workspace = true
+
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+# Native registry builds carry the production RustVenueHost (src/native_host.rs).
+safe-cex-venue-binance = { workspace = true, features = ["native"] }
+safe-cex-venue-backpack = { workspace = true, features = ["native"] }
+safe-cex-exchange = { workspace = true, features = ["native"] }
+safe-cex-transport = { workspace = true, features = ["native"] }
+
+[target.'cfg(not(target_arch = "wasm32"))'.dev-dependencies]
+# tests/native_host_*.rs drive the production host over local sockets.
+tokio = { workspace = true, features = ["rt", "net", "time", "io-util", "sync"] }
+tokio-tungstenite = { workspace = true }
+futures-util = { workspace = true }
+hmac.workspace = true
+sha2.workspace = true

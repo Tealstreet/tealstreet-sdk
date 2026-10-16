@@ -104,3 +104,5 @@ pub mod ticker_capture;
 
 pub mod class_decode;
 pub mod exchange_classes;
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+pub mod native_host;
