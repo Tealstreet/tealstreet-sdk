@@ -1105,3 +1105,29 @@ permanent envelope-controls.py restores the former derive: it compiles and fails
 the named numeric witness with exit101, then exact restoration passes. Canonical
 parity passes (7459 rows,17183 public Rust items). These observations do not clear
 the existing surrogate FINDING rows or classify private helper decoders.
+
+## Original accepted-contract census
+
+The original native/default census selects exactly 44 owners. The reviewed
+per-crate shard produces 30 native decoder results and 14 individual
+classifications, with zero failed selected owners. Four record observations
+cover all 49 account/position fields, numeric bits, metadata and cardinality via
+six decoder paths; 26 function owners execute 136 independently authored cases.
+Object observations use recursive native Js fields/kinds/number bits rather
+than serialized numeric lexemes. The shared-Js host fixture panics on unrelated
+capabilities and its mapped-key corpus is explicitly limited to exact keys.
+
+Twelve non-decoder helpers have direct native unit witnesses and twelve
+compiling named-failure/exact-restoration controls, including three new outbound
+controls in scripts/outbound-contract-controls.py. Three guard-only record
+controls compile after widening, fail the named complete-array rejection
+assertion, and pass after exact restoration. The direct-envelope old-derive numeric control remains in #280.
+Two typed initializer classifications have separately executed source/native
+constructor witnesses. The Api construction record reviews only shared-handle
+Clone capability and makes no executed clone or method-decoding claim.
+
+Reproduce selected compiler/native checks with
+`node safe-cex-venue-phemex/scripts/accepted-census-contracts.mjs` from sdk-rs;
+see safe-cex-parity/accepted-set/PHEMEX-REVIEW.md for individual proof commands.
+This does not assert full current discovery: ten post-census owners, one public
+alias, local scopes, feature combinations and WASM remain separate obligations.
