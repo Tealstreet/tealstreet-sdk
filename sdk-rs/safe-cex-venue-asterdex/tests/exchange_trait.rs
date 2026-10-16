@@ -207,7 +207,7 @@ fn all_sixteen_defaults_are_bound_through_the_constructed_exchange() {
 #[test]
 fn secondary_reads_keep_their_key_secret_and_transport_options() {
     let (venue, rt, _, wire) = support::fixture(
-        json!({"key":"write-key","secret":"write-secret","secondary_key":"read-key","secondary_secret":"read-secret","secondaryProxyUrl":"https://secondary.test"}),
+        json!({"key":"write-key","secret":"write-secret","secondary_key":"read-key","secondary_secret":"read-secret","secondaryProxyUrl":"https://secondary.test","overrideProxyUrl":"https://primary.test"}),
     );
     script(&wire);
     drive(&rt, venue.get_account()).unwrap();
@@ -235,6 +235,21 @@ fn secondary_reads_keep_their_key_secret_and_transport_options() {
         signature,
         json!(expected),
         "GET signs with the secondary secret"
+    );
+    assert!(
+        rt.http_options
+            .borrow()
+            .iter()
+            .any(|options| options.key == "write-key"
+                && options.override_proxy_url.as_deref() == Some("https://primary.test")),
+        "primary API retains its account routing"
+    );
+    let module_options = rt.http_options.borrow()[0].clone();
+    assert!(
+        module_options.key.is_empty()
+            && module_options.secret.is_empty()
+            && module_options.override_proxy_url.is_none(),
+        "module axios clock is independent of account credentials and private proxy routing"
     );
     assert!(
         rt.http_options

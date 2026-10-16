@@ -263,8 +263,13 @@ pub(super) fn build(weak: Weak<Shared>) -> Js {
         Ok(result)
     });
     bind("hasRetriedSignature", |_, a| {
-        let config=arg(&a,0);
-        Ok(Js::Bool(!config.is_nullish() && config.get(safe_cex_transport::signature_rejection::SIGNATURE_RETRY_CONFIG_KEY)?.truthy()))
+        let config = arg(&a, 0);
+        Ok(Js::Bool(
+            !config.is_nullish()
+                && config
+                    .get(safe_cex_transport::signature_rejection::SIGNATURE_RETRY_CONFIG_KEY)?
+                    .truthy(),
+        ))
     });
     bind("isBinanceStyleSignatureRejection", |_, a| {
         Ok(Js::Bool(

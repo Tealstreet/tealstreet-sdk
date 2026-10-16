@@ -78,7 +78,19 @@ pub(crate) fn assemble(
     let name = safe_cex_exchange::js_runtime::value::from_typed(&parts.name)?;
     let options = safe_cex_exchange::js_runtime::value::from_typed(&parts.options)?;
     let store = safe_cex_exchange::js_runtime::store::facade(parts.store.clone());
-    let default_http = (deps.http)(&parts.options)?;
+    // Module-level axios (the clock) has no account signing or private route.
+    // createAPI separately asks the factory for each lane's real options.
+    let mut raw_options = parts.options.clone();
+    raw_options.key.clear();
+    raw_options.secret.clear();
+    raw_options.remote_signer = None;
+    raw_options.secondary_key = None;
+    raw_options.secondary_secret = None;
+    raw_options.secondary_proxy_url = None;
+    raw_options.tealstreet_proxy = None;
+    raw_options.tealstreet_tunnel = None;
+    raw_options.override_proxy_url = None;
+    let default_http = (deps.http)(&raw_options)?;
     let shared = Rc::new_cyclic(|weak| {
         ScopeShared::new(
             deps.runtime.clone(),
