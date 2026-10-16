@@ -96,3 +96,8 @@ and BinanceSpotExchange (signed ws-api user-data subscription) on the native hos
 The native JSON account surface forwards journal reads (`fetchHistoricalPositions`)
 to the venue's declared fold/reported path, preserving account and time bounds.
 It must not inherit a TS wrapper's default rejection for a supported venue method.
+
+GRVT is constructed by the Rust table through `RustVenueHost::grvt`, with a fresh
+terminal HTTP host and the common public-data provider. Active GRVT SDK signing
+uses its local wallet; the native hosted-signer host refuses this venue visibly.
+The registry construction test reads actual GRVT public-gateway market data.

@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `backpack`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for `grvt`, `backpack`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`),
 the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
@@ -21,6 +21,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 `ExchangeName -> fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor`.
 
 - **Initial members:**
+  - `grvt`, built with `GrvtExchange::new` over shared js_runtime; its host supplies fresh HTTP and the common external-public-data factory. Active SDK signing requires a local wallet; the native hosted-signer host refuses this venue visibly.
   - `backpack`, built with `BackpackExchange::new`.
   - `binance`, built with `BinanceExchange::new`.
   - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around

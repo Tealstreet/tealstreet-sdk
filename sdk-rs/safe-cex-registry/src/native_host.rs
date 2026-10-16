@@ -100,6 +100,23 @@ impl RustVenueHost for NativeVenueHost {
         self.remote.clone()
     }
 
+    fn grvt(
+        &self,
+    ) -> Result<safe_cex_venue_grvt::binding::exchange::GrvtDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for grvt on the native host",
+            ));
+        }
+        Ok(safe_cex_venue_grvt::binding::exchange::GrvtDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                (self.adapter)()?,
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
         if self.remote.is_some() {
             return Err(ExchangeError::new(

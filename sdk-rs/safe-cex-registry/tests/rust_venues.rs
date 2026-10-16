@@ -158,11 +158,13 @@ fn run<T>(runtime: &Runtime, future: impl Future<Output = T>) -> T {
 #[derive(Default)]
 struct Wire {
     requests: Mutex<Vec<String>>,
+    request_data: Mutex<Vec<RestRequest>>,
     bodies: Mutex<BTreeMap<String, Value>>,
 }
 impl RestAdapter for Wire {
     fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
         self.requests.lock().unwrap().push(request.url.clone());
+        self.request_data.lock().unwrap().push(request.clone());
         let body = self
             .bodies
             .lock()
@@ -490,6 +492,19 @@ struct Venues {
     kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
 }
 impl RustVenueHost for Venues {
+    fn grvt(
+        &self,
+    ) -> Result<safe_cex_venue_grvt::binding::exchange::GrvtDependencies, ExchangeError> {
+        self.calls.borrow_mut().push("grvt");
+        Ok(safe_cex_venue_grvt::binding::exchange::GrvtDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                self.wire.clone(),
+            ),
+            external_public_data: None,
+        })
+    }
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
         self.calls.borrow_mut().push("kraken");
         Ok(safe_cex_venue_kraken::KrakenDependencies {
@@ -686,6 +701,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bitgetusdc,
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
+            ExchangeName::Grvt,
             ExchangeName::Kraken,
             ExchangeName::Krakenspot,
             ExchangeName::Okx,
@@ -1046,5 +1062,27 @@ fn native_kraken_dependencies_retain_module_state_per_host() {
     assert!(
         !Rc::ptr_eq(&first.futures_nonces, &other.futures_nonces),
         "REGISTRY separate native runtimes have separate module state"
+    );
+}
+
+#[test]
+fn grvt_constructs_through_registry_and_reads_actual_public_gateway() {
+    let host = venues();
+    host.wire.bodies.lock().unwrap().insert("/lite/v1/all_instruments".into(),json!({"r":[{"i":"BTC_USDT_Perp","k":"PERPETUAL","b":"BTC","q":"USDT","ms":"0.001","ts":"0.1","ih":"0x030501","bd":3,"qd":6}]}));
+    let exchange = construct(ExchangeName::Grvt, &host, json!({"key":"","secret":""}));
+    let markets = run(&host.runtime, exchange.fetch_markets()).expect("GRVT registry request");
+    assert_eq!(exchange.name(), &ExchangeName::Grvt);
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].symbol, "BTC_USDT_PERP");
+    assert_eq!(*host.calls.borrow(), ["grvt"]);
+    assert_eq!(
+        host.wire.request_data.lock().unwrap()[0]
+            .base_url
+            .as_deref(),
+        Some("https://market-data.grvt.io")
+    );
+    assert_eq!(
+        host.wire.requests.lock().unwrap()[0],
+        "/lite/v1/all_instruments"
     );
 }

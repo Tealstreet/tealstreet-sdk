@@ -23,6 +23,7 @@ use safe_cex_venue_binance::exchange_classes::{
 use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
+use safe_cex_venue_grvt::binding::exchange::{GrvtDependencies, GrvtExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use std::rc::Rc;
@@ -78,6 +79,7 @@ pub trait RustVenueHost {
     fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
     /// Bitget, Bitget USDC and Bitget inverse share one input set.
     fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
+    fn grvt(&self) -> Result<GrvtDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -101,6 +103,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Grvt, grvt_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
     (ExchangeName::Okx, okx_constructor),
@@ -108,6 +111,12 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
 ];
+
+pub fn grvt_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(GrvtExchange::new(name, options, store, host.grvt()?)?)
+    })
+}
 
 pub fn backpack_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
