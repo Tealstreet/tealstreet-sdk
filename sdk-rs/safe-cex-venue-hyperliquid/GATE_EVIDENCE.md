@@ -40,7 +40,7 @@ aliases, alongside two existing Clone reviews: **59 reviewed of 572 entries,
 513 unreviewed**. Earlier cohort sections below record their original snapshots.
 
 Strict native all-targets clippy and formatting pass. Parity passes with
-7459 rows, 17206 public items and zero findings. The final independent review
+7459 rows, 17214 public items and zero findings. The final independent review
 found no issues after the evidence status was updated.
 
 # Two waiting-status owner reviews
