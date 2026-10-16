@@ -1,7 +1,7 @@
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::{JsJsonValue, js_number_string};
 use safe_cex_types::{Execution, ExecutionsOptions};
-use safe_cex_venue_bitget::history_reads::fetch_historical_fills;
+use safe_cex_venue_bitget::history_reads::{fetch_historical_fills, fetch_historical_uta_fills};
 use serde_json::{Value, json};
 use std::{
     cell::RefCell,
@@ -61,14 +61,15 @@ fn option_number(value: &Value) -> Option<f64> {
 }
 fn execution(value: Execution) -> Value {
     let absent = json!({"$undefined":true});
-    json!({"timestamp":number(value.timestamp),"symbol":value.symbol,"id":value.id.map(Value::String).unwrap_or_else(||absent.clone()),"orderId":value.order_id.map(Value::String).unwrap_or(absent),"price":number(value.price),"qty":number(value.qty),"side":value.side,"commission":number(value.commission.unwrap()),"commissionAsset":value.commission_asset,"realizedPnl":number(value.realized_pnl.unwrap()),"positionSide":value.position_side,"maker":value.maker})
+    let optional = |v: Option<f64>| v.map(number).unwrap_or_else(|| absent.clone());
+    json!({"timestamp":number(value.timestamp),"symbol":value.symbol,"id":value.id.map(Value::String).unwrap_or_else(||absent.clone()),"orderId":value.order_id.map(Value::String).unwrap_or_else(||absent.clone()),"price":number(value.price),"qty":number(value.qty),"side":value.side,"commission":optional(value.commission),"commissionAsset":value.commission_asset.map(Value::String).unwrap_or_else(||absent.clone()),"realizedPnl":optional(value.realized_pnl),"positionSide":value.position_side,"maker":value.maker.map(Value::Bool).unwrap_or_else(||absent.clone())})
 }
 fn check(case: &Value) {
     let c = &case["config"];
     let calls = RefCell::new(Vec::new());
     let opts = ExecutionsOptions {
         symbol: c["opts"]["symbol"].as_str().map(str::to_owned),
-        order_id: None,
+        order_id: c["opts"]["orderId"].as_str().map(str::to_owned),
         from: option_number(&c["opts"]["from"]),
         to: option_number(&c["opts"]["to"]),
         limit: option_number(&c["opts"]["limit"]),
@@ -76,8 +77,63 @@ fn check(case: &Value) {
     let default_rows = json!([{"symbol":"BTC","cTime":"1700000000123","baseVolume":"2.5","price":"11.25","side":"sell","tradeSide":"close","profit":"3.75","fee":"-0.125","tradeId":"a"}]);
     let default_pages = json!([{"rows":default_rows}]);
     let pages = c.get("pages").unwrap_or(&default_pages).as_array().unwrap();
-    let mut index = 0;
+    let index = std::cell::Cell::new(0);
     let mut products = 0;
+    let resolve = |symbol: &str| {
+        calls.borrow_mut().push(json!(["resolve", symbol]));
+        match symbol {
+            "THROW" => Err(ExchangeError::new("resolve failure")),
+            "MISSING" => Ok(None),
+            "EMPTY" => Ok(Some((String::new(), String::new()))),
+            "BTC" => Ok(Some(("BTCUSDT".into(), "BTC/USDT".into()))),
+            _ => Ok(Some((symbol.into(), symbol.into()))),
+        }
+    };
+    let next_page = |label: &str, params: JsJsonValue| {
+        calls.borrow_mut().push(json!([label, tag(params)]));
+        let i = index.get();
+        let page = if c["cycle"] == true {
+            pages.get(i % pages.len())
+        } else {
+            pages.get(i)
+        };
+        index.set(i + 1);
+        std::future::ready(if let Some(error) = page.and_then(|p| p.get("error")) {
+            let mut e = ExchangeError::new("fixture page failure");
+            e.original_error = decode(error);
+            Err(e)
+        } else {
+            Ok((
+                page.and_then(|p| p["rows"].as_array())
+                    .map(|rows| {
+                        rows.iter()
+                            .map(|r| decode(r).unwrap_or(Value::Null))
+                            .collect()
+                    })
+                    .unwrap_or_default(),
+                page.and_then(|p| p["endId"].as_str()).map(str::to_owned),
+            ))
+        })
+    };
+    let error_value = |error: &ExchangeError| {
+        error
+            .original_error
+            .clone()
+            .or_else(|| Some(json!({"message":error.message})))
+    };
+    let report = |message: Option<Value>| {
+        calls.borrow_mut().push(json!([
+            "emit",
+            message
+                .map(|v| tag(JsJsonValue::from(v)))
+                .unwrap_or_else(|| json!({"$undefined":true}))
+        ]));
+        if c["reportError"] == true {
+            Err(ExchangeError::new("report failure"))
+        } else {
+            Ok(())
+        }
+    };
     let result = run(fetch_historical_fills(
         c["public"] == true,
         &opts,
@@ -90,16 +146,23 @@ fn check(case: &Value) {
                 Ok(c["uta"] == true)
             })
         },
-        |symbol| {
-            calls.borrow_mut().push(json!(["resolve", symbol]));
-            match symbol {
-                "THROW" => Err(ExchangeError::new("resolve failure")),
-                "MISSING" => Ok(None),
-                "EMPTY" => Ok(Some((String::new(), String::new()))),
-                "BTC" => Ok(Some(("BTCUSDT".into(), "BTC/USDT".into()))),
-                _ => Ok(Some((symbol.into(), symbol.into()))),
-            }
+        |opts| {
+            fetch_historical_uta_fills(
+                opts,
+                resolve,
+                || {
+                    calls.borrow_mut().push(json!(["category"]));
+                    if c["categoryError"] == true {
+                        Err(ExchangeError::new("category failure"))
+                    } else {
+                        Ok("USDT-FUTURES".into())
+                    }
+                },
+                |params| next_page("utaRead", params),
+                (error_value, report),
+            )
         },
+        resolve,
         || {
             calls
                 .borrow_mut()
@@ -116,52 +179,8 @@ fn check(case: &Value) {
                 .into())
             }
         },
-        |params| {
-            calls.borrow_mut().push(json!(["read", tag(params)]));
-            let page = if c["cycle"] == true {
-                pages.get(index % pages.len())
-            } else {
-                pages.get(index)
-            };
-            index += 1;
-            std::future::ready(if let Some(error) = page.and_then(|p| p.get("error")) {
-                let mut e = ExchangeError::new("fixture page failure");
-                e.original_error = decode(error);
-                Err(e)
-            } else {
-                Ok((
-                    page.and_then(|p| p["rows"].as_array())
-                        .map(|rows| {
-                            rows.iter()
-                                .map(|r| decode(r).unwrap_or(Value::Null))
-                                .collect()
-                        })
-                        .unwrap_or_default(),
-                    page.and_then(|p| p["endId"].as_str()).map(str::to_owned),
-                ))
-            })
-        },
-        (
-            |error: &ExchangeError| {
-                error
-                    .original_error
-                    .clone()
-                    .or_else(|| Some(json!({"message":error.message})))
-            },
-            |message| {
-                calls.borrow_mut().push(json!([
-                    "emit",
-                    message
-                        .map(|v| tag(JsJsonValue::from(v)))
-                        .unwrap_or_else(|| json!({"$undefined":true}))
-                ]));
-                if c["reportError"] == true {
-                    Err(ExchangeError::new("report failure"))
-                } else {
-                    Ok(())
-                }
-            },
-        ),
+        |params| next_page("read", params),
+        (error_value, report),
     ));
     let actual = match result {
         Ok(rows) => json!({"value":rows.into_iter().map(execution).collect::<Vec<_>>()}),
@@ -197,7 +216,7 @@ fn live_historical_fills() {
     let oracle: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         oracle["cases"].as_array().unwrap().len(),
-        87,
+        155,
         "historical fills case inventory"
     );
     assert_eq!(
@@ -254,6 +273,9 @@ fn historical_fills_drops_detection_and_page() {
                     std::future::pending::<()>().await;
                 }
                 Ok(false)
+            },
+            |_| -> std::future::Ready<Result<Vec<safe_cex_types::Execution>, ExchangeError>> {
+                unreachable!("classic routing")
             },
             |_| unreachable!("no rows should resolve"),
             || Ok("USDT-FUTURES".into()),
@@ -312,6 +334,9 @@ fn historical_fills_preserves_escaped_error_metadata() {
                 } else {
                     Ok(false)
                 })
+            },
+            |_| -> std::future::Ready<Result<Vec<safe_cex_types::Execution>, ExchangeError>> {
+                unreachable!("classic routing")
             },
             |_| {
                 if stage == "resolve" {

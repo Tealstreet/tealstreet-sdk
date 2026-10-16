@@ -110,6 +110,7 @@ struct State {
     configs: Vec<V>,
     preimages: Vec<String>,
     emissions: Vec<V>,
+    conditions: Vec<V>,
     fail: String,
 }
 impl H {
@@ -255,10 +256,57 @@ impl AssemblyHost for H {
             }
             "networkErrorOnRead" => {
                 h.event("condition")?;
-                Ok(s("read-only"))
+                Ok(V::F(Rc::new(|e| Ok(V::B(text(&e[0]) == "read")))))
+            }
+            "isBitgetSignatureRejection" => Ok(V::F(Rc::new(|_| Ok(V::B(false))))),
+            "signatureRejectedResponse" => {
+                h.event("signature-condition")?;
+                let predicate = matches!(args[0], V::F(_));
+                Ok(V::F(Rc::new(move |e| {
+                    Ok(V::B(predicate && text(&e[0]) == "sig"))
+                })))
+            }
+            "resendOnSignatureRejection" => {
+                h.event("resend-check")?;
+                assert!(
+                    matches!(args[2], V::F(_)),
+                    "ASSEMBLY native signature predicate"
+                );
+                Ok(V::U)
+            }
+            "typeof" => Ok(s(match &args[0] {
+                V::U => "undefined",
+                V::B(_) => "boolean",
+                V::N(_) => "number",
+                V::S(_) => "string",
+                V::F(_) => "function",
+                _ => "object",
+            })),
+            "WeakSet" => {
+                let members: Rc<RefCell<Vec<V>>> = Rc::default();
+                let added = members.clone();
+                Ok(o(vec![
+                    (
+                        "has",
+                        V::F(Rc::new(move |a| {
+                            Ok(V::B(members.borrow().iter().any(|m| same(m, &a[0]))))
+                        })),
+                    ),
+                    (
+                        "add",
+                        V::F(Rc::new(move |a| {
+                            added.borrow_mut().push(a[0].clone());
+                            Ok(V::U)
+                        })),
+                    ),
+                ]))
             }
             "retry" => {
                 h.event("retry")?;
+                h.state
+                    .borrow_mut()
+                    .conditions
+                    .push(get(&args[1], "retryCondition"));
                 assert!(
                     same(&get(&args[1], "retries"), &V::N(3.)),
                     "ASSEMBLY native retry count"
@@ -526,13 +574,11 @@ fn family_construction_native_then_source() {
                 "base",
                 "secondary-key",
                 "axios",
-                "condition",
                 "retry",
                 "request",
                 "response",
                 "limit",
                 "axios",
-                "condition",
                 "retry",
                 "request",
                 "response",
@@ -710,8 +756,30 @@ fn api_interceptors_native_then_source() {
             ),
             "ASSEMBLY native recv window"
         );
+        let interceptor = h.state.borrow().responses[0].clone();
+        let repeated = invoke(interceptor, vec![response.clone()]).unwrap();
+        assert!(
+            same(&repeated, &response),
+            "ASSEMBLY native repeated response alias"
+        );
+        let raw_body = s("{\"raw\":1}");
+        let raw_input = o(vec![
+            ("url", s("/orders")),
+            ("method", s("post")),
+            ("data", raw_body.clone()),
+            ("headers", o(vec![])),
+        ]);
+        let interceptor = h.state.borrow().requests[0].clone();
+        let raw = invoke(interceptor, vec![raw_input]).unwrap();
+        assert!(
+            same(&get(&raw, "data"), &raw_body),
+            "ASSEMBLY native raw body alias"
+        );
+        let condition = h.state.borrow().conditions[0].clone();
+        let conditions =
+            ["read", "sig", "other"].map(|e| wire(&invoke(condition.clone(), vec![s(e)]).unwrap()));
         cases.push(json!({"scene":scene}));
-        out.push(json!({"request":wire(&request),"preimages":h.state.borrow().preimages,"events":h.state.borrow().events,"emissions":h.state.borrow().emissions.iter().map(wire).collect::<Vec<_>>()}));
+        out.push(json!({"request":wire(&request),"preimages":h.state.borrow().preimages,"events":h.state.borrow().events,"emissions":h.state.borrow().emissions.iter().map(wire).collect::<Vec<_>>(),"conditions":conditions}));
     }
     assert_eq!(cases.len(), 10, "ASSEMBLY independent API floor");
     assert_eq!(
