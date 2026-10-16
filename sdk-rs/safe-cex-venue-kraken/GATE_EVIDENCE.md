@@ -1418,3 +1418,24 @@ SDK dependencies, Cargo/lock, extractor/Yarn/package scripts and relevant
 TypeScript) has no changed paths. Scoped Cargo/mutation exits therefore stand.
 Other venue manifests changed; extractor check at merge SHA returned **0**,
 7341/512, would update 0, added 0, orphaned 0. This is evidence-only.
+
+## Native hosted signer integration (2026-10-17)
+
+`safe-cex-registry/tests/native_host_kraken_signer.rs` runs three local native
+HTTP/WS witnesses. Both Kraken names construct with empty local secrets and
+validate accounts through the shared hosted signer, preserving account/name,
+returned signed wire headers and Spot form bytes, exact balance and read purity.
+The Futures socket asks for a challenge before subscribing; after remote signing
+all four private feeds retain the key, original challenge and returned signature.
+The request pins hosted account, toSign and kraken-challenge output format.
+
+With only the HTTP-host wiring fixed, the WS witness failed101: accountName was
+null instead of hosted-kraken-account. `AuthHost::read(remote)` now reads the live
+parent options injected by shared #151, under its existing capability guard.
+The three native witnesses pass after that fix.
+
+`python3 safe-cex-registry/scripts/kraken-hosted-controls.py` runs two permanent
+compiling controls from sdk-rs. Omitting the native signer fails the HTTP tests;
+reading a missing live signer property fails the WS witness. Each restored tree
+passes all three native witnesses. The controls ran sequentially with one Cargo
+job. Read-only sub-agent review reported no blocking findings.

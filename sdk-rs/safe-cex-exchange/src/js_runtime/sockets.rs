@@ -57,6 +57,8 @@ pub struct SocketCore {
     pub on_close_member: RefCell<Option<Js>>,
     /// The JS `pingAt` value; every write also reaches the core's ping time.
     ping_at: RefCell<Js>,
+    /// Prevent a source `super.dispose()` from dispatching its override again.
+    disposing: Cell<bool>,
 }
 
 struct JsProtocol(Weak<SocketCore>);
@@ -281,6 +283,26 @@ fn binary_data(bytes: &[u8], runtime: Rc<dyn crate::runtime::ExchangeRuntime>) -
 }
 
 impl WsProtocol for JsProtocol {
+    fn dispose(&self) {
+        let Some(core) = self.0.upgrade() else {
+            return;
+        };
+        if core.disposing.replace(true) {
+            return;
+        }
+        let this = core.this.borrow().clone();
+        let result = this.call_method("dispose", vec![]);
+        core.disposing.set(false);
+        // WsProtocol disposal is synchronous and infallible. Report a source
+        // throw through the host and allow core-owned transport cleanup to run.
+        if let Err(thrown) = result {
+            core.context.runtime.report_exception(
+                &core_error(thrown),
+                &serde_json::json!({ "operation": "dispose" }),
+            );
+        }
+    }
+
     fn ping(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         let core = self.core()?;
         let this = core.this.borrow().clone();
@@ -425,7 +447,11 @@ fn base_prototype(context: &Rc<JsSocketContext>) -> Js {
                         && let Some(core) = core_of(&context, &this)
                         && let Some(base) = core.base.get()
                     {
+                        // A direct source override calling super must not
+                        // redispatch itself through the typed protocol hook.
+                        let was_disposing = core.disposing.replace(true);
                         base.dispose();
+                        core.disposing.set(was_disposing);
                     }
                     Ok(Js::Undefined)
                 }),
@@ -459,6 +485,7 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         listeners: RefCell::default(),
         on_close_member: RefCell::default(),
         ping_at: RefCell::new(Js::Number(0.0)),
+        disposing: Cell::new(false),
     });
     let def = |name: &str, f: Js| {
         let _ = socket.define(name, f);

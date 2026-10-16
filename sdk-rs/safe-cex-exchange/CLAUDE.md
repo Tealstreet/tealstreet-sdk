@@ -95,6 +95,13 @@ outcome rather than that preparation failed. Doing the fetch in the venue and
 then calling `start_websocket` reopens exactly the disposal and stale-generation
 races this operation exists to own.
 
+JS-backed sockets dispatch typed disposal through the live receiver's `dispose`
+member. The facade guards both that dispatch and the base prototype's
+`super.dispose()` path against reentry. A source throw is reported through the
+runtime; the infallible protocol hook still permits core transport cleanup.
+The Weex source-member witness covers timer/listener cleanup, superclass order,
+direct and typed calls, repeated disposal and guard reset after errors.
+
 Socket options use `None` for omitted SDK tuning and `Some(options)` for explicit
 RWS options, including an empty object. Make absence a distinct representable
 state rather than a default value. Header presence does not select tuning.

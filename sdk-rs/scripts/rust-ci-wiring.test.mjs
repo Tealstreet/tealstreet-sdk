@@ -3,6 +3,7 @@ import './parity-toolchain.test.mjs';
 import './check-layers.test.mjs';
 import '../safe-cex-types/tests/ci-deps.test.cjs';
 import '../safe-cex-venue-binance/scripts/types-toolchain.test.mjs';
+import '../safe-cex-parity/scripts/review-contract-proposals.test.mjs';
 import assert from 'node:assert/strict';
 import fs, { existsSync, readFileSync } from 'node:fs';
 import test from 'node:test';
