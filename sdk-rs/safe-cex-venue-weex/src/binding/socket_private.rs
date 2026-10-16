@@ -35,7 +35,7 @@ fn unsupported(h: &Host, reason: Option<&[u16]>) -> Result<(), Thrown> {
 fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
     WeexPrivateFeedRuntime {
         disposed,
-        supported_runtime: |_| Ok(!cfg!(target_arch = "wasm32")),
+        supported_runtime: |_| Ok(!std::cfg!(target_arch = "wasm32")),
         credential: |h, key| parent(h)?.get("options")?.get(key),
         truthy: Js::truthy,
         undefined: Js::is_undefined,
@@ -50,7 +50,7 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
         make_undefined: |_| Ok(Js::Undefined),
         uppercase: |_, s| {
             Js::utf16(s)
-                .call_method("toUpperCase", vec![])
+                .call_method("toUpperCase", std::vec![])
                 .and_then(|s| v::units(&s))
         },
         map_length: |_, v| v::length(v),
@@ -62,7 +62,7 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
                 Ok(None)
             }
         },
-        empty_array: |_| Ok(Js::array(vec![])),
+        empty_array: |_| Ok(Js::array(std::vec![])),
         iterator: v::iterator,
         iterator_next: v::next,
         iterator_close: |_, _| Ok(()),
@@ -100,7 +100,7 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
             call_unit(
                 h,
                 "store.addOrUpdateOrders",
-                vec![Js::array(orders.clone())],
+                std::vec![Js::array(orders.clone())],
             )
         },
         order_status: |v| v.get("status").ok().and_then(|v| to_typed(&v).ok()),
@@ -108,19 +108,23 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
             call_unit(
                 h,
                 "store.updateOrderStatus",
-                vec![Js::object(vec![("id", id)]), status],
+                std::vec![Js::object(std::vec![("id", id)]), status],
             )
         },
         add_positions: |h, positions| {
-            call_unit(h, "store.addOrUpdatePositions", vec![Js::array(positions)])
+            call_unit(
+                h,
+                "store.addOrUpdatePositions",
+                std::vec![Js::array(positions)],
+            )
         },
         emit_fill: |h, fill| {
             parent_call(
                 h,
                 "emitter.emit",
-                vec![
+                std::vec![
                     Js::str("fill"),
-                    Js::object(vec![
+                    Js::object(std::vec![
                         ("id", Js::utf16(&fill.id)),
                         ("orderId", Js::utf16(&fill.order_id)),
                         ("side", fill.side),
@@ -135,13 +139,13 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
             )?;
             Ok(())
         },
-        track_received: |h| call_unit(h, "trackLastReceived", vec![]),
+        track_received: |h| call_unit(h, "trackLastReceived", std::vec![]),
         subscription_id: |h| h.root("subscriptionId")?.to_number(),
         set_subscription_id: |h, id| h.this().set("subscriptionId", Js::Number(id)),
         send_pong: |h, id| frame(h, "PONG", None, id, false),
-        handle_pong: |h, ms| call_unit(h, "handlePongEvent", vec![Js::Number(ms)]),
+        handle_pong: |h, ms| call_unit(h, "handlePongEvent", std::vec![Js::Number(ms)]),
         warning: |h, message| warn(h, Js::utf16(&message)),
-        record_stats: |h, key| call_unit(h, "recordMessageHandlerStats", vec![key.clone()]),
+        record_stats: |h, key| call_unit(h, "recordMessageHandlerStats", std::vec![key.clone()]),
         log_unsupported: |h, reason| {
             unsupported(
                 h,
@@ -156,12 +160,12 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
             let headers = Js::function("headers", move |_, _| provider(&weak()?));
             h.call(
                 "createWebsocket",
-                vec![
+                std::vec![
                     Js::str(url),
                     protocols.map_or(Js::Undefined, |ps| {
                         Js::array(ps.iter().map(|s| Js::str(s)).collect())
                     }),
-                    Js::object(vec![
+                    Js::object(std::vec![
                         ("headers", headers),
                         ("headersRequired", Js::Bool(required)),
                     ]),
@@ -176,7 +180,10 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
                 "message" => "onMessage",
                 _ => "onClose",
             };
-            ws.call_method("addEventListener", vec![Js::str(event), h.root(member)?])?;
+            ws.call_method(
+                "addEventListener",
+                std::vec![Js::str(event), h.root(member)?],
+            )?;
             Ok(())
         },
         header_unavailable: |error| {
@@ -214,20 +221,22 @@ fn runtime() -> WeexPrivateFeedRuntime<Host, Js, Js, Js, Thrown> {
                 WeexRefreshKind::Positions => "fetchPositions",
                 WeexRefreshKind::Balance => "fetchBalance",
             };
-            let pending = parent_call(h, method, vec![])?;
+            let pending = parent_call(h, method, std::vec![])?;
             Ok(Box::pin(await_js(pending)))
         },
         apply_refresh: |h, kind, value| match kind {
-            WeexRefreshKind::Orders => {
-                call_unit(h, "store.update", vec![Js::object(vec![("orders", value)])])
-            }
+            WeexRefreshKind::Orders => call_unit(
+                h,
+                "store.update",
+                std::vec![Js::object(std::vec![("orders", value)])],
+            ),
             WeexRefreshKind::Balance => call_unit(
                 h,
                 "store.update",
-                vec![Js::object(vec![("balance", value)])],
+                std::vec![Js::object(std::vec![("balance", value)])],
             ),
             WeexRefreshKind::Positions => {
-                call_unit(h, "store.addOrUpdatePositionsFull", vec![value])
+                call_unit(h, "store.addOrUpdatePositionsFull", std::vec![value])
             }
         },
         report_refresh_error: |h, _, error| {
@@ -268,7 +277,7 @@ pub(super) fn dispatch(mut h: Host, name: &'static str, args: Vec<Js>) -> Result
                 "subscribe" => control::private_subscribe(&mut h, &mut state, &runtime),
                 "onOpen" => control::private_on_open(&mut h, &mut state, &runtime),
                 _ => {
-                    return Err(Thrown::type_error(&format!(
+                    return Err(Thrown::type_error(&std::format!(
                         "Unknown WEEX private socket member {name}"
                     )));
                 }
