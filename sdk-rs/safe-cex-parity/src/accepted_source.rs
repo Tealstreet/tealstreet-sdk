@@ -680,7 +680,11 @@ impl LocalTypes {
             && match origin.as_str() {
                 "std" | "core" => !matches!(name.as_str(), "json" | "Token"),
                 "serde_json" => name == "json",
-                "syn" => name == "Token",
+                // syn 2.0.119/3.0.7 grouping arms are a match on private parse helpers.
+                "syn" => matches!(
+                    name.as_str(),
+                    "Token" | "braced" | "bracketed" | "parenthesized"
+                ),
                 _ => false,
             };
         if !qualified {
@@ -1547,6 +1551,9 @@ fn expression_macro(name: &str) -> bool {
             | "thread_local"
             | "pin"
             | "Token"
+            | "braced"
+            | "bracketed"
+            | "parenthesized"
     )
 }
 
@@ -1835,6 +1842,41 @@ mod tests {
         assert!(
             labels.contains(&"LOCAL_TRAIT_IMPL:serde::de::Visitor:Loose"),
             "free functions bind no owner: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn syn_grouping_macros_need_the_verified_syn_origin() {
+        let source = "fn parse(input: ParseStream) -> Result<()> { let content; syn::braced!(content in input); let inner; syn::parenthesized!(inner in content); let list; syn::bracketed!(list in inner); Ok(()) }";
+        let syntax = syn::parse_file(source).unwrap();
+        let mut verified = verified_test_visitor();
+        verified.visit_file(&syntax);
+        assert!(verified.names.is_empty(), "{:?}", verified.names);
+        for origins in [vec!["std", "core"], vec!["std", "core", "serde_json"]] {
+            let mut unverified = LocalTypes {
+                verified_macro_origins: origins.into_iter().map(str::to_owned).collect(),
+                ..LocalTypes::default()
+            };
+            unverified.visit_file(&syntax);
+            assert!(
+                unverified
+                    .names
+                    .iter()
+                    .any(|row| row.0 == "UNSUPPORTED_LOCAL_MACRO:braced"),
+                "{:?}",
+                unverified.names
+            );
+        }
+        let mut vendor = verified_test_visitor();
+        vendor
+            .visit_file(&syn::parse_file("fn f() { vendor::braced!(content in input); }").unwrap());
+        assert!(
+            vendor
+                .names
+                .iter()
+                .any(|row| row.0 == "UNSUPPORTED_LOCAL_MACRO:braced"),
+            "{:?}",
+            vendor.names
         );
     }
 
