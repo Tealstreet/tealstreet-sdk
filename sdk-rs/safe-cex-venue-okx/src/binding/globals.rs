@@ -328,6 +328,7 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     let def = |k: &str, v: Js| {
         let _ = g.define(k, v);
     };
+    signature_bindings(g);
     let w = weak.clone();
     def(
         "safeCexAxiosCreate",
@@ -374,7 +375,7 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     def(
         "markSkipRemoteSigning",
         Js::function("markSkipRemoteSigning", |_, a| {
-            arg(&a, 0).set("__skipRemoteSigning", Js::Bool(true))?;
+            arg(&a, 0).set("safeCexSkipRemoteSigning", Js::Bool(true))?;
             Ok(Js::Undefined)
         }),
     );
@@ -402,6 +403,65 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     );
 }
 
+/// The three imports used by the source API's lazy retry arrow and final
+/// response interceptor. Keep the stamp on the actual config object so both
+/// retry paths observe it when the full request chain runs again.
+fn signature_bindings(g: &Js) {
+    use safe_cex_transport::signature_rejection::SIGNATURE_RETRY_CONFIG_KEY as KEY;
+    let _ = g.define(
+        "isOkxSignatureRejection",
+        Js::function("isOkxSignatureRejection", |_, a| {
+            crate::api::is_okx_signature_rejection(&to_json(&arg(&a, 0))?)
+                .map(Js::Bool)
+                .map_err(coercion)
+        }),
+    );
+    let _ = g.define(
+        "signatureRejectedResponse",
+        Js::function("signatureRejectedResponse", |_, a| {
+            let predicate = arg(&a, 0);
+            Ok(Js::function("", move |_, a| {
+                let error = arg(&a, 0);
+                let config = error.get("config")?;
+                if !config.truthy() {
+                    return Ok(Js::Bool(false));
+                }
+                let response = error.get("response")?;
+                if !response.truthy() || config.get(KEY)?.truthy() {
+                    return Ok(Js::Bool(false));
+                }
+                if !predicate
+                    .call(Js::Undefined, vec![response.get("data")?])?
+                    .truthy()
+                {
+                    return Ok(Js::Bool(false));
+                }
+                config.set(KEY, Js::Bool(true))?;
+                Ok(Js::Bool(true))
+            }))
+        }),
+    );
+    let _ = g.define(
+        "resendOnSignatureRejection",
+        Js::function("resendOnSignatureRejection", |_, a| {
+            let xhr = arg(&a, 0);
+            let response = arg(&a, 1);
+            let predicate = arg(&a, 2);
+            let config = response.get("config")?;
+            if (!config.is_nullish() && config.get(KEY)?.truthy())
+                || !predicate
+                    .call(Js::Undefined, vec![response.get("data")?])?
+                    .truthy()
+            {
+                return Ok(Js::Undefined);
+            }
+            let stamped = config.spread_object()?;
+            stamped.define(KEY, Js::Bool(true))?;
+            xhr.call_method("request", vec![stamped])
+        }),
+    );
+}
+
 /// The whole OKX module scope.
 pub(crate) fn build(weak: Weak<OkxShared>) -> Js {
     let g = Js::object(vec![]);
@@ -413,4 +473,85 @@ pub(crate) fn build(weak: Weak<OkxShared>) -> Js {
     transport(&g, weak.clone());
     super::sockets::register(&g, weak);
     g
+}
+
+#[cfg(test)]
+mod signature_tests {
+    use super::*;
+    use std::cell::{Cell, RefCell};
+
+    #[test]
+    fn retry_bindings_stamp_the_replayed_config_and_preserve_resend_identity() {
+        let globals = Js::object(vec![]);
+        signature_bindings(&globals);
+        let predicate = globals.get("isOkxSignatureRejection").unwrap();
+        let condition = globals
+            .call_method("signatureRejectedResponse", vec![predicate.clone()])
+            .unwrap();
+        let data = Js::object(vec![("code", Js::str("50113"))]);
+        let config = Js::object(vec![("url", Js::str("/api/v5/trade/order"))]);
+        let response = Js::object(vec![("config", config.clone()), ("data", data.clone())]);
+        let error = Js::object(vec![("config", config.clone()), ("response", response)]);
+        assert!(
+            condition
+                .call(Js::Undefined, vec![error.clone()])
+                .unwrap()
+                .truthy()
+        );
+        assert!(config.get("safeCexSignatureRetry").unwrap().truthy());
+        assert!(!condition.call(Js::Undefined, vec![error]).unwrap().truthy());
+        let missing = Js::object(vec![("response", Js::object(vec![("data", data.clone())]))]);
+        assert!(
+            !condition
+                .call(Js::Undefined, vec![missing])
+                .unwrap()
+                .truthy()
+        );
+
+        let calls = Rc::new(Cell::new(0));
+        let captured = Rc::new(RefCell::new(Js::Undefined));
+        let result = Js::object(vec![("resent", Js::Bool(true))]);
+        let (count, next, settled) = (calls.clone(), captured.clone(), result.clone());
+        let xhr = Js::object(vec![(
+            "request",
+            Js::function("request", move |_, a| {
+                count.set(count.get() + 1);
+                *next.borrow_mut() = arg(&a, 0);
+                Ok(settled.clone())
+            }),
+        )]);
+        let original = Js::object(vec![("url", Js::str("/api/v5/trade/order"))]);
+        let response = Js::object(vec![("config", original.clone()), ("data", data.clone())]);
+        let resent = globals
+            .call_method(
+                "resendOnSignatureRejection",
+                vec![xhr.clone(), response, predicate.clone()],
+            )
+            .unwrap();
+        assert!(
+            resent.same_reference(&result),
+            "resend result is returned unchanged"
+        );
+        assert_eq!(calls.get(), 1);
+        let stamped = captured.borrow().clone();
+        assert!(stamped.get("safeCexSignatureRetry").unwrap().truthy());
+        assert_eq!(
+            text(&stamped.get("url").unwrap()).unwrap(),
+            "/api/v5/trade/order"
+        );
+        assert!(
+            original
+                .get("safeCexSignatureRetry")
+                .unwrap()
+                .is_undefined()
+        );
+        let response = Js::object(vec![("config", stamped), ("data", data)]);
+        assert!(
+            globals
+                .call_method("resendOnSignatureRejection", vec![xhr, response, predicate])
+                .unwrap()
+                .is_undefined()
+        );
+        assert_eq!(calls.get(), 1, "a stamped response is never resent twice");
+    }
 }

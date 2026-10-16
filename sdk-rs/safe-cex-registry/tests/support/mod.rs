@@ -37,6 +37,7 @@ pub struct Seen {
     pub method: String,
     pub path: String,
     pub query: String,
+    pub body: String,
     pub headers: HashMap<String, String>,
 }
 
@@ -126,11 +127,21 @@ pub async fn serve_http(listener: TcpListener, handler: Handler, seen: Rc<RefCel
                 method: method.clone(),
                 path: path.into(),
                 query: query.into(),
+                body: String::from_utf8_lossy(&buf[head_end + 4..head_end + 4 + length])
+                    .into_owned(),
                 headers,
             };
             let answer = handler(&request);
             seen.borrow_mut().push(request);
             let (status, body) = match answer {
+                // A handler picks a non-200 status with {"__status": 400, "body": ...}.
+                Some(reply) if reply.get("__status").is_some() => (
+                    match reply["__status"].as_u64() {
+                        Some(400) => "400 Bad Request",
+                        other => panic!("unsupported fixture status {other:?}"),
+                    },
+                    reply["body"].to_string(),
+                ),
                 Some(body) => ("200 OK", body.to_string()),
                 None => (
                     "404 Not Found",
@@ -395,8 +406,18 @@ pub async fn venue_harness(
         }) as Arc<dyn RestAdapter>)
     });
     let host = match signer {
-        Some((signer, account)) => native_venue_host_signed(host, adapters, signer, account),
-        None => native_venue_host_with(host, adapters),
+        Some((signer, account)) => native_venue_host_signed(
+            host,
+            adapters,
+            signer,
+            account,
+            safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+        ),
+        None => native_venue_host_with(
+            host,
+            adapters,
+            safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+        ),
     };
     let constructor =
         rust_constructor(&name, host).expect("a Rust-constructed venue in the registry table");

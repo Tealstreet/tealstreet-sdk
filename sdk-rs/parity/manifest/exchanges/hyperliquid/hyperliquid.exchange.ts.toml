@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.exchange.ts"
-rust_files = [ "safe-cex-venue-hyperliquid/src/exchange_helpers.rs", "safe-cex-venue-hyperliquid/src/json_boundaries.rs", "safe-cex-venue-hyperliquid/src/market_helpers.rs", "safe-cex-venue-hyperliquid/src/core_exchange_leaves.rs", "safe-cex-venue-hyperliquid/src/core_exchange_class.rs", "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs", "safe-cex-venue-hyperliquid/src/exchange.rs", "safe-cex-venue-hyperliquid/src/startup_timeout.rs", "safe-cex-venue-hyperliquid/src/market_data_selectors.rs", "safe-cex-venue-hyperliquid/src/cache_orders.rs", "safe-cex-venue-hyperliquid/src/account_position_leaves.rs", "safe-cex-venue-hyperliquid/src/startup_account_resolution.rs", "safe-cex-venue-hyperliquid/src/balance_state.rs", "safe-cex-venue-hyperliquid/src/order_request_leaves.rs", "safe-cex-venue-hyperliquid/src/startup_lifecycle.rs", "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs", "safe-cex-venue-hyperliquid/src/core_rest_reads.rs", "safe-cex-venue-hyperliquid/src/market_bootstrap.rs", "safe-cex-venue-hyperliquid/src/spot_market_bootstrap.rs", "safe-cex-venue-hyperliquid/src/core_position_order_state.rs", "safe-cex-venue-hyperliquid/src/hip3_position_refresh.rs", "safe-cex-venue-hyperliquid/src/order_reads.rs", "safe-cex-venue-hyperliquid/src/order_retry.rs", "safe-cex-venue-hyperliquid/src/limit_orders.rs", "safe-cex-venue-hyperliquid/src/placement_dispatch.rs", "safe-cex-venue-hyperliquid/src/cancellation.rs", "safe-cex-venue-hyperliquid/src/order_update.rs", "safe-cex-venue-hyperliquid/src/spot_account_reads.rs", "safe-cex-venue-hyperliquid/src/helper_tasks.rs" ]
+rust_files = [ "safe-cex-venue-hyperliquid/src/exchange_helpers.rs", "safe-cex-venue-hyperliquid/src/json_boundaries.rs", "safe-cex-venue-hyperliquid/src/market_helpers.rs", "safe-cex-venue-hyperliquid/src/core_exchange_leaves.rs", "safe-cex-venue-hyperliquid/src/core_exchange_class.rs", "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs", "safe-cex-venue-hyperliquid/src/exchange.rs", "safe-cex-venue-hyperliquid/src/startup_timeout.rs", "safe-cex-venue-hyperliquid/src/market_data_selectors.rs", "safe-cex-venue-hyperliquid/src/cache_orders.rs", "safe-cex-venue-hyperliquid/src/account_position_leaves.rs", "safe-cex-venue-hyperliquid/src/startup_account_resolution.rs", "safe-cex-venue-hyperliquid/src/balance_state.rs", "safe-cex-venue-hyperliquid/src/order_request_leaves.rs", "safe-cex-venue-hyperliquid/src/startup_lifecycle.rs", "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs", "safe-cex-venue-hyperliquid/src/core_rest_reads.rs", "safe-cex-venue-hyperliquid/src/market_bootstrap.rs", "safe-cex-venue-hyperliquid/src/spot_market_bootstrap.rs", "safe-cex-venue-hyperliquid/src/core_position_order_state.rs", "safe-cex-venue-hyperliquid/src/hip3_position_refresh.rs", "safe-cex-venue-hyperliquid/src/order_reads.rs", "safe-cex-venue-hyperliquid/src/order_retry.rs", "safe-cex-venue-hyperliquid/src/limit_orders.rs", "safe-cex-venue-hyperliquid/src/placement_dispatch.rs", "safe-cex-venue-hyperliquid/src/cancellation.rs", "safe-cex-venue-hyperliquid/src/order_update.rs", "safe-cex-venue-hyperliquid/src/spot_account_reads.rs", "safe-cex-venue-hyperliquid/src/helper_tasks.rs", "safe-cex-venue-hyperliquid/src/binding.rs" ]
 
 [[symbol]]
 ts = "parseFiniteNumber"
@@ -125,34 +125,34 @@ note = "Source cache delegation: fresh getCrossCache dependency then receiver-bo
 [[symbol]]
 ts = "HyperliquidExchange.forgetPrePlacement"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_forget_pre_placement"
+status = "ported"
+note = "Source cache delegation: fresh getCrossCache dependency then receiver-bound method lookup/call with exact argument count/order; readers return the callee's native handle, void writers discard it. Witness: tests/cross_cache_leaves.rs::native_fifteen_cache_order_methods_match_actual_source runs scripts/cache-orders-oracle.cjs over the actual exchange member (137 fixed cases through136, eight per delegator: result, undefined, null, singleton/method/getter throws, lone surrogate/signed zero, opaque identity). Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_forget_pre_placement`."
 
 [[symbol]]
 ts = "HyperliquidExchange.recordPlacement"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_record_placement", "safe-cex-venue-hyperliquid/src/cache_orders.rs::CacheOrdersHost::imported" ]
+status = "ported"
+note = "One Date.now and one getCrossCache read, then for-of over the wires: a truthy wire.c builds placementRecordFromWire(wire, symbol, placedAt) and adds it under a fresh wire.c read; a body throw closes the iterator. Witness: tests/cross_cache_leaves.rs::native_fifteen_cache_order_methods_match_actual_source runs scripts/cache-orders-oracle.cjs over the actual member (nine recordPlacement cases: mixed/empty wires and clock, singleton, builder, add, cloid-getter, binding and add-getter throws). Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_record_placement`. Split member `safe-cex-venue-hyperliquid/src/cache_orders.rs::CacheOrdersHost::imported` - the host-bound placementRecordFromWire module binding."
 
 [[symbol]]
 ts = "HyperliquidExchange.getPlacementRecord"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_get_placement_record"
+status = "ported"
+note = "Source cache delegation: fresh getCrossCache dependency then receiver-bound method lookup/call with exact argument count/order; readers return the callee's native handle, void writers discard it. Witness: tests/cross_cache_leaves.rs::native_fifteen_cache_order_methods_match_actual_source runs scripts/cache-orders-oracle.cjs over the actual exchange member (137 fixed cases through136, eight per delegator: result, undefined, null, singleton/method/getter throws, lone surrogate/signed zero, opaque identity). Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_get_placement_record`."
 
 [[symbol]]
 ts = "HyperliquidExchange.forgetPlacementRecord"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_forget_placement_record"
+status = "ported"
+note = "Source cache delegation: fresh getCrossCache dependency then receiver-bound method lookup/call with exact argument count/order; readers return the callee's native handle, void writers discard it. Witness: tests/cross_cache_leaves.rs::native_fifteen_cache_order_methods_match_actual_source runs scripts/cache-orders-oracle.cjs over the actual exchange member (137 fixed cases through136, eight per delegator: result, undefined, null, singleton/method/getter throws, lone surrogate/signed zero, opaque identity). Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_forget_placement_record`."
 
 [[symbol]]
 ts = "HyperliquidExchange.matchPrePlacement"
@@ -165,10 +165,10 @@ note = "Source cache delegation: fresh getCrossCache dependency then receiver-bo
 [[symbol]]
 ts = "HyperliquidExchange.matchPrePlacementTrigger"
 kind = "method"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_match_pre_placement_trigger"
+status = "ported"
+note = "Source cache delegation: fresh getCrossCache dependency then receiver-bound method lookup/call with exact argument count/order; readers return the callee's native handle, void writers discard it. Witness: tests/cross_cache_leaves.rs::native_fifteen_cache_order_methods_match_actual_source runs scripts/cache-orders-oracle.cjs over the actual exchange member (137 fixed cases through136, eight per delegator: result, undefined, null, singleton/method/getter throws, lone surrogate/signed zero, opaque identity). Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::exchange_match_pre_placement_trigger`."
 
 [[symbol]]
 ts = "HyperliquidExchange.getPendingHip3Order"
@@ -246,9 +246,9 @@ note = "CHOSEN shared string boundary: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf
 ts = "HyperliquidExchange.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/core_exchange_class.rs::construct_core_exchange_class", "safe-cex-venue-hyperliquid/src/exchange.rs::HyperliquidExchange::from_base" ]
+rs = [ "safe-cex-venue-hyperliquid/src/core_exchange_class.rs::construct_core_exchange_class", "safe-cex-venue-hyperliquid/src/exchange.rs::HyperliquidExchange::from_base", "safe-cex-venue-hyperliquid/src/binding.rs::HyperliquidExchange::new", "safe-cex-venue-hyperliquid/src/binding.rs::HyperliquidDependencies", "safe-cex-venue-hyperliquid/src/binding.rs::RuntimeClock", "safe-cex-venue-hyperliquid/src/binding.rs::RuntimeClock::new" ]
 status = "ported"
-note = "Behaviour finding repaired: source-order121 field initialization follows super with original three arguments/newTarget; then original opts feed createExchangeAPI/rateLimit(maxRPS3), createInfoAPI, unlimited API and native public/private socket construction in source order. Native imported callee/class allocation bindings remain explicit; the source/native constructor floor stops at second instance. Legacy from_base remains a typed state adapter and is not the source constructor. Rename target: `safe-cex-venue-hyperliquid/src/core_exchange_class.rs::construct_core_exchange_class`. Split member `safe-cex-venue-hyperliquid/src/exchange.rs::HyperliquidExchange::from_base` - typed partial constructor composition over BaseExchange; API clients and sockets are attached by the native class path."
+note = "Behaviour finding repaired: source-order121 field initialization follows super with original three arguments/newTarget; then original opts feed createExchangeAPI/rateLimit(maxRPS3), createInfoAPI, unlimited API and native public/private socket construction in source order. Native imported callee/class allocation bindings remain explicit; the source/native constructor floor stops at second instance. Legacy from_base remains a typed state adapter and is not the source constructor. Rename target: `safe-cex-venue-hyperliquid/src/core_exchange_class.rs::construct_core_exchange_class`. Split member `safe-cex-venue-hyperliquid/src/exchange.rs::HyperliquidExchange::from_base` - typed partial constructor composition over BaseExchange; API clients and sockets are attached by the native class path. Production composition: `safe-cex-venue-hyperliquid/src/binding.rs::HyperliquidExchange::new` builds the shared BaseExchange (2000ms tick, public-only support, the cloid rule), then runs this ported constructor inside the venue realm over the BaseExchange/BaseWebSocket/Store facades, so trait methods invoke the instance's ported methods; tests/binding.rs drives all 16 Exchange methods over a scripted host with one prove-fail per method. Split member `safe-cex-venue-hyperliquid/src/binding.rs::HyperliquidDependencies` - the host runtime, composed HTTP transport, process-wide weight limiter and required ExchangeSigners, attached to BaseExchange before realm assembly. tests/binding.rs::hosted_signer_reaches_native_capability_and_availability_without_a_secret checks native can_sign and availability subscription/cleanup for a hosted account without a local secret. Split member `safe-cex-venue-hyperliquid/src/binding.rs::RuntimeClock` - the limiter clock over the runtime's monotonic clock and sleep. Split member `safe-cex-venue-hyperliquid/src/binding.rs::RuntimeClock::new` - its constructor."
 
 [[symbol]]
 ts = "HyperliquidExchange.get hasPrivateSessionIdentity"
@@ -693,18 +693,18 @@ note = "Source position/order ingestion body and owned callbacks in Rust, with f
 [[symbol]]
 ts = "HyperliquidExchange#mapOpenOrderRow"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::map_open_order_row"
+status = "ported"
+note = "Generated from the actual member by scripts/position-state-generate.cjs: one venue open-order row to an Order with the caller's status, cloid read through readHyperliquidCloid and the placement-record type/price/TIF overlay. Witness: tests/core_position_order_state.rs::actual_source_position_order_state_native_values runs scripts/position-state-oracle.cjs (116 cases, including the cloid-record cases). Rename target: `safe-cex-venue-hyperliquid/src/core_position_order_state.rs::map_open_order_row`."
 
 [[symbol]]
 ts = "HyperliquidExchange.findOrderByClientOrderId"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/order_reads.rs::find_order_by_client_order_id"
+status = "ported"
+note = "Store lookup by symbol then orderCarriesClientOrderId; without a vault/applicationId user or a pattern-valid cloid the result is the not-found, non-definitive literal; otherwise one orderStatus info POST by cloid, open/triggered as Open, filled as Closed and anything else as Canceled through mapOpenOrderRow, kept only on a matching symbol. Witness: tests/order_reads.rs::native_find_order_by_client_order_id_before_source runs tests/order-find-oracle.cjs over the actual member with the actual HYPERLIQUID_CLOID_PATTERN (15 scenes); native results and effects are asserted before the source comparison. Rename target: `safe-cex-venue-hyperliquid/src/order_reads.rs::find_order_by_client_order_id`."
 
 [[symbol]]
 ts = "HyperliquidExchange.fetchIncomeHistory"
@@ -808,7 +808,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/limit_orders.rs::create_limit_order_wires"
 status = "ported"
-note = "Source limit requests and asynchronous signed placement bodies with native property/callee, unary conversion, one-element binding and iterator contracts. Preserves main/SL/TP request insertion order and spot reduce-only composition, fresh TP grouping after builder await, signature/payload input handles, post-sign market read retained across REST await, preplacement before REST, first-ID TIF and optimistic pending/store updates before retry. Native35case floor through34 place/wrong-type precedes source launch, plus actual dropped-observer adoption; independent requests/values/bits/UTF16, action/signature/payload aliases, errors, prefix effects and full optimistic fields. Actual existing Rust resolve_reduce_only is composed; wire formatter, action/signing and primitive implementations remain explicit bindings. General getter/proxy/coercion/live iterator domains, first-binding IteratorClose implementation, GC/full Promise scheduling and concrete class assembly are outside this floor. Canonical contracts: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Rename target: `safe-cex-venue-hyperliquid/src/limit_orders.rs::create_limit_order_wires`."
+note = "Source limit requests and asynchronous signed placement bodies with native property/callee, unary conversion, one-element binding and iterator contracts. Preserves main/SL/TP request insertion order and spot reduce-only composition, fresh TP grouping after builder await, signature/payload input handles, post-sign market read retained across REST await, preplacement before REST, first-ID TIF and optimistic pending/store updates before retry. Native35case floor through34 place/wrong-type precedes source launch, plus actual dropped-observer adoption; independent requests/values/bits/UTF16, action/signature/payload aliases, errors, prefix effects and full optimistic fields. Actual existing Rust resolve_reduce_only is composed; wire formatter, action/signing and primitive implementations remain explicit bindings. General getter/proxy/coercion/live iterator domains, first-binding IteratorClose implementation, GC/full Promise scheduling and concrete class assembly are outside this floor. Canonical contracts: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Rename target: `safe-cex-venue-hyperliquid/src/limit_orders.rs::create_limit_order_wires`. Cloid: an omitted cloid parameter mints one (default-parameter evaluation), and every leg wire carries its own minted cloid."
 
 [[symbol]]
 ts = "HyperliquidExchange.placeLimitOrder"
@@ -816,7 +816,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/limit_orders.rs::place_limit_order"
 status = "ported"
-note = "Source limit requests and asynchronous signed placement bodies with native property/callee, unary conversion, one-element binding and iterator contracts. Preserves main/SL/TP request insertion order and spot reduce-only composition, fresh TP grouping after builder await, signature/payload input handles, post-sign market read retained across REST await, preplacement before REST, first-ID TIF and optimistic pending/store updates before retry. Native35case floor through34 place/wrong-type precedes source launch, plus actual dropped-observer adoption; independent requests/values/bits/UTF16, action/signature/payload aliases, errors, prefix effects and full optimistic fields. Actual existing Rust resolve_reduce_only is composed; wire formatter, action/signing and primitive implementations remain explicit bindings. General getter/proxy/coercion/live iterator domains, first-binding IteratorClose implementation, GC/full Promise scheduling and concrete class assembly are outside this floor. Canonical contracts: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Rename target: `safe-cex-venue-hyperliquid/src/limit_orders.rs::place_limit_order`."
+note = "Source limit requests and asynchronous signed placement bodies with native property/callee, unary conversion, one-element binding and iterator contracts. Preserves main/SL/TP request insertion order and spot reduce-only composition, fresh TP grouping after builder await, signature/payload input handles, post-sign market read retained across REST await, preplacement before REST, first-ID TIF and optimistic pending/store updates before retry. Native35case floor through34 place/wrong-type precedes source launch, plus actual dropped-observer adoption; independent requests/values/bits/UTF16, action/signature/payload aliases, errors, prefix effects and full optimistic fields. Actual existing Rust resolve_reduce_only is composed; wire formatter, action/signing and primitive implementations remain explicit bindings. General getter/proxy/coercion/live iterator domains, first-binding IteratorClose implementation, GC/full Promise scheduling and concrete class assembly are outside this floor. Canonical contracts: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Rename target: `safe-cex-venue-hyperliquid/src/limit_orders.rs::place_limit_order`. Cloid: an omitted cloid parameter mints one; the wires are recorded through recordPlacement before the REST call."
 
 [[symbol]]
 ts = "HyperliquidExchange#resolveReduceOnly"
@@ -840,15 +840,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/placement_dispatch.rs::place_order"
 status = "ported"
-note = "Source market/limit/TP-SL dispatcher and serial placement bodies preserve caller-ID guard order, fresh type/side reads, precision capture and primitive conversion boundaries, zero/full position size versus action grouping, signed payload identities, cached market across awaits, market-only TIF, deferred empty-response refresh, HIP-3 prefix/store/retry effects and body-only iterator close. Owned serial callback dynamically looks up placeOrder for each call, returns its original result, awaits mapSeries then flattens one level. Native33case floor through32 serial-drop plus direct actual dropped observers precedes source launch; actual Rust dispatcher composes serial limit rows and existing resolve_reduce_only composes wire bodies. Native request bits/UTF16/fields, full optimistic fields, original payload/IDs/nested aliases and independent calls/output counts are asserted. The source oracle uses installed p-iteration mapSeries; native dense-array sequencing is a fixture binding, not a complete imported-helper proof. General getters/proxies/coercions/live iteration, primitive/signing/helper implementations, GC/full scheduling and concrete class assembly remain outside this floor. Canonical contracts: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Rename target: `safe-cex-venue-hyperliquid/src/placement_dispatch.rs::place_order`."
+note = "Source market/limit/TP-SL dispatcher and serial placement bodies preserve caller-ID guard order, fresh type/side reads, precision capture and primitive conversion boundaries, zero/full position size versus action grouping, signed payload identities, cached market across awaits, market-only TIF, deferred empty-response refresh, HIP-3 prefix/store/retry effects and body-only iterator close. Owned serial callback dynamically looks up placeOrder for each call, returns its original result, awaits mapSeries then flattens one level. Native33case floor through32 serial-drop plus direct actual dropped observers precedes source launch; actual Rust dispatcher composes serial limit rows and existing resolve_reduce_only composes wire bodies. Native request bits/UTF16/fields, full optimistic fields, original payload/IDs/nested aliases and independent calls/output counts are asserted. The source oracle uses installed p-iteration mapSeries; native dense-array sequencing is a fixture binding, not a complete imported-helper proof. General getters/proxies/coercions/live iteration, primitive/signing/helper implementations, GC/full scheduling and concrete class assembly remain outside this floor. Canonical contracts: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Rename target: `safe-cex-venue-hyperliquid/src/placement_dispatch.rs::place_order`. Cloid: the first statement resolves the caller's client order ID or mints one, then dispatches to placeOrderWithCloid."
 
 [[symbol]]
 ts = "HyperliquidExchange#placeOrderWithCloid"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/placement_dispatch.rs::place_order_with_cloid"
+status = "ported"
+note = "The body placeOrder dispatches to after resolving the caller's cloid or minting one: the cloid reaches every wire, recordPlacement runs before the REST call and stop entries pre-cache when trigger && (hip3 || !reduceOnly). Witness: tests/placement_dispatch.rs runs tests/placement-dispatch-oracle.cjs over the actual member; cloid fields, settlements and recordPlacement counts are asserted natively. Rename target: `safe-cex-venue-hyperliquid/src/placement_dispatch.rs::place_order_with_cloid`."
 
 [[symbol]]
 ts = "HyperliquidExchange.cancelOrders"
@@ -872,7 +872,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-hyperliquid/src/order_update.rs::update_order", "safe-cex-venue-hyperliquid/src/order_update.rs::run_update_callback" ]
 status = "ported"
-note = "Source cancel-replace body with explicit native async parameter binding, property-presence and reference-array binding operations. Preserves literal definitions versus later assignments, raw truthy reduceOnly and inherited/present-undefined patches, Number and finite-filter ordering, original-reference divergence denominator and strict quarter threshold, TP-to-SL-only safety policy/logs, placeholder truthy-zero fallbacks, cancel await before fresh dead ID and placement await, and original adopted result. Owned numeric filter/reduce callbacks retain captured reference and call order. Native41case floor through40 utf16-symbol plus actual dropped-observer settlement precedes source launch: exact raw fields/bits/UTF16/error diagnostics and identities, independent logs/callback phases/reference values, raw placeholder versus placed values, TIF/presence, input/result handles and cleanup prefixes. Scalar primitive, dense filter/reduce/binding and virtual cancel/place operations remain explicit contracts; generic getters/proxies/coercions/live iteration, global prototypes, GC/full scheduling and concrete class assembly are outside this floor. Canonical contracts: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Rename targets: `safe-cex-venue-hyperliquid/src/order_update.rs::update_order`, `safe-cex-venue-hyperliquid/src/order_update.rs::run_update_callback`."
+note = "Source cancel-replace body with explicit native async parameter binding, property-presence and reference-array binding operations. Preserves literal definitions versus later assignments, raw truthy reduceOnly and inherited/present-undefined patches, Number and finite-filter ordering, original-reference divergence denominator and strict quarter threshold, TP-to-SL-only safety policy/logs, placeholder truthy-zero fallbacks, cancel await before fresh dead ID and placement await, and original adopted result. Owned numeric filter/reduce callbacks retain captured reference and call order. Native41case floor through40 utf16-symbol plus actual dropped-observer settlement precedes source launch: exact raw fields/bits/UTF16/error diagnostics and identities, independent logs/callback phases/reference values, raw placeholder versus placed values, TIF/presence, input/result handles and cleanup prefixes. Scalar primitive, dense filter/reduce/binding and virtual cancel/place operations remain explicit contracts; generic getters/proxies/coercions/live iteration, global prototypes, GC/full scheduling and concrete class assembly are outside this floor. Canonical contracts: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Rename targets: `safe-cex-venue-hyperliquid/src/order_update.rs::update_order`, `safe-cex-venue-hyperliquid/src/order_update.rs::run_update_callback`. Cloid: the replacement mints a fresh cloid, places through placeOrderWithCloid and returns withReplacementClientOrderId(ids, cloid); tests/order_update.rs pins one mint, its argument position and the attached clientOrderId."
 
 [[symbol]]
 ts = "HyperliquidExchange.priceToPrecision"

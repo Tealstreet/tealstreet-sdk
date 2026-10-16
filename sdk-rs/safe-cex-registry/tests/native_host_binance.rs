@@ -135,3 +135,52 @@ fn binance_futures_runs_on_the_native_host_over_local_http_and_websocket() {
         exchange.dispose().expect("dispose");
     });
 }
+
+// ts: signatureRejectedResponse on a 400 and resendOnSignatureRejection on a 200,
+// each re-signing once with a fresh timestamp.
+#[test]
+fn binance_futures_resends_a_signature_rejection_once_on_the_native_host() {
+    for status in [Some(400), None] {
+        run_local(async move {
+            let calls = Rc::new(std::cell::Cell::new(0));
+            let counter = calls.clone();
+            let Harness { exchange, seen, .. } = binance_harness(Rc::new(move |request| {
+                if request.method != "POST" || request.path != "/fapi/v1/order" {
+                    return None;
+                }
+                counter.set(counter.get() + 1);
+                let rejection =
+                    json!({"code":-1022,"msg":"Signature for this request is not valid."});
+                (counter.get() == 1).then(|| match status {
+                    Some(status) => json!({"__status": status, "body": rejection}),
+                    None => rejection,
+                })
+            }))
+            .await;
+            exchange
+                .start()
+                .await
+                .expect("start over HTTP and WebSocket");
+            let order: safe_cex_types::PlaceOrderOpts = serde_json::from_value(
+                json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":10}),
+            )
+            .unwrap();
+            let ids = exchange
+                .base()
+                .place_order(exchange.as_ref(), order)
+                .await
+                .expect("the resend succeeds");
+            assert_eq!(ids, vec!["9001"], "{status:?}");
+            assert_eq!(calls.get(), 2, "one resend after a {status:?} rejection");
+            let stamps: Vec<_> = seen
+                .borrow()
+                .iter()
+                .filter(|s| s.path == "/fapi/v1/order")
+                .map(|s| query_value(&s.query, "signature").unwrap().to_owned())
+                .collect();
+            assert_eq!(stamps.len(), 2);
+            assert_ne!(stamps[0], stamps[1], "the resend is signed afresh");
+            exchange.dispose().expect("dispose");
+        });
+    }
+}

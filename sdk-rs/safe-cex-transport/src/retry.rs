@@ -235,6 +235,9 @@ impl RetryPolicy {
     }
 }
 impl WriteRequest {
+    pub fn request(&self) -> &RestRequest {
+        &self.0
+    }
     pub fn execute(self, adapter: &dyn RestAdapter) -> RestFuture<'_, RestResponse> {
         adapter.execute(self.0)
     }
@@ -248,8 +251,6 @@ impl WriteRequest {
 #[derive(Clone, Copy)]
 pub enum SignatureRetryVenue {
     Bybit,
-    Bitrue,
-    Apexomni,
 }
 
 pub fn is_error_signature(response: &RestResponse) -> Result<bool, safe_cex_num::JsCoercionError> {
@@ -297,48 +298,8 @@ fn signature_condition_failure(
     RestFailure::from_transport(crate::TransportError::JavaScript(error), request)
 }
 
-pub fn signature_error_on_read(
-    request: ReadRequest,
-    retries: usize,
-    venue: SignatureRetryVenue,
-) -> RetryPolicy {
-    RetryPolicy {
-        request,
-        retries,
-        delay: None,
-        condition: Box::new(move |_, result| match result {
-            Ok(_) => Ok(false),
-            Err(error) => {
-                let signature = match error.response.as_deref() {
-                    Some(response) => is_error_signature(response).map_err(|cause| {
-                        signature_condition_failure(cause, (*error.request).clone())
-                    })?,
-                    None => false,
-                };
-                Ok(signature
-                    || (error.is_retryable_network()
-                        && (!matches!(venue, SignatureRetryVenue::Bybit)
-                            || error.request.url != "/v5/market/instruments-info")))
-            }
-        }),
-    }
-}
-
 /// Execute rejected signature retries and token-approved network reads.
 /// Successful responses never enter retry; changed configs retain their data phase.
-pub fn retry_signature_rejection<'a>(
-    request: ClassifiedRequest,
-    adapter: &'a dyn RestAdapter,
-    retries: usize,
-    venue: SignatureRetryVenue,
-    clock: &'a dyn RateLimitClock,
-) -> RestFuture<'a, RestResponse> {
-    Box::pin(async move {
-        retry_signature_rejection_with_receipt(request, adapter, retries, venue, clock)
-            .await
-            .map(|execution| execution.response)
-    })
-}
 pub fn retry_signature_rejection_with_receipt<'a>(
     request: ClassifiedRequest,
     adapter: &'a dyn RestAdapter,

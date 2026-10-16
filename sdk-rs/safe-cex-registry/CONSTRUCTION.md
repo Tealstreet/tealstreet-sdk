@@ -1,8 +1,10 @@
 # Rust venue construction through the registry
 
-Status: implemented for `backpack`, `bitunix`, `blofin`, the Binance family (`binance`, `binancepm`,
+Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+`bitgetusdc`), `bitunix`, `blofin`, Coinbase (`coinbase`, `coinbasespot`),
+the Kraken family (`kraken`, `krakenspot`), `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
-`okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
+`okxeu`, `okxeudemo`) and `polymarket`, 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
 (crate layout, "Constructors and loaders live in `safe-cex-registry`"; P4 exit,
 "a tier-1 account on the Rust path behind a flag").
@@ -19,20 +21,35 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 `ExchangeName -> fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor`.
 
 - **Initial members:**
+  - `asterdex`, built with `native_exchange::AsterDEXExchange::new` on the shared
+    js_runtime. Its HTTP factory receives each lane's options, including secondary
+    credentials and proxy override. The native host routes signed requests through
+    the shared transport stack and supplies the external-data gateway factory.
+    `tests/native_host_asterdex.rs` verifies a signed account read server-side.
   - `backpack`, built with `BackpackExchange::new`.
   - `binance`, built with `BinanceExchange::new`.
+  - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around
+    `BitgetExchange::new`; `BitgetDependencies` carries the runtime and a
+    `JsHttpHost` built with js_runtime `rest_http_host`.
   - `bitunix`, built with `BitunixVenue::new` from a registry-built `BaseExchange`
     and `BitunixDependencies` (runtime, per-lane client builder and transport
     install, optional externalPublicData provider).
   - `blofin`, built with `BlofinNativeExchange::new` from a registry-built
     `BaseExchange` and `BlofinDependencies` (runtime, the common HTTP builder,
     optional externalPublicData provider, remote-signer account name).
+  - `coinbase` and `coinbasespot`, one constructor around `CoinbaseExchange::new`.
+    `CoinbaseDependencies` carries the shared HTTP/runtime hosts, signing cache,
+    external-data factory and local-wall-time conversion. The native host retains
+    its cache and routes hosted signing through the existing shared HTTP host.
+    `tests/native_host_coinbase.rs` runs both names over local HTTP/WS servers and
+    checks Coinbase Spot's source external-provider refusal.
   - `okx`, `okxdemo`, `okxeu` and `okxeudemo`, one shared constructor around
     `OkxExchange::new`; the name picks the class. `OkxDependencies` carries the
     runtime and a `JsHttpHost`; the native host builds it with js_runtime
     `rest_http_host` over a fresh terminal adapter.
   - `binancepm` and `binancespot`, built with `BinancePMExchange::new` and
     `BinanceSpotExchange::new` on the same `RustVenueHost::binance` inputs.
+- `hyperliquid` calls its existing production constructor with `RustVenueHost::hyperliquid(options)`: the host resolves the API origin through the selected transport, composes hosted HTTP signing and supplies signer metadata plus the shared weight limiter. HyperliquidSpot remains outside this table.
 - **Dependencies:** `safe-cex-registry` gains direct dependencies on those venue
   crates. The edges go downward (registry is above venues), but layering alone
   does not allow them: `layers.json` `registryConstructors` lists exactly the
@@ -64,7 +81,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bitget`, `bybit`, `kraken`, `kucoin`, `mexc`, `lighter`
+follow-up PR. Expected next: `bybit`, `kucoin`, `mexc`, `lighter`
 and `woo`.
 
 Each follow-up does four things:
@@ -83,7 +100,7 @@ Each follow-up does four things:
   The Rust path is native-only until the facade's wasm build links venue crates.
   That needs its own wasm size and feature audit, which this change does not
   claim.
-- **Every name not in the table.** Today that is 45 of 47.
+- **Every name not in the table.**
   - A name moves to the table when its venue lane reports the class bound:
     all 16 trait methods live, or TS-identical refusals cited.
   - The table and the binding audit must agree. A test pins the table's members
@@ -163,3 +180,32 @@ This changes the scope wording of one CHOSEN resolution, but none of its choices
 - **Prove-fail:** swapping the two table factories must fail the name
   assertion.
 - **Also run:** `yarn layers:check` and `parity:check` (staying at zero).
+
+The native Kraken host shares its Futures nonce counter and Spot client-ID generator across instances constructed by that host. The generator uses OS entropy. Its typed constructor visibly refuses hosted `remoteSigner`; external public data uses the shared gateway factory. Journal folding remains an optional host dependency, not a newly implemented journal engine.
+
+BingX uses `BingxExchange::new` with shared-js_runtime HTTP/socket dependencies.
+Its native-host E2E test verifies signed startup/placement/cancellation; the venue
+crate proves all 16 Exchange methods, retaining source-inherited rejections.
+
+
+## Hyperliquid native host
+
+Every native host constructor requires the caller's `Rc<HyperliquidRateLimiter>`.
+Call `native_host::hyperliquid_rate_limiter()` once per LocalSet, then pass clones
+to every direct and hosted account. Creating a limiter per account multiplies the
+1200/60000 weight budget. `NativeAccountSpec` requires the same input; the FFI
+command loop owns one limiter across all accounts and retains it across closes.
+
+The native Hyperliquid host builds safeCexAxiosCreate with the venue's mainnet or
+testnet baseURL and repeat query serializer, then installs the selected adapter
+for private clients. A small adapter uses that resolved client default instead
+of allowing ApiClient's per-request source baseURL to overwrite a proxy origin.
+Hosted signers receive unsigned trading actions and their account name; `/info`
+requests retain the skip-signing tag. The same hosted signer reaches native
+BaseExchange capability and availability waiting. Transport/remote signing is
+separate from the venue's local-key signing interceptor.
+
+`tests/native_host_hyperliquid.rs` constructs through the registry, invokes real
+trait methods over local reqwest HTTP, verifies signed action/nonce bytes on the
+server, and checks both network origins, proxy preservation, info bypass, repeat
+query encoding and limiter identity across separate account hosts.

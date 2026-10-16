@@ -17,7 +17,7 @@ with tempfile.TemporaryDirectory(prefix='cryptocom-parity-', dir=SDK / 'target')
     view = Path(temporary)
     (view / CRATE).symlink_to(SDK / CRATE, target_is_directory=True)
     (view / 'safe-cex-num').symlink_to(SDK / 'safe-cex-num', target_is_directory=True)
-    for name in ['safe-cex-crypto', 'safe-cex-exchange', 'safe-cex-store']:
+    for name in ['safe-cex-crypto', 'safe-cex-exchange', 'safe-cex-store', 'safe-cex-transport']:
         (view / name).symlink_to(SDK / name, target_is_directory=True)
     (view / 'safe-cex-types').symlink_to(SDK / 'safe-cex-types', target_is_directory=True)
     (view / 'Cargo.toml').write_text(
@@ -27,6 +27,7 @@ with tempfile.TemporaryDirectory(prefix='cryptocom-parity-', dir=SDK / 'target')
         'safe-cex-crypto = { path = "safe-cex-crypto" }\n'
         'safe-cex-exchange = { path = "safe-cex-exchange" }\n'
         'safe-cex-store = { path = "safe-cex-store" }\n'
+        'safe-cex-transport = { path = "safe-cex-transport" }\n'
         'serde = "' + tomllib.loads((SDK / 'Cargo.toml').read_text())['workspace']['dependencies']['serde']['version'] + '"\n'
         'serde_json = "' + tomllib.loads((SDK / 'Cargo.toml').read_text())['workspace']['dependencies']['serde_json']['version'] + '"\n')
     (view / 'exempt.toml').write_text('exempt = []\n')

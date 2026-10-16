@@ -51,6 +51,7 @@ publish = false
 # License remains unset until the overseer resolves public/licensing decision D4.
 
 [workspace.dependencies]
+safe-cex-venue-hyperliquid = { path = "safe-cex-venue-hyperliquid" }
 # Exact regex pin is deliberate: cargo update cannot take security patches; bump this requirement explicitly.
 regex = "=1.13.1"
 # Shared signing primitives for transport and venue authentication.
@@ -94,11 +95,17 @@ safe-cex-transport = { path = "safe-cex-transport" }
 safe-cex-crypto = { path = "safe-cex-crypto" }
 safe-cex-exchange = { path = "safe-cex-exchange" }
 safe-cex-registry = { path = "safe-cex-registry" }
+safe-cex-venue-asterdex = { path = "safe-cex-venue-asterdex" }
 safe-cex-venue-backpack = { path = "safe-cex-venue-backpack" }
 safe-cex-venue-binance = { path = "safe-cex-venue-binance" }
+safe-cex-venue-bingx = { path = "safe-cex-venue-bingx" }
+safe-cex-venue-bitget = { path = "safe-cex-venue-bitget" }
 safe-cex-venue-bitunix = { path = "safe-cex-venue-bitunix" }
 safe-cex-venue-blofin = { path = "safe-cex-venue-blofin" }
+safe-cex-venue-coinbase = { path = "safe-cex-venue-coinbase" }
 safe-cex-venue-okx = { path = "safe-cex-venue-okx" }
+safe-cex-venue-kraken = { path = "safe-cex-venue-kraken" }
+safe-cex-venue-polymarket = { path = "safe-cex-venue-polymarket" }
 safe-cex-candle-cache = { path = "safe-cex-candle-cache" }
 safe-cex = { path = "safe-cex" }
 safe-cex-ffi = { path = "safe-cex-ffi" }
@@ -118,6 +125,7 @@ rmp-serde = "=1.3.1"
 
 # P5a Ed25519 and Starknet/SNIP-12 primitives; no provider/client dependency.
 ed25519-dalek = { version = "=2.2.0", default-features = false, features = ["std", "zeroize"] }
+p256 = { version = "=0.13.2", default-features = false, features = ["ecdsa", "pkcs8", "std"] }
 starknet-crypto = { version = "=0.8.1", default-features = false, features = ["std"] }
 starknet-core = { version = "=0.16.0", default-features = false, features = ["std"] }
 

@@ -18,6 +18,44 @@ where
     T::deserialize(deserializer).map(Some)
 }
 
+/// Typed account extension consumed by the Polymarket source constructor.
+/// Unlike the venue's retained UTF-16 record, this uses the shared account
+/// UTF-8 string boundary. signerType retains source numeric values verbatim.
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct ExchangeOptionsPolymarket {
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub api_key: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub api_secret: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub api_passphrase: Option<String>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub signer_type: Option<f64>,
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub funder_address: Option<String>,
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, TS)]
 pub enum OrderStatus {
     #[serde(rename = "open")]
@@ -553,6 +591,46 @@ pub struct CoinBalance {
     pub notional: f64,
 }
 
+/// A currency row preserves the shape returned by its source venue. Crypto.com
+/// REST returns available/locked rather than the statically declared Balance.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum CurrencyBalance {
+    Declared(Balance),
+    AvailableLocked { available: f64, locked: f64 },
+}
+
+impl CurrencyBalance {
+    /// Read a declared Balance row without normalizing other source shapes.
+    pub fn as_balance(&self) -> Option<&Balance> {
+        match self {
+            Self::Declared(balance) => Some(balance),
+            Self::AvailableLocked { .. } => None,
+        }
+    }
+}
+impl From<Balance> for CurrencyBalance {
+    fn from(balance: Balance) -> Self {
+        Self::Declared(balance)
+    }
+}
+impl<'de> Deserialize<'de> for CurrencyBalance {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Declared(Balance),
+            AvailableLocked { available: f64, locked: f64 },
+        }
+        match Wire::deserialize(crate::strict_decode::object(deserializer))? {
+            Wire::Declared(balance) => Ok(Self::Declared(balance)),
+            Wire::AvailableLocked { available, locked } => {
+                Ok(Self::AvailableLocked { available, locked })
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -574,7 +652,7 @@ pub struct Balance {
         skip_serializing_if = "Option::is_none"
     )]
     #[ts(type = "{ [currency: string]: Balance }", optional)]
-    pub currencies: Option<crate::object_map::JsObjectMap<Balance>>,
+    pub currencies: Option<crate::object_map::JsObjectMap<crate::CurrencyBalance>>,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -2281,6 +2359,15 @@ pub struct ExchangeOptions {
     )]
     #[ts(inline)]
     pub extra: Option<ExchangeOptionsExtra>,
+    /// Runtime extension read by Polymarket through its source `opts as any`.
+    #[serde(rename = "polymarket")]
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    #[ts(skip)]
+    pub polymarket: Option<crate::ExchangeOptionsPolymarket>,
     #[serde(rename = "remoteSigner")]
     #[serde(
         default,
@@ -3839,7 +3926,7 @@ mod strict_codecs {
             deserialize_with = "deserialize_present",
             skip_serializing_if = "Option::is_none"
         )]
-        currencies: Option<crate::object_map::JsObjectMap<Balance>>,
+        currencies: Option<crate::object_map::JsObjectMap<crate::CurrencyBalance>>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",
@@ -5195,6 +5282,47 @@ mod strict_codecs {
     }
 
     #[derive(serde::Deserialize)]
+    #[serde(remote = "super::ExchangeOptionsPolymarket")]
+    #[serde(rename_all = "camelCase")]
+    struct WireExchangeOptionsPolymarket {
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        api_key: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        api_secret: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        api_passphrase: Option<String>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        signer_type: Option<f64>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        funder_address: Option<String>,
+    }
+    impl<'de> serde::Deserialize<'de> for super::ExchangeOptionsPolymarket {
+        fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+            WireExchangeOptionsPolymarket::deserialize(crate::strict_decode::object(deserializer))
+        }
+    }
+
+    #[derive(serde::Deserialize)]
     #[serde(remote = "super::ExchangeOptionsHyperliquidBuilder")]
     struct WireExchangeOptionsHyperliquidBuilder {
         #[serde(rename = "address")]
@@ -5722,6 +5850,13 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         extra: Option<ExchangeOptionsExtra>,
+        #[serde(rename = "polymarket")]
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        polymarket: Option<crate::ExchangeOptionsPolymarket>,
         #[serde(rename = "remoteSigner")]
         #[serde(
             default,

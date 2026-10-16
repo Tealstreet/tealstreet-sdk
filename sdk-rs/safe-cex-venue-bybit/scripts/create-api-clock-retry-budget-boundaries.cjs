@@ -49,7 +49,7 @@ for (const statement of apiSource.statements) {
 }
 assert.deepEqual(moduleFunctions, [
   'isSignedRequest', 'isPublicEndpoint', 'isInstrumentsInfoRequest', 'isBybitClockSyncRetMsg',
-  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitEnvProbeRequest',
+  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitSignRejection', 'isBybitEnvProbeRequest',
   'shouldRetryBybitRequest', 'createAPI',
 ], 'independent module function inventory');
 assert.ok(factory);
@@ -84,6 +84,7 @@ const types = load('assembled-bybit-api-constants.ts', {}, typesProgram);
 assert.deepEqual(Object.keys(types).sort(), [...typeNames].sort());
 const response = load('packages/safe-cex/src/exchanges/bybit/bybit.response.ts');
 const retryReads = load('packages/safe-cex/src/utils/retryReadsOnly.ts', { 'axios-retry': retry });
+const signatureRejection = load('packages/safe-cex/src/utils/signatureRejection.ts');
 
 const inputs = [
   { id: 'clock-only', before: 0, after: 0, resolved: true },
@@ -141,7 +142,7 @@ async function run(input, index) {
     '../../utils/virtualClock': { virtualClock: { getCurrentTimeMs: () => syncs ? 2000 : 1000,
       async syncBybitClientServerTime() { syncs++; }, syncFromServerTime() { assert.fail('no server timestamp'); } } },
     './bybit.response': response, './bybit.site': { getBybitSiteHeaders: () => ({}) }, './bybit.types': types,
-    '../../utils/retryReadsOnly': retryReads,
+    '../../utils/retryReadsOnly': retryReads, '../../utils/signatureRejection': signatureRejection,
   }, apiSource.text, { error: (...args) => emitted.push(args) });
   const client = api.createAPI(options, { name: 'bybitinverse', isDemo: false,
     recordAuthSuccess() { authSuccesses++; }, recordAuthFailure() { assert.fail('no auth failure'); },

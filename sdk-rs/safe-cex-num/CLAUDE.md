@@ -56,11 +56,13 @@ undefined object fields are omitted, array entries become null, and top-level
 undefined returns None. This prepared-data serializer excludes executable
 callbacks/replacers/cycles; BigInt returns the shared TypeError.
 
-`math_log10` ports V8 fdlibm including the fused multiply-add operations measured
-in Node's darwin arm64 build. Literal C++ expression order without contraction
-still differs; preserve explicit mul_add. The reference is this measured runtime,
-not every platform's libm or every V8 build configuration. The live oracle prints
-Node/V8 versions and probes ±256 ULP around every decimal power plus random bits.
+`math_log10` ports V8 fdlibm with native arithmetic profiles: Node's darwin
+arm64 build contracts multiply/add while Linux x64 keeps separate operations.
+Preserve that distinction: forcing either profile globally changes boundary
+results by one ULP. The private profile regression pins the CI decimal-boundary
+witness in both modes; the live oracle prints Node/V8 versions and probes ±256
+ULP around every decimal power plus random bits. Other V8/compiler profiles
+remain outside these measured profiles.
 
 `math_pow` follows V8's DEFAULT `use_std_math_pow` path, not legacy fdlibm.
 The wrapper must retain JS NaN/infinity rules and direct square/square-root
@@ -328,3 +330,5 @@ wire assertions, and pin independent feeder/compared counts. The scripts use
 `SAFE_CEX_TYPESCRIPT_PATH` with the existing source loader. Deliberate compiled
 regressions are restored by `scripts/order-policy-controls.py`; failures must
 include the named native assertion, never only a compiler diagnostic.
+
+get_balance_slice returns a borrowed BalanceSlice containing the source account or exact currency row. An available/locked row remains that shape; get_total_balance_from_balance sees its absent total and applies the source zero default. Do not fall back to the account total merely because a present currency row has a different runtime shape.

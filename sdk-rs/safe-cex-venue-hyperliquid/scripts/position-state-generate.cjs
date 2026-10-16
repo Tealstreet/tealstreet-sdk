@@ -16,6 +16,7 @@ const roots = [
     ['core', 'syncBalanceFromLivePositions'],
     ['core', 'fetchHip3Positions'],
     ['core', 'parseOpenOrders'],
+    ['core', 'mapOpenOrderRow'],
 ];
 const globals = new Set([
     'Object',
@@ -41,6 +42,7 @@ const globals = new Set([
     'createPositionId',
     'inferHyperliquidOrderTypeAndPrice',
     'parseHyperliquidOrderTimeInForce',
+    'readHyperliquidCloid',
     'hasSeenFill',
     'markFillSeen',
     'uniqBy',

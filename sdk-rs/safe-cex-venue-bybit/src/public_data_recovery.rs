@@ -323,11 +323,39 @@ pub fn fetch_fees<E, F: Future<Output = Result<DataValue, E>>>(
         }
     }
 }
-pub fn fetch_markets<E, F: Future<Output = Result<DataValue, E>>>(
-    helper: impl FnOnce(&str) -> Result<F, E>,
+fn spread_into<E>(
+    rows: &mut Vec<DataValue>,
+    value: DataValue,
+    type_error: &impl Fn(&str) -> E,
+) -> Result<(), E> {
+    match value {
+        DataValue::Array(items) => rows.extend(items.borrow().iter().cloned()),
+        DataValue::String(text) => rows.extend(text.chars().map(|c| DataValue::String(c.into()))),
+        _ => {
+            return Err(type_error(
+                "Spread syntax requires ...iterable[Symbol.iterator] to be a function",
+            ));
+        }
+    }
+    Ok(())
+}
+/// Linear markets; inverse markets pushed onto that same array when enabled; option
+/// markets appended into a fresh array when enabled. A branded request failure with
+/// cached markets resolves to the cache.
+#[allow(clippy::too_many_arguments)]
+pub fn fetch_markets<
+    E,
+    F: Future<Output = Result<DataValue, E>>,
+    O: Future<Output = Result<DataValue, E>>,
+>(
+    mut helper: impl FnMut(&str) -> Result<F, E>,
+    inverse_enabled: impl FnOnce() -> Result<bool, E>,
+    options_enabled: impl FnOnce() -> Result<bool, E>,
+    option_markets: impl FnOnce() -> Result<O, E>,
     is_request_error: impl FnOnce(&E) -> bool,
     mut stored: impl FnMut() -> Result<DataValue, E>,
     log: impl FnOnce(&str, &str) -> Result<(), E>,
+    type_error: impl Fn(&str) -> E,
 ) -> impl Future<Output = Result<DataValue, E>> {
     let mut is_request_error = Some(is_request_error);
     let mut log = Some(log);
@@ -348,13 +376,247 @@ pub fn fetch_markets<E, F: Future<Output = Result<DataValue, E>>>(
         Err(e) => (None, Some(recover(e))),
     };
     async move {
-        if let Some(request) = request {
-            match request.await {
-                Ok(v) => Ok(v),
-                Err(e) => recover(e),
+        let Some(request) = request else {
+            return prepared.unwrap();
+        };
+        let refreshed = async {
+            let markets = request.await?;
+            if inverse_enabled()? {
+                if matches!(markets, DataValue::Null | DataValue::Undefined) {
+                    return Err(type_error(&format!(
+                        "Cannot read properties of {} (reading 'push')",
+                        if matches!(markets, DataValue::Null) {
+                            "null"
+                        } else {
+                            "undefined"
+                        }
+                    )));
+                }
+                let inverse = helper("inverse")?.await?;
+                let DataValue::Array(rows) = &markets else {
+                    return Err(type_error("markets.push is not a function"));
+                };
+                let mut pushed = vec![];
+                spread_into(&mut pushed, inverse, &type_error)?;
+                rows.borrow_mut().extend(pushed);
             }
-        } else {
-            prepared.unwrap()
+            if !options_enabled()? {
+                return Ok(markets);
+            }
+            let mut all = vec![];
+            spread_into(&mut all, markets, &type_error)?;
+            spread_into(&mut all, option_markets()?.await?, &type_error)?;
+            Ok(DataValue::Array(Rc::new(RefCell::new(all))))
+        };
+        match refreshed.await {
+            Ok(v) => Ok(v),
+            Err(e) => recover(e),
+        }
+    }
+}
+
+/// A failure inside fetchOptionMarkets: a host rejection, or an Error the body raised.
+enum OptionFailure<E> {
+    Host(E),
+    Raised(String),
+}
+impl<E> From<E> for OptionFailure<E> {
+    fn from(error: E) -> Self {
+        Self::Host(error)
+    }
+}
+fn to_number(value: &DataValue) -> f64 {
+    match value {
+        DataValue::Undefined => f64::NAN,
+        DataValue::Null => 0.,
+        DataValue::Bool(v) => f64::from(u8::from(*v)),
+        DataValue::Number(v) => *v,
+        DataValue::String(v) => safe_cex_num::number_from_string(v),
+        DataValue::Array(items) => match items.borrow().as_slice() {
+            [] => 0.,
+            [DataValue::Null | DataValue::Undefined] => 0.,
+            [DataValue::String(v)] => safe_cex_num::number_from_string(v),
+            [DataValue::Number(v)] => *v,
+            _ => f64::NAN,
+        },
+        DataValue::Object(_) => f64::NAN,
+    }
+}
+// get-key v(obj, key) over a response object, with its snake_case alias.
+fn response_key<E>(
+    data: &DataValue,
+    key: &str,
+    snake: &str,
+) -> Result<DataValue, OptionFailure<E>> {
+    match data {
+        DataValue::Null | DataValue::Undefined | DataValue::Array(_) => Ok(DataValue::Undefined),
+        DataValue::Object(fields) => {
+            let fields = fields.borrow();
+            Ok(fields
+                .get(key)
+                .or_else(|| fields.get(snake))
+                .cloned()
+                .unwrap_or(DataValue::Undefined))
+        }
+        primitive => Err(OptionFailure::Raised(format!(
+            "Cannot use 'in' operator to search for '{key}' in {}",
+            primitive_text(primitive)
+        ))),
+    }
+}
+fn primitive_text(value: &DataValue) -> String {
+    match value {
+        DataValue::Undefined => "undefined".into(),
+        DataValue::Null => "null".into(),
+        DataValue::Bool(v) => v.to_string(),
+        DataValue::Number(v) => safe_cex_num::js_number_string(*v),
+        DataValue::String(v) => v.clone(),
+        DataValue::Array(_) | DataValue::Object(_) => "[object Object]".into(),
+    }
+}
+fn ensure_ok<E>(data: &DataValue) -> Result<(), OptionFailure<E>> {
+    if to_number(&response_key(data, "retCode", "ret_code")?) == 0. {
+        return Ok(());
+    }
+    // new Error(undefined) has an empty message; anything else is String(value).
+    Err(OptionFailure::Raised(
+        match response_key(data, "retMsg", "ret_msg")? {
+            DataValue::Undefined => String::new(),
+            message => primitive_text(&message),
+        },
+    ))
+}
+// `data.result?.list ?? []` and `data.result?.nextPageCursor ?? ''`.
+fn result_field<E>(data: &DataValue, key: &str) -> Result<DataValue, OptionFailure<E>> {
+    let result = prop(data, "result");
+    Ok(match prop(&result, key) {
+        DataValue::Null | DataValue::Undefined => DataValue::Undefined,
+        value => value,
+    })
+}
+async fn option_markets_body<E, G: Future<Output = Result<DataValue, E>>>(
+    coins: G,
+    get: &mut impl FnMut(&str, Option<(DataValue, DataValue)>) -> Result<G, E>,
+    map_instrument: &mut impl FnMut(DataValue) -> Result<DataValue, E>,
+) -> Result<DataValue, OptionFailure<E>> {
+    let endpoints = &crate::types::ENDPOINTS;
+    let coins = coins.await?;
+    ensure_ok(&coins)?;
+    let list = match result_field(&coins, "list")? {
+        DataValue::Undefined => vec![],
+        DataValue::Array(items) => items.borrow().clone(),
+        _ => {
+            return Err(OptionFailure::Raised(
+                "(coins.result?.list ?? []).map is not a function".into(),
+            ));
+        }
+    };
+    let mut base_coins = vec![];
+    for coin in list {
+        match coin {
+            DataValue::Null | DataValue::Undefined => {
+                return Err(OptionFailure::Raised(format!(
+                    "Cannot read properties of {} (reading 'baseCoin')",
+                    primitive_text(&coin)
+                )));
+            }
+            coin => base_coins.push(prop(&coin, "baseCoin")),
+        }
+    }
+    let mut markets = vec![];
+    for base_coin in base_coins {
+        let mut rows = vec![];
+        let mut cursor = DataValue::String(String::new());
+        loop {
+            let data = get(
+                endpoints["MARKETS"].as_str().unwrap(),
+                Some((base_coin.clone(), cursor)),
+            )?
+            .await?;
+            ensure_ok(&data)?;
+            match result_field(&data, "list")? {
+                DataValue::Undefined => {}
+                DataValue::Array(items) => rows.extend(items.borrow().iter().cloned()),
+                DataValue::String(text) => {
+                    rows.extend(text.chars().map(|c| DataValue::String(c.into())))
+                }
+                _ => {
+                    return Err(OptionFailure::Raised(
+                        "Spread syntax requires ...iterable[Symbol.iterator] to be a function"
+                            .into(),
+                    ));
+                }
+            }
+            cursor = match result_field(&data, "nextPageCursor")? {
+                DataValue::Undefined => DataValue::String(String::new()),
+                next => next,
+            };
+            if !truthy(&cursor) {
+                break;
+            }
+        }
+        for row in rows {
+            match map_instrument(row)? {
+                DataValue::Null | DataValue::Undefined => {}
+                DataValue::Array(items) => markets.extend(items.borrow().iter().cloned()),
+                market => markets.push(market),
+            }
+        }
+    }
+    Ok(DataValue::Array(Rc::new(RefCell::new(markets))))
+}
+// ts: BybitExchange.fetchOptionMarkets — best-effort: any failure logs and keeps the
+// option markets already stored, so positions keep their market.
+pub fn fetch_option_markets<'a, E: 'a, G: Future<Output = Result<DataValue, E>> + 'a>(
+    mut get: impl FnMut(&str, Option<(DataValue, DataValue)>) -> Result<G, E> + 'a,
+    mut map_instrument: impl FnMut(DataValue) -> Result<DataValue, E> + 'a,
+    describe: impl FnOnce(&E) -> String + 'a,
+    log: impl FnOnce(&str, &str) -> Result<(), E> + 'a,
+    stored: impl FnOnce() -> Result<DataValue, E> + 'a,
+    type_error: impl FnOnce(&str) -> E + 'a,
+) -> impl Future<Output = Result<DataValue, E>> + 'a {
+    let keep_stored = move |failure: OptionFailure<E>| {
+        let failure = match failure {
+            OptionFailure::Host(error) => describe(&error),
+            OptionFailure::Raised(message) => message,
+        };
+        log(
+            &format!("Failed to load Bybit option markets, keeping the last ones: {failure}"),
+            "warning",
+        )?;
+        let DataValue::Array(markets) = stored()? else {
+            return Err(type_error("this.store.markets.filter is not a function"));
+        };
+        let kept = markets
+            .borrow()
+            .iter()
+            .filter(|m| truthy(&prop(m, "option")))
+            .cloned()
+            .collect();
+        Ok(DataValue::Array(Rc::new(RefCell::new(kept))))
+    };
+    // The base-coin request starts before the first await, as in the source.
+    let first = get(
+        crate::types::ENDPOINTS["OPTION_BASE_COINS"]
+            .as_str()
+            .unwrap(),
+        None,
+    );
+    let mut keep_stored = Some(keep_stored);
+    let (coins, prepared) = match first {
+        Ok(coins) => (Some(coins), None),
+        Err(error) => (
+            None,
+            Some(keep_stored.take().unwrap()(OptionFailure::Host(error))),
+        ),
+    };
+    async move {
+        let Some(coins) = coins else {
+            return prepared.unwrap();
+        };
+        match option_markets_body(coins, &mut get, &mut map_instrument).await {
+            Ok(markets) => Ok(markets),
+            Err(failure) => keep_stored.take().unwrap()(failure),
         }
     }
 }

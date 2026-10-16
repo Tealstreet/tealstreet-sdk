@@ -17,8 +17,10 @@ use safe_cex_exchange::{
     websocket::{WsEvent, WsSocket},
 };
 use safe_cex_exchange::{
-    js_runtime::base_exchange::ExternalPublicDataFactory, native::native_runtime,
-    runtime::ExchangeError, websocket::WsRuntime,
+    js_runtime::base_exchange::{ExternalPublicDataFactory, HostedSigner},
+    native::native_runtime,
+    runtime::ExchangeError,
+    websocket::WsRuntime,
 };
 use safe_cex_store::StoreUpdate;
 use safe_cex_transport::socket::SocketFrame;
@@ -37,14 +39,31 @@ use std::{
 };
 
 pub type AdapterFactory = Rc<dyn Fn() -> Result<Arc<dyn RestAdapter>, ExchangeError>>;
-type HostedSigner = (Rc<dyn RemoteSigner>, Option<String>);
+pub use safe_cex_venue_hyperliquid::rate_limit::RateLimiter as HyperliquidRateLimiter;
+
+/// Create once per native LocalSet and share across every account host.
+#[allow(clippy::arc_with_non_send_sync)]
+pub fn hyperliquid_rate_limiter() -> Rc<HyperliquidRateLimiter> {
+    Rc::new(HyperliquidRateLimiter::new(
+        Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
+            native_runtime(),
+        )),
+        1200.0,
+        60_000.0,
+    ))
+}
+
 pub struct NativeVenueHost {
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
     remote: Option<HostedSigner>,
+    coinbase_keys: Rc<safe_cex_venue_coinbase::cdp_signing::CdpSigningCache>,
+    kraken_nonces: Rc<safe_cex_venue_kraken::api::FuturesModule>,
+    kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
+    hyperliquid_limiter: Rc<HyperliquidRateLimiter>,
 }
 /// Direct transport and real HTTP, as `directTransport` is the TypeScript default.
-pub fn native_venue_host() -> Rc<NativeVenueHost> {
+pub fn native_venue_host(limiter: Rc<HyperliquidRateLimiter>) -> Rc<NativeVenueHost> {
     native_venue_host_with(
         native_runtime(),
         Rc::new(|| {
@@ -52,17 +71,23 @@ pub fn native_venue_host() -> Rc<NativeVenueHost> {
                 .map(|adapter| Arc::new(adapter) as Arc<dyn RestAdapter>)
                 .map_err(|e| ExchangeError::new(e.to_string()))
         }),
+        limiter,
     )
 }
 /// A host over a caller-chosen runtime and terminal adapter (another transport or a test origin).
 pub fn native_venue_host_with(
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
+    limiter: Rc<HyperliquidRateLimiter>,
 ) -> Rc<NativeVenueHost> {
     Rc::new(NativeVenueHost {
         runtime,
         adapter,
         remote: None,
+        coinbase_keys: Rc::default(),
+        kraken_nonces: Rc::default(),
+        kraken_spot_ids: kraken_spot_ids(),
+        hyperliquid_limiter: limiter,
     })
 }
 /// One account's host whose requests sign through a hosted `remoteSigner`
@@ -72,14 +97,185 @@ pub fn native_venue_host_signed(
     adapter: AdapterFactory,
     signer: Rc<dyn RemoteSigner>,
     account_name: Option<String>,
+    limiter: Rc<HyperliquidRateLimiter>,
 ) -> Rc<NativeVenueHost> {
     Rc::new(NativeVenueHost {
         runtime,
         adapter,
         remote: Some((signer, account_name)),
+        coinbase_keys: Rc::default(),
+        kraken_nonces: Rc::default(),
+        kraken_spot_ids: kraken_spot_ids(),
+        hyperliquid_limiter: limiter,
     })
 }
+fn kraken_spot_ids() -> Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>> {
+    safe_cex_venue_kraken::spot_client_ids(|bytes| {
+        getrandom::getrandom(bytes).map_err(|_| safe_cex_types::js_coercion::JsCoercionError {
+            name: "Error",
+            message: "operating system entropy is unavailable",
+        })
+    })
+}
+
 impl RustVenueHost for NativeVenueHost {
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn hyperliquid(
+        &self,
+        options: &safe_cex_types::ExchangeOptions,
+    ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError> {
+        let base_url = if options.testnet.unwrap_or(false) {
+            "https://api.hyperliquid-testnet.xyz"
+        } else {
+            "https://api.hyperliquid.xyz"
+        };
+        let client = native_client(
+            &self.runtime,
+            &self.adapter,
+            safe_cex_types::ExchangeName::Hyperliquid,
+            options,
+            safe_cex_transport::RestRequest {
+                base_url: Some(base_url.into()),
+                ..Default::default()
+            },
+            self.remote.clone(),
+            Some(Arc::new(|params| {
+                fn query(value: &serde_json::Value) -> safe_cex_types::QueryValue {
+                    use safe_cex_types::QueryValue as Q;
+                    match value {
+                        serde_json::Value::Null => Q::Null,
+                        serde_json::Value::Bool(value) => Q::Bool(*value),
+                        serde_json::Value::Number(value) => {
+                            Q::Number(value.as_f64().expect("JSON number"))
+                        }
+                        serde_json::Value::String(value) => Q::String(value.clone()),
+                        serde_json::Value::Array(values) => {
+                            Q::Array(values.iter().map(query).collect())
+                        }
+                        serde_json::Value::Object(values) => {
+                            Q::Object(values.iter().map(|(k, v)| (k.clone(), query(v))).collect())
+                        }
+                    }
+                }
+                safe_cex_transport::query::render_query(
+                    &query(params),
+                    safe_cex_transport::query::QueryProfile {
+                        arrays: safe_cex_transport::query::QueryArrayFormat::Repeat,
+                        encode: true,
+                        key_order: safe_cex_transport::query::QueryKeyOrder::Preserve,
+                    },
+                )
+                .map_err(safe_cex_transport::TransportError::JavaScript)
+            })),
+        )?;
+        if !options.public_data_only.unwrap_or(false) {
+            safe_cex_exchange::http::install_transport_adapter(
+                &client,
+                &safe_cex_transport::TransportRegistry::default(),
+                options,
+                Some(&self.runtime.transport()),
+                safe_cex_transport::RestAdapterVariant::Default,
+            );
+        }
+        Ok(
+            safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
+                runtime: self.runtime.clone(),
+                http: Arc::new(HyperliquidHttp(client)),
+                limiter: self.hyperliquid_limiter.clone(),
+                signers: safe_cex_exchange::runtime::ExchangeSigners {
+                    remote_signer: self.remote.as_ref().map(|(signer, _)| signer.clone()),
+                    payload_signer: None,
+                },
+            },
+        )
+    }
+    #[expect(clippy::arc_with_non_send_sync)]
+    fn asterdex(
+        &self,
+    ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for asterdex on the native host",
+            ));
+        }
+        let runtime = self.runtime.clone();
+        let adapter = self.adapter.clone();
+        Ok(
+            safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies {
+                runtime: self.runtime.clone(),
+                http: Rc::new(move |options| {
+                    if options.remote_signer.is_some() {
+                        return Err(ExchangeError::new(
+                            "remoteSigner is not wired for asterdex on the native host",
+                        ));
+                    }
+                    Ok(safe_cex_exchange::js_runtime::client::rest_http_host(
+                        runtime.clone(),
+                        Arc::new(AsterRest {
+                            runtime: runtime.clone(),
+                            adapter: adapter.clone(),
+                            options: options.clone(),
+                        }),
+                    ))
+                }),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
+    fn hosted_signer(&self) -> Option<HostedSigner> {
+        self.remote.clone()
+    }
+    fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for bingx on the native host",
+            ));
+        }
+        Ok(safe_cex_venue_bingx::BingxDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                (self.adapter)()?,
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
+
+    fn coinbase(&self) -> Result<safe_cex_venue_coinbase::CoinbaseDependencies, ExchangeError> {
+        Ok(safe_cex_venue_coinbase::CoinbaseDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            signing_cache: self.coinbase_keys.clone(),
+            // Native SDK date helpers use a UTC host profile; wire timestamps carry offsets.
+            local_wall_time_to_utc: Rc::new(|millis| millis),
+        })
+    }
+
+    fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for kraken on the native host",
+            ));
+        }
+        Ok(safe_cex_venue_kraken::KrakenDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                (self.adapter)()?,
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            journal: None,
+            futures_nonces: self.kraken_nonces.clone(),
+            spot_client_ids: Some(self.kraken_spot_ids.clone()),
+        })
+    }
+
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError> {
         Ok(safe_cex_venue_binance::native_host::native_dependencies(
             self.runtime.clone(),
@@ -105,18 +301,25 @@ impl RustVenueHost for NativeVenueHost {
             date_parse: inputs.date_parse,
         })
     }
+    fn bitget(&self) -> Result<safe_cex_venue_bitget::BitgetDependencies, ExchangeError> {
+        Ok(safe_cex_venue_bitget::BitgetDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: None,
+        })
+    }
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for bitunix on the native host",
-            ));
-        }
         // createAPI builds a lane's client, then installs its transport; the
         // install sees the options of the lane just built.
         let built = Rc::new(RefCell::new(None::<safe_cex_types::ExchangeOptions>));
         let (runtime, adapter, record) =
             (self.runtime.clone(), self.adapter.clone(), built.clone());
         let install_runtime = self.runtime.clone();
+        let remote = self.remote.clone();
         Ok(BitunixDependencies {
             runtime: self.runtime.clone(),
             build: Rc::new(move |options| {
@@ -127,6 +330,8 @@ impl RustVenueHost for NativeVenueHost {
                     safe_cex_types::ExchangeName::Bitunix,
                     options,
                     safe_cex_transport::RestRequest::default(),
+                    remote.clone(),
+                    None,
                 )
             }),
             install: Rc::new(move |client| {
@@ -143,36 +348,104 @@ impl RustVenueHost for NativeVenueHost {
                 Ok(())
             }),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
+            remote_signer_account_name: self.remote.as_ref().and_then(|(_, name)| name.clone()),
         })
     }
-    // externalPublicData stays unset: the constructor refuses that option visibly.
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for blofin on the native host",
-            ));
-        }
         Ok(BlofinDependencies {
             runtime: self.runtime.clone(),
-            http: blofin_http(self.runtime.clone(), self.adapter.clone()),
-            external_public_data: Some(gateway_factory(self.runtime.clone())),
-            remote_signer_account_name: None,
-        })
-    }
-    // externalPublicData stays unset: OkxExchange::new refuses that option visibly.
-    fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for okx on the native host",
-            ));
-        }
-        Ok(OkxDependencies {
-            runtime: self.runtime.clone(),
-            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+            http: blofin_http(
                 self.runtime.clone(),
-                (self.adapter)()?,
+                self.adapter.clone(),
+                self.remote.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
+            remote_signer_account_name: self.remote.as_ref().and_then(|(_, name)| name.clone()),
+        })
+    }
+    fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
+        Ok(OkxDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
+    fn polymarket(
+        &self,
+    ) -> Result<safe_cex_venue_polymarket::binding::exchange::PolymarketDependencies, ExchangeError>
+    {
+        Ok(
+            safe_cex_venue_polymarket::binding::exchange::PolymarketDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                    self.remote.clone(),
+                ),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+}
+
+// ApiClient supplies its source baseURL on every request. The configured client
+// already resolved that baseURL through the selected regional/proxy transport;
+// use its default so the source origin cannot overwrite the resolved route.
+struct HyperliquidHttp(safe_cex_exchange::http::HttpClient);
+impl RestAdapter for HyperliquidHttp {
+    fn execute(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        Box::pin(async move { self.execute_with_receipt(request).await.map(|r| r.response) })
+    }
+    fn execute_with_receipt(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestExecution> {
+        request.base_url = None;
+        Box::pin(self.0.execute_with_receipt(request))
+    }
+}
+
+// The source API factory supplies its base URL after choosing primary/secondary
+// options. Route the final post-signing request through the shared HTTP stack.
+struct AsterRest {
+    runtime: Rc<dyn WsRuntime>,
+    adapter: AdapterFactory,
+    options: safe_cex_types::ExchangeOptions,
+}
+impl RestAdapter for AsterRest {
+    fn execute(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        Box::pin(async move {
+            let client = native_client(
+                &self.runtime,
+                &self.adapter,
+                safe_cex_types::ExchangeName::Asterdex,
+                &self.options,
+                request.clone(),
+                None,
+                None,
+            )
+            .map_err(|error| {
+                safe_cex_transport::RestFailure::pre_transmit(error.message, request.clone())
+            })?;
+            safe_cex_exchange::http::install_transport_adapter(
+                &client,
+                &safe_cex_transport::TransportRegistry::default(),
+                &self.options,
+                Some(&self.runtime.transport()),
+                safe_cex_transport::RestAdapterVariant::Default,
+            );
+            request.base_url = None;
+            client.execute(request).await
         })
     }
 }
@@ -185,18 +458,22 @@ fn native_client(
     exchange: safe_cex_types::ExchangeName,
     options: &safe_cex_types::ExchangeOptions,
     request: safe_cex_transport::RestRequest,
+    remote: Option<HostedSigner>,
+    params_serializer: Option<safe_cex_exchange::http::ParamsSerializer>,
 ) -> Result<safe_cex_exchange::http::HttpClient, ExchangeError> {
     let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
     safe_cex_exchange::http::safe_cex_axios_create(
         safe_cex_exchange::http::HttpClientOptions {
-            params_serializer: None,
+            params_serializer,
             response_transform: None,
             exchange,
             options: options.clone(),
             request,
             provider: Some(runtime.transport()),
-            signer: None,
-            account_name: None,
+            signer: remote.as_ref().map(|(signer, _)| {
+                safe_cex_exchange::js_runtime::client::transport_signer(signer.clone())
+            }),
+            account_name: remote.and_then(|(_, name)| name),
             adapter: adapter()?,
             host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
             runtime: exchange_runtime,
@@ -214,7 +491,11 @@ fn native_client(
 }
 
 /// BloFin's common HTTP builder: (options, baseURL, timeout budget) -> adapter.
-fn blofin_http(runtime: Rc<dyn WsRuntime>, adapter: AdapterFactory) -> BlofinHttp {
+fn blofin_http(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: AdapterFactory,
+    remote: Option<HostedSigner>,
+) -> BlofinHttp {
     Rc::new(move |options, base_url, budget| {
         let request = safe_cex_transport::RestRequest {
             base_url: Some(base_url.to_owned()),
@@ -227,6 +508,8 @@ fn blofin_http(runtime: Rc<dyn WsRuntime>, adapter: AdapterFactory) -> BlofinHtt
             safe_cex_types::ExchangeName::Blofin,
             options,
             request,
+            remote.clone(),
+            None,
         )
         .map_err(|e| e.message)?;
         Ok(Rc::new(client) as Rc<dyn RestAdapter>)

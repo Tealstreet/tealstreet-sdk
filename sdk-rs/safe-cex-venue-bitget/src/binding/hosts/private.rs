@@ -608,7 +608,8 @@ impl StreamTimerHost for Rt {
 /// binding installs no tunnel transport, so the default direct provider resolves.
 fn resolve_transport_routing(args: &[Js]) -> Result<Js, Thrown> {
     let name: ExchangeName = to_typed(&arg(args, 0))?;
-    let options: ExchangeOptions = to_typed(&arg(args, 1))?;
+    let options: ExchangeOptions =
+        safe_cex_exchange::js_runtime::base_exchange::exchange_options(&arg(args, 1))?;
     from_typed(&DirectTransport.ws_routing(&name, &RoutingOptions::from(&options)))
 }
 

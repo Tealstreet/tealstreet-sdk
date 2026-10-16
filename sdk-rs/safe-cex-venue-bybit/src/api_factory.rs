@@ -13,7 +13,7 @@ use safe_cex_transport::{
     RestAdapter, RestExecution, RestFailure, RestFuture, RestRequest, RestResponse,
     RestResponseBody, TransportError, TransportRegistry,
     rate_limit::RateLimitClock,
-    retry::{ReadClassification, SignatureRetryVenue, retry_signature_rejection_with_receipt},
+    retry::{ClassifiedRequest, ReadClassification},
 };
 use safe_cex_types::ExchangeName;
 use serde_json::{Map, Value};
@@ -50,6 +50,8 @@ enum ProbeResult {
 struct Flags {
     clock_retry: bool,
     env_probe: bool,
+    // One re-signed resend per request, shared by the rejected and resolved paths.
+    signature_retry: bool,
     retries_consumed: usize,
 }
 struct Execution {
@@ -226,11 +228,12 @@ impl Client {
                 client: &client.request,
                 calls: Cell::new(0),
             };
-            let receipt = retry_signature_rejection_with_receipt(
-                ReadClassification::Methods.classify(request),
+            let signature_retry = Cell::new(flags.signature_retry);
+            let receipt = retry_bybit(
+                request,
                 &attempt,
                 3_usize.saturating_sub(flags.retries_consumed),
-                SignatureRetryVenue::Bybit,
+                &signature_retry,
                 client.retry_clock.as_ref(),
             )
             .await?;
@@ -238,6 +241,7 @@ impl Client {
                 receipt,
                 flags: Flags {
                     retries_consumed: flags.retries_consumed + attempt.calls.get() - 1,
+                    signature_retry: signature_retry.get(),
                     ..flags
                 },
             };
@@ -334,6 +338,7 @@ impl Client {
                 Flags {
                     env_probe: true,
                     clock_retry: false,
+                    signature_retry: false,
                     retries_consumed: 0,
                 },
             )
@@ -386,10 +391,12 @@ impl Client {
         let mut data = response_data(&response.body);
         let meta = get_bybit_response_meta(&data);
         if !meta.has_explicit_status && response.status >= 400 {
-            let auth = matches!(response.status, 401 | 403);
+            let blocked = crate::api_request::blocked_by_cdn(&data);
+            let auth = !blocked && matches!(response.status, 401 | 403);
             let message = crate::api_request::http_failure_message(
                 response.status,
                 response.reason.as_deref(),
+                blocked,
             );
             let body = spread_data(&data);
             let message = if !execution.flags.env_probe && auth {
@@ -403,8 +410,7 @@ impl Client {
             } else {
                 Some(message)
             };
-            let mut body =
-                body.map_err(|message| RestFailure::pre_transmit(message, request.clone()))?;
+            let mut body = body;
             body.insert("retCode".into(), Value::from(response.status));
             data = Value::Object(body);
             set_message(&mut data, message);
@@ -413,6 +419,19 @@ impl Client {
         }
         if execution.flags.env_probe {
             return Ok(execution);
+        }
+        // Re-signed once before it may count as a bad key: these arrive in bursts right
+        // after a reconnect, on keys that work.
+        if !execution.flags.signature_retry && crate::api::is_bybit_sign_rejection(&data) {
+            return self
+                .request(
+                    request.clone(),
+                    Flags {
+                        signature_retry: true,
+                        ..execution.flags
+                    },
+                )
+                .await;
         }
         if is_auth_code(meta.ret_code) {
             self.record_auth_failure(request)?;
@@ -480,29 +499,19 @@ fn response_data(body: &RestResponseBody) -> Value {
     body.clone().into_data()
 }
 
-fn spread_data(data: &Value) -> Result<Map<String, Value>, String> {
+// A string body (CloudFront's HTML page) would spread into one key per character.
+fn spread_data(data: &Value) -> Map<String, Value> {
     match data {
-        Value::Object(map) => Ok(safe_cex_num::js_own_keys(map.keys().map(String::as_str))
+        Value::Object(map) => safe_cex_num::js_own_keys(map.keys().map(String::as_str))
             .into_iter()
             .map(|key| (key.to_owned(), map[key].clone()))
-            .collect()),
-        Value::Array(values) => Ok(values
+            .collect(),
+        Value::Array(values) => values
             .iter()
             .enumerate()
             .map(|(index, value)| (index.to_string(), value.clone()))
-            .collect()),
-        Value::String(text) => text
-            .encode_utf16()
-            .enumerate()
-            .map(|(index, unit)| {
-                char::from_u32(u32::from(unit))
-                    .map(|value| (index.to_string(), Value::String(value.to_string())))
-                    .ok_or_else(|| {
-                        "Bybit status synthesis cannot represent a lone UTF-16 code unit".into()
-                    })
-            })
             .collect(),
-        _ => Ok(Map::new()),
+        _ => Map::new(),
     }
 }
 fn set_message(data: &mut Value, message: Option<String>) {
@@ -534,4 +543,70 @@ fn raw_response_unavailable(data: &Value) -> Result<bool, safe_cex_num::JsCoerci
         }
         _ => Ok(false),
     }
+}
+
+/// axios-retry with shouldRetryBybitRequest: network reads (except instruments-info)
+/// retry within the budget; a rejected signature is retried once, writes included,
+/// stamping `signature_retry` as signatureRejectedResponse stamps the config.
+fn retry_bybit<'a>(
+    request: RestRequest,
+    adapter: &'a dyn RestAdapter,
+    retries: usize,
+    signature_retry: &'a Cell<bool>,
+    clock: &'a dyn RateLimitClock,
+) -> RestFuture<'a, RestExecution> {
+    let classification = ReadClassification::Methods;
+    // An original write is never network-retried, whatever its failure config claims.
+    let original_read = matches!(
+        classification.classify(request.clone()),
+        ClassifiedRequest::Read(_)
+    );
+    let mut request = request;
+    Box::pin(async move {
+        for attempt in 0..=retries {
+            let started = clock.now_ms();
+            let result = adapter.execute_with_receipt(request.clone()).await;
+            let Err(error) = &result else {
+                return result;
+            };
+            if attempt == retries {
+                return result;
+            }
+            let network = error.is_retryable_network()
+                && original_read
+                && matches!(
+                    classification.classify((*error.request).clone()),
+                    ClassifiedRequest::Read(_)
+                );
+            let retry = if network {
+                error.request.url != "/v5/market/instruments-info"
+            } else {
+                let rejected = !signature_retry.get()
+                    && error.response.as_deref().is_some_and(|response| {
+                        crate::api::is_bybit_sign_rejection(&response.body.clone().into_data())
+                    });
+                if rejected {
+                    signature_retry.set(true);
+                }
+                rejected
+            };
+            if !retry {
+                return result;
+            }
+            let mut next = (*error.request).clone();
+            next.timeout_ms = request.timeout_ms;
+            if let Some(timeout) = request.timeout_ms.filter(|timeout| *timeout != 0)
+                && started != 0
+            {
+                let remaining =
+                    i128::from(timeout) - (i128::from(clock.now_ms()) - i128::from(started));
+                if remaining <= 0 {
+                    return result;
+                }
+                next.timeout_ms = Some(remaining.min(i128::from(i64::MAX)) as i64);
+            }
+            request = next;
+        }
+        unreachable!()
+    })
 }

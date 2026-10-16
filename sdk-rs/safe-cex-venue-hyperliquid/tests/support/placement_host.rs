@@ -102,6 +102,8 @@ impl WsPingHost for Host {
                 "priceToPrecision",
                 "resolveReduceOnly",
                 "placeLimitOrder",
+                "placeOrderWithCloid",
+                "recordPlacement",
                 "addToPrePlacementCache",
                 "postOrderAction",
                 "validateResponseAndExtractOrderIds",
@@ -203,6 +205,16 @@ impl WsPingHost for Host {
                 let observer = place_order(self, r, &first);
                 Ok(self.base.promise(observer))
             }
+            // The actual source arrow (not a fixture): run the Rust body as the class would.
+            "placeOrderWithCloid" => {
+                let cloid = args.get(1).cloned().unwrap_or(N::U);
+                let observer = place_order_with_cloid(self, r, &first, &cloid);
+                Ok(self.base.promise(observer))
+            }
+            "mintHyperliquidCloid" => {
+                self.record(id, args);
+                Ok(s("0xmint"))
+            }
             "replacement-place" => {
                 self.record(id, args);
                 Ok(self.ready(Ok(self.st.borrow().replacement.clone())))
@@ -285,6 +297,7 @@ impl WsPingHost for Host {
                 Ok(N::B(scene == "tp-deferred"))
             }
             "addToPrePlacementCache"
+            | "recordPlacement"
             | "rememberLimitOrderTimeInForce"
             | "addPendingHip3Order"
             | "refreshHip3OrdersWithRetry"

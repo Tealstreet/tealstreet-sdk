@@ -134,9 +134,12 @@ impl BlofinApi {
             .map(|b| b.untransformed())
             .transpose()
             .map_err(|e| e.to_string())?
-            .filter(|v| js_truthy(Some(v)))
-            .map(|v| {
-                js_json_stringify(&JsJsonValue::from(v.clone())).map_err(|e| e.message.to_owned())
+            .map(|v| match v {
+                // A replayed config carries the body axios already serialized: sign those bytes.
+                Value::String(text) => Ok(Some(text.clone())),
+                v if js_truthy(Some(v)) => js_json_stringify(&JsJsonValue::from(v.clone()))
+                    .map_err(|e| e.message.to_owned()),
+                _ => Ok(None),
             })
             .transpose()?
             .flatten();

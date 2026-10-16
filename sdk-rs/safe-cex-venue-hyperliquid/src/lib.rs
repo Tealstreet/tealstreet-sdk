@@ -1,6 +1,7 @@
 //! Hyperliquid types and REST API; exchange/WS implementations remain pending.
 pub mod agent;
 pub mod balance_state;
+pub mod binding;
 pub mod browser_approval_flows;
 pub mod builder_fee;
 pub mod constants;
@@ -8,6 +9,7 @@ pub mod exchange_helpers;
 pub mod lifecycle_delegates;
 pub mod market_data_selectors;
 pub mod order_request_leaves;
+pub(crate) mod realm;
 pub mod spot_constants;
 pub mod spot_json;
 pub mod spot_models;
@@ -20,6 +22,7 @@ pub mod api;
 pub mod order_response;
 pub mod rate_limit;
 
+pub mod cloid;
 pub mod order_history;
 pub mod order_inference;
 

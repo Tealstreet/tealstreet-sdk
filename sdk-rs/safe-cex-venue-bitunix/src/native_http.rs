@@ -28,7 +28,9 @@ type ReceiveFn = for<'a> fn(
     &'a Value,
     &mut dyn FnMut(&str) -> Result<Option<Value>, String>,
     &mut dyn FnMut(String, &Value) -> Result<(), String>,
-) -> Result<&'a Value, String>;
+    &mut dyn FnMut(&Value) -> Result<Option<Value>, String>,
+    &mut dyn FnMut(&Value) -> bool,
+) -> Result<crate::api::Received<'a>, String>;
 
 /// One createAPI client: axios defaults, retry budget and the two interceptors.
 pub(crate) struct Lane {
@@ -143,8 +145,8 @@ impl Lane {
                     receive: Cell::new(None),
                 }))
             },
-            || Ok(()),
-            |lane, (), retries| {
+            // The request loop evaluates both retry arms itself.
+            |lane, _condition, retries| {
                 lane.retries.set(retries as u32);
                 Ok(())
             },
@@ -209,19 +211,15 @@ fn query_profile(value: &Value) -> Result<String, String> {
     )
     .map_err(|e| e.message.to_owned())
 }
-fn is_signature_rejection(data: &Value) -> bool {
-    let code = data.get("code");
-    let numeric = match code {
-        Some(Value::Number(n)) => n.as_f64() == Some(10007.0),
-        Some(Value::String(s)) => s.trim() == "10007",
-        _ => false,
-    };
-    let message = data
-        .get("msg")
-        .filter(|v| !v.is_null())
-        .map(|v| v.as_str().map_or_else(|| v.to_string(), str::to_owned))
-        .unwrap_or_default();
-    numeric || message.to_lowercase().contains("sign signature error")
+fn body_value(body: RestResponseBody) -> Value {
+    match body {
+        RestResponseBody::Encoded(bytes) => serde_json::from_slice(&bytes)
+            .unwrap_or_else(|_| Value::String(String::from_utf8_lossy(&bytes).into_owned())),
+        RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v,
+    }
+}
+fn signature_rejected(data: &Value) -> Result<bool, ExchangeError> {
+    crate::api::is_bitunix_signature_rejection(data).map_err(|e| ExchangeError::new(e.message))
 }
 impl Client {
     pub(crate) fn get(
@@ -276,6 +274,8 @@ impl Client {
                 "__suppressExchangeRateLimitError": wire(&field(&config, "__suppressExchangeRateLimitError").unwrap_or(JsJsonValue::Undefined))?,
             });
             let mut attempt = 0;
+            // The config stamp: one signature re-sign per call, by retry or by resend.
+            let mut signature_retried = false;
             loop {
                 let mut request = RestRequest {
                     method: method.into(),
@@ -323,10 +323,17 @@ impl Client {
                 let outcome = executor.execute(request.clone()).await;
                 let response = match outcome {
                     Err(failure) => {
-                        if attempt < lane.retries.get()
-                            && safe_cex_transport::retry::is_read_only_method(&request)
-                            && failure.is_retryable_network()
-                        {
+                        let network = safe_cex_transport::retry::is_read_only_method(&request)
+                            && failure.is_retryable_network();
+                        let rejected = !signature_retried
+                            && match &failure.response {
+                                Some(response) => {
+                                    signature_rejected(&body_value(response.body.clone()))?
+                                }
+                                None => false,
+                            };
+                        if attempt < lane.retries.get() && (network || rejected) {
+                            signature_retried |= rejected;
                             attempt += 1;
                             continue;
                         }
@@ -338,15 +345,10 @@ impl Client {
                     Ok(response) => response,
                 };
                 let status = response.status;
-                let data = match response.body {
-                    RestResponseBody::Encoded(bytes) => serde_json::from_slice(&bytes)
-                        .unwrap_or_else(|_| {
-                            Value::String(String::from_utf8_lossy(&bytes).into_owned())
-                        }),
-                    RestResponseBody::Untransformed(v) | RestResponseBody::Transformed(v) => v,
-                };
-                if attempt < lane.retries.get() && is_signature_rejection(&data) {
-                    attempt += 1;
+                let data = body_value(response.body);
+                // ts: resendOnSignatureRejection in the response interceptor.
+                if !signature_retried && signature_rejected(&data)? {
+                    signature_retried = true;
                     continue;
                 }
                 let mut config_out = flags.clone();
@@ -377,6 +379,9 @@ impl Client {
                         )
                         .map_err(|e| e.message)
                     },
+                    // The loop above already resent a rejection, and runs each response once.
+                    &mut |_| Ok(None),
+                    &mut |_| false,
                 )
                 .map_err(ExchangeError::new)?;
                 return Ok(view["data"].clone());

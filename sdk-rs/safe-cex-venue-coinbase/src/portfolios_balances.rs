@@ -24,6 +24,7 @@ pub struct PortfolioThrown {
     /// JSON property view for existing HTTP/message-policy bodies; not the native origin.
     pub value: Option<Value>,
     store_mutation: Option<safe_cex_store::StoreMutationError>,
+    native: Option<Rc<safe_cex_exchange::runtime::ExchangeError>>,
 }
 impl PortfolioThrown {
     /// None is the source undefined value. JSON throws have no native Store origin.
@@ -31,7 +32,31 @@ impl PortfolioThrown {
         Self {
             value,
             store_mutation: None,
+            native: None,
         }
+    }
+    pub(crate) fn from_native(error: safe_cex_exchange::runtime::ExchangeError) -> Self {
+        let mut value = serde_json::Map::from_iter([
+            ("name".into(), Value::String(error.name.clone())),
+            ("message".into(), Value::String(error.message.clone())),
+        ]);
+        for (key, field) in [
+            ("response", &error.response),
+            ("code", &error.code),
+            ("config", &error.config),
+        ] {
+            if let Some(field) = field {
+                value.insert(key.into(), field.clone());
+            }
+        }
+        Self {
+            value: Some(Value::Object(value)),
+            store_mutation: None,
+            native: Some(Rc::new(error)),
+        }
+    }
+    pub(crate) fn native(&self) -> Option<&safe_cex_exchange::runtime::ExchangeError> {
+        self.native.as_deref()
     }
     /// Access the retained failure, including subscriber identity and original cause.
     pub fn store_mutation(&self) -> Option<&safe_cex_store::StoreMutationError> {
@@ -45,6 +70,7 @@ impl From<safe_cex_store::StoreMutationError> for PortfolioThrown {
         Self {
             value: None,
             store_mutation: Some(error),
+            native: None,
         }
     }
 }
@@ -61,9 +87,14 @@ impl std::fmt::Display for PortfolioThrown {
 }
 impl std::error::Error for PortfolioThrown {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        self.store_mutation
-            .as_ref()
+        self.native
+            .as_deref()
             .map(|error| error as &dyn std::error::Error)
+            .or_else(|| {
+                self.store_mutation
+                    .as_ref()
+                    .map(|error| error as &dyn std::error::Error)
+            })
     }
 }
 /// HTTP data is a plain, inert JSON record. Portfolio arrays additionally retain identity.
@@ -85,6 +116,9 @@ pub struct PortfolioBalance {
     /// Distinguishes an absent property from an own property containing undefined.
     pub has_currencies: bool,
     pub extra: IndexMap<String, Rc<RefCell<Value>>>,
+    /// Imported typed Store snapshot, before JSON projection of optional model
+    /// fields. Source scalar/currency edits still live in the fields above.
+    pub native_snapshot: Option<Rc<safe_cex_types::CurrencyBalance>>,
 }
 /// Ordinary-object reducer: own keys follow JS order; __proto__ sets the prototype.
 #[derive(Debug, Default)]
@@ -584,6 +618,7 @@ pub fn fetch_balance<H: PortfolioHost + 'static>(
                                 (k.clone(), copy)
                             })
                             .collect(),
+                        native_snapshot: b.native_snapshot.clone(),
                     }))
                 };
                 balance = replacement;

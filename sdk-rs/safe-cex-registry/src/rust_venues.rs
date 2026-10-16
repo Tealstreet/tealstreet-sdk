@@ -7,7 +7,7 @@ use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     external::ExternalPublicData,
     http::HttpClient,
-    js_runtime::base_exchange::ExternalPublicDataFactory,
+    js_runtime::base_exchange::{ExternalPublicDataFactory, HostedSigner},
     runtime::ExchangeError,
     websocket::WsRuntime,
 };
@@ -20,9 +20,13 @@ use safe_cex_venue_backpack::{
 use safe_cex_venue_binance::exchange_classes::{
     BinanceExchange, BinancePMExchange, BinanceSpotExchange, ExchangeDependencies,
 };
+use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
+use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
+use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
+use safe_cex_venue_polymarket::binding::exchange::{PolymarketDependencies, PolymarketExchange};
 use std::rc::Rc;
 
 /// What `BackpackExchange::new` takes besides the BaseExchange the registry builds.
@@ -44,6 +48,7 @@ pub struct BitunixDependencies {
     pub install: BitunixInstall,
     /// Required when `options.externalPublicData` is set.
     pub external_public_data: Option<ExternalPublicDataFactory>,
+    pub remote_signer_account_name: Option<String>,
 }
 
 /// The common HTTP stack BloFin builds each client from: (options, baseURL, timeout budget).
@@ -61,12 +66,48 @@ pub struct BlofinDependencies {
 
 /// Host inputs for Rust venue construction, requested once per constructed instance.
 pub trait RustVenueHost {
+    /// AsterDEX needs a per-lane HTTP factory to preserve secondary routing.
+    fn asterdex(
+        &self,
+    ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "asterdex inputs are unavailable on this host",
+        ))
+    }
+
+    /// Optional hosted account capability; no host-local secret is required.
+    fn hosted_signer(&self) -> Option<HostedSigner> {
+        None
+    }
+    fn coinbase(&self) -> Result<CoinbaseDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Coinbase dependencies were not supplied by this RustVenueHost",
+        ))
+    }
+    fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "BingX dependencies are unavailable on this host",
+        ))
+    }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
     fn okx(&self) -> Result<OkxDependencies, ExchangeError>;
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError>;
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError>;
+    /// Futures and Spot share the SDK runtime's nonce and client-ID state.
+    fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
+    /// Bitget, Bitget USDC and Bitget inverse share one input set.
+    fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
+    fn hyperliquid(
+        &self,
+        options: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError>;
+    fn polymarket(&self) -> Result<PolymarketDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Polymarket host inputs are not configured",
+        ))
+    }
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -81,17 +122,50 @@ type RustConstructorEntry = fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor;
 
 /// Bound venues only; each later venue is added by its own follow-up.
 pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
+    (ExchangeName::Asterdex, asterdex_constructor),
     (ExchangeName::Backpack, backpack_constructor),
     (ExchangeName::Binance, binance_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
     (ExchangeName::Binancespot, binancespot_constructor),
+    (ExchangeName::Bingx, bingx_constructor),
+    (ExchangeName::Bitget, bitget_constructor),
+    (ExchangeName::Bitgetinverse, bitget_constructor),
+    (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Coinbase, coinbase_constructor),
+    (ExchangeName::Coinbasespot, coinbase_constructor),
+    (ExchangeName::Hyperliquid, hyperliquid_constructor),
+    (ExchangeName::Kraken, kraken_constructor),
+    (ExchangeName::Krakenspot, kraken_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Polymarket, polymarket_constructor),
 ];
+
+pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |_, options, store| {
+        let deps = host.hyperliquid(&options)?;
+        let exchange =
+            safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
+        Ok(exchange)
+    })
+}
+
+pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_asterdex::native_exchange::AsterDEXExchange::new(
+                name,
+                options,
+                store,
+                host.asterdex()?,
+            )?,
+        )
+    })
+}
 
 pub fn backpack_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
@@ -159,18 +233,40 @@ fn external_factory(
     }
 }
 
+pub fn coinbase_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = CoinbaseExchange::new(name, options, store, host.coinbase()?)?;
+        Ok(exchange)
+    })
+}
+
+pub fn bitget_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = BitgetExchange::new(name, options, store, host.bitget()?)?;
+        Ok(exchange)
+    })
+}
+
 pub fn bitunix_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.bitunix()?;
         let external = external_factory("bitunix", deps.external_public_data, &options)?;
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options,
             store,
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
-        let exchange = BitunixVenue::new(base, deps.build, deps.install, deps.runtime, external)?;
+        base.signers.remote_signer = host.hosted_signer().map(|(signer, _)| signer);
+        let exchange = BitunixVenue::new(
+            base,
+            deps.build,
+            deps.install,
+            deps.runtime,
+            external,
+            deps.remote_signer_account_name,
+        )?;
         Ok(exchange)
     })
 }
@@ -179,13 +275,14 @@ pub fn blofin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.blofin()?;
         let external = external_factory("blofin", deps.external_public_data, &options)?;
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options,
             store,
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
+        base.signers.remote_signer = host.hosted_signer().map(|(signer, _)| signer);
         let http = deps.http;
         let exchange = BlofinNativeExchange::new(
             base,
@@ -198,10 +295,28 @@ pub fn blofin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     })
 }
 
+pub fn kraken_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = KrakenExchange::new(name, options, store, host.kraken()?)?;
+        Ok(exchange)
+    })
+}
+
 pub fn okx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let exchange = OkxExchange::new(name, options, store, host.okx()?)?;
         Ok(exchange)
+    })
+}
+
+pub fn polymarket_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(PolymarketExchange::new(
+            name,
+            options,
+            store,
+            host.polymarket()?,
+        )?)
     })
 }
 
@@ -259,4 +374,11 @@ pub fn native_constructor(
             .map(|constructor| std::future::ready(Some(constructor)))
             .ok_or_else(|| -> ModuleError { Rc::new(NoRustConstructor(name)) }),
     }
+}
+
+pub fn bingx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        safe_cex_venue_bingx::BingxExchange::new(name, options, store, host.bingx()?)
+            .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
 }

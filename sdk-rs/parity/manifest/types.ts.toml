@@ -14,9 +14,9 @@ note = ""
 ts = "ExchangeOptions"
 kind = "type"
 layer = "adapted"
-rs = [ "safe-cex-types/src/lib.rs::ExchangeOptions", "safe-cex-crypto/src/lib.rs::SigningOptions" ]
+rs = [ "safe-cex-types/src/lib.rs::ExchangeOptions", "safe-cex-crypto/src/lib.rs::SigningOptions", "safe-cex-types/src/lib.rs::ExchangeOptionsPolymarket" ]
 status = "ported"
-note = "Split wire data from callable runtime signing; renamed runtime projection `safe-cex-crypto/src/lib.rs::SigningOptions`. safe-cex-types ExchangeOptions preserves declaration parity and finite JSON data (C4), importing callback oracle types while rejecting present in-process capabilities; crypto SigningOptions borrows key/secret and an invocable HMAC payloadSigner. Other runtime capabilities remain unported."
+note = "Split wire data from callable runtime signing; renamed runtime projection `safe-cex-crypto/src/lib.rs::SigningOptions`. safe-cex-types ExchangeOptions preserves declaration parity and finite JSON data (C4), importing callback oracle types while rejecting present in-process capabilities; crypto SigningOptions borrows key/secret and an invocable HMAC payloadSigner. Other runtime capabilities remain unported. Split member `safe-cex-types/src/lib.rs::ExchangeOptionsPolymarket` carries the five Polymarket constructor account fields read through opts as any (polymarket.types.ts PolymarketExchangeOptions); it is a runtime extension and omitted from the static root TS declaration. Credentials/funder use the existing sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary; the retained venue Text record remains separate. signerType retains native Number bits, including NaN/infinities/negative zero, with no enum normalization."
 
 [[symbol]]
 ts = "ValidateAccountResult"
@@ -54,9 +54,9 @@ note = ""
 ts = "Balance"
 kind = "type"
 layer = "mirror"
-rs = "safe-cex-types/src/lib.rs::Balance"
+rs = [ "safe-cex-types/src/lib.rs::Balance", "safe-cex-types/src/lib.rs::CurrencyBalance", "safe-cex-types/src/lib.rs::CurrencyBalance::as_balance" ]
 status = "ported"
-note = "Recursive currencies and coins use insertion order with canonical array-index enumeration after decoding and typed insertion, including Serialize; no lexical BTreeMap reordering. "
+note = "Recursive currencies and coins use insertion order with canonical array-index enumeration after decoding and typed insertion, including Serialize; no lexical BTreeMap reordering. Split members `safe-cex-types/src/lib.rs::CurrencyBalance` and `safe-cex-types/src/lib.rs::CurrencyBalance::as_balance` preserve source runtime currency rows: declared Balance or Crypto.com REST available/locked, without normalizing their field names. TS static currencies annotation remains Balance; source cryptocom.exchange.ts fetchBalance violates it at runtime (ts-bug: currency-balance-runtime-shape). "
 
 [[symbol]]
 ts = "OptionRight"

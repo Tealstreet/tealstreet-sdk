@@ -1,8 +1,10 @@
 # Hyperliquid Rust venue
 
 Behavioral authority: [Hyperliquid guidance](../../packages/safe-cex/src/exchanges/hyperliquid/CLAUDE.md).
-Current implementation covers types/tables, API and pure exchange/history helpers; exchange identity/TIF/cancel state is being ported over BaseExchange; transport
-constructor composition and WS remain pending.
+The production constructor binds the class to shared BaseExchange, store, REST and
+socket hosts. The native registry supplies options-aware transport, hosted signers
+and a caller-owned limiter. Earlier continuation notes below are historical;
+the production binding section records the current entrypoint and runtime choices.
 `deriveClosedPositions` is separate from `fetchClosedPnl`. Future exchange work
 must preserve the surgical store mutation in `fetchOrdersInternal` and the
 explicit fire-and-forget `refreshOrders` wrapper, never generalize the exception.
@@ -250,3 +252,50 @@ untransformed template; invalid wallet validation may fail first. Inspection can
 emit an unexpected-action warning. Proven Transformed String data skips signing.
 The typed telemetry callback maps a missing body to JSON null and owns its JSON
 context; no source undefined/alias/error-object identity is asserted for that ABI.
+
+## Production binding (`binding.rs`, `realm/`)
+
+`HyperliquidExchange::new(options, store, HyperliquidDependencies)` builds the
+shared BaseExchange with the required `HyperliquidDependencies.signers`, then runs the ported class constructor inside `realm`, the
+crate-private production JS host for the generic class bodies. Every `Exchange`
+trait method invokes the instance's ported method; six inherit the TS
+BaseExchange `Not implemented` rejection (getAccount, fetchMarkets, fetchTickers,
+fetchSymbolMaxLeverage, changePositionMode, fetchPublicTrades). Facades bind the
+JS BaseExchange, BaseWebSocket (over the core socket), store and REST clients to
+their Rust owners; imports bind by name to the existing ports, and an unbound
+name throws a ReferenceError rather than resolving to a stand-in.
+`tests/binding.rs` drives all 16 methods over a scripted host and asserts a
+clean startup. Run `python3 sdk-rs/safe-cex-venue-hyperliquid/scripts/binding-controls.py`
+from the repository root for reproducible dispatch controls: each of the 16
+trait overrides is corrupted independently, must compile and fail its named
+E2E test, and is restored byte-for-byte. The restored suite must pass all 14
+tests. These controls establish dispatch coverage; they do not establish full
+JavaScript semantics or live exchange parity. Logs stay outside the repository.
+
+Startup's successful `applicationId`/`vault` assignments also patch the native
+BaseExchange identity immediately. A host write observer preserves the realm
+object's ordinary property descriptors; it runs after successful assignment and
+outside the object's borrow. The scripted legacy-account test covers user,
+vault, agent and subAccount roles against both native options and privacy checks.
+Native identity strings retain the shared scalar-Unicode boundary.
+
+Declared realm choices: promise reactions run as runtime tasks, not a V8
+microtask queue; store reads are snapshots (writes go through Store methods);
+the cross cache is per realm and memory-only (no BroadcastChannel or
+sessionStorage on native hosts); `close` listeners are not invoked because the
+core socket runs the close/reconnect path; external public data rejects visibly.
+Signing converts actions with `undefined` members retained, matching msgpack nil.
+
+The production host supplies `ExchangeSigners` through the existing dependency
+struct; construction attaches them to BaseExchange before realm assembly. Native
+`can_sign` reflects a hosted signer even with no local secret, and availability
+waiters subscribe to that same signer. HTTP relay signing is supplied separately
+by the host's composed adapter, which must honor the API's skip-signing tag on info
+requests. Every caller must pass the signer bundle explicitly; local callers use
+`ExchangeSigners::default()`.
+
+
+Date construction and Date.now apply the shared TimeClip operation to injected
+wall-clock values. A fractional host clock must still produce an integer nonce;
+`tests/binding.rs` checks local signing with a fractional input. NativeRuntime also
+supplies integer epoch milliseconds, while monotonic clocks retain their precision.

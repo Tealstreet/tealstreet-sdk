@@ -20,7 +20,9 @@ use std::{
 struct Runtime {
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
     clock: std::cell::Cell<f64>,
+    wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
+    hold_sleep: std::cell::Cell<bool>,
 }
 struct Task;
 impl ExchangeTask for Task {
@@ -31,9 +33,12 @@ impl ExchangeRuntime for Runtime {
         self.clock.get()
     }
     fn now_ms(&self) -> f64 {
-        0.0
+        self.wall_clock.get()
     }
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
+        if self.hold_sleep.get() {
+            return Box::pin(std::future::pending());
+        }
         self.clock.set(self.clock.get() + ms as f64);
         Box::pin(async { Ok(()) })
     }
@@ -60,6 +65,141 @@ impl ExchangeRuntime for Runtime {
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
     }
+}
+
+#[test]
+fn base_worker_rpc_forwards_arguments_results_errors_and_completion_hook() {
+    use safe_cex_exchange::{
+        capabilities::ExchangeCapabilities,
+        exchange::{BaseExchange, Exchange},
+        worker::CallableMethodsInWorker,
+    };
+    struct Venue {
+        base: Rc<BaseExchange>,
+        caps: ExchangeCapabilities,
+        completed: RefCell<Vec<(Value, Value, Vec<Value>)>>,
+    }
+    impl Exchange for Venue {
+        type PlaceOpts = safe_cex_types::PlaceOrderOpts;
+        fn base(&self) -> &BaseExchange {
+            &self.base
+        }
+        fn capabilities(&self) -> &ExchangeCapabilities {
+            &self.caps
+        }
+        fn after_method_called_in_worker(
+            &self,
+            result: &Value,
+            method: CallableMethodsInWorker,
+            args: &[Value],
+        ) -> Result<(), ExchangeError> {
+            self.completed.borrow_mut().push((
+                result.clone(),
+                serde_json::to_value(method).unwrap(),
+                args.to_vec(),
+            ));
+            Ok(())
+        }
+    }
+    for success in [true, false] {
+        let assembled = assemble(json!({"key":"k","secret":"s"})).unwrap();
+        assembled.runtime.hold_sleep.set(true);
+        let venue = Rc::new(Venue {
+            base: assembled.base.clone(),
+            caps: Default::default(),
+            completed: RefCell::new(vec![]),
+        });
+        let dynamic: Rc<dyn Exchange> = venue.clone();
+        *assembled.context.venue.borrow_mut() = Some(Rc::downgrade(&dynamic));
+        let requests = Rc::new(RefCell::new(vec![]));
+        let captured = requests.clone();
+        assembled.base.on(
+            "callMethod",
+            Rc::new(move |_, request| {
+                captured.borrow_mut().push(request.clone());
+                Ok(())
+            }),
+        );
+        let promise = assembled
+            .this
+            .call_method(
+                "callMethodInWorker",
+                vec![Js::str("removeOrders"), worker_order_ids(), Js::Number(17.)],
+            )
+            .expect("shared worker RPC is installed");
+        assert_eq!(
+            requests.borrow().len(),
+            1,
+            "source async prefix emits one worker request"
+        );
+        let request = requests.borrow()[0].clone();
+        assert_eq!(request["method"], json!("removeOrders"));
+        assert_eq!(request["args"], json!([[{"id":"wire-7"}],17.0]));
+        let result = if success {
+            json!({"removed":["wire-7"],"version":23.0})
+        } else {
+            json!({"name":"WorkerFailure","message":"worker rejected","code":409,"stack":"worker stack"})
+        };
+        assembled
+            .base
+            .emit(
+                "callMethod:done",
+                json!({"requestId":request["requestId"],"success":success,"result":result}),
+            )
+            .unwrap();
+        let reply = settle(&assembled.runtime, promise);
+        if success {
+            assert_eq!(to_json(&reply.unwrap()).unwrap(), result);
+            assert_eq!(
+                venue.completed.borrow().as_slice(),
+                &[(
+                    result,
+                    json!("removeOrders"),
+                    vec![json!([{"id":"wire-7"}]), json!(17.0)]
+                )]
+            );
+        } else {
+            let error = reply.unwrap_err();
+            assert_eq!(
+                error.value.get("name").unwrap().to_display(),
+                "WorkerFailure"
+            );
+            assert_eq!(
+                to_json(&error.value.get("code").unwrap()).unwrap(),
+                json!(409.0)
+            );
+            assert_eq!(
+                error.value.get("stack").unwrap().to_display(),
+                "worker stack"
+            );
+            assert_eq!(error.to_exchange_error().message, "worker rejected");
+            assert!(venue.completed.borrow().is_empty());
+        }
+    }
+    // The default test clock resolves its sleep immediately: the facade must
+    // preserve the existing core timeout rather than leave an unsettled promise.
+    let assembled = assemble(json!({"key":"k","secret":"s"})).unwrap();
+    let venue: Rc<dyn Exchange> = Rc::new(Venue {
+        base: assembled.base.clone(),
+        caps: Default::default(),
+        completed: RefCell::new(vec![]),
+    });
+    *assembled.context.venue.borrow_mut() = Some(Rc::downgrade(&venue));
+    let promise = assembled
+        .this
+        .call_method(
+            "callMethodInWorker",
+            vec![Js::str("removeOrders"), worker_order_ids()],
+        )
+        .unwrap();
+    assert_eq!(
+        settle(&assembled.runtime, promise).unwrap_err().message(),
+        "Timeout callMethodInWorker"
+    );
+}
+
+fn worker_order_ids() -> Js {
+    safe_cex_exchange::js_runtime::value::from_json(&json!([{"id":"wire-7"}]))
 }
 
 struct Http {
@@ -107,6 +247,273 @@ fn settle(runtime: &Runtime, value: Js) -> Result<Js, Thrown> {
         }
     }
     panic!("promise did not settle")
+}
+
+#[test]
+fn client_retry_preserves_the_failed_config_and_retry_stamp() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    xhr.call_method(
+        "__configureRetry",
+        vec![Js::object(vec![
+            ("retries", Js::Number(3.0)),
+            (
+                "retryCondition",
+                Js::function("retryCondition", |_, a| {
+                    let config = arg(&a, 0).get("config")?;
+                    if config.get("signatureRetried")?.truthy() {
+                        return Ok(Js::Bool(false));
+                    }
+                    config.set("signatureRetried", Js::Bool(true))?;
+                    config.set("data", Js::str("replayed body"))?;
+                    Ok(Js::Bool(true))
+                }),
+            ),
+        ])],
+    )
+    .unwrap();
+    let result = settle(
+        &runtime,
+        xhr.call_method("post", vec![Js::str("/fail"), Js::str("original body")])
+            .unwrap(),
+    );
+    assert!(result.is_err());
+    let sent = http.sent.borrow();
+    assert_eq!(
+        sent.len(),
+        2,
+        "retry predicate stamp survives the next attempt"
+    );
+    assert_eq!(sent[0]["data"], "original body");
+    assert_eq!(sent[1]["data"], "replayed body");
+    assert_eq!(sent[1]["signatureRetried"], true);
+}
+
+#[test]
+fn client_headers_support_source_set_get_has_without_wire_methods() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(
+        http.clone(),
+        Js::object(vec![(
+            "headers",
+            Js::object(vec![
+                ("X-Trace", Js::str("default")),
+                ("Content-Type", Js::str("application/json")),
+            ]),
+        )]),
+    );
+    xhr.get("interceptors")
+        .unwrap()
+        .get("request")
+        .unwrap()
+        .call_method(
+            "use",
+            vec![Js::function("source headers", |_, a| {
+                let config = arg(&a, 0);
+                let headers = config.get("headers")?;
+                assert!(
+                    headers.get("set")?.is_callable(),
+                    "source-interceptor headers.set must be callable"
+                );
+                assert!(
+                    !headers.has_own("set"),
+                    "AxiosHeaders methods are inherited"
+                );
+                assert_eq!(
+                    headers
+                        .call_method("get", vec![Js::str("x-trace")])?
+                        .to_display(),
+                    "request",
+                    "request header wins case-insensitively"
+                );
+                let returned = headers
+                    .call_method("set", vec![Js::str("POLY_SIGNATURE"), Js::str("signed")])?;
+                assert!(returned.same_reference(&headers), "headers.set is fluent");
+                headers.call_method("set", vec![Js::str("poly_signature"), Js::str("updated")])?;
+                assert_eq!(
+                    headers
+                        .call_method("get", vec![Js::str("Poly_Signature")])?
+                        .to_display(),
+                    "updated"
+                );
+                assert!(
+                    headers
+                        .call_method("has", vec![Js::str("POLY_SIGNATURE")])?
+                        .truthy()
+                );
+                assert!(
+                    !headers
+                        .call_method("has", vec![Js::str("absent")])?
+                        .truthy()
+                );
+                assert_eq!(
+                    headers
+                        .own_keys()
+                        .iter()
+                        .map(|k| String::from_utf16(k).unwrap())
+                        .collect::<Vec<_>>(),
+                    vec!["X-Trace", "Content-Type", "POLY_SIGNATURE"],
+                    "only header entries reach the wire"
+                );
+                Ok(config)
+            })],
+        )
+        .unwrap();
+    settle(
+        &runtime,
+        xhr.call_method(
+            "get",
+            vec![
+                Js::str("/ok"),
+                Js::object(vec![(
+                    "headers",
+                    Js::object(vec![("x-trace", Js::str("request"))]),
+                )]),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        http.sent.borrow()[0]["headers"],
+        json!({"X-Trace":"request","Content-Type":"application/json","POLY_SIGNATURE":"updated"}),
+        "wire headers contain data only"
+    );
+}
+
+#[test]
+fn client_header_facade_matches_installed_axios() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_headers_oracle.cjs"
+        ))
+        .output()
+        .expect("Axios oracle launches");
+    assert!(
+        output.status.success(),
+        "Axios oracle: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let capture: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = capture["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 4, "independent header corpus floor");
+    let mut compared = 0;
+    for case in cases {
+        let runtime = Rc::new(Runtime::default());
+        let http = Rc::new(Http {
+            runtime: runtime.clone(),
+            sent: RefCell::default(),
+        });
+        let xhr = client::create(
+            http,
+            Js::object(vec![(
+                "headers",
+                safe_cex_exchange::js_runtime::value::from_json(&case["defaults"]),
+            )]),
+        );
+        let source = case.clone();
+        let checked = Rc::new(std::cell::Cell::new(0));
+        let performed = checked.clone();
+        xhr.get("interceptors")
+            .unwrap()
+            .get("request")
+            .unwrap()
+            .call_method(
+                "use",
+                vec![Js::function("compare source headers", move |_, a| {
+                    let config = arg(&a, 0);
+                    let headers = config.get("headers")?;
+                    for (sets, expected) in source["sets"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .zip(source["snapshots"].as_array().unwrap())
+                    {
+                        let args = sets
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(safe_cex_exchange::js_runtime::value::from_json)
+                            .collect();
+                        assert!(
+                            headers.call_method("set", args)?.same_reference(&headers),
+                            "source fluent receiver"
+                        );
+                        let entries: Vec<_> = headers
+                            .own_entries()?
+                            .into_iter()
+                            .map(|(k, v)| {
+                                json!([String::from_utf16(&k).unwrap(), to_json(&v).unwrap()])
+                            })
+                            .collect();
+                        assert_eq!(
+                            json!(entries),
+                            expected["entries"],
+                            "actual Axios native entries"
+                        );
+                        assert_eq!(
+                            json!(
+                                headers
+                                    .own_keys()
+                                    .iter()
+                                    .map(|k| String::from_utf16(k).unwrap())
+                                    .collect::<Vec<_>>()
+                            ),
+                            expected["keys"],
+                            "actual Axios own-key order"
+                        );
+                        for probe in expected["probes"].as_array().unwrap() {
+                            let name = Js::str(probe["name"].as_str().unwrap());
+                            let value = headers.call_method("get", vec![name.clone()])?;
+                            assert_eq!(
+                                headers.call_method("has", vec![name])?.truthy(),
+                                probe["present"].as_bool().unwrap(),
+                                "actual Axios has"
+                            );
+                            if let Some(expected) = probe.get("value") {
+                                assert_eq!(to_json(&value)?, *expected, "actual Axios get");
+                            } else {
+                                assert!(value.is_undefined(), "absent Axios get stays undefined");
+                            }
+                        }
+                        performed.set(performed.get() + 1);
+                    }
+                    Ok(config)
+                })],
+            )
+            .unwrap();
+        settle(
+            &runtime,
+            xhr.call_method(
+                "get",
+                vec![
+                    Js::str("/ok"),
+                    Js::object(vec![(
+                        "headers",
+                        safe_cex_exchange::js_runtime::value::from_json(&case["request"]),
+                    )]),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            checked.get(),
+            case["sets"].as_array().unwrap().len(),
+            "no skipped source operations"
+        );
+        compared += checked.get();
+    }
+    assert_eq!(compared, 17, "independent performed operation count");
 }
 
 #[test]
@@ -1096,6 +1503,7 @@ impl safe_cex_transport::RestAdapter for Terminal {
             body: RestResponseBody::Encoded(body.as_bytes().to_vec()),
         };
         let result = match request.url.as_str() {
+            "/large-id" => Ok(response(200, r#"{ "orderId":9007199254740993 }"#)),
             "/down" => {
                 let mut failure = RestFailure::pre_transmit("socket hang up".into(), request);
                 failure.code = Some("ECONNRESET".into());
@@ -1179,6 +1587,44 @@ fn rest_http_host_carries_config_to_the_terminal_adapter() {
 }
 
 #[test]
+fn rest_http_host_text_response_preserves_raw_big_integer_tokens() {
+    let runtime = Rc::new(Runtime::default());
+    let terminal = std::sync::Arc::new(Terminal::default());
+    let host = client::rest_http_host(runtime.clone(), terminal);
+    let xhr = client::create(host, Js::object(vec![("responseType", Js::str("text"))]));
+    let response = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/large-id")]).unwrap(),
+    )
+    .unwrap();
+    let raw = response.get("data").unwrap();
+    assert!(
+        raw.is_string(),
+        "text response must reach the venue before numeric projection"
+    );
+    assert_eq!(raw.to_display(), r#"{ "orderId":9007199254740993 }"#);
+    assert_eq!(
+        safe_cex_transport::how::big_int_as_string_json_parse(&raw.to_display())["orderId"],
+        "9007199254740993"
+    );
+    let failed = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/fail")]).unwrap(),
+    )
+    .unwrap_err();
+    assert_eq!(
+        failed
+            .value
+            .get("response")
+            .unwrap()
+            .get("data")
+            .unwrap()
+            .to_display(),
+        r#"{"code":"1"}"#
+    );
+}
+
+#[test]
 fn rest_http_host_lets_the_venue_serialize_its_query() {
     let runtime = Rc::new(Runtime::default());
     let terminal = std::sync::Arc::new(Terminal::default());
@@ -1211,6 +1657,129 @@ fn rest_http_host_lets_the_venue_serialize_its_query() {
     let seen = terminal.seen.lock().unwrap();
     assert_eq!(seen[0].url, "/ok?a=1&b=2");
     assert_eq!(seen[0].params, None);
+}
+
+/// A dropped awaiter releases its waker at once; the promise still settles for the
+/// awaiters that remain.
+#[test]
+fn dropped_promise_wait_releases_its_waker() {
+    #[derive(Default)]
+    struct Count(std::sync::atomic::AtomicBool);
+    impl std::task::Wake for Count {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let runtime: Rc<dyn ExchangeRuntime> = Rc::new(Runtime::default());
+    let promise = Promise::pending(&runtime);
+    let (dropped, kept) = (
+        std::sync::Arc::<Count>::default(),
+        std::sync::Arc::<Count>::default(),
+    );
+    let mut first = Box::pin(promise.wait());
+    let mut second = Box::pin(promise.wait());
+    for (wait, waker) in [(&mut first, &dropped), (&mut second, &kept)] {
+        let waker = Waker::from(waker.clone());
+        assert!(
+            wait.as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+    }
+    assert_eq!(
+        std::sync::Arc::strong_count(&dropped),
+        2,
+        "registered while pending"
+    );
+    drop(first);
+    assert_eq!(
+        std::sync::Arc::strong_count(&dropped),
+        1,
+        "WAITER drop releases the waker"
+    );
+    assert_eq!(
+        std::sync::Arc::strong_count(&kept),
+        2,
+        "the other awaiter stays registered"
+    );
+    promise.settle(Ok(Js::Bool(true)));
+    assert_eq!(
+        std::sync::Arc::strong_count(&kept),
+        1,
+        "settlement wakes and releases"
+    );
+    assert!(
+        kept.0.load(std::sync::atomic::Ordering::SeqCst),
+        "the kept awaiter is woken"
+    );
+    assert!(
+        !dropped.0.load(std::sync::atomic::Ordering::SeqCst),
+        "the dropped one is not"
+    );
+    let waker = Waker::from(kept.clone());
+    assert!(matches!(
+        second.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Ready(Ok(Js::Bool(true)))
+    ));
+}
+
+/// clearTimeout cancels the host task, and a fired timer leaves the timer list.
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[test]
+fn clear_timeout_cancels_and_fired_timers_are_released() {
+    use safe_cex_exchange::js_runtime::scope::{Scope, ScopeShared};
+    let tokio = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&tokio, async {
+        let runtime = safe_cex_exchange::native::native_runtime();
+        let http = Rc::new(Http {
+            runtime: Rc::new(Runtime::default()),
+            sent: RefCell::default(),
+        });
+        let store: Rc<dyn safe_cex_store::Store> =
+            Rc::new(safe_cex_store::store::DefaultStore::new());
+        let scope = Scope {
+            shared: Rc::new(ScopeShared::new(
+                runtime.clone(),
+                http,
+                store,
+                Js::Undefined,
+                (),
+            )),
+            this: Js::Undefined,
+        };
+        let ran = Rc::new(std::cell::Cell::new(0));
+        let (cleared, kept) = (ran.clone(), ran.clone());
+        let timer = scope.set_timeout(
+            Rc::new(move || {
+                cleared.set(cleared.get() + 10);
+                Ok(())
+            }),
+            20.0,
+        );
+        scope.set_timeout(
+            Rc::new(move || {
+                kept.set(kept.get() + 1);
+                Ok(())
+            }),
+            20.0,
+        );
+        assert_eq!(scope.shared.timers.borrow().len(), 2);
+        scope.clear_timeout(&timer);
+        assert_eq!(scope.shared.timers.borrow().len(), 1);
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        assert_eq!(
+            ran.get(),
+            1,
+            "the cleared timer never fires; the other fires once"
+        );
+        assert!(
+            scope.shared.timers.borrow().is_empty(),
+            "a fired timer is released"
+        );
+    });
 }
 
 #[test]
@@ -2110,4 +2679,574 @@ fn client_rejection_handlers_follow_the_axios_promise_chain() {
         result.get("recovered").unwrap().to_display(),
         "Request failed with status code 500"
     );
+}
+
+#[test]
+fn source_socket_fields_reach_typed_groups_and_track_replacement_and_removal() {
+    use safe_cex_exchange::{
+        js_runtime::sockets::{base_websocket, core_of},
+        socket_lifecycle::SocketSlot,
+    };
+    let (a, _venue) = assembled_venue(Ok(vec![]));
+    assert!(a.base.get_all_sockets().is_empty());
+    // Exact order from source BaseExchange.getAllSockets/getPublicSockets.
+    let fields = [
+        "privateWebsocket",
+        "publicWebsocket",
+        "publicWebsocketSecondary",
+        "publicInverseWebsocket",
+        "futuresWebsocket",
+        "businessWebsocket",
+        "secondsTickersWebsocket",
+        "thirdTickersWebsocket",
+    ];
+    let sockets: Vec<_> = fields
+        .iter()
+        .map(|field| {
+            let socket = base_websocket(&a.context, a.this.clone());
+            a.this.set(field, socket.clone()).unwrap();
+            socket
+        })
+        .collect();
+    let expected: Vec<_> = sockets
+        .iter()
+        .map(|socket| core_of(&a.context, socket).unwrap().base().unwrap())
+        .collect();
+    let actual = a.base.get_all_sockets();
+    assert_eq!(
+        actual.len(),
+        8,
+        "typed lifecycle sees every source-owned socket"
+    );
+    for (actual, expected) in actual.iter().zip(&expected) {
+        assert!(Rc::ptr_eq(actual, expected));
+    }
+    assert!(Rc::ptr_eq(&a.base.get_private_sockets()[0], &expected[0]));
+    assert_eq!(
+        a.base
+            .get_public_sockets()
+            .iter()
+            .map(|s| s.id)
+            .collect::<Vec<_>>(),
+        expected[1..].iter().map(|s| s.id).collect::<Vec<_>>()
+    );
+    let replacement = base_websocket(&a.context, a.this.clone());
+    a.this.set("privateWebsocket", replacement.clone()).unwrap();
+    let replacement_core = core_of(&a.context, &replacement).unwrap().base().unwrap();
+    assert!(Rc::ptr_eq(
+        &a.base.get_socket(SocketSlot::Private).unwrap(),
+        &replacement_core
+    ));
+    a.this.delete(&utf16("publicWebsocket"));
+    assert!(a.base.get_socket(SocketSlot::Public).is_none());
+    assert_eq!(a.base.get_all_sockets().len(), 7);
+    assert_eq!(a.base.get_public_sockets().len(), 6);
+    a.base.dispose().unwrap();
+    assert!(replacement_core.is_disposed());
+    assert!(expected[1..].iter().all(|socket| socket.is_disposed()));
+}
+
+#[test]
+fn date_now_is_integer_while_performance_retains_fractional_milliseconds() {
+    let (runtime, shared) = scoped_globals();
+    for (wall, expected) in [
+        (1_735_689_600_000.75, 1_735_689_600_000.0),
+        (1234.125, 1234.0),
+    ] {
+        runtime.wall_clock.set(wall);
+        runtime.clock.set(7.625);
+        assert_eq!(
+            run(&shared.globals, "Date.now", vec![]).as_f64(),
+            Some(expected)
+        );
+        assert_eq!(
+            run(&shared.globals, "performance.now", vec![]).as_f64(),
+            Some(7.625)
+        );
+    }
+}
+
+mod http_factory {
+    use super::*;
+    use safe_cex_exchange::js_runtime::client::factory;
+    use safe_cex_transport::{
+        DirectTransport, PrivateProxy, ResolvedRouting, RestAdapter, RestAdapterContext,
+        RestAuthorizer, RestFuture, RestRequest, RestResponse, RestResponseBody, RestTransport,
+        RestTransportContext, RoutingOptions, TransportError, TransportFuture, TransportProvider,
+        WsConnection,
+    };
+    use safe_cex_types::{ExchangeName, ExchangeOptions};
+    use std::sync::Arc;
+    struct Authorizer {
+        events: Rc<RefCell<Vec<String>>>,
+        fail: bool,
+    }
+    impl RestAuthorizer for Authorizer {
+        fn authorize<'a>(&'a self, request: &'a mut RestRequest) -> TransportFuture<'a, ()> {
+            Box::pin(async move {
+                self.events.borrow_mut().push("authorize".into());
+                if self.fail {
+                    return Err(TransportError::Host("token rejected".into()));
+                }
+                request
+                    .headers
+                    .insert("Proxy-Authorization".into(), "Bearer token".into());
+                Ok(())
+            })
+        }
+    }
+    struct Provider {
+        proxied: bool,
+        authorize: Arc<dyn RestAuthorizer>,
+        adapter: Option<Arc<dyn RestAdapter>>,
+        variants: RefCell<Vec<safe_cex_transport::RestAdapterVariant>>,
+    }
+    impl TransportProvider for Provider {
+        fn name(&self) -> &str {
+            "recording"
+        }
+        fn rest(&self, c: RestTransportContext<'_>) -> Result<RestTransport, TransportError> {
+            Ok(RestTransport {
+                base_url: if self.proxied {
+                    c.config
+                        .base_url
+                        .as_ref()
+                        .map(|base| format!("https://proxy/{base}"))
+                } else {
+                    c.config.base_url.clone()
+                },
+                proxied: self.proxied,
+                authorize: Some(self.authorize.clone()),
+            })
+        }
+        fn rest_adapter(&self, c: RestAdapterContext<'_>) -> Option<Arc<dyn RestAdapter>> {
+            self.variants.borrow_mut().push(c.variant);
+            self.adapter.clone()
+        }
+        fn proxy_prefix(&self, _: RestTransportContext<'_>) -> String {
+            String::new()
+        }
+        fn public_cors_proxy(&self) -> Option<String> {
+            None
+        }
+        fn private_proxy(&self, _: &ExchangeName) -> Option<Arc<dyn PrivateProxy>> {
+            None
+        }
+        fn require_proxy(&self, o: ExchangeOptions) -> ExchangeOptions {
+            o
+        }
+        fn server_proxy_url(&self, _: &ExchangeName) -> Option<String> {
+            None
+        }
+        fn ws_routing(&self, e: &ExchangeName, o: &RoutingOptions) -> ResolvedRouting {
+            DirectTransport.ws_routing(e, o)
+        }
+        fn ws_connection(&self, _: &str) -> Option<WsConnection> {
+            None
+        }
+    }
+    struct Terminal {
+        events: Rc<RefCell<Vec<String>>>,
+        sent: Rc<RefCell<Vec<RestRequest>>>,
+        query_in_url: bool,
+    }
+    impl RestAdapter for Terminal {
+        fn query_in_url(&self) -> bool {
+            self.query_in_url
+        }
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.events.borrow_mut().push("send".into());
+            self.sent.borrow_mut().push(request);
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Untransformed(json!({"ok":true})),
+                })
+            })
+        }
+    }
+    fn opts(value: Value) -> Js {
+        safe_cex_exchange::js_runtime::value::from_json(&value)
+    }
+    #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn source_factory_routes_and_authorizes_after_venue_signing_without_losing_headers() {
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/js_http_factory_source.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+        assert_eq!(rows.len(), 4);
+        for row in rows {
+            let runtime = Rc::new(Runtime::default());
+            let events = Rc::new(RefCell::new(vec![]));
+            let sent = Rc::new(RefCell::new(vec![]));
+            let terminal = Arc::new(Terminal {
+                events: events.clone(),
+                sent: sent.clone(),
+                query_in_url: true,
+            });
+            let host = client::rest_http_host(runtime.clone(), terminal);
+            let provider = Provider {
+                proxied: row["proxied"].as_bool().unwrap(),
+                authorize: Arc::new(Authorizer {
+                    events: events.clone(),
+                    fail: row["failAuth"].as_bool().unwrap(),
+                }),
+                adapter: None,
+                variants: RefCell::default(),
+            };
+            let config = opts(
+                json!({"baseURL":"https://venue","timeout":31,"headers":{"X-Venue":"initial"}}),
+            );
+            let xhr = factory::create(
+                host,
+                &provider,
+                config,
+                &opts(json!({"key":"","secret":""})),
+                ExchangeName::Polymarket,
+            )
+            .unwrap();
+            let trace = events.clone();
+            xhr.get("interceptors")
+                .unwrap()
+                .get("request")
+                .unwrap()
+                .call_method(
+                    "use",
+                    vec![Js::function("venue", move |_, a| {
+                        trace.borrow_mut().push("venue".into());
+                        let config = arg(&a, 0);
+                        config
+                            .get("headers")?
+                            .call_method("set", vec![Js::str("X-Venue"), Js::str("signed")])?;
+                        Ok(config)
+                    })],
+                )
+                .unwrap();
+            let result = settle(
+                &runtime,
+                xhr.call_method("get", vec![Js::str("/book")]).unwrap(),
+            );
+            assert_eq!(json!(*events.borrow()), row["events"]);
+            assert_eq!(
+                result.as_ref().err().map(Thrown::message),
+                row["error"].as_str().map(str::to_owned)
+            );
+            let requests = sent.borrow();
+            if row["wire"].is_null() {
+                assert!(requests.is_empty());
+            } else {
+                assert_eq!(requests.len(), 1);
+                let request = &requests[0];
+                assert_eq!(
+                    json!({"baseURL":request.base_url,"timeout":request.timeout_ms,"headers":request.headers}),
+                    row["wire"]
+                );
+                assert_eq!(
+                    result
+                        .unwrap()
+                        .get("config")
+                        .unwrap()
+                        .get("headers")
+                        .unwrap()
+                        .call_method("get", vec![Js::str("x-venue")])
+                        .unwrap()
+                        .to_display(),
+                    "signed"
+                );
+            }
+        }
+    }
+    #[test]
+    fn direct_factory_preserves_override_and_refuses_unavailable_routing_before_send() {
+        let runtime = Rc::new(Runtime::default());
+        let http = Rc::new(Http {
+            runtime: runtime.clone(),
+            sent: RefCell::default(),
+        });
+        let options = opts(json!({"key":"","secret":"","overrideProxyUrl":"https://override"}));
+        let xhr = factory::create(
+            http.clone(),
+            &DirectTransport,
+            opts(json!({"baseURL":"https://venue","timeout":999})),
+            &options,
+            ExchangeName::Polymarket,
+        )
+        .unwrap();
+        settle(
+            &runtime,
+            xhr.call_method("get", vec![Js::str("/book")]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            http.sent.borrow()[0]["baseURL"],
+            "https://override/https://venue"
+        );
+        for flag in ["tealstreetProxy", "tealstreetTunnel"] {
+            let error = factory::create(
+                http.clone(),
+                &DirectTransport,
+                opts(json!({"baseURL":"https://venue"})),
+                &opts(json!({"key":"","secret":"",flag:true})),
+                ExchangeName::Polymarket,
+            )
+            .unwrap_err();
+            assert!(error.message().contains("direct transport is active"));
+        }
+        assert_eq!(http.sent.borrow().len(), 1);
+    }
+    #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn explicit_transport_installation_selects_variants_and_leaves_how_params_in_frame() {
+        use safe_cex_transport::{RestAdapterRegion, RestAdapterVariant as V};
+        let runtime = Rc::new(Runtime::default());
+        let direct = Rc::new(Http {
+            runtime: runtime.clone(),
+            sent: RefCell::default(),
+        });
+        let events = Rc::new(RefCell::new(vec![]));
+        let sent = Rc::new(RefCell::new(vec![]));
+        let provider = Provider {
+            proxied: false,
+            authorize: Arc::new(Authorizer {
+                events: events.clone(),
+                fail: false,
+            }),
+            adapter: Some(Arc::new(Terminal {
+                events,
+                sent: sent.clone(),
+                query_in_url: false,
+            })),
+            variants: RefCell::default(),
+        };
+        let options = opts(json!({"key":"","secret":"","tealstreetTunnel":true}));
+        let xhr = factory::create(
+            direct.clone(),
+            &provider,
+            opts(json!({"baseURL":"https://venue"})),
+            &options,
+            ExchangeName::Polymarket,
+        )
+        .unwrap();
+        let variants = [
+            V::Default,
+            V::BigInt,
+            V::Region {
+                region: Some(RestAdapterRegion::Ja),
+            },
+        ];
+        for variant in &variants {
+            factory::install_transport_adapter(
+                direct.clone(),
+                &provider,
+                &xhr,
+                &options,
+                ExchangeName::Polymarket,
+                variant.clone(),
+            )
+            .unwrap();
+            settle(
+                &runtime,
+                xhr.call_method(
+                    "get",
+                    vec![
+                        Js::str("/book"),
+                        Js::object(vec![
+                            ("params", opts(json!({"id":"9007199254740993"}))),
+                            (
+                                "paramsSerializer",
+                                Js::function("serialize", |_, _| {
+                                    panic!("HOW must retain frame params")
+                                }),
+                            ),
+                        ]),
+                    ],
+                )
+                .unwrap(),
+            )
+            .unwrap();
+        }
+        assert_eq!(*provider.variants.borrow(), variants);
+        assert!(direct.sent.borrow().is_empty());
+        for request in sent.borrow().iter() {
+            assert_eq!(request.url, "/book");
+            assert_eq!(request.params, Some(json!({"id":"9007199254740993"})));
+        }
+        let absent = Provider {
+            adapter: None,
+            ..provider
+        };
+        factory::install_transport_adapter(
+            direct,
+            &absent,
+            &xhr,
+            &options,
+            ExchangeName::Polymarket,
+            V::Default,
+        )
+        .unwrap();
+        settle(
+            &runtime,
+            xhr.call_method("get", vec![Js::str("/again")]).unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            sent.borrow().last().unwrap().url,
+            "/again",
+            "absent adapter retains the installed inner adapter"
+        );
+    }
+
+    struct Signer {
+        events: Rc<RefCell<Vec<String>>>,
+    }
+    impl safe_cex_transport::signing::RemoteSigner for Signer {
+        fn sign(
+            &self,
+            request: safe_cex_transport::signing::RemoteSignerRequest,
+        ) -> TransportFuture<'_, safe_cex_transport::signing::RemoteSignerResponse> {
+            use safe_cex_transport::signing::*;
+            self.events.borrow_mut().push("sign".into());
+            let RemoteSignerRequest::Http(request) = request else {
+                panic!("HTTP expected")
+            };
+            assert_eq!(request.exchange_name, ExchangeName::Polymarket);
+            assert_eq!(request.account_name.as_deref(), Some("hosted"));
+            assert_eq!(
+                request
+                    .config
+                    .headers
+                    .get("Proxy-Authorization")
+                    .map(String::as_str),
+                Some("Bearer token")
+            );
+            Box::pin(async move {
+                Ok(RemoteSignerResponse::Http(HttpSigningResponse {
+                    id: request.id,
+                    config: Some(SignedConfig {
+                        url: Some("/signed".into()),
+                        params: Some(json!({"signed":7.0})),
+                        headers: [("Remote-Signature".into(), "signed".into())]
+                            .into_iter()
+                            .collect(),
+                        ..Default::default()
+                    }),
+                    error: None,
+                }))
+            })
+        }
+    }
+    impl safe_cex_exchange::runtime::RemoteSigner for Signer {
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn on_availability_change(
+            &self,
+            _: Rc<dyn Fn(bool)>,
+        ) -> safe_cex_exchange::runtime::Cleanup {
+            Box::new(|| {})
+        }
+    }
+    #[test]
+    #[allow(clippy::arc_with_non_send_sync)]
+    fn replacing_transport_keeps_remote_signing_below_proxy_auth_and_before_query_serialization() {
+        use safe_cex_transport::RestAdapterVariant;
+        let runtime = Rc::new(Runtime::default());
+        let events = Rc::new(RefCell::new(vec![]));
+        let sent = Rc::new(RefCell::new(vec![]));
+        let terminal = Arc::new(Terminal {
+            events: events.clone(),
+            sent: sent.clone(),
+            query_in_url: true,
+        });
+        let host = client::rest_http_host_signed(
+            runtime.clone(),
+            terminal.clone(),
+            Some((
+                Rc::new(Signer {
+                    events: events.clone(),
+                }),
+                Some("hosted".into()),
+            )),
+        );
+        let provider = Provider {
+            proxied: true,
+            authorize: Arc::new(Authorizer {
+                events: events.clone(),
+                fail: false,
+            }),
+            adapter: Some(terminal),
+            variants: RefCell::default(),
+        };
+        let options = opts(json!({"key":"","secret":""}));
+        let trace = events.clone();
+        let xhr = factory::create(
+            host.clone(),
+            &provider,
+            Js::object(vec![
+                ("baseURL", Js::str("https://venue")),
+                (
+                    "paramsSerializer",
+                    Js::function("serialize", move |_, a| {
+                        trace.borrow_mut().push("serialize".into());
+                        assert_eq!(to_json(&arg(&a, 0))?, json!({"signed":7.0}));
+                        Ok(Js::str("signed=7"))
+                    }),
+                ),
+            ]),
+            &options,
+            ExchangeName::Polymarket,
+        )
+        .unwrap();
+        factory::install_transport_adapter(
+            host,
+            &provider,
+            &xhr,
+            &options,
+            ExchangeName::Polymarket,
+            RestAdapterVariant::Default,
+        )
+        .unwrap();
+        let response = settle(
+            &runtime,
+            xhr.call_method(
+                "get",
+                vec![Js::str("/book"), opts(json!({"params":{"unsigned":3}}))],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(*events.borrow(), ["authorize", "sign", "serialize", "send"]);
+        let sent = sent.borrow();
+        assert_eq!(sent.len(), 1);
+        assert_eq!(sent[0].url, "/signed?signed=7");
+        assert_eq!(
+            sent[0].headers.get("Remote-Signature").map(String::as_str),
+            Some("signed")
+        );
+        assert_eq!(
+            response
+                .get("config")
+                .unwrap()
+                .get("url")
+                .unwrap()
+                .to_display(),
+            "/signed"
+        );
+        assert_eq!(
+            to_json(&response.get("config").unwrap().get("params").unwrap()).unwrap(),
+            json!({"signed":7.0})
+        );
+    }
 }

@@ -10,9 +10,10 @@ use crate::{
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     external::ExternalPublicData,
-    runtime::{ExchangeRuntime, ListenerCleanup},
+    runtime::{ExchangeRuntime, ListenerCleanup, RemoteSigner},
 };
 use safe_cex_store::Store;
+use safe_cex_transport::signing::RemoteSignerRequest;
 use safe_cex_transport::{
     RestAdapter, TransportError, TransportProvider,
     secondary::{RateLimitWrapper, create_api_with_secondary_key},
@@ -42,6 +43,41 @@ pub struct BaseExchangeParts {
     pub external_public_data: Option<ExternalPublicDataFactory>,
 }
 
+/// exchange-server's browser relay for one account, with that account's name.
+pub type HostedSigner = (Rc<dyn RemoteSigner>, Option<String>);
+
+/// ts: options.remoteSigner, `{ accountName, sign(request) }` over the hosted signer.
+fn js_remote_signer(
+    signer: Rc<dyn RemoteSigner>,
+    account: Option<String>,
+    runtime: Rc<dyn ExchangeRuntime>,
+) -> Js {
+    let sign = Js::function("sign", move |_, a| {
+        let request: RemoteSignerRequest = serde_json::from_value(to_json(&arg(&a, 0))?)
+            .map_err(|e| Thrown::type_error(&e.to_string()))?;
+        let signer = signer.clone();
+        Ok(Js::Promise(Promise::spawn(
+            &runtime,
+            Box::pin(async move {
+                let response = signer
+                    .sign(request)
+                    .await
+                    .map_err(|e| Thrown::error("Error", &e.to_string()))?;
+                let value = serde_json::to_value(&response)
+                    .map_err(|e| Thrown::type_error(&e.to_string()))?;
+                Ok(super::value::from_json(&value))
+            }),
+        )))
+    });
+    Js::object(vec![
+        (
+            "accountName",
+            account.map_or(Js::Undefined, |a| Js::str(&a)),
+        ),
+        ("sign", sign),
+    ])
+}
+
 fn assembled_venue(context: &Weak<JsSocketContext>) -> Result<Rc<dyn Exchange>, Thrown> {
     context
         .upgrade()
@@ -69,13 +105,31 @@ pub fn create(
         ));
     }
     let external_public_data = parts.external_public_data;
-    let base = Rc::new(BaseExchange::new(
+    let mut core = BaseExchange::new(
         parts.name,
         parts.options,
         parts.store,
         runtime.clone(),
         parts.settings,
-    ));
+    );
+    let remote = context
+        .http
+        .borrow()
+        .as_ref()
+        .map(|http| -> Result<Option<HostedSigner>, Thrown> {
+            http.configure_exchange(core.name.clone())?;
+            Ok(http.hosted_signer())
+        })
+        .transpose()?
+        .flatten();
+    if let Some((signer, account)) = remote {
+        core.signers.remote_signer = Some(signer.clone());
+        options.set(
+            "remoteSigner",
+            js_remote_signer(signer, account, runtime.clone()),
+        )?;
+    }
+    let base = Rc::new(core);
     let this = Js::object_with_class(
         "BaseExchange",
         vec![
@@ -474,7 +528,107 @@ pub fn create(
             }),
         );
     }
+    // Source BaseExchange.getAllSockets reads these properties on every call.
+    // Defer core creation until the venue is assembled and retain weak owners.
+    if let Js::Object(receiver) = &this {
+        use crate::socket_lifecycle::SocketSlot;
+        for (name, slot) in [
+            ("privateWebsocket", SocketSlot::Private),
+            ("publicWebsocket", SocketSlot::Public),
+            ("publicWebsocketSecondary", SocketSlot::PublicSecondary),
+            ("publicInverseWebsocket", SocketSlot::PublicInverse),
+            ("futuresWebsocket", SocketSlot::Futures),
+            ("businessWebsocket", SocketSlot::Business),
+            ("secondsTickersWebsocket", SocketSlot::SecondsTickers),
+            ("thirdTickersWebsocket", SocketSlot::ThirdTickers),
+        ] {
+            let receiver = Rc::downgrade(receiver);
+            let context = Rc::downgrade(context);
+            base.set_socket_lookup(
+                slot,
+                Rc::new(move || {
+                    let context = context.upgrade()?;
+                    let receiver = Js::Object(receiver.upgrade()?);
+                    let read = || -> Result<Option<Rc<crate::websocket::BaseWebSocket>>, Thrown> {
+                        let socket = receiver.get(name)?;
+                        super::sockets::core_of(&context, &socket)
+                            .map(|core| core.base())
+                            .transpose()
+                    };
+                    read().unwrap_or_else(|error| {
+                        context.runtime.report_exception(
+                            &error.to_exchange_error(),
+                            &serde_json::json!({"operation":"getAllSockets", "slot":name}),
+                        );
+                        None
+                    })
+                }),
+            );
+        }
+    }
+    {
+        let context = Rc::downgrade(context);
+        def(
+            "callMethodInWorker",
+            Js::function("callMethodInWorker", move |_, args| {
+                worker_rpc(&context, args)
+            }),
+        );
+    }
     Ok((this, base))
+}
+
+/// Keep worker RPC ownership in the core: its exact reply listener and timeout
+/// are released by WorkerReplyGuard, and the venue receives the completion hook.
+fn worker_rpc(context: &Weak<JsSocketContext>, args: Vec<Js>) -> Result<Js, Thrown> {
+    let context = context
+        .upgrade()
+        .ok_or_else(|| Thrown::error("Error", "exchange is not assembled"))?;
+    let runtime: Rc<dyn ExchangeRuntime> = context.runtime.clone();
+    Ok(Js::Promise(Promise::spawn(
+        &runtime,
+        Box::pin(async move {
+            let venue = assembled_venue(&Rc::downgrade(&context))?;
+            let method = to_typed(&arg(&args, 0))?;
+            let args = args
+                .iter()
+                .skip(1)
+                .map(to_json)
+                .collect::<Result<Vec<_>, _>>()?;
+            let result = match venue
+                .base()
+                .call_method_in_worker(venue.as_ref(), method, args)
+                .await
+            {
+                Ok(result) => result,
+                Err(error) => {
+                    // Keep the native metadata and expose the source-reconstructed
+                    // stack/code properties to JS callers as well.
+                    let (stack, code) = (error.stack.clone(), error.code.clone());
+                    let thrown = Thrown::from(error);
+                    if let Some(stack) = stack {
+                        thrown.value.define("stack", Js::str(&stack))?;
+                    }
+                    if let Some(code) = code {
+                        thrown
+                            .value
+                            .define("code", super::value::from_json(&code))?;
+                    }
+                    return Err(thrown);
+                }
+            };
+            Ok(super::value::from_json(&result))
+        }),
+    )))
+}
+
+/// Decode structural options without serializing executable host capabilities.
+/// The source object retains these handles; core receives them from its host.
+pub fn exchange_options(options: &Js) -> Result<ExchangeOptions, Thrown> {
+    let structural = options.spread_object()?;
+    structural.delete(&super::value::utf16("remoteSigner"));
+    structural.delete(&super::value::utf16("payloadSigner"));
+    to_typed(&structural)
 }
 
 type ClientRows = RefCell<Vec<(Arc<dyn RestAdapter>, Js)>>;
@@ -502,7 +656,7 @@ fn create_xhr_with_secondary_key(
         .map(|url| String::from_utf16_lossy(url));
     let rate_limit = other_member("rateLimit")?;
     let secondary_rate_limit = other_member("secondaryRateLimit")?;
-    let typed: ExchangeOptions = to_typed(&opts)?;
+    let typed: ExchangeOptions = exchange_options(&opts)?;
 
     let rows: ClientRows = RefCell::default();
     let failure: RefCell<Option<Thrown>> = RefCell::default();

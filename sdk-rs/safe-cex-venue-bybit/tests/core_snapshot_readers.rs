@@ -348,10 +348,33 @@ impl Host {
             ("upnl", n(8.5)),
             ("info", obj(vec![("tag", t("SYNCED"))])),
         ]);
+        let keep = i["keepRows"] == true;
+        let kept_orders = arr(vec![
+            obj(vec![("id", t("K0")), ("symbol", t("BTC-OPT"))]),
+            obj(vec![("id", t("K1")), ("symbol", t("BTCUSDT"))]),
+        ]);
+        let kept_positions = arr(vec![
+            obj(vec![("id", t("KP0")), ("symbol", t("BTCUSD"))]),
+            obj(vec![("id", t("KP1")), ("symbol", t("BTC-OPT"))]),
+        ]);
         let stores = [0, 1].map(|idx| {
             obj(vec![
-                ("orders", arr(vec![])),
-                ("positions", stored.clone()),
+                (
+                    "orders",
+                    if keep {
+                        kept_orders.clone()
+                    } else {
+                        arr(vec![])
+                    },
+                ),
+                (
+                    "positions",
+                    if keep {
+                        kept_positions.clone()
+                    } else {
+                        stored.clone()
+                    },
+                ),
                 ("balance", cached.clone()),
                 (
                     "loaded",
@@ -393,7 +416,7 @@ impl Host {
             (balance.clone(), "balance".into()),
             (formatted.clone(), "formatted".into()),
             (cached, "cached".into()),
-            (stored, "storedPositions".into()),
+            (stored.clone(), "storedPositions".into()),
             (merged.clone(), "merged".into()),
             (synced.clone(), "synced".into()),
             (stores[0].clone(), "store0".into()),
@@ -401,10 +424,7 @@ impl Host {
         ];
         refs.push((items(&orders)[0].clone(), "order0".into()));
         refs.push((items(&positions)[0].clone(), "position0".into()));
-        refs.push((
-            items(&field(&stores[0], "positions"))[0].clone(),
-            "storedPosition0".into(),
-        ));
+        refs.push((items(&stored)[0].clone(), "storedPosition0".into()));
         let values = BTreeMap::from([
             ("fetchOrders".into(), orders.clone()),
             ("fetchPositions".into(), positions.clone()),
@@ -554,6 +574,13 @@ impl Host {
     fn dependency(&self, name: &str, args: Vec<V>) -> V {
         let h = self.h();
         let name = name.to_owned();
+        let args_text: Vec<Option<String>> = args
+            .iter()
+            .map(|a| match a.as_ref() {
+                Node::Text(units) => Some(String::from_utf16_lossy(units)),
+                _ => None,
+            })
+            .collect();
         self.launch(Box::pin(async move {
             h.rec(&name, args)?;
             let delay = h.input["delays"][&name].as_u64().unwrap_or(1);
@@ -574,6 +601,15 @@ impl Host {
             }
             if h.input["failAsync"] == name {
                 return Err(h.primary.clone());
+            }
+            if let Some(category) = h.input["failCategory"].as_str() {
+                let index = usize::from(name == "fetchPositionsHelper");
+                if args_text
+                    .get(index)
+                    .is_some_and(|a| a.as_deref() == Some(category))
+                {
+                    return Err(h.primary.clone());
+                }
             }
             Ok(h.values[&name].clone())
         }))
@@ -613,6 +649,7 @@ impl Host {
                 self.input.get("symbols").map(from).unwrap_or_else(u),
                 t(self.input["category"].as_str().unwrap_or("linear")),
                 t(self.input["settle"].as_str().unwrap_or("USDT")),
+                self.input.get("failClosed").map(from).unwrap_or_else(u),
             ),
             _ => panic!("op"),
         })
@@ -675,12 +712,15 @@ impl SnapshotHost for Host {
                         | "dedupePositionsById"
                         | "reinitOnThrow"
                         | "tick"
+                        | "inverseEnabled"
+                        | "optionsEnabled"
+                        | "log"
                 )))
             || (Rc::ptr_eq(owner, &field(&self.owner, "xhr")) && key == "get")
             || (self.stores.iter().any(|s| Rc::ptr_eq(s, owner))
                 && matches!(key, "update" | "addOrUpdatePositionsFull"))
             || (matches!(owner.as_ref(), Node::Array(_))
-                && matches!(key, "flat" | "map" | "flatMap"))
+                && matches!(key, "flat" | "map" | "flatMap" | "push" | "filter"))
             || (matches!(owner.as_ref(), Node::Fn { .. }) && key == "bind")
             || (matches!(owner.as_ref(), Node::Promise(_)) && matches!(key, "then" | "catch"));
         Ok(if method {
@@ -738,6 +778,10 @@ impl SnapshotHost for Host {
                 | "order_settle"
                 | "position_settle"
                 | "position_symbol"
+                | "option_orders_fetch"
+                | "inverse_positions_fetch"
+                | "option_positions_fetch"
+                | "keep_category"
                 | "ignore"
                 | "tick_callback"
         ) {
@@ -830,6 +874,34 @@ impl SnapshotHost for Host {
                 self.rec("emit", args)?;
                 Ok(u())
             }
+            "inverseEnabled" | "optionsEnabled" => {
+                self.rec(code, args)?;
+                Ok(b(self.input[if code == "inverseEnabled" {
+                    "inverse"
+                } else {
+                    "options"
+                }] == true))
+            }
+            "log" => {
+                self.rec("log", args)?;
+                Ok(u())
+            }
+            "push" => {
+                let Node::Array(rows) = owner.as_ref() else {
+                    panic!("push")
+                };
+                rows.borrow_mut().extend(args);
+                Ok(n(rows.borrow().len() as f64))
+            }
+            "filter" => {
+                let mut out = vec![];
+                for row in items(owner) {
+                    if truth(&self.apply(first.clone(), vec![row.clone()])?) {
+                        out.push(row)
+                    }
+                }
+                Ok(arr(out))
+            }
             "formatBalance" => {
                 self.rec("format", args)?;
                 Ok(self.values["formatted"].clone())
@@ -848,6 +920,10 @@ impl SnapshotHost for Host {
             }
             "getCategoryForSymbol" => {
                 self.rec("category", args)?;
+                let symbol = String::from_utf16_lossy(&text(&first));
+                if let Some(category) = self.input["categories"][&symbol].as_str() {
+                    return Ok(t(category));
+                }
                 let mut name = "category.".encode_utf16().collect::<Vec<_>>();
                 name.extend(text(&first));
                 Ok(Rc::new(Node::Text(name)))
@@ -956,6 +1032,8 @@ impl SnapshotHost for Host {
     fn intrinsic(&self, name: &str, args: Vec<V>) -> Result<V, V> {
         match name {
             "null" => Ok(Rc::new(Node::Null)),
+            "template" => Ok(Rc::new(Node::Text(args.iter().flat_map(text).collect()))),
+            "LogSeverity.Warning" => Ok(t("warning")),
             "virtualClock.getCurrentTimeMs" => {
                 self.rec("clock", args)?;
                 Ok(n(self.input["time"].as_f64().unwrap_or(1000.)))
@@ -1176,7 +1254,7 @@ fn core_snapshot_readers_native_source_oracle() {
         String::from_utf8_lossy(&output.stderr)
     );
     let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(rows.len(), 80, "SNAPSHOT independent scenario floor");
+    assert_eq!(rows.len(), 93, "SNAPSHOT independent scenario floor");
     let mut counts = BTreeMap::new();
     let mut supplemental = vec![];
     for (index, row) in rows.iter().enumerate() {
@@ -1198,6 +1276,11 @@ fn core_snapshot_readers_native_source_oracle() {
             Ok(v) => {
                 assert_native(&v, &row["result"], &label);
                 if matches!(op, "orders" | "positions") {
+                    // Kept rows are the store's own row objects, not copies.
+                    let kept: Vec<V> = ["orders", "positions"]
+                        .iter()
+                        .flat_map(|key| items(&field(&h.stores[0], key)))
+                        .collect();
                     for value in items(&v) {
                         assert!(
                             h.refs.borrow().iter().any(|(original, name)| matches!(
@@ -1205,7 +1288,7 @@ fn core_snapshot_readers_native_source_oracle() {
                                 "order0" | "position0"
                             ) && Rc::ptr_eq(
                                 original, &value
-                            )),
+                            )) || kept.iter().any(|row| Rc::ptr_eq(row, &value)),
                             "{label}: native flattened original row identity"
                         );
                     }
@@ -1296,10 +1379,10 @@ fn core_snapshot_readers_native_source_oracle() {
             ("tick", 10),
             ("sync", 6),
             ("raw", 10),
-            ("orders", 6),
+            ("orders", 13),
             ("ordersHelper", 10),
-            ("positions", 6),
-            ("positionsHelper", 12)
+            ("positions", 10),
+            ("positionsHelper", 14)
         ]),
         "SNAPSHOT independent family floors"
     );
@@ -1307,7 +1390,7 @@ fn core_snapshot_readers_native_source_oracle() {
         assert_eq!(a, e, "{label}")
     }
     eprintln!(
-        "SNAPSHOT stopped at iteration 79 (positions snake-case empty page); source floor80, native settlement/drain bound256 turns; no wire assertions"
+        "SNAPSHOT completed 93 iterations; native settlement/drain bound256 turns; no wire assertions"
     );
 }
 

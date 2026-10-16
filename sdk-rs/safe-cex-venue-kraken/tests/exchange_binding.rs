@@ -565,3 +565,148 @@ fn spot_place_order_posts_add_order_with_a_module_client_id() {
             .is_some_and(|s| !s.is_empty())
     );
 }
+
+#[test]
+fn spot_signature_rejection_replays_the_signed_form_once() {
+    for status in [200.0, 401.0] {
+        let h = harness(ExchangeName::Krakenspot, options(), |http| {
+            http.route(
+                "POST",
+                "/0/private/OpenOrders",
+                status,
+                json!({"error": ["EAPI:Invalid signature"]}),
+            );
+            http.ok(
+                "POST",
+                "/0/private/OpenOrders",
+                json!({"error": [], "result": {"open": {}}}),
+            );
+        });
+        assert!(
+            h.drive(h.venue().fetch_orders(None))
+                .expect("signed replay")
+                .is_empty()
+        );
+        let calls = h.http.calls("/0/private/OpenOrders");
+        assert_eq!(calls.len(), 2, "status {status}");
+        let form = |index: usize| {
+            data(&calls[index])
+                .split('&')
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        let (first, second) = (form(0), form(1));
+        let nonces = |parts: &Vec<String>| {
+            parts
+                .iter()
+                .filter(|p| p.starts_with("nonce="))
+                .cloned()
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(nonces(&first).len(), 1);
+        assert_eq!(
+            nonces(&second).len(),
+            1,
+            "old nonce removed before re-signing"
+        );
+        assert_ne!(nonces(&first), nonces(&second));
+        assert_ne!(calls[0].headers["API-Sign"], calls[1].headers["API-Sign"]);
+        assert_eq!(
+            first
+                .iter()
+                .filter(|p| !p.starts_with("nonce="))
+                .collect::<Vec<_>>(),
+            second
+                .iter()
+                .filter(|p| !p.starts_with("nonce="))
+                .collect::<Vec<_>>()
+        );
+    }
+}
+
+#[test]
+fn spot_repeated_signature_rejection_stops_after_one_resend() {
+    for status in [200.0, 401.0] {
+        let h = harness(ExchangeName::Krakenspot, options(), |http| {
+            http.route(
+                "POST",
+                "/0/private/OpenOrders",
+                status,
+                json!({"error": ["EAPI:Invalid signature"]}),
+            );
+        });
+        // The source fetcher logs and returns []; observe transport calls too.
+        let _ = h.drive(h.venue().fetch_orders(None));
+        assert_eq!(
+            h.http.calls("/0/private/OpenOrders").len(),
+            2,
+            "status {status}"
+        );
+    }
+}
+
+#[test]
+fn spot_order_resend_retains_the_unsigned_order_fields() {
+    for status in [200.0, 401.0] {
+        let h = harness(ExchangeName::Krakenspot, options(), |http| {
+            http.ok(
+                "GET",
+                "/0/public/AssetPairs",
+                json!({"error": [], "result": {
+                    "XXBTZUSD": {"wsname": "XBT/USD", "pair_decimals": 1, "lot_decimals": 8,
+                        "ordermin": "0.0001", "status": "online", "altname": "XBTUSD"}
+                }}),
+            );
+            http.route(
+                "POST",
+                "/0/private/AddOrder",
+                status,
+                json!({"error": ["EAPI:Invalid signature"]}),
+            );
+            http.ok(
+                "POST",
+                "/0/private/AddOrder",
+                json!({"error": [], "result": {"txid": ["T-replayed"]}}),
+            );
+        });
+        let markets = h.drive(h.venue().fetch_markets()).unwrap();
+        safe_cex_store::Store::update(
+            h.store.as_ref(),
+            safe_cex_store::StoreUpdate {
+                markets: Some(markets),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        let ids = h
+            .drive(Box::pin(
+                safe_cex_exchange::exchange::Exchange::base(h.exchange.as_ref()).place_order(
+                    h.venue(),
+                    order(json!({"symbol":"XBT/USD", "type":"limit", "side":"buy",
+                "amount":0.501, "price":30000})),
+                ),
+            ))
+            .expect("write signature rejection is safe to resend");
+        assert_eq!(ids, vec!["T-replayed"]);
+        let calls = h.http.calls("/0/private/AddOrder");
+        assert_eq!(calls.len(), 2);
+        let unsigned = |request: &support::Request| {
+            data(request)
+                .split('&')
+                .filter(|p| !p.starts_with("nonce="))
+                .map(str::to_owned)
+                .collect::<Vec<_>>()
+        };
+        assert_eq!(unsigned(&calls[0]), unsigned(&calls[1]), "status {status}");
+        assert!(data(&calls[1]).contains("volume=0.501"));
+        assert!(data(&calls[1]).contains("price=30000"));
+        assert_eq!(
+            data(&calls[1])
+                .split('&')
+                .filter(|p| p.starts_with("nonce="))
+                .count(),
+            1
+        );
+    }
+}

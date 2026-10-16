@@ -40,6 +40,7 @@ use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{
     RestAdapter, RestAdapterVariant, RestBody, RestFailure, RestRequest, RestResponse,
     TransportRegistry,
+    signature_rejection::is_binance_style_signature_rejection,
     signing::{RemoteSignerRequest, RemoteSignerResponse},
     socket::SocketFrame,
 };
@@ -188,13 +189,14 @@ struct NativeClient {
     route: Option<(Rc<NativeClient>, Rc<NativeClient>)>,
     request: RefCell<Vec<RequestInterceptor>>,
     response: RefCell<Vec<ResponseStage>>,
-    retry: RefCell<Option<(u32, RetryRead)>>,
+    /// (retries, read classification, signature-rejection arm).
+    retry: RefCell<Option<(u32, RetryRead, bool)>>,
     transform: Cell<ResponseTransform>,
     limit: RefCell<Option<RateWindow>>,
     owner: Rc<RefCell<Weak<ExchangeState>>>,
 }
 enum ResponseStage {
-    Api(ResponseInterceptor, ResponseInterceptor),
+    Api(ResponseInterceptor, Option<ResponseInterceptor>),
     Guard(Fulfilled<EventValue>, Rejected<EventValue, Failure>),
 }
 /// axios-rate-limit: at most `max` request starts in any `per_ms` window.
@@ -264,19 +266,38 @@ async fn run_request(
         return Box::pin(run_request(imports, target.clone(), method, path, args)).await;
     }
     let mut attempt = 0u32;
+    // The config stamp: one signature resend per call, by retry or by interceptor.
+    let mut signature_retried = false;
     loop {
         wait_for_slot(&client, &imports.runtime).await?;
         let outcome = dispatch(&client, method, path, args.clone()).await;
         let retry = client.retry.borrow().clone();
-        if let (Err(Dispatch::Transport(error, _)), Some((retries, read))) = (&outcome, retry)
+        if let (Err(Dispatch::Transport(error, _)), Some((retries, read, signature))) =
+            (&outcome, retry)
             && attempt < retries
-            && error.is_retryable_network()
-            && read.matches_read(Some(method_name(method)), Some(path))
         {
-            attempt += 1;
-            continue;
+            let network = error.is_retryable_network()
+                && read.matches_read(Some(method_name(method)), Some(path));
+            let rejected = signature
+                && !signature_retried
+                && match &error.response {
+                    Some(response) => is_binance_style_signature_rejection(&response_data(
+                        response,
+                        client.transform.get(),
+                    ))
+                    .map_err(|e| failure(e.message))?,
+                    None => false,
+                };
+            if network || rejected {
+                signature_retried |= rejected;
+                attempt += 1;
+                continue;
+            }
         }
-        return respond(&client, outcome).await;
+        match respond(&client, outcome, !signature_retried).await? {
+            Some(data) => return Ok(data),
+            None => signature_retried = true,
+        }
     }
 }
 enum Dispatch {
@@ -468,10 +489,12 @@ fn error_value(error: &Failure) -> EventValue {
     );
     value
 }
+/// None asks the caller to resend once: a response interceptor saw a signature rejection.
 async fn respond(
     client: &Rc<NativeClient>,
     outcome: Result<(RestResponse, RestRequest), Dispatch>,
-) -> Result<EventValue, Failure> {
+    resend_allowed: bool,
+) -> Result<Option<EventValue>, Failure> {
     let transform = client.transform.get();
     let mut state: Result<EventValue, Failure> = match outcome {
         Ok((response, config)) => response_value(&response, &config, transform),
@@ -494,20 +517,27 @@ async fn respond(
         .collect();
     let mut bindings = NativeResponseBindings {
         owner: client.owner.clone(),
+        resend_allowed,
+        resend_requested: false,
     };
     for stage in stages {
         state = match (stage, state) {
             (ResponseStage::Api(success, _), Ok(response)) => {
-                api_outcome(success(response, &mut bindings)?, None)
+                let outcome = success(response, &mut bindings)?;
+                if bindings.resend_requested {
+                    return Ok(None);
+                }
+                api_outcome(outcome, None)
             }
-            (ResponseStage::Api(_, failed), Err(error)) => {
+            (ResponseStage::Api(_, Some(failed)), Err(error)) => {
                 api_outcome(failed(error_value(&error), &mut bindings)?, Some(error))
             }
+            (ResponseStage::Api(_, None), Err(error)) => Err(error),
             (ResponseStage::Guard(success, _), Ok(response)) => success(response),
             (ResponseStage::Guard(_, rejected), Err(error)) => rejected(error)?.await,
         };
     }
-    state.and_then(|response| response.get("data"))
+    state.and_then(|response| response.get("data")).map(Some)
 }
 fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<EventValue, Failure> {
     match result {
@@ -527,6 +557,7 @@ fn api_outcome(result: ResponseReturn, original: Option<Failure>) -> Result<Even
             message,
             code,
             response,
+            emitted: _,
         }) => {
             let mut error = ExchangeError::new(message);
             error.name = name.into();
@@ -592,6 +623,8 @@ impl RequestBindings for NativeRequestBindings {
 }
 struct NativeResponseBindings {
     owner: Rc<RefCell<Weak<ExchangeState>>>,
+    resend_allowed: bool,
+    resend_requested: bool,
 }
 impl ResponseBindings for NativeResponseBindings {
     fn emit(&mut self, message: EventValue) -> Result<(), Failure> {
@@ -599,6 +632,17 @@ impl ResponseBindings for NativeResponseBindings {
         owner
             .ok_or_else(|| failure("response emitted with no live exchange bound"))?
             .emit(message)
+    }
+    // The truthy marker ends this pass; run_request re-dispatches the request once.
+    fn resend(&mut self, response: EventValue) -> Result<EventValue, Failure> {
+        if self.resend_allowed
+            && is_binance_style_signature_rejection(&to_json(&response.get("data")?)?)
+                .map_err(|e| failure(e.message))?
+        {
+            self.resend_requested = true;
+            return Ok(EventValue::Bool(true));
+        }
+        Ok(EventValue::Undefined)
     }
 }
 
@@ -692,12 +736,18 @@ impl FactoryBindings for Factorizer<'_> {
         self.handle = record([("pendingClient", EventValue::Bool(true))]);
         Ok(self.handle.clone())
     }
-    fn retry(&mut self, _client: EventValue, retries: u32, read: RetryRead) -> Result<(), Failure> {
+    fn retry(
+        &mut self,
+        _client: EventValue,
+        retries: u32,
+        read: RetryRead,
+        signature: bool,
+    ) -> Result<(), Failure> {
         let client = self
             .pending
             .as_ref()
             .ok_or_else(|| failure("retry before create"))?;
-        *client.retry.borrow_mut() = Some((retries, read));
+        *client.retry.borrow_mut() = Some((retries, read, signature));
         Ok(())
     }
     fn request_use(
@@ -742,7 +792,7 @@ impl FactoryBindings for Factorizer<'_> {
         &mut self,
         _client: EventValue,
         success: ResponseInterceptor,
-        failed: ResponseInterceptor,
+        failed: Option<ResponseInterceptor>,
     ) -> Result<(), Failure> {
         let client = self
             .pending
