@@ -51,8 +51,8 @@ mod rest_positions;
 
 mod submission;
 
-pub mod exchange;
 pub mod binding;
+pub mod exchange;
 pub use binding::BybitDependencies;
 pub use exchange::BybitExchange;
 

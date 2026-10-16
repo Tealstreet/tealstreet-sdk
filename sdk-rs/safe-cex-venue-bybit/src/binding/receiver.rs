@@ -101,11 +101,16 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     this.define("publicWebsocket", socket(rt, SocketSlot::Public)?)?;
     this.define("privateWebsocket", socket(rt, SocketSlot::Private)?)?;
     // ts: BybitExchange.get inversePublicWebsocket — the secondary public slot.
-    this.define("inversePublicWebsocket", socket(rt, SocketSlot::PublicSecondary)?)?;
+    this.define(
+        "inversePublicWebsocket",
+        socket(rt, SocketSlot::PublicSecondary)?,
+    )?;
 
     // Fields owned by the typed core; reads and writes go straight through.
     bool_cell(&this, rt, "needsReinit", |v| &v.needs_reinit);
-    bool_cell(&this, rt, "forceUnifiedBalance", |v| &v.force_unified_balance);
+    bool_cell(&this, rt, "forceUnifiedBalance", |v| {
+        &v.force_unified_balance
+    });
     number_cell(&this, rt, "lastReinitAt", |v| &v.last_reinit_at);
     number_cell(&this, rt, "reinitRetryMs", |v| &v.reinit_retry_ms);
     number_cell(&this, rt, "batchLimit", |v| &v.batch_limit);
@@ -137,7 +142,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                     .map_or(Js::Undefined, Js::Number))
             })),
             Some(Rc::new(move |_, v| {
-                let value = if v.is_undefined() { None } else { Some(v.to_number()?) };
+                let value = if v.is_undefined() {
+                    None
+                } else {
+                    Some(v.to_number()?)
+                };
                 venue(&s)?.last_websocket_positions_update.set(value);
                 Ok(())
             })),
@@ -163,7 +172,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
                 None => Ok(Js::Undefined),
             })),
             Some(Rc::new(move |_, v| {
-                let mode = if v.is_undefined() { None } else { Some(to_typed(&v)?) };
+                let mode = if v.is_undefined() {
+                    None
+                } else {
+                    Some(to_typed(&v)?)
+                };
                 venue(&s)?.position_mode.set(mode);
                 Ok(())
             })),
@@ -208,7 +221,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     });
     // ts: BybitExchange.getCategoryForSymbol
     method(&this, rt, "getCategoryForSymbol", |rt, a| {
-        Ok(Js::str(venue(rt)?.get_category_for_symbol(&text(&arg(&a, 0))?)))
+        Ok(Js::str(
+            venue(rt)?.get_category_for_symbol(&text(&arg(&a, 0))?),
+        ))
     });
     method(&this, rt, "inverseEnabled", |rt, _| {
         Ok(Js::Bool(venue(rt)?.inverse_enabled()))
@@ -217,15 +232,18 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(Js::Bool(venue(rt)?.options_enabled()))
     });
     // ts: BybitExchange#inferProtectiveOrderSide
-    method(&this, rt, "inferProtectiveOrderSide", |rt, a| {
-        match venue(rt)?
+    method(
+        &this,
+        rt,
+        "inferProtectiveOrderSide",
+        |rt, a| match venue(rt)?
             .infer_protective_order_side(&to_json(&arg(&a, 0))?)
             .map_err(|m| Thrown::error("TypeError", &m))?
         {
             Some(side) => from_typed(&side),
             None => Ok(Js::Undefined),
-        }
-    });
+        },
+    );
     // ts: BybitExchange.dedupePositionsById
     method(&this, rt, "dedupePositionsById", |_, a| {
         let positions: Vec<safe_cex_types::Position> = to_typed(&arg(&a, 0))?;
@@ -261,6 +279,38 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         Ok(Js::Undefined)
     });
 
+    // Public data (members/markets.rs).
+    method(&this, rt, "fetchFees", |rt, a| {
+        members::markets::fetch_fees(rt, arg(&a, 0))
+    });
+    method(&this, rt, "fetchTradingMarketsResponse", |rt, a| {
+        members::markets::fetch_trading_markets_response(rt, arg(&a, 0))
+    });
+    method(&this, rt, "fetchMarketsHelper", |rt, a| {
+        members::markets::fetch_markets_helper(rt, arg(&a, 0))
+    });
+    method(&this, rt, "fetchOptionMarkets", |rt, _| {
+        members::markets::fetch_option_markets(rt)
+    });
+    method(&this, rt, "fetchMarkets", |rt, _| {
+        members::markets::fetch_markets(rt)
+    });
+    method(&this, rt, "fetchTickersRawHelper", |rt, a| {
+        members::markets::fetch_tickers_raw_helper(rt, arg(&a, 0))
+    });
+    method(&this, rt, "fetchTickersRaw", |rt, _| {
+        members::markets::fetch_tickers_raw(rt)
+    });
+    method(&this, rt, "fetchTickersWithoutParse", |rt, _| {
+        members::markets::fetch_tickers_without_parse(rt)
+    });
+    method(&this, rt, "fetchTickers", |rt, _| {
+        members::markets::fetch_tickers(rt)
+    });
+    method(&this, rt, "parseTickers", |rt, a| {
+        members::markets::parse_tickers(rt, arg(&a, 0))
+    });
+
     // Snapshot readers (core_snapshot_readers.rs).
     method(&this, rt, "fetchOrders", |rt, _| {
         Ok(snapshot::fetch_orders(h(rt), rt.this.clone()))
@@ -274,7 +324,11 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         ))
     });
     method(&this, rt, "fetchPositions", |rt, a| {
-        Ok(snapshot::fetch_positions(h(rt), rt.this.clone(), arg(&a, 0)))
+        Ok(snapshot::fetch_positions(
+            h(rt),
+            rt.this.clone(),
+            arg(&a, 0),
+        ))
     });
     method(&this, rt, "fetchPositionsHelper", |rt, a| {
         Ok(snapshot::fetch_positions_helper(
@@ -293,7 +347,10 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         ))
     });
     method(&this, rt, "fetchAndSetPrivateSnapshot", |rt, _| {
-        Ok(snapshot::fetch_and_set_private_snapshot(h(rt), rt.this.clone()))
+        Ok(snapshot::fetch_and_set_private_snapshot(
+            h(rt),
+            rt.this.clone(),
+        ))
     });
     method(&this, rt, "fetchAndSetPrivateSnapshotHelper", |rt, a| {
         Ok(snapshot::fetch_and_set_private_snapshot_helper(
@@ -302,7 +359,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
             arg(&a, 0).truthy(),
         ))
     });
-    method(&this, rt, "tick", |rt, _| Ok(snapshot::tick(h(rt), rt.this.clone())));
+    method(&this, rt, "tick", |rt, _| {
+        Ok(snapshot::tick(h(rt), rt.this.clone()))
+    });
     method(&this, rt, "fetchRawBalance", |rt, _| {
         Ok(snapshot::fetch_raw_balance(h(rt), rt.this.clone()))
     });

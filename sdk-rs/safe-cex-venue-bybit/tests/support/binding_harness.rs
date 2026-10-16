@@ -1,5 +1,8 @@
 //! Scripted wire and runtime driving the production BybitExchange through `Exchange`.
-#![allow(dead_code, reason = "each test binary uses a different part of the harness")]
+#![allow(
+    dead_code,
+    reason = "each test binary uses a different part of the harness"
+)]
 use safe_cex_exchange::{
     exchange::Exchange,
     http::{HttpFailure, HttpFuture, HttpHost},
@@ -206,6 +209,8 @@ pub struct Request {
 #[derive(Default)]
 pub struct Wire {
     pub routes: RefCell<Vec<(String, String, VecDeque<(u16, Value)>)>>,
+    /// (METHOD, path, query key, query value) routes, checked before the plain ones.
+    pub param_routes: RefCell<Vec<(String, String, String, String, (u16, Value))>>,
     pub requests: RefCell<Vec<Request>>,
 }
 impl Wire {
@@ -215,6 +220,15 @@ impl Wire {
             Some((_, _, queue)) => queue.push_back((status, body)),
             None => routes.push((method.into(), path.into(), VecDeque::from([(status, body)]))),
         }
+    }
+    pub fn route_when(&self, method: &str, path: &str, key: &str, value: &str, body: Value) {
+        self.param_routes.borrow_mut().push((
+            method.into(),
+            path.into(),
+            key.into(),
+            value.into(),
+            (200, body),
+        ));
     }
     /// A `retCode: 0` envelope around `result`.
     pub fn ok(&self, method: &str, path: &str, result: Value) {
@@ -260,11 +274,21 @@ impl RestAdapter for Wire {
         self.requests.borrow_mut().push(Request {
             method: method.clone(),
             url: path.clone(),
-            params: request.params.clone().unwrap_or_else(|| query(&request.url)),
+            params: request
+                .params
+                .clone()
+                .unwrap_or_else(|| query(&request.url)),
             body,
             headers: json!(request.headers),
         });
-        let reply = {
+        let params = request.params.clone().unwrap_or_else(|| query(&request.url));
+        let matched = self
+            .param_routes
+            .borrow()
+            .iter()
+            .find(|(m, p, k, v, _)| *m == method && *p == path && params[k.as_str()] == v.as_str())
+            .map(|(.., reply)| reply.clone());
+        let reply = matched.or_else(|| {
             let mut routes = self.routes.borrow_mut();
             routes
                 .iter_mut()
@@ -276,7 +300,7 @@ impl RestAdapter for Wire {
                         queue[0].clone()
                     }
                 })
-        };
+        });
         Box::pin(async move {
             match reply {
                 Some((status, body)) => Ok(RestResponse {

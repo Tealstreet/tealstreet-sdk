@@ -33,12 +33,18 @@ impl Network {
     }
 }
 #[derive(Clone, Copy)]
-#[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired as the remaining receiver members land")
+)]
 pub(crate) enum PublicCategory {
     Linear,
     Inverse,
 }
-#[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired as the remaining receiver members land")
+)]
 impl PublicCategory {
     fn key(self) -> &'static str {
         match self {
@@ -54,9 +60,8 @@ pub struct BybitExchange {
     xhr: std::cell::OnceCell<Rc<SecondaryKeyClients>>,
     unlimited_xhr: std::cell::OnceCell<Arc<dyn RestAdapter>>,
     pub(crate) js: std::cell::OnceCell<crate::binding::rt::Rt>,
-    pub(crate) order_state: crate::primary_order_lifecycle::PrimaryOrderState<
-        safe_cex_exchange::js_runtime::value::Js,
-    >,
+    pub(crate) order_state:
+        crate::primary_order_lifecycle::PrimaryOrderState<safe_cex_exchange::js_runtime::value::Js>,
     /// ts: BybitExchange#debouncedPrivateSnapshotRefresh, over the receiver.
     pub(crate) snapshot_refresh: std::cell::OnceCell<
         Rc<crate::private_snapshot_refresh::PrivateSnapshotRefresh<crate::binding::rt::Rt>>,
@@ -73,16 +78,27 @@ pub struct BybitExchange {
     pub(crate) api_key_info: RefCell<Option<crate::types::BybitApiKeyInfo>>,
     pub(crate) batch_limit: Cell<f64>,
     pub(crate) force_unified_balance: Cell<bool>,
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "wired as the remaining receiver members land")
+    )]
     pub(crate) execution_query_max_range_ms: f64,
-    #[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
+    #[cfg_attr(
+        not(test),
+        expect(dead_code, reason = "wired as the remaining receiver members land")
+    )]
     pub(crate) default_executions_lookback_ms: f64,
 }
 
-#[cfg_attr(not(test), expect(dead_code, reason = "wired as the remaining receiver members land"))]
+#[cfg_attr(
+    not(test),
+    expect(dead_code, reason = "wired as the remaining receiver members land")
+)]
 impl BybitExchange {
     pub(crate) fn xhr(&self) -> &Rc<SecondaryKeyClients> {
-        self.xhr.get().expect("Bybit clients are created during construction")
+        self.xhr
+            .get()
+            .expect("Bybit clients are created during construction")
     }
     pub(crate) fn unlimited_xhr(&self) -> &Arc<dyn RestAdapter> {
         self.unlimited_xhr

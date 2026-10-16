@@ -344,12 +344,11 @@ impl PublicProtocol {
                 .map_err(|error| ExchangeError::new(error.to_string()))
         });
         let pong_socket = Rc::downgrade(socket);
-        let pong: safe_cex_exchange::websocket::MessageHandler = Rc::new(move |_| {
-            match pong_socket.upgrade() {
+        let pong: safe_cex_exchange::websocket::MessageHandler =
+            Rc::new(move |_| match pong_socket.upgrade() {
                 Some(socket) => socket.handle_pong_event(5_000),
                 None => Ok(()),
-            }
-        });
+            });
         let mut handlers = socket.message_handlers.borrow_mut();
         handlers.insert(
             "tickers".into(),
@@ -379,7 +378,10 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
         )
     }
     // ts: BybitPublicWebsocket.onOpen — one tickers topic per market of this category.
-    fn on_open(&self, socket: Rc<BaseWebSocket>) -> safe_cex_exchange::runtime::ExchangeFuture<'static, ()> {
+    fn on_open(
+        &self,
+        socket: Rc<BaseWebSocket>,
+    ) -> safe_cex_exchange::runtime::ExchangeFuture<'static, ()> {
         let result = (|| -> Result<(), ExchangeError> {
             if socket.is_disposed() {
                 return Ok(());

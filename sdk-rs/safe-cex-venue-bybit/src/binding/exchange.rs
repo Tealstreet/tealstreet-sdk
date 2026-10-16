@@ -8,7 +8,9 @@ use super::{
 };
 use crate::{exchange::BybitExchange, order_params::BybitPlaceOrderOpts};
 use safe_cex_exchange::{
-    capabilities::{CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding},
+    capabilities::{
+        CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
+    },
     client_order_id::{ClientOrderIdRuleOverrides, pattern_client_order_id_rule},
     exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedBatch, ValidatedOrder},
     http::{HttpClientOptions, HttpHost},
@@ -181,9 +183,14 @@ impl BybitExchange {
                             logs: Some(Default::default()),
                             every: vec![],
                             periodic: vec![],
-                            #[allow(clippy::arc_with_non_send_sync, reason = "browser-local runtime, as everywhere in this crate")]
+                            #[allow(
+                                clippy::arc_with_non_send_sync,
+                                reason = "browser-local runtime, as everywhere in this crate"
+                            )]
                             next_id: Arc::new(move || next_id.unique_id()),
-                            signing_now: Arc::new(move || signing_clock.get_current_time_ms() as u64),
+                            signing_now: Arc::new(move || {
+                                signing_clock.get_current_time_ms() as u64
+                            }),
                         },
                         owner,
                         is_demo: base.is_demo,
@@ -194,7 +201,10 @@ impl BybitExchange {
                     },
                     &TransportRegistry::default(),
                 )?;
-                #[allow(clippy::arc_with_non_send_sync, reason = "RestAdapter supports browser-local hosts")]
+                #[allow(
+                    clippy::arc_with_non_send_sync,
+                    reason = "RestAdapter supports browser-local hosts"
+                )]
                 let api: Arc<dyn RestAdapter> = Arc::new(api);
                 Ok(api)
             },
@@ -204,7 +214,11 @@ impl BybitExchange {
                     Rc::new(crate::ws_public::PublicProtocol {
                         parent,
                         runtime: runtime.clone(),
-                        category: if category == "inverse" { "inverse" } else { "linear" },
+                        category: if category == "inverse" {
+                            "inverse"
+                        } else {
+                            "linear"
+                        },
                     })
                 }
             },
@@ -257,7 +271,9 @@ impl BybitExchange {
     }
 
     fn rt(&self) -> &Rt {
-        self.js.get().expect("BybitExchange::create assembles the receiver")
+        self.js
+            .get()
+            .expect("BybitExchange::create assembles the receiver")
     }
 
     fn invoke<T: serde::de::DeserializeOwned + 'static>(

@@ -1,11 +1,4 @@
-#![cfg_attr(
-    not(test),
-    expect(
-        dead_code,
-        reason = "Pure market mapping slice awaits fetch orchestration"
-    )
-)]
-//! Pure mapping slice of fetchMarketsHelper; request scheduling remains pending.
+//! Pure mapping slice of fetchMarketsHelper; the request sequence lives with each class.
 use crate::exchange_state::parse_float;
 use safe_cex_types::{
     Market, MarketLimits, MarketLimitsAmount, MarketLimitsLeverage, MarketPrecision,

@@ -41,7 +41,10 @@ pub(crate) fn remaining_in_store_units(
     remaining_native: f64,
     price: f64,
 ) -> Result<Vec<(&'static str, Js)>, Thrown> {
-    if !crate::inverse_symbol::is_bybit_inverse_symbol(&text(symbol)?) || price.is_nan() || price <= 0. {
+    if !crate::inverse_symbol::is_bybit_inverse_symbol(&text(symbol)?)
+        || price.is_nan()
+        || price <= 0.
+    {
         return Ok(vec![("remaining", Js::Number(remaining_native))]);
     }
     let coin = safe_cex_num::math_round((remaining_native / price) * 1e8) / 1e8;
@@ -67,11 +70,14 @@ pub(crate) fn map_order(rt: &Rt, this: &Js, o: &Js) -> Result<Js, Thrown> {
     let close_on_trigger = flag(o, "closeOnTrigger")?;
     let tpsl_mode = get_key(o, "tpslMode")?;
     // ts: isBybitPositionTpslMode — a string in BYBIT_POSITION_TPSL_MODES.
-    let position_tpsl = tpsl_mode.is_string()
-        && matches!(text(&tpsl_mode)?.as_str(), "Full" | "Partial");
+    let position_tpsl =
+        tpsl_mode.is_string() && matches!(text(&tpsl_mode)?.as_str(), "Full" | "Partial");
     let create_type = get_key(o, "createType")?;
     let create_type_order_type = if position_tpsl {
-        table(&crate::types::POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE, &create_type)?
+        table(
+            &crate::types::POSITION_TPSL_ORDER_TYPE_FROM_CREATE_TYPE,
+            &create_type,
+        )?
     } else {
         Js::Undefined
     };
@@ -79,7 +85,11 @@ pub(crate) fn map_order(rt: &Rt, this: &Js, o: &Js) -> Result<Js, Thrown> {
         || create_type_order_type.truthy();
     let trigger_price = get_key(o, "triggerPrice")?;
     let o_price = if is_stop {
-        if trigger_price.truthy() { trigger_price.clone() } else { o.get("price")? }
+        if trigger_price.truthy() {
+            trigger_price.clone()
+        } else {
+            o.get("price")?
+        }
     } else {
         o.get("price")?
     };
@@ -160,7 +170,10 @@ pub(crate) fn map_order(rt: &Rt, this: &Js, o: &Js) -> Result<Js, Thrown> {
         ("amount", Js::Number(amount)),
         (
             "filled",
-            Js::Number(parse_float(&nullish_or(get_key(o, "cumExecQty")?, Js::Number(0.)))?),
+            Js::Number(parse_float(&nullish_or(
+                get_key(o, "cumExecQty")?,
+                Js::Number(0.),
+            ))?),
         ),
         ("reduceOnly", Js::Bool(reduce_only)),
         ("close", Js::Bool(close_on_trigger)),
@@ -190,8 +203,20 @@ pub(crate) fn map_order(rt: &Rt, this: &Js, o: &Js) -> Result<Js, Thrown> {
     };
     let order_id = text(&o.get("orderId")?)?;
     for (value, suffix, kind, trigger_key, trigger_field) in [
-        (sl, "stop_loss", "stop_market", "slTriggerBy", "slTriggerType"),
-        (tp, "take_profit", "take_profit_market", "tpTriggerBy", "tpTriggerType"),
+        (
+            sl,
+            "stop_loss",
+            "stop_market",
+            "slTriggerBy",
+            "slTriggerType",
+        ),
+        (
+            tp,
+            "take_profit",
+            "take_profit_market",
+            "tpTriggerBy",
+            "tpTriggerType",
+        ),
     ] {
         if value.partial_cmp(&0.) != Some(std::cmp::Ordering::Greater) {
             continue;
@@ -237,7 +262,11 @@ pub(crate) fn map_position(rt: &Rt, this: &Js, p: &Js) -> Result<Js, Thrown> {
         Js::str("short")
     } else {
         let mapped = table(&crate::types::POSITION_SIDE, &p.get("side")?)?;
-        if mapped.truthy() { mapped } else { Js::str("long") }
+        if mapped.truthy() {
+            mapped
+        } else {
+            Js::str("long")
+        }
     };
     let mut unrealized = parse_float(&or_zero(get_key(p, "unrealisedPnl")?))?;
     let symbol = p.get("symbol")?;
@@ -249,7 +278,11 @@ pub(crate) fn map_position(rt: &Rt, this: &Js, p: &Js) -> Result<Js, Thrown> {
     let inverse = crate::inverse_symbol::is_bybit_inverse_symbol(&symbol_text);
     if inverse {
         let ticker = store.get("tickersBySymbol")?.get(&symbol_text)?;
-        let mark = if ticker.is_nullish() { Js::Undefined } else { ticker.get("mark")? };
+        let mark = if ticker.is_nullish() {
+            Js::Undefined
+        } else {
+            ticker.get("mark")?
+        };
         let reference = if mark.truthy() {
             mark.to_number()?
         } else {
@@ -257,8 +290,16 @@ pub(crate) fn map_position(rt: &Rt, this: &Js, p: &Js) -> Result<Js, Thrown> {
             if from_row != 0. && !from_row.is_nan() {
                 from_row
             } else {
-                let last = if ticker.is_nullish() { Js::Undefined } else { ticker.get("last")? };
-                if last.truthy() { last.to_number()? } else { entry_price }
+                let last = if ticker.is_nullish() {
+                    Js::Undefined
+                } else {
+                    ticker.get("last")?
+                };
+                if last.truthy() {
+                    last.to_number()?
+                } else {
+                    entry_price
+                }
             }
         };
         if reference > 0. {
@@ -271,7 +312,11 @@ pub(crate) fn map_position(rt: &Rt, this: &Js, p: &Js) -> Result<Js, Thrown> {
             && market.get("quote")?.strict_equals(&Js::str("USDC"))
             && ticker.truthy()
         {
-            let direction = if side.strict_equals(&Js::str("long")) { 1. } else { -1. };
+            let direction = if side.strict_equals(&Js::str("long")) {
+                1.
+            } else {
+                -1.
+            };
             let mark = ticker.get("mark")?.to_number()?;
             unrealized = direction * (mark * contracts - entry_price * contracts);
         }
@@ -326,7 +371,11 @@ pub(crate) fn map_position(rt: &Rt, this: &Js, p: &Js) -> Result<Js, Thrown> {
         ),
         (
             "marginSize",
-            if im > 0. { Js::Number(im) } else { Js::Undefined },
+            if im > 0. {
+                Js::Number(im)
+            } else {
+                Js::Undefined
+            },
         ),
         ("positionMode", position_mode),
         ("marginType", margin_type),

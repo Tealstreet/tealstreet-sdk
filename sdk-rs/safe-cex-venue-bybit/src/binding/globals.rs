@@ -70,4 +70,3 @@ pub(crate) fn build(rt: Weak<Shared>, clock: VirtualClock) -> Js {
     );
     g
 }
-

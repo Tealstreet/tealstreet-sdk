@@ -32,7 +32,9 @@ fn request(config: &Js) -> Result<RestRequest, Thrown> {
     Ok(RestRequest {
         method: text(&config.get("method")?)?.to_ascii_lowercase(),
         url: text(&config.get("url")?)?,
-        params: (!params.is_nullish()).then(|| to_json(&params)).transpose()?,
+        params: (!params.is_nullish())
+            .then(|| to_json(&params))
+            .transpose()?,
         body: (!data.is_undefined())
             .then(|| to_json(&data).map(RestBody::Untransformed))
             .transpose()?,

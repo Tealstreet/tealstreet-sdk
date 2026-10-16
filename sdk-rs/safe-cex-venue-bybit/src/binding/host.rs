@@ -58,7 +58,11 @@ fn merge_updates_using_last_update(rt: &Rt, updates: &Js, existing: &Js) -> Resu
             }
             None => false,
         };
-        merged.push(if keep { found.expect("kept row") } else { update });
+        merged.push(if keep {
+            found.expect("kept row")
+        } else {
+            update
+        });
     }
     merged.extend(existing);
     // lodash uniqBy(…, 'id'): first occurrence by SameValueZero.
@@ -75,7 +79,11 @@ fn merge_updates_using_last_update(rt: &Rt, updates: &Js, existing: &Js) -> Resu
 }
 
 // ts: syncUnifiedBalanceUpnlFromPositions — the same balance object unless upnl moved.
-fn sync_unified_balance_upnl(balance: &Js, positions: &Js, account_type: &Js) -> Result<Js, Thrown> {
+fn sync_unified_balance_upnl(
+    balance: &Js,
+    positions: &Js,
+    account_type: &Js,
+) -> Result<Js, Thrown> {
     if !balance.truthy() || text(account_type)? != "UNIFIED" {
         return Ok(balance.clone());
     }
@@ -176,7 +184,12 @@ impl SnapshotHost for Rt {
         if key == "flat" && owner.is_array() {
             return Ok(Js::function("flat", move |_, _| {
                 let mut out = vec![];
-                for item in owner.array_items().unwrap_or_default().into_iter().flatten() {
+                for item in owner
+                    .array_items()
+                    .unwrap_or_default()
+                    .into_iter()
+                    .flatten()
+                {
                     match item.array_items() {
                         Some(inner) => out.extend(inner.into_iter().flatten()),
                         None => out.push(item),
