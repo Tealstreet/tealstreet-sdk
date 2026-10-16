@@ -77,13 +77,29 @@ pub(crate) fn parse_float(value: Option<&Value>) -> Result<f64, &'static str> {
     let text = safe_cex_num::js_string(value).map_err(|error| error.message)?;
     Ok(safe_cex_num::parse_float(&text))
 }
-// ts: BybitExchange.parseTickers
+#[derive(Clone, Copy, PartialEq)]
+enum TickerFamily {
+    Primary,
+    InverseClass,
+    Spot,
+}
+// ts: BybitExchange.parseTickers — an inverse market's volume24h is in USD contracts and its
+// turnover24h in the coin, so volume reads turnover24h and quoteVolume reads volume24h.
 pub fn parse_tickers(
     raw: Option<&[Value]>,
     markets: &[safe_cex_types::Market],
     cached: &[safe_cex_types::Ticker],
 ) -> Result<Vec<safe_cex_types::Ticker>, &'static str> {
-    parse_tickers_family(raw, markets, cached, false)
+    parse_tickers_family(raw, markets, cached, TickerFamily::Primary)
+}
+
+// ts: BybitInverseExchange.parseTickers — volume24h and volume24h * lastPrice on every market.
+pub fn parse_inverse_class_tickers(
+    raw: Option<&[Value]>,
+    markets: &[safe_cex_types::Market],
+    cached: &[safe_cex_types::Ticker],
+) -> Result<Vec<safe_cex_types::Ticker>, &'static str> {
+    parse_tickers_family(raw, markets, cached, TickerFamily::InverseClass)
 }
 
 // ts: BybitSpotExchange.parseTickers
@@ -92,15 +108,16 @@ pub fn parse_spot_tickers(
     markets: &[safe_cex_types::Market],
     cached: &[safe_cex_types::Ticker],
 ) -> Result<Vec<safe_cex_types::Ticker>, &'static str> {
-    parse_tickers_family(raw, markets, cached, true)
+    parse_tickers_family(raw, markets, cached, TickerFamily::Spot)
 }
 
 fn parse_tickers_family(
     raw: Option<&[Value]>,
     markets: &[safe_cex_types::Market],
     cached: &[safe_cex_types::Ticker],
-    spot: bool,
+    family: TickerFamily,
 ) -> Result<Vec<safe_cex_types::Ticker>, &'static str> {
+    let spot = family == TickerFamily::Spot;
     let Some(raw) = raw else {
         return Ok(cached.to_vec());
     };
@@ -119,8 +136,9 @@ fn parse_tickers_family(
             continue;
         };
         let value = |key| parse_float(row.get(key));
+        let inverse = family == TickerFamily::Primary && market.is_inverse == Some(true);
         let last = value("lastPrice")?;
-        let volume = value("volume24h")?;
+        let volume = value(if inverse { "turnover24h" } else { "volume24h" })?;
         tickers.push(safe_cex_types::Ticker {
             id: market.id.clone(),
             symbol: market.symbol.clone(),
@@ -142,7 +160,11 @@ fn parse_tickers_family(
                 value("nextFundingTime")?
             },
             volume,
-            quote_volume: volume * last,
+            quote_volume: if inverse {
+                value("volume24h")?
+            } else {
+                volume * last
+            },
             mid_price: None,
             timestamp: None,
             info: None,
