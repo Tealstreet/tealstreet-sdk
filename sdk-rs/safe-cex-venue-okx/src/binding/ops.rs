@@ -100,8 +100,20 @@ fn base_constructor(scope: &OkxScope) -> Js {
             settings: settings(&shared.extra.name, Rc::downgrade(&shared))?,
             external_public_data: shared.extra.external_public_data.clone(),
         };
-        let (this, base) =
-            base_exchange::create(&shared.sockets, parts, arg(&a, 0), arg(&a, 1), arg(&a, 2))?;
+        let (this, base) = base_exchange::create(
+            &shared.sockets,
+            parts,
+            arg(&a, 0),
+            arg(&a, 1),
+            arg(&a, 2),
+            |this| {
+                // Both maintained demo subclasses initialize isDemo = true.
+                if matches!(shared.extra.variant(), Variant::Demo | Variant::EuDemo) {
+                    this.define("isDemo", Js::Bool(true))?;
+                }
+                Ok(())
+            },
+        )?;
         let _ = shared.base.set(base);
         *shared.exchange.borrow_mut() = this.clone();
         Ok(this)
