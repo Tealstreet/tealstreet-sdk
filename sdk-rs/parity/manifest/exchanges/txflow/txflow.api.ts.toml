@@ -1,0 +1,10 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/txflow/txflow.api.ts"
+
+[[symbol]]
+ts = "createAPI"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

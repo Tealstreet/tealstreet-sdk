@@ -1,0 +1,26 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/txflow/txflow.exchange.ts"
+
+[[symbol]]
+ts = "TxFlowExchange"
+kind = "class"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "TxFlowExchange.constructor"
+kind = "constructor"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "TxFlowExchange.start"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

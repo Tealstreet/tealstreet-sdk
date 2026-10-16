@@ -1,0 +1,26 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/txflow/txflow.types.ts"
+
+[[symbol]]
+ts = "TXFLOW_MAINNET_REST_URL"
+kind = "const"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "TXFLOW_TESTNET_REST_URL"
+kind = "const"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "TXFLOW_PHASE_0_UNIMPLEMENTED_MESSAGE"
+kind = "const"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

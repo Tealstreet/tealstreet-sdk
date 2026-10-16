@@ -22,7 +22,7 @@ fn ready<F: Future>(future: F) -> F::Output {
 }
 #[test]
 fn native_secondary_runtime_and_capture_flags() {
-    assert_eq!(EXCHANGES_WITHOUT_SECONDARY_KEY.len(), 15);
+    assert_eq!(EXCHANGES_WITHOUT_SECONDARY_KEY.len(), 16);
     assert_eq!(
         EXCHANGES_WITHOUT_SECONDARY_KEY,
         [
@@ -40,6 +40,7 @@ fn native_secondary_runtime_and_capture_flags() {
             "mode",
             "salsadex",
             "tealstreet-dex",
+            "txflow",
             "what"
         ]
     );
