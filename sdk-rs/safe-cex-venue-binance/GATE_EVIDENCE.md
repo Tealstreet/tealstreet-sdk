@@ -3405,6 +3405,21 @@ Fresh ordinary discovery and four production contract probes pass with zero
 failed owners; parity-check passes 7,459 rows and 17,183 public Rust items.
 
 
+After the shared per-crate contract cutover, the four reviewed record rows live
+in `accepted-set/contracts/safe-cex-venue-binance.json`. The integration preserves
+all 16 existing master shards byte for byte and leaves the deleted monolithic
+`contracts.json` absent. The maintained record runner imports shared
+`loadContracts()`; no old reader or duplicate contract set is retained.
+
+The post-cutover selected native/live TypeScript run passes all 13 tests with
+zero ignored. Generator freshness, formatting and parity-check pass again
+(7,459 rows; 17,183 public Rust items). Binance and all native dependency source
+files and venue tests are unchanged from the previous validated record revision.
+The migrated maintained runner completes fresh ordinary native/default discovery
+and all four production record probes with zero failed owners. The frozen Yarn
+install also passes. Compiled guard controls and all-target Clippy retain their
+previous execution provenance; no source change requires rerunning them here.
+
 ### String union native witnesses
 
 The income, API-type and orderbook-apply unions retain their existing String

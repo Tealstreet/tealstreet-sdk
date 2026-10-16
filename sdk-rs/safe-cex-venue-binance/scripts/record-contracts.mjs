@@ -6,6 +6,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { inventory } from '../../safe-cex-parity/scripts/accepted-inventory.mjs';
 import { runProbes } from '../../safe-cex-parity/scripts/accepted-probes.mjs';
+import { loadContracts } from '../../safe-cex-parity/scripts/accepted-contract-files.mjs';
 
 const workspace = fileURLToPath(new URL('../../', import.meta.url));
 function cargo(args, env = {}) {
@@ -46,7 +47,7 @@ console.log('Probe scope: four selected records only; remaining owners/aliases/l
 const results = runProbes(workspace, metadata, [{
   package: pkg.name, packageId: pkg.id, target, types,
   publicAliases: [], defaultWitnesses: [], locals: [], delegatedLocals: [],
-}], read('contracts'), { target: 'native', features: [], jobs: 1 });
+}], loadContracts(), { target: 'native', features: [], jobs: 1 });
 assert.equal(results.length, selected.length);
 for (const result of results) assert.equal(result.failures.length, 0,
   `${result.name}: ${result.failures.join('; ')}`);
