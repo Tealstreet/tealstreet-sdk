@@ -142,6 +142,7 @@ test('isolated core dependencies include the real JWT codec under repository fro
       assert.equal(manifest.dependencies.typescript, root.devDependencies.typescript);
       assert.equal(manifest.dependencies.jsonwebtoken, sdk.dependencies.jsonwebtoken, 'real JWT dependency required');
       assert.equal(manifest.dependencies['axios-retry'], sdk.dependencies['axios-retry'], 'live network retry predicate required');
+      assert.equal(manifest.dependencies.lodash, sdk.dependencies.lodash, 'live CrossTrade mapping requires Lodash');
     };
     check(projected);
     const missingEmitter = structuredClone(projected);
@@ -160,6 +161,9 @@ test('isolated core dependencies include the real JWT codec under repository fro
     const missingRetry = structuredClone(projected);
     delete missingRetry.dependencies['axios-retry'];
     assert.throws(() => check(missingRetry), /live network retry predicate required/);
+    const missingLodash = structuredClone(projected);
+    delete missingLodash.dependencies.lodash;
+    assert.throws(() => check(missingLodash), /live CrossTrade mapping requires Lodash/);
   } finally {
     rmSync(target, { recursive: true, force: true });
   }
