@@ -371,9 +371,15 @@ impl JsNumberOutput for safe_cex_types::ExchangeOptionsExternalPublicData {
     }
 }
 
+impl JsNumberOutput for safe_cex_types::ExchangeOptionsPolymarket {
+    fn check_number_output(&self) {
+        crate::js_number_output!(self, struct { api_key, api_secret, api_passphrase, signer_type, funder_address });
+    }
+}
+
 impl JsNumberOutput for safe_cex_types::ExchangeOptions {
     fn check_number_output(&self) {
-        crate::js_number_output!(self, struct { key, secret, passphrase, secondary_key, secondary_secret, secondary_passphrase, secondary_proxy_url, auth, paradex_address, subkey_address, grvt_signer_address, grvt_trading_account_id, stark_private_key, vault, application_id, api_key_index, hyperliquid_builder, testnet, enable_spot_markets, enable_option_markets, enable_inverse_markets, bybit_site_id, public_data_only, private_only, tealstreet_proxy, tealstreet_tunnel, tealstreet_ws_route, override_proxy_url, proxy_region, omni_key_seed, subaccount, orderly_exchange_id, tuning, extra, remote_signer, transport, payload_signer, hosted_mode, external_public_data });
+        crate::js_number_output!(self, struct { key, secret, passphrase, secondary_key, secondary_secret, secondary_passphrase, secondary_proxy_url, auth, paradex_address, subkey_address, grvt_signer_address, grvt_trading_account_id, stark_private_key, vault, application_id, api_key_index, hyperliquid_builder, testnet, enable_spot_markets, enable_option_markets, enable_inverse_markets, bybit_site_id, public_data_only, private_only, tealstreet_proxy, tealstreet_tunnel, tealstreet_ws_route, override_proxy_url, proxy_region, omni_key_seed, subaccount, orderly_exchange_id, tuning, extra, polymarket, remote_signer, transport, payload_signer, hosted_mode, external_public_data });
     }
 }
 
