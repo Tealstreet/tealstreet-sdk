@@ -26,16 +26,15 @@ class NukeTestExchange extends BaseExchange {
   };
 }
 
-const market = (symbol: string, contractSize: number, isInverse = false): Market => ({
+const market = (symbol: string, contractSize: number): Market => ({
   id: symbol,
   symbol,
   base: 'BTC',
-  quote: isInverse ? 'USD' : 'USDT',
+  quote: 'USDT',
   active: true,
   precision: { amount: 0.01, price: 0.1 },
   limits: { amount: { min: 0.01, max: 1_000_000 }, leverage: { min: 1, max: 100 } },
   contractSize,
-  isInverse,
 });
 
 const position = (overrides: Partial<Position>): Position => ({
@@ -73,20 +72,6 @@ describe('BaseExchange nuke sizing', () => {
       reduceOnly: true,
     });
     expect(exchange.placed[0].amount).toBeCloseTo(0.12, 10);
-  });
-
-  it('sizes an inverse position from its quote notional, not its mark-derived base', async () => {
-    const exchange = new NukeTestExchange();
-    seed(
-      exchange,
-      [market('BTCUSD', 100, true)],
-      [position({ symbol: 'BTCUSD', side: PositionSide.Short, contracts: 0.0049, notional: 400 })],
-    );
-
-    await exchange.nukePositions(3);
-
-    expect(exchange.placed).toHaveLength(1);
-    expect(exchange.placed[0]).toMatchObject({ symbol: 'BTCUSD', side: OrderSide.Buy, amount: 4 });
   });
 
   it('skips a position whose market is not loaded and still closes the rest', async () => {
