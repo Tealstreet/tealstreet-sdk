@@ -4082,6 +4082,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "safe-cex-venue-txflow"
+version = "0.1.0"
+dependencies = [
+ "safe-cex-exchange",
+ "safe-cex-store",
+ "safe-cex-transport",
+ "safe-cex-types",
+ "serde_json",
+]
+
+[[package]]
 name = "safe-cex-venue-weex"
 version = "0.1.0"
 dependencies = [

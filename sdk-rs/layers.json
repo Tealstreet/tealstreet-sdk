@@ -56,7 +56,8 @@
         "safe-cex-venue-bitrue",
         "safe-cex-venue-bingx",
         "safe-cex-venue-phemex",
-        "safe-cex-venue-breakoutprop"
+        "safe-cex-venue-breakoutprop",
+        "safe-cex-venue-txflow"
       ]
     },
     {
