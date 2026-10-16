@@ -95,6 +95,13 @@ outcome rather than that preparation failed. Doing the fetch in the venue and
 then calling `start_websocket` reopens exactly the disposal and stale-generation
 races this operation exists to own.
 
+JS-backed sockets dispatch typed disposal through the live receiver's `dispose`
+member. The facade guards both that dispatch and the base prototype's
+`super.dispose()` path against reentry. A source throw is reported through the
+runtime; the infallible protocol hook still permits core transport cleanup.
+The Weex source-member witness covers timer/listener cleanup, superclass order,
+direct and typed calls, repeated disposal and guard reset after errors.
+
 Socket options use `None` for omitted SDK tuning and `Some(options)` for explicit
 RWS options, including an empty object. Make absence a distinct representable
 state rather than a default value. Header presence does not select tuning.
@@ -931,10 +938,20 @@ than the venue allows. Request interceptors still run again to refresh signing.
 
 ## Native host (`native` feature)
 
+The JS socket constructor forwards protocols and connection tuning. Required
+upgrade headers refuse unsupported hosts before a dial. A retained header
+provider runs in each core-owned dial preparation; a thrown auth error prevents
+that attempt. Native reconnects call the venue's constructor path again, so the
+next attempt regenerates headers. The native host accepts the source's header
+wrapper selection as a plain authenticated socket; the core owns reconnects.
+Header-less requests for a host-managed reconnecting wrapper still refuse.
+`ws_options` tests compare actual source constructor inputs and verify two fresh
+upgrade headers at a real loopback server, failed preparation and host refusal.
+
 `native::native_runtime()` is the production `ExchangeRuntime` + `WsRuntime` on a
 tokio `LocalSet` over the direct transport; `NativeHttpHost` drives the adapter
 once. Sockets are plain (`enable_reconnecting` false): the core owns
-reconnection, and a `reconnecting` dial is refused rather than faked. The
+reconnection, and a header-less `reconnecting` dial is refused. The
 feature's dependencies are target-gated, so `--all-features` wasm builds stay
 I/O-free. Inherent `impl` blocks inside cfg-gated modules fail the parity
 indexer closed; native modules use free functions and trait impls only.
@@ -960,6 +977,12 @@ Blob.text perform UTF-8 replacement only when the venue explicitly asks for text
 compressed-frame consumers must read the bytes and use their source decoder.
 `ws_lifecycle::js_sockets::binary_delivery_preserves_bytes_until_explicit_text_conversion`
 checks non-UTF-8 bytes, object identity, explicit conversion and unchanged text frames.
+
+Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
+JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
+`dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
+cases cover successful cleanup and each throwing socket, shared-cell visibility,
+retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
 
 The js_runtime Object.defineProperty binding retains ordinary-object/function data
 attributes, following ToPropertyDescriptor and ValidateAndApplyPropertyDescriptor
@@ -995,10 +1018,22 @@ JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
 `dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
 cases cover successful cleanup and each throwing socket, shared-cell visibility,
 retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.
-The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
-worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
-completion hook and reconstructed error properties. Arguments/results use the
-existing JSON worker boundary; it does not create a parallel worker protocol.
+
+The JS HTTP bridge retains JSON-data adapter config in RestRequest.config_extensions,
+including GRVT's browser cookie/account fields. It leaves executable Axios hooks
+on the source config. Hosted effective config still spreads that source object,
+then overlays actual adapter fields; terminal extension updates survive too.
+Cookie promotion belongs exclusively to HOW, not the direct HTTP bridge.
+
+
+The shared lodash import table supplies `times` for source order splitting.
+It truncates the coerced count, returns an empty array for invalid/nonpositive
+counts, and treats non-callable iteratees as identity (not a property shorthand).
+Callbacks receive only their index with undefined `this`; results retain their
+values, and a thrown callback stops further calls without replacing its error.
+`js_runtime::library::tests::lodash_times_*` compares 68 installed-lodash cases
+and independently checks native callback/error behavior. The callback-arity
+mutation compiles and fails both tests, then passes after restoration.
 
 Configured js_runtime retries retain `config["axios-retry"]` through the effective
 failed-config replay. The source condition sees the current retryCount; retryDelay
@@ -1010,3 +1045,16 @@ an exhausted budget rejects the original error before sleeping or sending.
 including request overrides, async predicate results, timer failure and loss of
 an observer during a pending delay. This covers configured callbacks within the
 runtime's existing HTTP and timer profiles.
+
+The shared utility import table also installs Lodash `throttle`. Its scheduler
+uses the existing Scope clock and cancellable timers, preserving leading and
+trailing options, the latest receiver/arguments, maxWait, cached returns and
+callback errors. The returned function exposes cancel and flush. Polymarket
+consumes this shared factory directly; it has no venue-local scheduler.
+`tests/js_throttle.rs` compares 294 installed-Lodash traces in one Node capture,
+including sustained bursts, stalled timers and clock rollback, then checks
+native error identity separately. Host timer precision remains Scope's existing
+millisecond profile. The sequential `tests/js_throttle_controls.py` faults each
+of leading, trailing and maxWait; all three must compile and fail the source
+comparison, then pass after exact restoration. A fourth fault removes the shared
+import and must fail Polymarket construction, then restore all 15 concrete tests.

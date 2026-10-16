@@ -24,6 +24,7 @@ use safe_cex_exchange::{
         AccountIdentityPatch, BaseExchange, Exchange, ExchangeSettings, IdentityFieldPatch,
         ValidatedBatch, ValidatedOrder,
     },
+    js_runtime::base_exchange::ExternalPublicDataFactory,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeSigners},
     websocket::WsRuntime,
     ws_parent::WsExchangeParent,
@@ -42,6 +43,7 @@ pub struct HyperliquidDependencies {
     pub http: Arc<dyn RestAdapter>,
     pub limiter: Rc<RateLimiter>,
     pub signers: ExchangeSigners,
+    pub external_public_data: Option<ExternalPublicDataFactory>,
 }
 
 pub(crate) struct Binding {
@@ -128,7 +130,8 @@ impl HyperliquidExchange {
             .map_err(|e| thrown(&mut realm, e))?;
         realm.bind_import("HyperliquidPublicWebSocket", public);
         realm.bind_import("HyperliquidPrivateWebSocket", private);
-        let base_class = base_exchange_class(&mut realm, venue.base.clone());
+        let base_class =
+            base_exchange_class(&mut realm, venue.base.clone(), deps.external_public_data);
         let class = core_exchange_class::create_core_exchange_class(&mut realm, &base_class)
             .map_err(|e| thrown(&mut realm, e))?;
         realm.bind_import("HyperliquidExchange", class.clone());
@@ -267,6 +270,22 @@ impl Exchange for HyperliquidExchange {
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
         Box::pin(self.unit("start", |_| Ok(vec![])))
+    }
+    fn fetch_historical_positions(
+        &self,
+        options: safe_cex_exchange::journal::HistoricalPositionOptions,
+    ) -> ExchangeFuture<'_, Vec<serde_json::Value>> {
+        Box::pin(self.typed("fetchHistoricalPositions", move |realm| {
+            let opts = realm.new_object();
+            realm.define_str(&opts, "account", Value::str(&options.account))?;
+            if let Some(from) = options.from {
+                realm.define_str(&opts, "from", Value::Number(from))?;
+            }
+            if let Some(to) = options.to {
+                realm.define_str(&opts, "to", Value::Number(to))?;
+            }
+            Ok(vec![opts])
+        }))
     }
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
         Box::pin(async move {

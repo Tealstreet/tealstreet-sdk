@@ -33,7 +33,9 @@ impl BingxExchange {
         if name != ExchangeName::Bingx {
             return Err(ExchangeError::new("BingxExchange requires bingx"));
         }
-        if options.remote_signer.is_some() || options.payload_signer.is_some() {
+        if (options.remote_signer.is_some() && deps.http.hosted_signer().is_none())
+            || options.payload_signer.is_some()
+        {
             return Err(ExchangeError::new(
                 "BingX hosted signers require a host signing capability",
             ));

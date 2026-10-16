@@ -1,5 +1,21 @@
 # Accepted-set gate evidence
 
+## Native source-tooling contract additions
+
+On source base `04171f4f19`, all production targets in `safe-cex-parity`
+produced 32 native/default receipts: 20 runtime results and 12 classifications.
+The new `fragment_named`, `local_types_with_recipes` and
+`parity_trait_inventory::collect` contracts execute actual native operations
+against independently authored token/file/AST witnesses. The concrete
+`ModuleRecipes` alias executes ordinary compiler identity and decoder/conversion
+trait probes; its exact native-tooling declaration claim does not skip them.
+
+All four new contracts pass. The package's five existing positional-array defect
+owners match the scoped standing ledger exactly, with no new or stale scoped
+shape failures. A plain package run reports those five known defects; the scoped
+ratchet comparison passes. This is native tooling evidence, not a full workspace
+or feature/wasm matrix result. The ledger and production Rust sources are unchanged.
+
 ## Initial native census
 
 Base: `7fcffd57e8`, branch `feat/rust-accepted-set-gate`. All 26 venue crates
@@ -330,3 +346,57 @@ The production matrix also found a function-local `macro_rules!` definition in
 not by macro name: its function-local declaration and call pass discovery, while
 the same macro hoisted to module scope fails with a named production assertion.
 This changes discovery coverage, not decoder or debt classification.
+
+### Mixed observed and typed APIs
+
+An alternate-only owner may combine executed `observed` entrypoints with
+explicitly classified `typed` entrypoints. Both retain the exact compiler API
+list. A typed entry must pass the same raw-input role and signature checks as
+an ordinary typed contract; a raw constructor, conversion, byte/string input,
+or decoder bound cannot inherit permission from a neighboring typed method.
+The owner must still execute at least one observed API. Generated dispatch
+contains only observed methods, each with its own input/output witnesses.
+
+This permits a native runtime type to classify an empty collection constructor
+without inventing varying inputs or outputs for it, while executing its raw
+string-key operations independently. The registered `observed typed entrypoint
+raw compiler role` mutation removes that validation at the production branch;
+its test requires an assertion failure and a restored passing baseline.
+This format support does not waive a decoder, change the defect ledger, or
+establish a complete production matrix result.
+
+
+### Serde forwarding macro discovery
+
+The qualified `serde::forward_to_deserialize_any!` identifier-only form is
+reviewed against registry Serde 1.0.229 and its selected registry serde_core
+1.0.229 provider. Both compiler artifact identities are required. Only the
+reviewed method-name tokens are accepted; custom visitor syntax, unknown names,
+extra token groups, imports under another name and shadowed namespaces remain
+unsupported. Rustdoc still inventories every expanded method, and each method
+retains its ordinary exact API classification and runtime obligations. This
+permission changes source discovery only; it does not exempt deserializers.
+
+The native typed-boundary observations use fixed visitors. Boolean forwarding
+witnesses show the actual captured boolean reaches that visitor, including
+methods whose names describe other Serde data types; they do not establish
+numeric, string, aggregate or arbitrary visitor semantics. Enum and newtype
+observations separately execute their concrete native branches.
+
+
+The concrete `HostedSigner` tuple has a separate bounded compiler identity
+probe: its source and expanded targets must be exactly an Rc of the native
+RemoteSigner trait plus an optional String. Rc, Option and String each require
+their resolved sysroot identity. An invariant native type equality checks the
+actual alias against the independently authored tuple. This gives no permission
+to generic tuples or other signer payloads. The registered expanded-target
+mutation proves the compiler-target refusal remains active.
+
+The active Serde rc feature makes `value::Str` (Rc<[u16]>) a real sequence
+decoder. Its contract observes native UTF-16 units, including a surrogate pair
+and a lone surrogate, and refuses strings, negative/out-of-range units and
+nonintegral numbers. Numeric runtime observations project binary64 bits before
+JSON so integer-valued floats cannot be confused with JSON integer storage.
+CrossTradeStore now constrains its remote-derived decoder to object input;
+its existing native observations and the focused object/array regression retain
+the original map fields and reject positional arrays. No debt entry was added.

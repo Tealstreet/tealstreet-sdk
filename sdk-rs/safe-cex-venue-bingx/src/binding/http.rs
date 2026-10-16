@@ -239,6 +239,9 @@ impl Host {
     }
 }
 impl ApiHost for Host {
+    fn has_remote_signer(&self) -> bool {
+        self.scope.http.hosted_signer().is_some()
+    }
     fn create(
         &self,
         defaults: ApiDefaults,
