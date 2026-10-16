@@ -1377,14 +1377,6 @@ rs = "safe-cex-exchange/src/signing.rs::SigningHttpClient"
 reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
 
 [[exempt]]
-rs = "safe-cex-transport/src/retry.rs::WriteRequest::request"
-reason = "Read-only borrow of the classified write's request, so the signature-rejection retry can read its original timeout budget without unwrapping the type-state token. Adds no routing, retry or venue behavior."
-
-[[exempt]]
-rs = "safe-cex-exchange/src/http.rs::HttpClient::is_signing_capture"
-reason = "Exposes the host's existing signing-capture boolean (the config predicate recordRequestOutcome already reads) to venue interceptors, so KuCoin keeps an incoming timestamp only on the device signing pass. Adds no routing, retry or venue behavior."
-
-[[exempt]]
 rs = "safe-cex-exchange/src/signing.rs::SigningHttpClient::capture"
 reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
 
