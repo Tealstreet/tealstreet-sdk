@@ -7,7 +7,7 @@ const helpers=load(path.join(root,'packages/safe-cex/src/utils/omitUndefined.ts'
 const file=path.join(root,'packages/safe-cex/src/exchanges/blofin/blofin.exchange.ts');
 const ast=ts.createSourceFile(file,fs.readFileSync(file,'utf8'),ts.ScriptTarget.Latest,true);
 const klass=ast.statements.find(s=>ts.isClassDeclaration(s)&&s.name?.text==='BlofinExchange');
-const names=['updateOrder','cancelOrders','setLeverage','placeOrder','placeOrders','changeMarginType','placeOrderBatch','placeAlgoOrderBatch','cancelNormalOrders','cancelAlgoOrders','cancelTriggerOrders','isAlgoOrder','isAlreadyGoneCancelRow','parsePositivePrice','mapBlofinTriggerType','placeTriggerOrder'];
+const names=['updateOrder','cancelOrders','setLeverage','placeOrder','placeOrders','changeMarginType','placeOrderBatch','placeAlgoOrderBatch','cancelNormalOrders','cancelAlgoOrders','cancelTriggerOrders','isAlgoOrder','isAlreadyGoneCancelRow','parsePositivePrice','mapBlofinTriggerType','placeTriggerOrder','applyConfirmedMarginType'];
 let active;
 const scope={...enums,...constants,...helpers,chunk:dependencies('lodash/chunk'),partition:dependencies('lodash/partition'),uniqBy:dependencies('lodash/uniqBy'),mapSeries:dependencies('p-iteration').mapSeries,forEachSeries:dependencies('p-iteration').forEachSeries,sleep:async ms=>{active.trace.push(['sleep',ms]);},BLOFIN_MULTI_TRADE_POSITION_SELECTION_CODE:'102143',BLOFIN_MULTI_TRADE_UNSUPPORTED_MESSAGE:'BloFin Multi-Position mode is not supported in Tealstreet yet. Turn off Multi-Position mode on BloFin, then retry from Tealstreet.'};
 const factories={};
@@ -76,7 +76,9 @@ add('updateOrder',[{order:order('N'),update:{price:104.5,amount:8.25}}],{orders:
 add('updateOrder',[{order:order('N__take_profit','take_profit_market'),update:{price:151.5}}],{orders:[order('N'),order('N__stop_loss','stop_market',{price:73.25}),order('N__take_profit','take_profit_market',{price:149.5})],responses:[ok]});
 add('updateOrder',[{order:order('A__take_profit','take_profit_market'),update:{price:151.5}}],{orders:[order('A__stop_loss','stop_market',{price:73.25}),order('A__take_profit','take_profit_market',{price:149.5})],responses:[ok]});
 add('cancelAlgoOrders',[[order('A','stop_market')]],{responses:[{code:'5',msg:'outer error',data:[null]}]});
-assert.equal(cases.length,52,'independent_case_floor');
+// The confirmed marginMode wins over the argument and re-types only the flat position.
+add('changeMarginType',[true,'BTCUSDT'],{positions:[{...pos('P0'),contracts:0},pos('P1')],fetchedPositions:[pos('P1',11)],responses:[{code:'0',data:{marginMode:'cross'}}]});
+assert.equal(cases.length,53,'independent_case_floor');
 const raw=value=>JSON.stringify(value,(_,v)=>v===undefined?{__undefined:true}:v);
 async function run(input){
  const inputRaw=raw(input);
@@ -131,5 +133,5 @@ async function run(input){
   zeroWitnesses.push({input:Object.is(input,-0)?'-0':'0',min:Object.is(min,-0)?'-0':'0',max:Object.is(max,-0)?'-0':'0',negative:expected});
  }
  assert.equal(zeroWitnesses.length,4,'independent_zero_floor');
- console.log(raw({header:{architecture:process.arch,nodeVersion:process.version},cases:outputs,boundaries,parallelWitness:{starts,immediateStarts,microtaskIterations:iteration},zeroWitnesses,stoppedAfter:52}));
+ console.log(raw({header:{architecture:process.arch,nodeVersion:process.version},cases:outputs,boundaries,parallelWitness:{starts,immediateStarts,microtaskIterations:iteration},zeroWitnesses,stoppedAfter:53}));
 })().catch(error=>{console.error(error);process.exitCode=1});

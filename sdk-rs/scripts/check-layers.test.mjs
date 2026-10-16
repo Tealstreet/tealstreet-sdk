@@ -39,7 +39,7 @@ test('Lighter protocol SDK stays below venue adapters and above crypto services'
 test('removing the protocol SDK classification fails closed', () => {
   const { policy, metadata } = inputs();
   policy.layers.find(layer => layer.name === 'exchange-core').packages = ['safe-cex-exchange'];
-  assert.throws(() => validateLayers(policy, metadata), /unclassified crate: workspace -> safe-cex-lighter-sdk/);
+  assert.throws(() => validateLayers(policy, metadata), /unclassified dependency: safe-cex-venue-lighter -> safe-cex-lighter-sdk/);
 });
 for (const [name, from, to, reason] of [
   ['lateral edge', 'safe-cex-store', 'safe-cex-transport', 'lateral dependency'],

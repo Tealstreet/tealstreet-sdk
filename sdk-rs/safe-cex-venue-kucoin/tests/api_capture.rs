@@ -115,5 +115,59 @@ fn missing_retry_dependency_is_a_hard_failure() {
     );
 }
 
+#[test]
+fn signature_predicate_matches_actual_typescript() {
+    use std::io::Write;
+    let corpus = serde_json::json!([
+        {"code": "400005"},
+        {"code": 400005},
+        {"code": "200000", "msg": "Invalid KC-API-SIGN"},
+        {"msg": "invalid kc-api-sign header"},
+        {"code": "400004", "msg": "Invalid KC-API-PASSPHRASE"},
+        {"code": "400005 "},
+        {"msg": null},
+        {"msg": "INVALID KC-API-\u{17F}IGN"},
+        {},
+        null,
+        "400005"
+    ]);
+    let expected = [
+        true, true, true, true, false, false, false, false, false, false, false,
+    ];
+    let mut child = Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/signature-rejection.cjs"
+        ))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(corpus.to_string().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<bool> = serde_json::from_slice(&output.stdout).unwrap();
+    let inputs = corpus.as_array().unwrap();
+    assert_eq!(source.len(), inputs.len(), "source signature corpus floor");
+    for ((data, rejected), source) in inputs.iter().zip(expected).zip(source) {
+        assert_eq!(
+            safe_cex_venue_kucoin::api::is_kucoin_signature_rejection(data).unwrap(),
+            rejected,
+            "native signature predicate {data}"
+        );
+        assert_eq!(source, rejected, "source signature predicate {data}");
+    }
+}
+
 #[path = "support/api_runtime.rs"]
 mod api_runtime;
