@@ -1,4 +1,4 @@
-//! Bybit and Demo through production registry, typed API factory and local HTTP.
+//! Bound Bybit family through production registry, signed API factory and local HTTP.
 #![cfg(not(target_arch = "wasm32"))]
 mod support;
 use hmac::{Hmac, Mac};
@@ -53,6 +53,7 @@ fn bybit_and_demo_construct_and_sign_through_native_registry() {
             ExchangeName::Bybit,
             ExchangeName::Bybitdemo,
             ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
         ] {
             let h = support::venue_harness(
                 name.clone(),
@@ -63,6 +64,10 @@ fn bybit_and_demo_construct_and_sign_through_native_registry() {
             )
             .await;
             assert_eq!(h.exchange.base().name(), &name);
+            if name == ExchangeName::Bybitinverse {
+                assert_eq!(h.exchange.class_name(), "BybitInverseExchange");
+                assert!(!h.exchange.base().is_spot && !h.exchange.base().is_demo);
+            }
             let account =
                 tokio::time::timeout(std::time::Duration::from_secs(10), h.exchange.get_account())
                     .await
@@ -132,6 +137,7 @@ fn bybit_and_demo_use_hosted_signer_without_local_credentials() {
             ExchangeName::Bybit,
             ExchangeName::Bybitdemo,
             ExchangeName::Bybitspot,
+            ExchangeName::Bybitinverse,
         ] {
             let signer = Rc::new(HostedBybit::default());
             let h = support::venue_harness(

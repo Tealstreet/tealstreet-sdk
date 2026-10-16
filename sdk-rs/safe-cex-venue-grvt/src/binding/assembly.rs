@@ -20,7 +20,7 @@ use safe_cex_exchange::{
 use std::rc::Rc;
 
 pub(super) fn client_order_id_rule() -> safe_cex_exchange::client_order_id::ClientOrderIdRule {
-    use safe_cex_exchange::client_order_id::*;
+    use safe_cex_exchange::client_order_id::ClientOrderIdRule;
     ClientOrderIdRule {
         label: "GRVT".into(),
         requirement: "be a canonical decimal integer between 1 and 9223372036854775807".into(),
@@ -220,35 +220,77 @@ impl CompositionHost for Host {
     }
     fn private_field(&self, state: Rc<PrivateCommands<Js, super::private::Key>>, key: &str) -> Js {
         use super::fields;
-        macro_rules! boolean {
-            ($field:ident) => {{
-                let get = state.clone();
-                fields::boolean(
-                    Rc::new(move || get.$field.get()),
-                    Rc::new(move |v| state.$field.set(v)),
-                )
-            }};
-        }
-        macro_rules! number {
-            ($field:ident) => {{
+        match key {
+            "requestId" => {
                 let get = state.clone();
                 fields::number(
-                    Rc::new(move || get.$field.get()),
-                    Rc::new(move |v| state.$field.set(v)),
+                    Rc::new(move || get.request_id.get()),
+                    Rc::new(move |v| state.request_id.set(v)),
                 )
-            }};
-        }
-        match key {
-            "requestId" => number!(request_id),
-            "sessionRefreshAttempts" => number!(session_refresh_attempts),
-            "lastPositionFetchTime" => number!(last_position_fetch_time),
-            "positionFetchThrottleMs" => number!(position_fetch_throttle_ms),
-            "reportedMissingProxyHost" => boolean!(reported_missing_proxy_host),
-            "authenticated" => boolean!(authenticated),
-            "authenticationFailed" => boolean!(authentication_failed),
-            "sessionRefreshInFlight" => boolean!(session_refresh_in_flight),
-            "positionFetchScheduled" => boolean!(position_fetch_scheduled),
-            "hasPendingPositionEvents" => boolean!(has_pending_position_events),
+            }
+            "sessionRefreshAttempts" => {
+                let get = state.clone();
+                fields::number(
+                    Rc::new(move || get.session_refresh_attempts.get()),
+                    Rc::new(move |v| state.session_refresh_attempts.set(v)),
+                )
+            }
+            "lastPositionFetchTime" => {
+                let get = state.clone();
+                fields::number(
+                    Rc::new(move || get.last_position_fetch_time.get()),
+                    Rc::new(move |v| state.last_position_fetch_time.set(v)),
+                )
+            }
+            "positionFetchThrottleMs" => {
+                let get = state.clone();
+                fields::number(
+                    Rc::new(move || get.position_fetch_throttle_ms.get()),
+                    Rc::new(move |v| state.position_fetch_throttle_ms.set(v)),
+                )
+            }
+            "reportedMissingProxyHost" => {
+                let get = state.clone();
+                fields::boolean(
+                    Rc::new(move || get.reported_missing_proxy_host.get()),
+                    Rc::new(move |v| state.reported_missing_proxy_host.set(v)),
+                )
+            }
+            "authenticated" => {
+                let get = state.clone();
+                fields::boolean(
+                    Rc::new(move || get.authenticated.get()),
+                    Rc::new(move |v| state.authenticated.set(v)),
+                )
+            }
+            "authenticationFailed" => {
+                let get = state.clone();
+                fields::boolean(
+                    Rc::new(move || get.authentication_failed.get()),
+                    Rc::new(move |v| state.authentication_failed.set(v)),
+                )
+            }
+            "sessionRefreshInFlight" => {
+                let get = state.clone();
+                fields::boolean(
+                    Rc::new(move || get.session_refresh_in_flight.get()),
+                    Rc::new(move |v| state.session_refresh_in_flight.set(v)),
+                )
+            }
+            "positionFetchScheduled" => {
+                let get = state.clone();
+                fields::boolean(
+                    Rc::new(move || get.position_fetch_scheduled.get()),
+                    Rc::new(move |v| state.position_fetch_scheduled.set(v)),
+                )
+            }
+            "hasPendingPositionEvents" => {
+                let get = state.clone();
+                fields::boolean(
+                    Rc::new(move || get.has_pending_position_events.get()),
+                    Rc::new(move |v| state.has_pending_position_events.set(v)),
+                )
+            }
             "privateStreamHealthyAt" => {
                 let get = state.clone();
                 fields::view(
@@ -411,5 +453,138 @@ impl CompositionHost for Host {
     }
     fn severity(&self, severity: LogSeverity) -> Js {
         Js::str(severity.as_str())
+    }
+}
+
+#[cfg(test)]
+mod private_scalar_tests {
+    use super::*;
+    use crate::binding::runtime::{Extra, Shared};
+    #[allow(dead_code)]
+    mod fixture {
+        use crate as safe_cex_venue_grvt;
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/binding_harness.rs"
+        ));
+    }
+
+    #[test]
+    fn private_scalar_views_keep_each_native_cell_live_and_independent() {
+        let shared = Rc::new(Shared::new(
+            Rc::new(fixture::Runtime::default()),
+            Rc::new(fixture::Http::default()),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            Js::object(vec![]),
+            Extra {
+                builder_error_proto: Js::object(vec![]),
+                nonce_ids: Default::default(),
+                nonce_times: Default::default(),
+                public: Default::default(),
+                private: Default::default(),
+                name: safe_cex_types::ExchangeName::Grvt,
+                options: fixture::options(),
+                external_public_data: None,
+            },
+        ));
+        let host = Host::from_shared(shared, Js::object(vec![]));
+        let state = Rc::new(PrivateCommands::default());
+        let number = |view: Js| match super::super::fields::read(view).unwrap() {
+            Js::Number(v) => v,
+            _ => panic!("GRVT PRIVATE SCALAR native Number variant"),
+        };
+        for (key, cell, before, after) in [
+            ("requestId", &state.request_id, 11.0, -0.0),
+            (
+                "sessionRefreshAttempts",
+                &state.session_refresh_attempts,
+                22.0,
+                0.5,
+            ),
+            (
+                "lastPositionFetchTime",
+                &state.last_position_fetch_time,
+                33.0,
+                -6.25,
+            ),
+            (
+                "positionFetchThrottleMs",
+                &state.position_fetch_throttle_ms,
+                44.0,
+                f64::INFINITY,
+            ),
+        ] {
+            cell.set(before);
+            let view = host.private_field(state.clone(), key);
+            assert_eq!(
+                number(view.clone()).to_bits(),
+                before.to_bits(),
+                "GRVT PRIVATE SCALAR {key} initial read"
+            );
+            cell.set(before + 0.25);
+            assert_eq!(
+                number(view.clone()).to_bits(),
+                (before + 0.25).to_bits(),
+                "GRVT PRIVATE SCALAR {key} live read"
+            );
+            assert!(super::super::fields::write(&view, Js::Number(after)).unwrap());
+            assert_eq!(
+                cell.get().to_bits(),
+                after.to_bits(),
+                "GRVT PRIVATE SCALAR {key} native write"
+            );
+            assert_eq!(
+                number(view.clone()).to_bits(),
+                after.to_bits(),
+                "GRVT PRIVATE SCALAR {key} getter after write"
+            );
+            assert!(
+                super::super::fields::write(&view, Js::str("7")).is_err(),
+                "GRVT PRIVATE SCALAR {key} Number admission"
+            );
+            assert_eq!(
+                cell.get().to_bits(),
+                after.to_bits(),
+                "GRVT PRIVATE SCALAR {key} refusal state"
+            );
+        }
+        let boolean = |view: Js| match super::super::fields::read(view).unwrap() {
+            Js::Bool(v) => v,
+            _ => panic!("GRVT PRIVATE SCALAR native Bool variant"),
+        };
+        for (key, cell) in [
+            (
+                "reportedMissingProxyHost",
+                &state.reported_missing_proxy_host,
+            ),
+            ("authenticated", &state.authenticated),
+            ("authenticationFailed", &state.authentication_failed),
+            ("sessionRefreshInFlight", &state.session_refresh_in_flight),
+            ("positionFetchScheduled", &state.position_fetch_scheduled),
+            (
+                "hasPendingPositionEvents",
+                &state.has_pending_position_events,
+            ),
+        ] {
+            cell.set(false);
+            let view = host.private_field(state.clone(), key);
+            assert!(
+                !boolean(view.clone()),
+                "GRVT PRIVATE SCALAR {key} initial read"
+            );
+            assert!(super::super::fields::write(&view, Js::str("enabled")).unwrap());
+            assert!(cell.get(), "GRVT PRIVATE SCALAR {key} native write");
+            assert!(
+                boolean(view.clone()),
+                "GRVT PRIVATE SCALAR {key} getter after write"
+            );
+            cell.set(false);
+            assert!(
+                !boolean(view.clone()),
+                "GRVT PRIVATE SCALAR {key} live read"
+            );
+            assert!(super::super::fields::write(&view, Js::Null).unwrap());
+            assert!(!cell.get(), "GRVT PRIVATE SCALAR {key} falsy write");
+        }
     }
 }

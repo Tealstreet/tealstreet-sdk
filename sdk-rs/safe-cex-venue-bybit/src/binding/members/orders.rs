@@ -392,6 +392,16 @@ fn position_response_meta(rt: &Rt, data: &Js) -> Result<Js, Thrown> {
 // ts: BybitExchange.fetchPositionMode. Mapping and Store publication never
 // project a native Position through JSON.
 pub(crate) fn fetch_position_mode(rt: &Rt, symbol: Js) -> Result<Js, Thrown> {
+    fetch_position_mode_body(rt, symbol, true)
+}
+
+// ts: BybitInverseExchange.fetchPositionMode — direct retMsg policy and
+// optional map, rather than the primary normalized-status/array-only policy.
+pub(crate) fn fetch_inverse_position_mode(rt: &Rt, symbol: Js) -> Result<Js, Thrown> {
+    fetch_position_mode_body(rt, symbol, false)
+}
+
+fn fetch_position_mode_body(rt: &Rt, symbol: Js, primary: bool) -> Result<Js, Thrown> {
     let rt = rt.clone();
     Ok(rt.clone().spawn(Box::pin(async move {
         let store = rt.this.get("store")?;
@@ -430,7 +440,16 @@ pub(crate) fn fetch_position_mode(rt: &Rt, symbol: Js) -> Result<Js, Thrown> {
         )?)
         .await?
         .get("data")?;
-        let meta = position_response_meta(&rt, &data)?;
+        let meta = if primary {
+            position_response_meta(&rt, &data)?
+        } else {
+            Js::Undefined
+        };
+        if !primary && !get_key(&data, "retMsg")?.strict_equals(&Js::str("OK")) {
+            rt.this
+                .call_method("emitAndLogError", vec![get_key(&data, "retMsg")?])?;
+            return Ok(Js::str("oneway"));
+        }
         let result = if data.is_nullish() {
             Js::Undefined
         } else {
@@ -442,7 +461,7 @@ pub(crate) fn fetch_position_mode(rt: &Rt, symbol: Js) -> Result<Js, Thrown> {
             result.get("list")?
         };
         let rows = list.array_items().unwrap_or_default();
-        if !meta.get("isSuccess")?.truthy() && rows.is_empty() {
+        if primary && !meta.get("isSuccess")?.truthy() && rows.is_empty() {
             let message = meta.get("retMsg")?;
             let code = meta.get("retCode")?;
             let fallback = if message.truthy() {
@@ -471,14 +490,23 @@ pub(crate) fn fetch_position_mode(rt: &Rt, symbol: Js) -> Result<Js, Thrown> {
             )?;
             return Ok(Js::str("oneway"));
         }
-        let mapped = Js::array(
-            rows.into_iter()
-                .map(|row| {
-                    rt.this
-                        .call_method("mapPosition", vec![row.unwrap_or(Js::Undefined)])
-                })
-                .collect::<Result<Vec<_>, _>>()?,
-        );
+        if !primary && !list.is_nullish() && !list.is_array() {
+            return Err(Thrown::type_error(
+                "data?.result?.list?.map is not a function",
+            ));
+        }
+        let mapped = if !primary && list.is_nullish() {
+            Js::Undefined
+        } else {
+            Js::array(
+                rows.into_iter()
+                    .map(|row| {
+                        rt.this
+                            .call_method("mapPosition", vec![row.unwrap_or(Js::Undefined)])
+                    })
+                    .collect::<Result<Vec<_>, _>>()?,
+            )
+        };
         store.call_method("addOrUpdatePositions", vec![mapped.clone()])?;
         if mapped.get("length")?.truthy() {
             mapped.get("0")?.get("positionMode")

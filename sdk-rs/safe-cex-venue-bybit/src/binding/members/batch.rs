@@ -122,8 +122,22 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     Ok(())
 }
 
+// Source-identical category grouping and delays are installed by the common
+// receiver. Only the three differing inverse members replace that surface.
+pub(crate) fn install_inverse(rt: &Rt) -> Result<(), Thrown> {
+    method(rt, "placeOrders", |rt, a| place_orders_body(rt, a, false))?;
+    method(rt, "processBatch", |rt, a| process_batch_body(rt, a, false))?;
+    method(rt, "formatOrderForBatch", |rt, a| {
+        format_order_body(rt, a, false)
+    })?;
+    Ok(())
+}
+
 // ts: BybitExchange.placeOrders
 fn place_orders(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
+    place_orders_body(rt, a, true)
+}
+fn place_orders_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
     let orders = arg(&a, 0);
     Ok(rt.clone().spawn(Box::pin(async move {
         if orders.get("length")?.strict_equals(&Js::Number(0.)) {
@@ -132,7 +146,7 @@ fn place_orders(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         rt.this
             .call_method("assertCallerClientOrderIds", vec![orders.clone()])?;
         for order in items(&orders)? {
-            if crate::options::is_bybit_option_symbol(&text(&order.get("symbol")?)?) {
+            if primary && crate::options::is_bybit_option_symbol(&text(&order.get("symbol")?)?) {
                 rt.this
                     .call_method("assertOptionOrderPlaceable", vec![order])?;
             } else {
@@ -162,7 +176,7 @@ fn place_orders(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
                     || kind.strict_equals(&Js::str("take_profit_market"))))
                 || kind.strict_equals(&Js::str("trailing_stop_market"))
                 || crate::order_params::has_bybit_single_order_params(&opts)
-                || crate::options::is_bybit_option_symbol(&base.symbol)
+                || (primary && crate::options::is_bybit_option_symbol(&base.symbol))
             {
                 special.push(order);
             } else {
@@ -286,6 +300,9 @@ fn place_batch_orders_for_category(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
 
 // ts: BybitExchange.processBatch
 fn process_batch(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
+    process_batch_body(rt, a, true)
+}
+fn process_batch_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
     Ok(rt.clone().spawn(Box::pin(async move {
         let mut pending = vec![];
         for order in items(&arg(&a, 1))? {
@@ -328,9 +345,12 @@ fn process_batch(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         .await?
         .get("data")?;
         if !data.get("retMsg")?.strict_equals(&Js::str("OK")) {
-            let message = rt
-                .this
-                .call_method("formatBybitVenueError", vec![data.clone()])?;
+            let message = if primary {
+                rt.this
+                    .call_method("formatBybitVenueError", vec![data.clone()])?
+            } else {
+                data.get("retMsg")?
+            };
             emit(&rt, message.clone())?;
             return Err(error(&message)?);
         }
@@ -344,7 +364,11 @@ fn process_batch(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
         if extra.truthy() {
             for (index, entry) in items(&extra)?.into_iter().enumerate() {
                 if !entry.get("code")?.strict_equals(&Js::Number(0.)) {
-                    let message = rt.this.call_method("formatBybitVenueError", vec![entry])?;
+                    let message = if primary {
+                        rt.this.call_method("formatBybitVenueError", vec![entry])?
+                    } else {
+                        entry.get("msg")?
+                    };
                     errors.push(format!("Order {}: {}", index + 1, text(&message)?));
                 }
             }
@@ -384,6 +408,9 @@ fn process_batch(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
 // receives the actual awaited position index. Request numerics are source string
 // fields; the only numeric output, positionIdx, is the canonical 0/1/2 selector.
 fn format_order_for_batch(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
+    format_order_body(rt, a, true)
+}
+fn format_order_body(rt: Rt, a: Vec<Js>, primary: bool) -> Result<Js, Thrown> {
     Ok(rt.clone().spawn(Box::pin(async move {
         let body = async {
             let opts = arg(&a, 0);
@@ -419,12 +446,12 @@ fn format_order_for_batch(rt: Rt, a: Vec<Js>) -> Result<Js, Thrown> {
                 .iter()
                 .find(|t| t.symbol == typed.symbol)
                 .cloned();
-            match crate::order_format::format_order_for_batch(
-                &typed,
-                Some(&market),
-                ticker.as_ref(),
-                index,
-            ) {
+            let formatter = if primary {
+                crate::order_format::format_order_for_batch
+            } else {
+                crate::order_format::format_inverse_order_for_batch
+            };
+            match formatter(&typed, Some(&market), ticker.as_ref(), index) {
                 Ok(request) => Ok(from_json(&request)),
                 Err(message) => {
                     // The pure body already prefixes caught format failures.
