@@ -58,6 +58,8 @@ pub trait ExchangeImports {
         rate: Option<crate::private_session::RateHook>,
     ) -> Result<EventValue, Failure>;
     fn rate_limit(&self, client: EventValue, max_rps: f64) -> Result<EventValue, Failure>;
+    /// `args` is the query params for GET/DELETE (`xhr.get(path, { params })`) and the
+    /// body for POST/PUT (`xhr.post(path, data)`); resolves to `response.data`.
     fn request(
         &self,
         client: EventValue,
@@ -100,8 +102,8 @@ pub trait ExchangeImports {
         &self,
         signer: EventValue,
     ) -> Result<crate::api_factory::RemoteSignCall, Failure>;
-    /// Receives the exchange's emitAndLogError before any client is created.
-    fn bind_emitter(&self, _emit: Rc<dyn Fn(EventValue) -> Result<(), Failure>>) {}
+    /// Receives the exchange before any client is created; hosts keep it weakly.
+    fn bind_owner(&self, _owner: Weak<ExchangeState>) {}
     fn virtual_now(&self) -> f64;
     fn uuid(&self) -> String;
     fn dayjs(&self, value: Option<f64>) -> Result<f64, Failure>;
@@ -229,6 +231,23 @@ fn json_value(v: &EventValue) -> Result<Value, Failure> {
     serde_json::from_str(&text).map_err(|e| failure(e.to_string()))
 }
 
+/// The typed IncomeRecord boundary: Binance sends tranId/tradeId as JSON numbers, which
+/// TS keeps raw and every consumer interpolates; the typed record carries String(id).
+pub(crate) fn income_records(
+    value: &EventValue,
+) -> Result<Vec<safe_cex_types::IncomeRecord>, Failure> {
+    let mut rows = json_value(value)?;
+    if let Value::Array(items) = &mut rows {
+        for item in items.iter_mut() {
+            for key in ["tranId", "tradeId"] {
+                if let Some(id) = item.get(key).and_then(Value::as_f64) {
+                    item[key] = Value::String(safe_cex_num::js_number_string(id));
+                }
+            }
+        }
+    }
+    typed(&EventValue::from_json(rows))
+}
 fn typed<T: serde::de::DeserializeOwned>(v: &EventValue) -> Result<T, Failure> {
     crate::class_decode::decode(v.clone()).map_err(|e| failure(e.to_string()))
 }
@@ -302,13 +321,7 @@ impl ExchangeState {
             resync: Default::default(),
             root: OnceCell::new(),
         });
-        let emitter = Rc::downgrade(&owner);
-        owner.imports.bind_emitter(Rc::new(move |message| {
-            emitter
-                .upgrade()
-                .ok_or_else(|| failure("exchange dropped"))?
-                .emit(message)
-        }));
+        owner.imports.bind_owner(Rc::downgrade(&owner));
         let bindings = Rc::new(Constructor(owner.clone(), OnceCell::new(), OnceCell::new()));
         let name = decoded(&owner.base.name)?;
         let store = record([]);
@@ -426,7 +439,7 @@ impl ExchangeState {
             .update(update, false)
             .map_err(|error| Rc::new(error.into()))
     }
-    fn emit(&self, message: EventValue) -> Result<(), Failure> {
+    pub(crate) fn emit(&self, message: EventValue) -> Result<(), Failure> {
         self.base
             .emit_and_log_error(
                 safe_cex_exchange::error_reporting::ExchangeErrorInput::Message(message.text()?),
@@ -1560,7 +1573,7 @@ impl crate::public_rest::RestBindings for RestContext {
             if let Some(limit) = p.limit {
                 value.define("limit", number(limit));
             }
-            record([("params", value)])
+            value
         });
         let request = self.0.http(
             match client {
@@ -2343,10 +2356,7 @@ impl ExchangeState {
                 Client::Private,
                 HttpMethod::Delete,
                 path,
-                Some(record([(
-                    "params",
-                    record([("symbol", string(request.symbol))]),
-                )])),
+                Some(record([("symbol", string(request.symbol))])),
             )?;
             Ok::<_, Failure>(async move { response.await.map(|_| ()) })
         };
