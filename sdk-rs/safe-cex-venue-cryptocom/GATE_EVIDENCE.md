@@ -178,3 +178,16 @@ four shared facade create-body hashes change with the setter;26 missing calls
 are recorded (25 BingX component delegates and1 Crypto trait start callback).
 Coinbase source-super evidence remains alongside #175's AsterDEX/BingX records.
 No source-super exception is added for Crypto.com.
+
+After merging master aa38a50adf, all23 binding tests, the shared6-case source
+disposal witness,5 override-contract tests and6 nonignored cancellation-inventory
+tests pass. The merged factory combines #158's synchronous writable Cell with
+master's synchronous weak socket lookups; no await/owned reservation changes.
+Its producer/dependency fingerprints were reconciled after that diff review.
+The override inventory additionally records15 Polymarket component/trait calls
+and four updated facade body hashes. Actual Polymarket source calls super.dispose
+only; its one native dispose arm now has reviewed source-super evidence. No
+Crypto.com source-super exception is introduced.
+
+The post-master strict host all-target and wasm library Clippy runs passed.
+Canonical parity passed7459 rows /17096 public Rust items on the merged tree.
