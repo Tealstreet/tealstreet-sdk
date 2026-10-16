@@ -721,13 +721,13 @@
   },
   {
     "function": "new",
-    "body": "c023da4e81457c3c",
+    "body": "f60cc96a14949a71",
     "call": "v . start ()",
     "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
   },
   {
     "function": "new",
-    "body": "c023da4e81457c3c",
+    "body": "f60cc96a14949a71",
     "call": "v . fetch_historical_fills (o)",
     "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
   },
