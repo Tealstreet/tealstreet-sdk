@@ -5,7 +5,7 @@ use crate::{
         host::{get_key, text},
         promise::await_js,
         rt::{Rt, venue},
-        value::{Js, Thrown, arg, from_typed, to_typed},
+        value::{Js, Thrown, arg, from_typed, to_json, to_typed},
     },
     inverse_read_surface as reads, variant_account_refresh as refresh,
 };
@@ -190,8 +190,67 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "fetchMarketsHelper", fetch_markets_helper)?;
     method(rt, "parseTickers", |rt, a| parse_tickers(&rt, arg(&a, 0)))?;
-    // The raw category fanout, disposal guards and member dispatch are identical
-    // in the two source classes; only the inverse parser differs.
+    method(rt, "fetchTickersRawHelper", |rt, a| {
+        Ok(rt.clone().spawn(Box::pin(async move {
+            let data = get(
+                &rt,
+                "/v5/market/tickers",
+                Js::object(vec![("category", arg(&a, 0))]),
+            )
+            .await?;
+            let message = get_key(&data, "retMsg")?;
+            if !message.strict_equals(&Js::str("OK")) {
+                rt.this.call_method("emitAndLogError", vec![message])?;
+                return Ok(Js::array(vec![Js::Null]));
+            }
+            data.get("result")?.get("list")
+        })))
+    })?;
+    method(rt, "fetchTickersRaw", |rt, _| {
+        Ok(rt.clone().spawn(Box::pin(async move {
+            let mut pending = vec![];
+            for category in fields(&rt.this.get("supportedCategories")?)? {
+                pending.push(
+                    rt.this
+                        .call_method("fetchTickersRawHelper", vec![category])?,
+                );
+            }
+            let all = rt
+                .global("Promise.all")?
+                .call(rt.global("Promise")?, vec![Js::array(pending)])?;
+            let mut tickers = vec![];
+            for rows in fields(&await_js(all).await?)? {
+                tickers.extend(fields(&rows)?);
+            }
+            if tickers.iter().any(|row| row.strict_equals(&Js::Null)) {
+                rt.this
+                    .call_method("emitAndLogError", vec![Js::str("Failed to fetch tickers")])?;
+                return Ok(Js::Null);
+            }
+            Ok(Js::array(tickers))
+        })))
+    })?;
+    method(rt, "fetchTickersWithoutParse", |rt, _| {
+        Ok(rt.clone().spawn(Box::pin(async move {
+            let raw = await_js(rt.this.call_method("fetchTickersRaw", vec![])?).await?;
+            if rt.this.get("isDisposed")?.truthy() {
+                Ok(Js::array(vec![]))
+            } else {
+                Ok(raw)
+            }
+        })))
+    })?;
+    method(rt, "fetchTickers", |rt, _| {
+        Ok(rt.clone().spawn(Box::pin(async move {
+            let raw = await_js(rt.this.call_method("fetchTickersRaw", vec![])?).await?;
+            if rt.this.get("isDisposed")?.truthy() {
+                rt.this.get("store")?.get("tickers")
+            } else {
+                rt.this.call_method("parseTickers", vec![raw])
+            }
+        })))
+    })?;
+    method(rt, "fetchAndCacheApiKeyInfo", fetch_and_cache_api_key_info)?;
     method(rt, "fetchOrdersPositionsAndBalance", |rt, _| {
         Ok(rt.clone().spawn(Box::pin(async move {
             refresh::inverse_account_refresh(&rt, rt.this.clone()).await
@@ -214,6 +273,62 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
     })?;
     method(rt, "start", start)?;
     Ok(())
+}
+
+// ts: BybitInverseExchange.fetchAndCacheApiKeyInfo — the cached user-data key is
+// inverse-specific, while the maintained fetch and VIP table bodies are shared.
+fn fetch_and_cache_api_key_info(rt: Rt, _: Vec<Js>) -> Result<Js, Thrown> {
+    Ok(rt.clone().spawn(Box::pin(async move {
+        let result = async {
+            await_js(rt.this.call_method("fetchApiKeyInfo", vec![])?).await?;
+            if rt.this.get("apiKeyInfo")?.truthy() {
+                super::startup::update_batch_limit_based_on_vip_level(&rt)?;
+                // Same typed user-data channel as the primary cache adapter.
+                let mut data = serde_json::Map::new();
+                data.insert(
+                    "bybitinverseApiKeyInfo".into(),
+                    to_json(&rt.this.get("apiKeyInfo")?)?,
+                );
+                venue(&rt)?
+                    .base
+                    .store
+                    .update_user_data(Some(serde_json::Value::Object(data)))
+                    .map_err(|error| {
+                        Thrown::from(safe_cex_exchange::runtime::ExchangeError::from(error))
+                    })?;
+            }
+            let info = rt.this.get("apiKeyInfo")?;
+            let vip = if info.is_nullish() {
+                Js::Undefined
+            } else {
+                info.get("vipLevel")?
+            };
+            let vip = if vip.truthy() {
+                vip
+            } else {
+                Js::str("Unknown")
+            };
+            rt.this.call_method(
+                "log",
+                vec![Js::str(&format!(
+                    "API key info cached. VIP Level: {}, Batch Limit: {}",
+                    text(&vip)?,
+                    text(&rt.this.get("batchLimit")?)?,
+                ))],
+            )?;
+            Ok::<_, Thrown>(())
+        }
+        .await;
+        if result.is_err() {
+            rt.this.call_method(
+                "log",
+                vec![Js::str(
+                    "Failed to fetch API key info, continuing without it",
+                )],
+            )?;
+        }
+        Ok(Js::Undefined)
+    })))
 }
 
 // ts: BybitInverseExchange.fetchMarketsHelper — both requests are sequential and
