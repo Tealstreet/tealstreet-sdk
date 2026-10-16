@@ -367,7 +367,9 @@ pins every method's outcome and transport routes per class, constructed via each
 factory call builds an axios-equivalent client over the shared `HttpClient`:
 the ported request interceptors run inside `execute_with_interceptor` (so a
 public endpoint's header removal stands), response stages run FIFO (factory
-interceptors, then weight guards), reads retry on network failure, and the
+interceptors, then weight guards), reads retry on network failure, a -1022
+signature rejection is re-signed once (a non-2xx through retry, a 2xx through
+the interceptor's resend, sharing one stamp per call), and the
 secondary-key split routes `get` to the secondary client. The private base is a
 core `BaseWebSocket` with id 3 whose protocol forwards open/message to the
 registered listeners; close stays with the core. `PrivateBase::install_hooks`

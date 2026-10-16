@@ -1,5 +1,4 @@
 use super::*;
-use safe_cex_transport::retry::SignatureRetryVenue;
 use safe_cex_venue_apexomni::api_runtime::{
     ApexApi, ApexApiConfiguration, ApexApiHost, create_api,
 };
@@ -80,14 +79,9 @@ impl ApexApiHost for ApiHost {
         );
         Ok(())
     }
-    fn configure_retry(
-        &self,
-        retries: u8,
-        venue: SignatureRetryVenue,
-    ) -> Result<(), ExchangeError> {
-        assert!(matches!(venue, SignatureRetryVenue::Apexomni));
+    fn configure_retry(&self, retries: u8) -> Result<(), ExchangeError> {
         self.runtime
-            .record("configure:retry", vec![n(retries.into())]);
+            .record("configure:retry", vec![n(retries.into()), J::Bool(true)]);
         Ok(())
     }
     fn register_request_handler(&self, api: Weak<ApexApi>) -> Result<(), ExchangeError> {

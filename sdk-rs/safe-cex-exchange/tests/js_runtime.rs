@@ -110,6 +110,273 @@ fn settle(runtime: &Runtime, value: Js) -> Result<Js, Thrown> {
 }
 
 #[test]
+fn client_retry_preserves_the_failed_config_and_retry_stamp() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    xhr.call_method(
+        "__configureRetry",
+        vec![Js::object(vec![
+            ("retries", Js::Number(3.0)),
+            (
+                "retryCondition",
+                Js::function("retryCondition", |_, a| {
+                    let config = arg(&a, 0).get("config")?;
+                    if config.get("signatureRetried")?.truthy() {
+                        return Ok(Js::Bool(false));
+                    }
+                    config.set("signatureRetried", Js::Bool(true))?;
+                    config.set("data", Js::str("replayed body"))?;
+                    Ok(Js::Bool(true))
+                }),
+            ),
+        ])],
+    )
+    .unwrap();
+    let result = settle(
+        &runtime,
+        xhr.call_method("post", vec![Js::str("/fail"), Js::str("original body")])
+            .unwrap(),
+    );
+    assert!(result.is_err());
+    let sent = http.sent.borrow();
+    assert_eq!(
+        sent.len(),
+        2,
+        "retry predicate stamp survives the next attempt"
+    );
+    assert_eq!(sent[0]["data"], "original body");
+    assert_eq!(sent[1]["data"], "replayed body");
+    assert_eq!(sent[1]["signatureRetried"], true);
+}
+
+#[test]
+fn client_headers_support_source_set_get_has_without_wire_methods() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(
+        http.clone(),
+        Js::object(vec![(
+            "headers",
+            Js::object(vec![
+                ("X-Trace", Js::str("default")),
+                ("Content-Type", Js::str("application/json")),
+            ]),
+        )]),
+    );
+    xhr.get("interceptors")
+        .unwrap()
+        .get("request")
+        .unwrap()
+        .call_method(
+            "use",
+            vec![Js::function("source headers", |_, a| {
+                let config = arg(&a, 0);
+                let headers = config.get("headers")?;
+                assert!(
+                    headers.get("set")?.is_callable(),
+                    "source-interceptor headers.set must be callable"
+                );
+                assert!(
+                    !headers.has_own("set"),
+                    "AxiosHeaders methods are inherited"
+                );
+                assert_eq!(
+                    headers
+                        .call_method("get", vec![Js::str("x-trace")])?
+                        .to_display(),
+                    "request",
+                    "request header wins case-insensitively"
+                );
+                let returned = headers
+                    .call_method("set", vec![Js::str("POLY_SIGNATURE"), Js::str("signed")])?;
+                assert!(returned.same_reference(&headers), "headers.set is fluent");
+                headers.call_method("set", vec![Js::str("poly_signature"), Js::str("updated")])?;
+                assert_eq!(
+                    headers
+                        .call_method("get", vec![Js::str("Poly_Signature")])?
+                        .to_display(),
+                    "updated"
+                );
+                assert!(
+                    headers
+                        .call_method("has", vec![Js::str("POLY_SIGNATURE")])?
+                        .truthy()
+                );
+                assert!(
+                    !headers
+                        .call_method("has", vec![Js::str("absent")])?
+                        .truthy()
+                );
+                assert_eq!(
+                    headers
+                        .own_keys()
+                        .iter()
+                        .map(|k| String::from_utf16(k).unwrap())
+                        .collect::<Vec<_>>(),
+                    vec!["X-Trace", "Content-Type", "POLY_SIGNATURE"],
+                    "only header entries reach the wire"
+                );
+                Ok(config)
+            })],
+        )
+        .unwrap();
+    settle(
+        &runtime,
+        xhr.call_method(
+            "get",
+            vec![
+                Js::str("/ok"),
+                Js::object(vec![(
+                    "headers",
+                    Js::object(vec![("x-trace", Js::str("request"))]),
+                )]),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        http.sent.borrow()[0]["headers"],
+        json!({"X-Trace":"request","Content-Type":"application/json","POLY_SIGNATURE":"updated"}),
+        "wire headers contain data only"
+    );
+}
+
+#[test]
+fn client_header_facade_matches_installed_axios() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_headers_oracle.cjs"
+        ))
+        .output()
+        .expect("Axios oracle launches");
+    assert!(
+        output.status.success(),
+        "Axios oracle: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let capture: Value = serde_json::from_slice(&output.stdout).unwrap();
+    let cases = capture["cases"].as_array().unwrap();
+    assert_eq!(cases.len(), 4, "independent header corpus floor");
+    let mut compared = 0;
+    for case in cases {
+        let runtime = Rc::new(Runtime::default());
+        let http = Rc::new(Http {
+            runtime: runtime.clone(),
+            sent: RefCell::default(),
+        });
+        let xhr = client::create(
+            http,
+            Js::object(vec![(
+                "headers",
+                safe_cex_exchange::js_runtime::value::from_json(&case["defaults"]),
+            )]),
+        );
+        let source = case.clone();
+        let checked = Rc::new(std::cell::Cell::new(0));
+        let performed = checked.clone();
+        xhr.get("interceptors")
+            .unwrap()
+            .get("request")
+            .unwrap()
+            .call_method(
+                "use",
+                vec![Js::function("compare source headers", move |_, a| {
+                    let config = arg(&a, 0);
+                    let headers = config.get("headers")?;
+                    for (sets, expected) in source["sets"]
+                        .as_array()
+                        .unwrap()
+                        .iter()
+                        .zip(source["snapshots"].as_array().unwrap())
+                    {
+                        let args = sets
+                            .as_array()
+                            .unwrap()
+                            .iter()
+                            .map(safe_cex_exchange::js_runtime::value::from_json)
+                            .collect();
+                        assert!(
+                            headers.call_method("set", args)?.same_reference(&headers),
+                            "source fluent receiver"
+                        );
+                        let entries: Vec<_> = headers
+                            .own_entries()?
+                            .into_iter()
+                            .map(|(k, v)| {
+                                json!([String::from_utf16(&k).unwrap(), to_json(&v).unwrap()])
+                            })
+                            .collect();
+                        assert_eq!(
+                            json!(entries),
+                            expected["entries"],
+                            "actual Axios native entries"
+                        );
+                        assert_eq!(
+                            json!(
+                                headers
+                                    .own_keys()
+                                    .iter()
+                                    .map(|k| String::from_utf16(k).unwrap())
+                                    .collect::<Vec<_>>()
+                            ),
+                            expected["keys"],
+                            "actual Axios own-key order"
+                        );
+                        for probe in expected["probes"].as_array().unwrap() {
+                            let name = Js::str(probe["name"].as_str().unwrap());
+                            let value = headers.call_method("get", vec![name.clone()])?;
+                            assert_eq!(
+                                headers.call_method("has", vec![name])?.truthy(),
+                                probe["present"].as_bool().unwrap(),
+                                "actual Axios has"
+                            );
+                            if let Some(expected) = probe.get("value") {
+                                assert_eq!(to_json(&value)?, *expected, "actual Axios get");
+                            } else {
+                                assert!(value.is_undefined(), "absent Axios get stays undefined");
+                            }
+                        }
+                        performed.set(performed.get() + 1);
+                    }
+                    Ok(config)
+                })],
+            )
+            .unwrap();
+        settle(
+            &runtime,
+            xhr.call_method(
+                "get",
+                vec![
+                    Js::str("/ok"),
+                    Js::object(vec![(
+                        "headers",
+                        safe_cex_exchange::js_runtime::value::from_json(&case["request"]),
+                    )]),
+                ],
+            )
+            .unwrap(),
+        )
+        .unwrap();
+        assert_eq!(
+            checked.get(),
+            case["sets"].as_array().unwrap().len(),
+            "no skipped source operations"
+        );
+        compared += checked.get();
+    }
+    assert_eq!(compared, 17, "independent performed operation count");
+}
+
+#[test]
 fn client_runs_request_interceptors_lifo_and_response_interceptors_fifo() {
     let runtime = Rc::new(Runtime::default());
     let http = Rc::new(Http {
@@ -1250,6 +1517,129 @@ fn rest_http_host_lets_the_venue_serialize_its_query() {
     let seen = terminal.seen.lock().unwrap();
     assert_eq!(seen[0].url, "/ok?a=1&b=2");
     assert_eq!(seen[0].params, None);
+}
+
+/// A dropped awaiter releases its waker at once; the promise still settles for the
+/// awaiters that remain.
+#[test]
+fn dropped_promise_wait_releases_its_waker() {
+    #[derive(Default)]
+    struct Count(std::sync::atomic::AtomicBool);
+    impl std::task::Wake for Count {
+        fn wake(self: std::sync::Arc<Self>) {
+            self.0.store(true, std::sync::atomic::Ordering::SeqCst);
+        }
+    }
+    let runtime: Rc<dyn ExchangeRuntime> = Rc::new(Runtime::default());
+    let promise = Promise::pending(&runtime);
+    let (dropped, kept) = (
+        std::sync::Arc::<Count>::default(),
+        std::sync::Arc::<Count>::default(),
+    );
+    let mut first = Box::pin(promise.wait());
+    let mut second = Box::pin(promise.wait());
+    for (wait, waker) in [(&mut first, &dropped), (&mut second, &kept)] {
+        let waker = Waker::from(waker.clone());
+        assert!(
+            wait.as_mut()
+                .poll(&mut Context::from_waker(&waker))
+                .is_pending()
+        );
+    }
+    assert_eq!(
+        std::sync::Arc::strong_count(&dropped),
+        2,
+        "registered while pending"
+    );
+    drop(first);
+    assert_eq!(
+        std::sync::Arc::strong_count(&dropped),
+        1,
+        "WAITER drop releases the waker"
+    );
+    assert_eq!(
+        std::sync::Arc::strong_count(&kept),
+        2,
+        "the other awaiter stays registered"
+    );
+    promise.settle(Ok(Js::Bool(true)));
+    assert_eq!(
+        std::sync::Arc::strong_count(&kept),
+        1,
+        "settlement wakes and releases"
+    );
+    assert!(
+        kept.0.load(std::sync::atomic::Ordering::SeqCst),
+        "the kept awaiter is woken"
+    );
+    assert!(
+        !dropped.0.load(std::sync::atomic::Ordering::SeqCst),
+        "the dropped one is not"
+    );
+    let waker = Waker::from(kept.clone());
+    assert!(matches!(
+        second.as_mut().poll(&mut Context::from_waker(&waker)),
+        Poll::Ready(Ok(Js::Bool(true)))
+    ));
+}
+
+/// clearTimeout cancels the host task, and a fired timer leaves the timer list.
+#[cfg(all(feature = "native", not(target_arch = "wasm32")))]
+#[test]
+fn clear_timeout_cancels_and_fired_timers_are_released() {
+    use safe_cex_exchange::js_runtime::scope::{Scope, ScopeShared};
+    let tokio = tokio::runtime::Builder::new_current_thread()
+        .enable_time()
+        .build()
+        .unwrap();
+    tokio::task::LocalSet::new().block_on(&tokio, async {
+        let runtime = safe_cex_exchange::native::native_runtime();
+        let http = Rc::new(Http {
+            runtime: Rc::new(Runtime::default()),
+            sent: RefCell::default(),
+        });
+        let store: Rc<dyn safe_cex_store::Store> =
+            Rc::new(safe_cex_store::store::DefaultStore::new());
+        let scope = Scope {
+            shared: Rc::new(ScopeShared::new(
+                runtime.clone(),
+                http,
+                store,
+                Js::Undefined,
+                (),
+            )),
+            this: Js::Undefined,
+        };
+        let ran = Rc::new(std::cell::Cell::new(0));
+        let (cleared, kept) = (ran.clone(), ran.clone());
+        let timer = scope.set_timeout(
+            Rc::new(move || {
+                cleared.set(cleared.get() + 10);
+                Ok(())
+            }),
+            20.0,
+        );
+        scope.set_timeout(
+            Rc::new(move || {
+                kept.set(kept.get() + 1);
+                Ok(())
+            }),
+            20.0,
+        );
+        assert_eq!(scope.shared.timers.borrow().len(), 2);
+        scope.clear_timeout(&timer);
+        assert_eq!(scope.shared.timers.borrow().len(), 1);
+        tokio::time::sleep(std::time::Duration::from_millis(80)).await;
+        assert_eq!(
+            ran.get(),
+            1,
+            "the cleared timer never fires; the other fires once"
+        );
+        assert!(
+            scope.shared.timers.borrow().is_empty(),
+            "a fired timer is released"
+        );
+    });
 }
 
 #[test]

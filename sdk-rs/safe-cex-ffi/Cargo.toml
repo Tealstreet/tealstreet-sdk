@@ -9,15 +9,17 @@ crate-type = ["cdylib", "rlib"]
 
 [features]
 default = []
-node = ["dep:napi", "dep:napi-derive", "dep:napi-build"]
+node = ["dep:napi", "dep:napi-derive", "dep:napi-build", "dep:tokio", "dep:serde_json"]
 wasm = ["dep:wasm-bindgen"]
 
 [dependencies]
 safe-cex-registry.workspace = true
 safe-cex.workspace = true
-napi = { workspace = true, optional = true, default-features = false, features = ["napi4"] }
+napi = { workspace = true, optional = true, default-features = false, features = ["napi4", "async"] }
 napi-derive = { workspace = true, optional = true }
 wasm-bindgen = { workspace = true, optional = true }
+tokio = { workspace = true, optional = true, features = ["rt", "sync"] }
+serde_json = { workspace = true, optional = true }
 
 [build-dependencies]
 napi-build = { workspace = true, optional = true }

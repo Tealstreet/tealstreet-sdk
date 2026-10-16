@@ -13,7 +13,11 @@ use safe_cex_transport::{
 use safe_cex_types::ws_auth::WsAuthResponse;
 use safe_cex_venue_binance::private_event_value::EventValue;
 use serde_json::{Value, json};
-use std::{cell::RefCell, rc::Rc, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::Arc,
+};
 use support::*;
 
 fn hmac_hex(payload: &str) -> String {
@@ -146,6 +150,168 @@ fn binance_signs_through_a_hosted_remote_signer_with_no_secret() {
     });
 }
 
+/// A browser relay returns the signed configuration; this host has no secret.
+#[derive(Default)]
+struct AccountRelay {
+    calls: RefCell<Vec<Value>>,
+    reject_ws: Cell<bool>,
+    replace_params: Cell<bool>,
+}
+impl safe_cex_transport::signing::RemoteSigner for AccountRelay {
+    fn sign(&self, request: RemoteSignerRequest) -> TransportFuture<'_, RemoteSignerResponse> {
+        self.calls
+            .borrow_mut()
+            .push(serde_json::to_value(&request).unwrap());
+        let response = match request {
+            RemoteSignerRequest::Http(request) => {
+                let mut headers = request.config.headers;
+                headers.insert(
+                    "x-relay-signature".into(),
+                    hmac_hex(&format!("{} {}", request.config.method, request.config.url)),
+                );
+                RemoteSignerResponse::Http(HttpSigningResponse {
+                    id: request.id,
+                    config: Some(SignedConfig {
+                        url: None,
+                        params: if self.replace_params.get() {
+                            Some(json!({"x":"signed"}))
+                        } else {
+                            request.config.params
+                        },
+                        data: request.config.data,
+                        headers,
+                    }),
+                    error: None,
+                })
+            }
+            RemoteSignerRequest::WsAuth { request, .. } => {
+                let input = request.ws_auth.and_then(|auth| auth.to_sign).unwrap();
+                RemoteSignerResponse::WsAuth(WsAuthResponse {
+                    id: request.id,
+                    ws_auth_signature: (!self.reject_ws.get()).then(|| hmac_hex(&input)),
+                    error: self
+                        .reject_ws
+                        .get()
+                        .then(|| "hosted signer unavailable".into()),
+                })
+            }
+        };
+        Box::pin(async move { Ok(response) })
+    }
+}
+impl RemoteSigner for AccountRelay {
+    fn is_available(&self) -> bool {
+        true
+    }
+    fn on_availability_change(&self, _: Rc<dyn Fn(bool)>) -> Cleanup {
+        Box::new(|| {})
+    }
+}
+
+#[test]
+fn tier_one_native_venues_validate_through_the_hosted_account_without_a_secret() {
+    use safe_cex_types::ExchangeName;
+    run_local(async {
+        for name in [
+            ExchangeName::Okx,
+            ExchangeName::Okxdemo,
+            ExchangeName::Okxeu,
+            ExchangeName::Okxeudemo,
+            ExchangeName::Blofin,
+            ExchangeName::Bitunix,
+        ] {
+            let signer = Rc::new(AccountRelay::default());
+            let h = venue_harness(name.clone(), Rc::new(|request| {
+                assert_eq!(request.headers.get("x-relay-signature"), Some(&hmac_hex(&format!("{} {}", request.method, request.path))), "server verifies the hosted relay signature");
+                Some(match request.path.as_str() {
+                    "/api/v1/asset/balances" => json!({"code":"0","data":[{"available":"61","frozen":"7"}]}),
+                    "/api/v1/futures/account" => json!({"code":0,"data":[{"marginCoin":"USDT","available":"61","margin":"7","crossUnrealizedPNL":"0","isolationUnrealizedPNL":"0"}]}),
+                    _ => json!({"code":"0","data":[]}),
+                })
+            }), json!({"key":"hosted-key","secret":"","passphrase":"hosted-passphrase"}), Some((signer.clone(), Some("hosted-account".into()))), safe_cex_exchange::native::native_runtime()).await;
+            assert!(
+                h.exchange.base().signers.remote_signer.is_some(),
+                "native core retains hosted signer for {name:?}"
+            );
+            assert!(h.exchange.base().options().secret.is_empty());
+            let result = h
+                .exchange
+                .validate_account()
+                .await
+                .expect("hosted validation completes");
+            assert_eq!(
+                result.error.as_value(),
+                &json!(""),
+                "hosted account validates for {name:?}"
+            );
+            assert!(
+                !h.seen.borrow().is_empty(),
+                "validation reaches real local HTTP"
+            );
+            let calls = signer.calls.borrow();
+            assert!(!calls.is_empty(), "hosted signer called for {name:?}");
+            for call in calls.iter() {
+                assert_eq!(call["exchangeName"], serde_json::to_value(&name).unwrap());
+                assert_eq!(call["accountName"], "hosted-account");
+            }
+            h.exchange.dispose().unwrap();
+        }
+    });
+}
+
+#[test]
+fn tier_one_private_sockets_authenticate_through_the_hosted_account() {
+    use safe_cex_types::ExchangeName;
+    run_local(async {
+        for name in [
+            ExchangeName::Okx,
+            ExchangeName::Blofin,
+            ExchangeName::Bitunix,
+        ] {
+            let signer = Rc::new(AccountRelay::default());
+            let h = venue_harness(
+                name.clone(),
+                Rc::new(|request| Some(match request.path.as_str() {
+                    "/api/v5/account/config" => json!({"code":"0","data":[{"posMode":"net_mode"}]}),
+                    "/api/v1/futures/account" => json!({"code":0,"data":{"marginCoin":"USDT","available":"61","margin":"7","positionMode":"ONE_WAY"}}),
+                    path if path.starts_with("/api/v1/futures/") => json!({"code":0,"data":[]}),
+                    _ => json!({"code":"0","data":[]}),
+                })),
+                json!({"key":"hosted-key","secret":"","passphrase":"hosted-passphrase"}),
+                Some((signer.clone(), Some("hosted-account".into()))),
+                safe_cex_exchange::native::native_runtime(),
+            )
+            .await;
+            let exchange = h.exchange.clone();
+            let startup = tokio::task::spawn_local(async move { exchange.start().await });
+            eventually("hosted login reaches the private socket", || {
+                h.received
+                    .borrow()
+                    .iter()
+                    .any(|frame| frame.contains("\"op\":\"login\""))
+            })
+            .await;
+            let calls = signer.calls.borrow();
+            let call = calls
+                .iter()
+                .find(|call| call["type"] == "ws-auth")
+                .expect("private auth uses the hosted signer");
+            assert_eq!(call["exchangeName"], serde_json::to_value(&name).unwrap());
+            assert_eq!(call["accountName"], "hosted-account");
+            let signature = hmac_hex(call["wsAuth"]["toSign"].as_str().unwrap());
+            assert!(
+                h.received
+                    .borrow()
+                    .iter()
+                    .any(|frame| frame.contains(&signature)),
+                "private login carries the returned signature for {name:?}"
+            );
+            h.exchange.dispose().unwrap();
+            startup.abort();
+        }
+    });
+}
+
 #[test]
 fn spot_websocket_auth_signs_through_the_hosted_signer() {
     run_local(async {
@@ -178,5 +344,126 @@ fn spot_websocket_auth_signs_through_the_hosted_signer() {
         assert_eq!(calls[0]["type"], "ws-auth");
         assert_eq!(calls[0]["accountName"], "acct-1");
         assert_eq!(calls[0]["wsAuth"]["toSign"], "apiKey=k&timestamp=1");
+    });
+}
+
+#[test]
+fn rejected_hosted_private_auth_sends_no_login_or_subscriptions() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    use safe_cex_types::ExchangeName;
+    run_local(async {
+        let signer = Rc::new(AccountRelay {
+            reject_ws: Cell::new(true),
+            ..Default::default()
+        });
+        let h = venue_harness(
+            ExchangeName::Bitunix,
+            Rc::new(|_| None),
+            json!({"key":"hosted-key","secret":""}),
+            Some((signer.clone(), Some("hosted-account".into()))),
+            safe_cex_exchange::native::native_runtime(),
+        )
+        .await;
+        h.exchange
+            .base()
+            .get_socket(SocketSlot::Private)
+            .expect("Bitunix private socket")
+            .connect_and_subscribe(false)
+            .unwrap();
+        eventually("hosted signer rejects private auth", || {
+            signer
+                .calls
+                .borrow()
+                .iter()
+                .any(|call| call["type"] == "ws-auth")
+        })
+        .await;
+        tokio::time::sleep(std::time::Duration::from_millis(25)).await;
+        assert!(
+            !h.received
+                .borrow()
+                .iter()
+                .any(|frame| frame.contains("\"op\":\"login\"")
+                    || frame.contains("\"op\":\"subscribe\"")),
+            "rejected hosted auth sends no login or subscription"
+        );
+        h.exchange.dispose().unwrap();
+    });
+}
+
+/// Custom query rendering consumes the returned signed params, while the retry
+/// config retains those params and the source URL instead of wire-only encoding.
+#[test]
+#[allow(clippy::arc_with_non_send_sync)]
+fn hosted_signing_precedes_query_serialization_and_retains_signed_config() {
+    use safe_cex_exchange::js_runtime::{
+        client,
+        value::{Js, to_json},
+    };
+    use safe_cex_transport::{
+        RestAdapter, RestFuture, RestRequest, RestResponse, RestResponseBody,
+    };
+    struct Wire(Rc<RefCell<Vec<RestRequest>>>);
+    impl RestAdapter for Wire {
+        fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+            self.0.borrow_mut().push(request);
+            Box::pin(async {
+                Ok(RestResponse {
+                    status: 200,
+                    reason: None,
+                    headers: Default::default(),
+                    body: RestResponseBody::Encoded(b"{}".to_vec()),
+                })
+            })
+        }
+    }
+    run_local(async {
+        let signer = Rc::new(AccountRelay {
+            replace_params: Cell::new(true),
+            ..Default::default()
+        });
+        let seen = Rc::new(RefCell::new(Vec::new()));
+        let host = client::rest_http_host_signed(
+            safe_cex_exchange::native::native_runtime(),
+            Arc::new(Wire(seen.clone())),
+            Some((signer.clone(), Some("query-account".into()))),
+        );
+        host.configure_exchange(safe_cex_types::ExchangeName::Okx)
+            .unwrap();
+        let response = host
+            .send(Js::object(vec![
+                ("method", Js::str("get")),
+                ("url", Js::str("/private")),
+                ("params", Js::object(vec![("x", Js::str("unsigned"))])),
+                (
+                    "paramsSerializer",
+                    Js::function("serialize", |_, args| {
+                        Ok(Js::str(&format!("x={}", args[0].get("x")?.to_display())))
+                    }),
+                ),
+            ]))
+            .await
+            .unwrap();
+        assert_eq!(
+            signer.calls.borrow()[0]["config"]["params"],
+            json!({"x":"unsigned"})
+        );
+        assert_eq!(seen.borrow()[0].url, "/private?x=signed");
+        assert!(seen.borrow()[0].params.is_none());
+        let config = response.get("config").unwrap();
+        assert_eq!(config.get("url").unwrap().to_display(), "/private");
+        assert_eq!(
+            to_json(&config.get("params").unwrap()).unwrap(),
+            json!({"x":"signed"})
+        );
+        assert_eq!(
+            config
+                .get("headers")
+                .unwrap()
+                .get("x-relay-signature")
+                .unwrap()
+                .to_display(),
+            hmac_hex("GET /private")
+        );
     });
 }

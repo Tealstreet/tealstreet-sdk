@@ -8,6 +8,9 @@ import qs from 'qs';
 const root = new URL('../../../packages/safe-cex/src/', import.meta.url);
 const source = ts.createSourceFile('api.ts', readFileSync(new URL('exchanges/bybit/bybit.api.ts', root), 'utf8'), ts.ScriptTarget.Latest, true);
 const code = source.statements.filter(ts.isVariableStatement).map(s => s.getText(source).replace(/^export /, '')).join('\n');
+// The shared resend helpers execute as maintained; this stays a request-path fixture.
+const rejection = ts.createSourceFile('signatureRejection.ts', readFileSync(new URL('utils/signatureRejection.ts', root), 'utf8'), ts.ScriptTarget.Latest, true);
+const rejectionCode = rejection.statements.filter(ts.isVariableStatement).map(s => s.getText(rejection).replace(/^export /, '')).join('\n');
 const cases = [];
 for (const method of ['GET','POST']) for (const url of ['/v5/order/create','/v5/market/kline'])
 for (const mode of ['local','no-key','reject']) for (const data of [undefined, {amount:1e-7,price:1e21}, '  {"x":1}  ', 'plain']) {
@@ -32,7 +35,7 @@ for (const mode of ['local','no-key','reject']) for (const data of [undefined, {
     virtualClock:{getCurrentTimeMs:()=>1000},
     getBybitResponseMeta:()=>({hasExplicitStatus:true,isSuccess:true,retCode:0}),
   });
-  vm.runInContext(ts.transpileModule(code+'\nglobalThis.createAPI=createAPI;', {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText, context);
+  vm.runInContext(ts.transpileModule(rejectionCode+'\n'+code+'\nglobalThis.createAPI=createAPI;', {compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText, context);
   const client = context.createAPI(options, {name:'bybit',isDemo:false,recordAuthSuccess:()=>{}});
   const request = {method,url,params:{z:1,requestId:'old'},...(data===undefined?{}:{data})};
   let error = null;

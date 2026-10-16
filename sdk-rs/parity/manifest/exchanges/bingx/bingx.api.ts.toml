@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bingx/bingx.api.ts"
-rust_files = [ "safe-cex-venue-bingx/src/types.rs", "safe-cex-venue-bingx/src/api.rs" ]
+rust_files = [ "safe-cex-venue-bingx/src/data_reads.rs", "safe-cex-venue-bingx/src/types.rs", "safe-cex-venue-bingx/src/api.rs" ]
 
 [[symbol]]
 ts = "sort"
@@ -13,26 +13,26 @@ note = "FINDING (BingX continuation audit owner): The comparator actually orders
 [[symbol]]
 ts = "unsignedPayload"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bingx/src/api.rs::unsigned_payload"
+status = "ported"
+note = "Renamed target `safe-cex-venue-bingx/src/api.rs::unsigned_payload`. Parses an admitted JSON string/object/array, copies its own enumerable fields except signature, and leaves the input unchanged. Witness: tests/signature_resend.rs and tests/completion.rs on actual source."
 
 [[symbol]]
 ts = "isBingxSignatureRejection"
 kind = "const-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = "safe-cex-venue-bingx/src/api.rs::is_bingx_signature_rejection"
+status = "ported"
+note = "Renamed target `safe-cex-venue-bingx/src/api.rs::is_bingx_signature_rejection`. The decoded-JSON predicate is compared with actual source in tests/completion.rs; tests/signature_resend.rs separately checks re-signed transport/resend composition."
 
 [[symbol]]
 ts = "createAPI"
 kind = "const-fn"
 layer = "mirror"
-rs = "safe-cex-venue-bingx/src/api.rs::create_api"
+rs = [ "safe-cex-venue-bingx/src/api.rs::create_api", "safe-cex-venue-bingx/src/data_reads.rs::ReadTransport::send_with_signature_retry" ]
 status = "divergent"
-note = "Renamed to safe-cex-venue-bingx/src/api.rs::create_api; CHOSEN: native requests/options own their state rather than exposing interceptor mutations through caller object/header aliases (MANIFEST-SPEC.md#owned-snapshot-vs-live-alias). create_api locally installs the default URL/recvWindow/key/source/content headers, bigint response parser selection, three read-network retries including listen-key paths, tunnel gate and request preparation; qs/HMAC/Axios operations are imported capabilities. Four actual full-factory cases compare native prepared params/body/headers, HMAC input and factory order; the source adds timestamp and POST Content-Type to the caller objects while the native original remains unchanged. ICU sort uses the previously declared root locale profile; UTF-8 admission follows MANIFEST-SPEC.md#shared-utf8-string-boundary. CHOSEN finite payload admission: native signing refuses non-object payloads and NaN timestamp/POST fields; source POST quantity=notnumber produces NaN after signing, while the native call returns the named refusal after the same HMAC input. This keeps the shared RestBody admission explicit. CHOSEN prototype-key admission: source reduction assigns __proto__ to the accumulator prototype and removes it from own signed fields; native signing visibly refuses that key because its owned object has no mutable JS prototype. api_prototype_key_refusal_is_visible executes both sides."
+note = "Renamed to safe-cex-venue-bingx/src/api.rs::create_api; CHOSEN: native requests/options own their state rather than exposing interceptor mutations through caller object/header aliases (MANIFEST-SPEC.md#owned-snapshot-vs-live-alias). create_api locally installs the default URL/recvWindow/key/source/content headers, bigint response parser selection, three read-network retries including listen-key paths, tunnel gate and request preparation; qs/HMAC/Axios operations are imported capabilities. Four actual full-factory cases compare native prepared params/body/headers, HMAC input and factory order; the source adds timestamp and POST Content-Type to the caller objects while the native original remains unchanged. ICU sort uses the previously declared root locale profile; UTF-8 admission follows MANIFEST-SPEC.md#shared-utf8-string-boundary. CHOSEN finite payload admission: native signing refuses non-object payloads and NaN timestamp/POST fields; source POST quantity=notnumber produces NaN after signing, while the native call returns the named refusal after the same HMAC input. This keeps the shared RestBody admission explicit. CHOSEN prototype-key admission: source reduction assigns __proto__ to the accumulator prototype and removes it from own signed fields; native signing visibly refuses that key because its owned object has no mutable JS prototype. api_prototype_key_refusal_is_visible executes both sides. Split member `safe-cex-venue-bingx/src/data_reads.rs::ReadTransport::send_with_signature_retry`. The send path forwards the per-call signature stamp through the existing host read transport, so re-signing and response resends share one retry decision."
 
 [[symbol]]
 ts = "FETCH_POSITIONS_RESPONSE"

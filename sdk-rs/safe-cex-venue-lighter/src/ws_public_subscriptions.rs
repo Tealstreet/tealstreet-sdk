@@ -2,7 +2,10 @@
 //! Live JS property/callee/receiver/iterator/literal/timer/transport bindings are
 //! required hosts. Typed UTF16 strings, booleans, arrays and ordinary intrinsics;
 //! complete websocket construction and reflective intrinsic overrides unproved.
-use crate::{sdk_account_api::AccountValue, transaction_signing::SigningResult};
+use crate::{
+    sdk_account_api::{AccountValue, primitive_to_number, primitive_to_string, type_error},
+    transaction_signing::SigningResult,
+};
 use std::rc::Rc;
 pub trait SubscriptionCall {
     fn call(&self, args: &[AccountValue]) -> SigningResult<AccountValue>;
@@ -58,17 +61,12 @@ fn path(h: &dyn PublicSubscriptionHost, keys: &[&str]) -> SigningResult<AccountV
     }
     Ok(value)
 }
-fn string(value: AccountValue) -> Vec<u16> {
-    let AccountValue::String(value) = value else {
-        unreachable!("typed string or actual String() result")
-    };
-    value
+/// Template-literal ToString; identity for the String() results read here.
+fn string(value: AccountValue) -> SigningResult<Vec<u16>> {
+    primitive_to_string(&value)
 }
-fn num(value: AccountValue) -> f64 {
-    let AccountValue::Number(value) = value else {
-        unreachable!("typed Number clock")
-    };
-    value
+fn num(value: AccountValue) -> SigningResult<f64> {
+    primitive_to_number(&value)
 }
 fn call(
     h: &dyn PublicSubscriptionHost,
@@ -145,7 +143,7 @@ pub fn connect_and_subscribe(
     } else {
         '?'
     };
-    let id = string(h.global("nanoid")?.call(&[])?);
+    let id = string(h.global("nanoid")?.call(&[])?)?;
     let mut query = u("requestId=");
     query.extend(id);
     if readonly {
@@ -174,7 +172,7 @@ pub fn connect_and_subscribe(
         AccountValue::Boolean(false),
     )?;
     let create = h.member(&h.owner(), "createWebsocket")?;
-    let mut url = string(endpoint);
+    let mut url = string(endpoint)?;
     url.push(separator as u16);
     url.extend(query);
     let ws = create.call(&[text(&url)])?;
@@ -208,7 +206,7 @@ fn market_id(h: &dyn PublicSubscriptionHost, market: &AccountValue) -> SigningRe
     let stringify = h.global("String")?;
     let id = get(h, market, "id")?;
     let id = if id.truthy() { id } else { text(&[]) };
-    Ok(string(stringify.call(&[id])?))
+    string(stringify.call(&[id])?)
 }
 // ts: LighterPublicWebsocket#onMarketsChanged
 pub fn on_markets_changed(
@@ -230,7 +228,7 @@ pub fn on_markets_changed(
         if id.is_empty() {
             return Ok(());
         }
-        let mut key = string(get(h, &h.owner(), "bboTickerTopicPrefix")?);
+        let mut key = string(get(h, &h.owner(), "bboTickerTopicPrefix")?)?;
         key.extend_from_slice(&id);
         let mut channel = u("ticker/");
         channel.extend(id);
@@ -256,8 +254,11 @@ pub fn sync_bbo_ticker_topics(h: &dyn PublicSubscriptionHost) -> SigningResult<(
     let topics = get(h, &h.owner(), "topics")?;
     let keys = keys.call(&[topics])?;
     h.for_of(&keys, &mut |key| {
-        let key = string(key);
-        let prefix = string(get(h, &h.owner(), "bboTickerTopicPrefix")?);
+        // `key.startsWith(prefix)`: only a String key has the method here.
+        let AccountValue::String(key) = key else {
+            return Err(type_error("key.startsWith is not a function"));
+        };
+        let prefix = string(get(h, &h.owner(), "bboTickerTopicPrefix")?)?;
         if key.starts_with(&prefix) {
             let topics = get(h, &h.owner(), "topics")?;
             h.delete(&topics, &key)?;
@@ -272,7 +273,7 @@ pub fn sync_bbo_ticker_topics(h: &dyn PublicSubscriptionHost) -> SigningResult<(
         }
         // Computed assignment evaluates owner record before prefix/key expression.
         let topics = get(h, &h.owner(), "topics")?;
-        let mut key = string(get(h, &h.owner(), "bboTickerTopicPrefix")?);
+        let mut key = string(get(h, &h.owner(), "bboTickerTopicPrefix")?)?;
         key.extend_from_slice(&id);
         let mut value = u("ticker/");
         value.extend(id);
@@ -305,7 +306,7 @@ pub fn is_order_book_rest_fallback_cooling_down(
     h: &dyn PublicSubscriptionHost,
     topic: &[u16],
 ) -> SigningResult<bool> {
-    let now = num(h.global("virtualClock.getCurrentTimeMs")?.call(&[])?);
+    let now = num(h.global("virtualClock.getCurrentTimeMs")?.call(&[])?)?;
     let record = get(h, &h.owner(), "orderBookRestFallbackCooldownUntilByTopic")?;
     let until = h.get(&record, topic)?;
     h.less_than(

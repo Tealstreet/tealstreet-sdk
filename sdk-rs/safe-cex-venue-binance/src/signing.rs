@@ -140,11 +140,9 @@ pub async fn sign_binance_request(
     data.insert("signature".into(), Value::String(signed.signature));
     next.insert("params".into(), Value::Object(data));
     if let Some(headers) = signed.headers {
-        let mut merged: Map<String, Value> = headers
-            .into_iter()
-            .map(|(k, v)| (k, Value::String(v)))
-            .collect();
-        merged.extend(spread(config.get("headers")));
+        // Last: a replayed config still carries the previous signature's headers.
+        let mut merged = spread(config.get("headers"));
+        merged.extend(headers.into_iter().map(|(k, v)| (k, Value::String(v))));
         let mut normalized = Map::new();
         for (key, value) in entries(&merged) {
             let lower = safe_cex_num::js_trim(key).to_lowercase();

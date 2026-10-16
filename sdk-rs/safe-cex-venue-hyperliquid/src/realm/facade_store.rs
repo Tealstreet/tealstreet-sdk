@@ -1,0 +1,227 @@
+//! The JS `store` object over the Rust Store.
+//!
+//! CHOSEN: reads are snapshots. `store.orders` returns a fresh array of fresh
+//! order objects, so mutating a returned object does not write the Store; the
+//! ported bodies write through the Store methods, which is what persists.
+use super::{Realm, value::*};
+use safe_cex_store::{Store, StoreUpdate};
+use safe_cex_types::{Order, Position};
+use serde_json::{Map, Value as Json};
+use std::rc::Rc;
+
+#[derive(Clone, Copy)]
+enum Table {
+    MarketsBySymbol,
+    MarketsById,
+    TickersBySymbol,
+    TickersById,
+}
+
+struct TableView {
+    store: Rc<dyn Store>,
+    table: Table,
+}
+
+impl Exotic for TableView {
+    fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Option<Value> {
+        let key = String::from_utf16_lossy(key.units()?);
+        let json = match self.table {
+            Table::MarketsBySymbol => {
+                serde_json::to_value(self.store.markets_by_symbol().get(&key)?)
+            }
+            Table::MarketsById => serde_json::to_value(self.store.markets_by_id().get(&key)?),
+            Table::TickersBySymbol => {
+                serde_json::to_value(self.store.tickers_by_symbol().get(&key)?)
+            }
+            Table::TickersById => serde_json::to_value(self.store.tickers_by_id().get(&key)?),
+        }
+        .ok()?;
+        Some(realm.from_serde(&json))
+    }
+    fn keys(&self) -> Vec<PropKey> {
+        let keys: Vec<String> = match self.table {
+            Table::MarketsBySymbol => self.store.markets_by_symbol().keys().cloned().collect(),
+            Table::MarketsById => self.store.markets_by_id().keys().cloned().collect(),
+            Table::TickersBySymbol => self.store.tickers_by_symbol().keys().cloned().collect(),
+            Table::TickersById => self.store.tickers_by_id().keys().cloned().collect(),
+        };
+        keys.iter().map(|k| PropKey::str(k)).collect()
+    }
+}
+
+fn arg(args: &[Value], i: usize) -> Value {
+    args.get(i).cloned().unwrap_or(Value::Undefined)
+}
+fn mutation(
+    r: &Realm,
+    result: Result<(), safe_cex_store::StoreMutationError>,
+) -> Result<Value, Thrown> {
+    result
+        .map(|()| Value::Undefined)
+        .map_err(|e| r.error(&e.to_string()))
+}
+fn id_of(r: &mut Realm, selector: &Value) -> Result<String, Thrown> {
+    let id = r.get_str(selector, "id")?;
+    r.to_rust_string(&id)
+}
+fn patch(r: &mut Realm, changes: &Value) -> Result<Map<String, Json>, Thrown> {
+    match r.to_serde(changes)? {
+        Json::Object(map) => Ok(map),
+        _ => Err(r.type_error("store patch must be an object")),
+    }
+}
+fn snapshot<T: serde::Serialize + ?Sized>(r: &mut Realm, value: &T) -> Result<Value, Thrown> {
+    r.from_typed(&value)
+}
+
+pub(crate) fn store_object(realm: &Realm, store: Rc<dyn Store>) -> Value {
+    let o = realm.new_object();
+    let getter =
+        |name: &str, body: Rc<dyn Fn(&mut Realm, &Rc<dyn Store>) -> Result<Value, Thrown>>| {
+            let store = store.clone();
+            let f = realm.native(&format!("get {name}"), 0, move |r, _, _| body(r, &store));
+            realm.define_getter(&o, PropKey::str(name), f);
+        };
+    getter("orders", Rc::new(|r, s| snapshot(r, &*s.orders())));
+    getter("positions", Rc::new(|r, s| snapshot(r, &*s.positions())));
+    getter("markets", Rc::new(|r, s| snapshot(r, &*s.markets())));
+    getter("tickers", Rc::new(|r, s| snapshot(r, &*s.tickers())));
+    getter("balance", Rc::new(|r, s| snapshot(r, &*s.balance())));
+    getter("loaded", Rc::new(|r, s| snapshot(r, &*s.loaded())));
+    getter("latency", Rc::new(|_, s| Ok(Value::Number(s.latency()))));
+    for (name, table) in [
+        ("marketsBySymbol", Table::MarketsBySymbol),
+        ("marketsById", Table::MarketsById),
+        ("tickersBySymbol", Table::TickersBySymbol),
+        ("tickersById", Table::TickersById),
+    ] {
+        getter(
+            name,
+            Rc::new(move |r, s| {
+                Ok(r.alloc(
+                    Kind::Exotic(Rc::new(TableView {
+                        store: s.clone(),
+                        table,
+                    })),
+                    Some(&r.intrinsics().object_proto),
+                ))
+            }),
+        );
+    }
+    let method =
+        |name: &str,
+         length: u8,
+         body: Rc<dyn Fn(&mut Realm, &Rc<dyn Store>, &[Value]) -> Result<Value, Thrown>>| {
+            let store = store.clone();
+            let f = realm.native(name, length, move |r, _, args| body(r, &store, args));
+            realm.define_hidden(&o, PropKey::str(name), f);
+        };
+    method(
+        "update",
+        2,
+        Rc::new(|r, s, a| {
+            let json = r.to_serde(&arg(a, 0))?;
+            let changes: StoreUpdate = serde_json::from_value(json)
+                .map_err(|e| r.type_error(&format!("store.update: {e}")))?;
+            let from_worker = arg(a, 1).truthy();
+            mutation(r, s.update(changes, from_worker))
+        }),
+    );
+    method(
+        "addOrder",
+        1,
+        Rc::new(|r, s, a| {
+            let order: Order = r.to_typed(&arg(a, 0))?;
+            mutation(r, s.add_order(order))
+        }),
+    );
+    method(
+        "addOrUpdateOrder",
+        1,
+        Rc::new(|r, s, a| {
+            let order: Order = r.to_typed(&arg(a, 0))?;
+            mutation(r, s.add_or_update_order(order))
+        }),
+    );
+    method(
+        "updateOrder",
+        2,
+        Rc::new(|r, s, a| {
+            let id = id_of(r, &arg(a, 0))?;
+            let changes = patch(r, &arg(a, 1))?;
+            mutation(r, s.update_order(&id, &changes))
+        }),
+    );
+    method(
+        "removeOrder",
+        1,
+        Rc::new(|r, s, a| {
+            let id = id_of(r, &arg(a, 0))?;
+            mutation(r, s.remove_order(&id))
+        }),
+    );
+    method(
+        "removeOrders",
+        1,
+        Rc::new(|r, s, a| {
+            let mut ids = vec![];
+            for o in r.collect_iterable(&arg(a, 0))? {
+                ids.push(id_of(r, &o)?);
+            }
+            let ids: Vec<&str> = ids.iter().map(String::as_str).collect();
+            mutation(r, s.remove_orders(&ids))
+        }),
+    );
+    method(
+        "updatePosition",
+        2,
+        Rc::new(|r, s, a| {
+            let id = id_of(r, &arg(a, 0))?;
+            let changes = patch(r, &arg(a, 1))?;
+            mutation(r, s.update_position(&id, &changes))
+        }),
+    );
+    method(
+        "addOrUpdatePosition",
+        1,
+        Rc::new(|r, s, a| {
+            let position: Position = r.to_typed(&arg(a, 0))?;
+            mutation(r, s.add_or_update_position(position))
+        }),
+    );
+    method(
+        "addOrUpdatePositions",
+        1,
+        Rc::new(|r, s, a| {
+            let positions: Vec<Position> = r.to_typed(&arg(a, 0))?;
+            mutation(r, s.add_or_update_positions(positions))
+        }),
+    );
+    method(
+        "addOrUpdatePositionsFull",
+        1,
+        Rc::new(|r, s, a| {
+            let positions: Vec<Position> = r.to_typed(&arg(a, 0))?;
+            mutation(r, s.add_or_update_positions_full(positions))
+        }),
+    );
+    method(
+        "updateTicker",
+        2,
+        Rc::new(|r, s, a| {
+            let id = id_of(r, &arg(a, 0))?;
+            let changes = patch(r, &arg(a, 1))?;
+            mutation(r, s.update_ticker(&id, &changes))
+        }),
+    );
+    method(
+        "updateMarket",
+        2,
+        Rc::new(|r, s, a| {
+            let id = id_of(r, &arg(a, 0))?;
+            let changes = patch(r, &arg(a, 1))?;
+            mutation(r, s.update_market(&id, &changes))
+        }),
+    );
+    o
+}
