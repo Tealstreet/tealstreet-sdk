@@ -3,6 +3,11 @@
 Behavioral reference: [TypeScript MEXC guidance](../../packages/safe-cex/src/exchanges/mexc/CLAUDE.md).
 Use the [shared exchange contract](../safe-cex-exchange/CLAUDE.md); variants stay within this crate.
 
+Regular-order `externalOid` generation uses the shared crypto `uuid_with_entropy`
+helper with runtime entropy: generate 21 nanoid characters, then strip `-` and
+`_`, as `utils/uuid.ts` does. The runtime's generic `unique_id` contract does not
+specify that format. The trait-level wire test pins length and separator removal.
+
 Protocol tables are maintained in `src/types.rs` and compared in full to live
 TypeScript by `tests/tables.rs`. The envelope uses a private map-only decoder;
 absent optional fields differ from present null, while unknown data retains null.
