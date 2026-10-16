@@ -1,0 +1,676 @@
+//! Production Coinbase class graph over scripted HTTP/WebSocket leaves.
+#[path = "support/binding_harness.rs"]
+#[allow(dead_code)]
+mod binding_harness;
+use binding_harness::{Http, harness, options};
+use safe_cex_exchange::exchange::Exchange;
+use safe_cex_store::{Store, StoreUpdate};
+use safe_cex_types::*;
+use serde_json::{Value, json};
+
+fn script(http: &Http) {
+    http.ok("GET", "/api/v3/brokerage/portfolios", json!({"portfolios":[{"name":"Synthetic Spot", "uuid":"portfolio-synthetic", "type":"DEFAULT", "deleted":false}]}));
+    http.ok(
+        "GET",
+        "/api/v3/brokerage/portfolios/portfolio-synthetic",
+        json!({"breakdown":{"spot_positions":[{"asset":"USDC","available_to_trade_crypto":13.25,"total_balance_crypto":17.5}]}}),
+    );
+    http.route(
+        "GET",
+        "/api/v3/brokerage/cfm/balance_summary",
+        403.0,
+        json!({"message":"No CFM permissions"}),
+    );
+    http.ok(
+        "GET",
+        "/api/v3/brokerage/products",
+        json!({"products":[product()]}),
+    );
+    http.ok(
+        "GET",
+        "/api/v3/brokerage/orders/historical/batch",
+        json!({"orders":[],"has_next":false}),
+    );
+}
+fn product() -> Value {
+    json!({"product_id":"BTC-USDC","base_currency_id":"BTC","quote_currency_id":"USDC","price_increment":"0.01","base_increment":"0.001","base_min_size":"0.001","base_max_size":"100", "trading_disabled":false,"view_only":false,"price":"123.5","price_percentage_change_24h":"2.5","volume_24h":"1000"})
+}
+fn place() -> PlaceOrderOpts {
+    serde_json::from_value(json!({"symbol":"BTC-USDC","type":"limit","side":"buy","amount":2.5,"price":123.45,"clientOrderId":"synthetic-caller-id"})).unwrap()
+}
+fn order() -> Order {
+    serde_json::from_value(json!({"id":"order-synthetic","parentId":"synthetic-caller-id","status":"open","symbol":"BTC-USDC","type":"limit","side":"buy","price":123.45,"amount":2.5,"filled":0,"remaining":2.5,"reduceOnly":false,"lastUpdate":1700000000000.0,"info":{"product_id":"BTC-USDC","order_configuration":{"limit_limit_gtc":{"base_size":"2.5","limit_price":"123.45","post_only":false}}}})).unwrap()
+}
+
+#[test]
+fn constructs_both_variants_and_selects_the_real_portfolio() {
+    for name in [ExchangeName::Coinbase, ExchangeName::Coinbasespot] {
+        let h = harness(name.clone(), options(), script);
+        assert_eq!(h.venue().name(), &name);
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/binding-metadata.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let metadata: Value = serde_json::from_slice(&output.stdout).unwrap();
+        let source = &metadata[if name == ExchangeName::Coinbase {
+            "coinbase"
+        } else {
+            "coinbasespot"
+        }];
+        assert_eq!(
+            h.venue().base().settings.supports_public_only,
+            source["supportsPublicOnly"].as_bool().unwrap()
+        );
+        assert_eq!(
+            h.venue().base().settings.tick_interval,
+            source["tickInterval"].as_f64()
+        );
+        assert_eq!(
+            h.venue().base().settings.positions_supported,
+            source["positions"].as_bool()
+        );
+        let account = h.drive(h.venue().get_account()).unwrap();
+        assert_eq!(account.user_id, "portfolio-synthetic");
+        assert_eq!(h.http.calls("/api/v3/brokerage/portfolios").len(), 1);
+        let request = &h.http.calls("/api/v3/brokerage/portfolios")[0];
+        assert!(
+            request.headers["Coinbase-Authorization"]
+                .as_str()
+                .unwrap()
+                .starts_with("Bearer eyJ")
+        );
+        assert_eq!(
+            h.venue().class_name(),
+            if name == ExchangeName::Coinbase {
+                "CoinbaseExchange"
+            } else {
+                "CoinbaseSpotExchange"
+            }
+        );
+    }
+}
+#[test]
+fn reads_are_pure_and_preserve_native_fields() {
+    let h = harness(ExchangeName::Coinbase, options(), script);
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    assert_eq!(markets.len(), 1);
+    assert_eq!(markets[0].symbol, "BTC-USDC");
+    assert_eq!(markets[0].precision.price, 0.01);
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let before = h.store.orders().len();
+    let tickers = h.drive(h.venue().fetch_tickers()).unwrap();
+    assert_eq!(tickers[0].last, 123.5);
+    assert_eq!(tickers[0].percentage, 2.5);
+    let positions = h.drive(h.venue().fetch_positions(None)).unwrap();
+    assert_eq!(positions.len(), 1);
+    assert_eq!(positions[0].symbol, "BTC-USDC");
+    assert_eq!(positions[0].contracts, 0.0);
+    let orders = h.drive(h.venue().fetch_orders(None)).unwrap();
+    assert!(orders.is_empty());
+    assert_eq!(
+        h.http
+            .calls("/api/v3/brokerage/orders/historical/batch")
+            .len(),
+        5
+    );
+    assert_eq!(h.store.orders().len(), before);
+    assert!(h.store.tickers().is_empty());
+    let balance = h.drive(h.exchange.fetch_balance()).unwrap();
+    assert_eq!(balance.total, 0.0);
+    assert_eq!(
+        balance.currencies.as_ref().unwrap()["USDC"]
+            .as_balance()
+            .unwrap()
+            .free,
+        13.25
+    );
+    assert_eq!(
+        balance.currencies.as_ref().unwrap()["USDC"]
+            .as_balance()
+            .unwrap()
+            .used,
+        4.25
+    );
+}
+#[test]
+fn validates_account_with_the_source_error_policy() {
+    let h = harness(ExchangeName::Coinbase, options(), script);
+    let validation = h.drive(h.venue().validate_account()).unwrap();
+    assert_eq!(validation.error.as_value(), "");
+    assert_eq!(validation.balance.unwrap().total, 0.0);
+    let h = harness(ExchangeName::Coinbase, options(), |http| {
+        http.route(
+            "GET",
+            "/api/v3/brokerage/products",
+            401.0,
+            json!({"msg":"denied synthetic"}),
+        )
+    });
+    assert_eq!(
+        h.drive(h.venue().validate_account())
+            .unwrap()
+            .error
+            .as_value(),
+        "denied synthetic"
+    );
+}
+#[test]
+fn writes_use_native_client_id_and_real_reconciliation() {
+    let h = harness(ExchangeName::Coinbase, options(), |http| {
+        script(http);
+        http.ok("POST", "/api/v3/brokerage/orders", json!({"success":true,"success_response":{"order_id":"order-synthetic","product_id":"BTC-USDC","side":"BUY","client_order_id":"synthetic-caller-id"}}));
+        http.ok(
+            "POST",
+            "/api/v3/brokerage/orders/batch_cancel",
+            json!({"results":[{"success":true}]}),
+        );
+    });
+    let markets = h.drive(h.venue().fetch_markets()).unwrap();
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let ids = h
+        .drive(Box::pin(
+            h.exchange.base().place_order(h.exchange.as_ref(), place()),
+        ))
+        .unwrap();
+    assert_eq!(ids, vec!["order-synthetic"]);
+    let request = &h.http.calls("/api/v3/brokerage/orders")[0];
+    assert_eq!(request.data["client_order_id"], "synthetic-caller-id");
+    assert_eq!(
+        request.data["order_configuration"]["limit_limit_gtc"]["base_size"],
+        "2.5"
+    );
+    assert_eq!(
+        h.store.orders()[0].parent_id.as_deref(),
+        Some("synthetic-caller-id")
+    );
+    h.drive(h.venue().cancel_orders(vec![order()])).unwrap();
+    assert_eq!(h.store.orders()[0].status, OrderStatus::Canceled);
+    assert_eq!(
+        h.http.calls("/api/v3/brokerage/orders/batch_cancel")[0].data,
+        json!({"order_ids":["order-synthetic"]})
+    );
+}
+#[test]
+fn inherited_unsupported_methods_keep_the_exact_base_error() {
+    let h = harness(ExchangeName::Coinbase, options(), |_| {});
+    assert_eq!(
+        h.drive(h.venue().fetch_symbol_max_leverage("BTC-USDC".into()))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert_eq!(
+        h.drive(h.venue().set_leverage("BTC-USDC".into(), 5.0, None))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert_eq!(
+        h.drive(h.venue().change_position_mode(true, None))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert_eq!(
+        h.drive(h.venue().change_margin_type(true, None))
+            .unwrap_err()
+            .message,
+        "Not implemented"
+    );
+    assert!(h.http.requests.borrow().is_empty());
+}
+#[test]
+fn starts_both_sockets_and_disposes_the_same_owned_connections() {
+    let h = harness(ExchangeName::Coinbase, options(), script);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    assert!(h.store.loaded().markets);
+    let sockets = h.runtime.sockets.borrow();
+    assert_eq!(sockets.len(), 2);
+    let public = sockets
+        .iter()
+        .find(|(url, _)| url == "wss://advanced-trade-ws.coinbase.com")
+        .unwrap()
+        .1
+        .clone();
+    let private = sockets
+        .iter()
+        .find(|(url, _)| url == "wss://advanced-trade-ws-user.coinbase.com")
+        .unwrap()
+        .1
+        .clone();
+    drop(sockets);
+    let messages: Vec<Value> = public
+        .sent
+        .borrow()
+        .iter()
+        .map(|value| serde_json::from_str(value).unwrap())
+        .collect();
+    assert_eq!(
+        messages[0],
+        json!({"type":"subscribe","channel":"heartbeats","product_ids":["BTC-USDC"]})
+    );
+    let messages: Vec<Value> = private
+        .sent
+        .borrow()
+        .iter()
+        .map(|value| serde_json::from_str(value).unwrap())
+        .collect();
+    assert_eq!(messages.len(), 2);
+    assert_eq!(messages[0]["channel"], "user");
+    assert_eq!(messages[1]["channel"], "heartbeats");
+    assert!(messages.iter().all(|message| {
+        message["jwt"]
+            .as_str()
+            .is_some_and(|jwt| jwt.starts_with("eyJ"))
+    }));
+    h.venue().dispose().unwrap();
+    assert!(h.venue().base().is_disposed());
+    assert!(public.closed.get());
+    assert!(private.closed.get());
+}
+#[test]
+fn edits_only_a_proven_reconciled_native_spot_order() {
+    let h = harness(ExchangeName::Coinbase, options(), |http| {
+        script(http);
+        http.ok(
+            "POST",
+            "/api/v3/brokerage/orders/edit",
+            json!({"success":true,"errors":[]}),
+        );
+    });
+    let mut markets = h.drive(h.venue().fetch_markets()).unwrap();
+    markets[0].info.as_mut().unwrap()["product_type"] = json!("SPOT");
+    let mut canonical = order();
+    let info = canonical.info.as_mut().unwrap();
+    info["order_id"] = json!("order-synthetic");
+    info["status"] = json!("OPEN");
+    info["order_type"] = json!("LIMIT");
+    info["order_side"] = json!("BUY");
+    info["filled_size"] = json!("0");
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            markets: Some(markets),
+            orders: Some(vec![canonical.clone()]),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let ids = h
+        .drive(h.venue().update_order(UpdateOrderOpts {
+            order: canonical,
+            update: UpdateOrderOptsUpdate::Variant1(UpdateOrderOptsUpdateVariant1 {
+                price: 125.0,
+                amount: None,
+            }),
+        }))
+        .unwrap();
+    assert_eq!(ids, vec!["order-synthetic"]);
+    assert_eq!(
+        h.http.calls("/api/v3/brokerage/orders/edit")[0].data,
+        json!({"order_id":"order-synthetic","price":"125","size":"2.5"})
+    );
+}
+#[test]
+fn historical_candles_resolve_aliases_and_preserve_the_native_result() {
+    let h = harness(ExchangeName::Coinbase, options(), |http| {
+        http.ok("GET", "/api/v3/brokerage/products/BTC-USD/candles", json!({"candles":[{"start":"1700000000","open":"100","high":"130","low":"90","close":"123.5","volume":"4.5"}]}))
+    });
+    let candles = h
+        .drive(
+            h.venue().fetch_ohlcv(
+                serde_json::from_value(
+                    json!({"symbol":"BTC-USDC","interval":"1m","limit":2,"to":1700000120000.0}),
+                )
+                .unwrap(),
+            ),
+        )
+        .unwrap();
+    assert_eq!(candles.len(), 1);
+    assert_eq!(candles[0].timestamp, 1700000000.0);
+    assert_eq!(candles[0].close, 123.5);
+    assert_eq!(candles[0].volume, 4.5);
+    let params = &h.http.calls("/api/v3/brokerage/products/BTC-USD/candles")[0].params;
+    assert_eq!(params["granularity"], "ONE_MINUTE");
+    assert_eq!(params["start"], 1700000000.0);
+    assert_eq!(params["end"], 1700000120.0);
+}
+
+#[derive(Default)]
+struct Hosted {
+    requests: std::cell::RefCell<Vec<Value>>,
+    fail: std::cell::Cell<bool>,
+}
+impl safe_cex_transport::signing::RemoteSigner for Hosted {
+    fn sign(
+        &self,
+        request: safe_cex_transport::signing::RemoteSignerRequest,
+    ) -> safe_cex_transport::TransportFuture<'_, safe_cex_transport::signing::RemoteSignerResponse>
+    {
+        let value = serde_json::to_value(&request).unwrap();
+        self.requests.borrow_mut().push(value.clone());
+        let result = safe_cex_crypto::WsAuthResponse {
+            id: value.get("id").cloned(),
+            ws_auth_signature: (!self.fail.get()).then(|| "synthetic-hosted-jwt".into()),
+            error: self
+                .fail
+                .get()
+                .then(|| "synthetic signer unavailable".into()),
+        };
+        Box::pin(async move {
+            Ok(safe_cex_transport::signing::RemoteSignerResponse::WsAuth(
+                result,
+            ))
+        })
+    }
+}
+impl safe_cex_exchange::runtime::RemoteSigner for Hosted {
+    fn is_available(&self) -> bool {
+        true
+    }
+    fn on_availability_change(
+        &self,
+        _: std::rc::Rc<dyn Fn(bool)>,
+    ) -> safe_cex_exchange::runtime::Cleanup {
+        Box::new(|| {})
+    }
+}
+#[test]
+fn private_ws_uses_shared_hosted_signer_and_sends_nothing_on_failure() {
+    for fail in [false, true] {
+        let signer = std::rc::Rc::new(Hosted::default());
+        signer.fail.set(fail);
+        let mut options = options();
+        options.secret.clear();
+        let h = harness(ExchangeName::Coinbase, options, |http| {
+            script(http);
+            *http.hosted_signer.borrow_mut() =
+                Some((signer.clone(), Some("synthetic-account".into())));
+        });
+        assert!(!h.venue().is_public_data_only());
+        h.drive(h.venue().start()).unwrap();
+        h.runtime.pump();
+        let sockets = h.runtime.sockets.borrow();
+        let private = sockets
+            .iter()
+            .find(|(url, _)| url == "wss://advanced-trade-ws-user.coinbase.com")
+            .unwrap()
+            .1
+            .clone();
+        drop(sockets);
+        let requests = signer.requests.borrow();
+        assert_eq!(requests.len(), if fail { 1 } else { 2 });
+        assert_eq!(
+            requests[0],
+            json!({"id":"coinbase-ws-auth.user","type":"ws-auth","exchangeName":"coinbase","accountName":"synthetic-account","wsAuth":{"toSign":"coinbase-websocket-jwt.user","outputFormat":"coinbase-jwt","extraData":{"channel":"user"}}})
+        );
+        if fail {
+            assert!(private.sent.borrow().is_empty());
+            assert!(private.closed.get());
+        } else {
+            assert_eq!(private.sent.borrow().len(), 2);
+            assert!(
+                private
+                    .sent
+                    .borrow()
+                    .iter()
+                    .all(|message| message.contains("synthetic-hosted-jwt"))
+            );
+        }
+    }
+}
+#[test]
+fn native_number_bits_survive_reads_and_tick_store_publication() {
+    for price in ["-0", "1e999"] {
+        let h = harness(ExchangeName::Coinbase, options(), |http| {
+            script(http);
+            let mut product = product();
+            product["price"] = json!(price);
+            http.ok(
+                "GET",
+                "/api/v3/brokerage/products",
+                json!({"products":[product]}),
+            );
+        });
+        h.drive(h.venue().start()).unwrap();
+        for _ in 0..20 {
+            h.runtime.advance(250.0);
+        }
+        let tickers = h.store.tickers();
+        assert!(!tickers.is_empty());
+        if price == "-0" {
+            assert_eq!(tickers[0].last.to_bits(), (-0.0_f64).to_bits());
+        } else {
+            assert_eq!(tickers[0].last, f64::INFINITY);
+        }
+        drop(tickers);
+        h.venue().dispose().unwrap();
+    }
+}
+#[test]
+fn concrete_ws_auth_hook_preserves_request_id_and_source_errors() {
+    let h = harness(ExchangeName::Coinbase, options(), |_| {});
+    let request = serde_json::from_value(
+        json!({"id":"ws-synthetic","wsAuth":{"outputFormat":"coinbase-jwt"}}),
+    )
+    .unwrap();
+    let response = h.drive(h.venue().sign_ws_auth(&request)).unwrap();
+    assert_eq!(response.id, Some(json!("ws-synthetic")));
+    assert!(response.error.is_none());
+    assert!(response.ws_auth_signature.unwrap().starts_with("eyJ"));
+    let request =
+        serde_json::from_value(json!({"id":17,"wsAuth":{"outputFormat":"unsupported-fixture"}}))
+            .unwrap();
+    let response = h.drive(h.venue().sign_ws_auth(&request)).unwrap();
+    assert_eq!(response.id.as_ref().and_then(Value::as_f64), Some(17.0));
+    assert_eq!(
+        response.error.as_deref(),
+        Some("Unsupported Coinbase WS auth outputFormat: unsupported-fixture")
+    );
+}
+#[test]
+fn public_stream_listeners_use_real_parser_and_shared_book_operations() {
+    use safe_cex_exchange::websocket::WsEvent;
+    use safe_cex_transport::socket::SocketFrame;
+    use std::{cell::RefCell, rc::Rc};
+    let h = harness(ExchangeName::Coinbase, options(), script);
+    h.drive(h.venue().start()).unwrap();
+    h.runtime.pump();
+    let books = Rc::new(RefCell::new(Vec::new()));
+    let capture = books.clone();
+    let stop_book = h
+        .venue()
+        .listen_order_book(
+            "BTC-USDC".into(),
+            Rc::new(move |book| capture.borrow_mut().push(book)),
+        )
+        .unwrap();
+    let candles = Rc::new(RefCell::new(Vec::new()));
+    let capture = candles.clone();
+    let stop_candle = h
+        .venue()
+        .listen_ohlcv(
+            serde_json::from_value(json!({"symbol":"BTC-USDC","interval":"5m"})).unwrap(),
+            Rc::new(move |candle| capture.borrow_mut().push(candle)),
+        )
+        .unwrap();
+    let public = h
+        .runtime
+        .sockets
+        .borrow()
+        .iter()
+        .find(|(url, _)| url == "wss://advanced-trade-ws.coinbase.com")
+        .unwrap()
+        .1
+        .clone();
+    for frame in [
+        json!({"channel":"l2_data","events":[{"type":"snapshot","product_id":"BTC-USD","updates":[{"side":"bid","price_level":"40","new_quantity":"2"},{"side":"bid","price_level":"42","new_quantity":"3"},{"side":"offer","price_level":"43","new_quantity":"4"}]}]}),
+        json!({"channel":"candles","events":[{"type":"update","candles":[{"product_id":"BTC-USD","start":"1700000000","open":"40","high":"45","low":"39","close":"44","volume":"7"}]}]}),
+    ] {
+        public
+            .events
+            .borrow_mut()
+            .push_back(WsEvent::Message(SocketFrame::Text(frame.to_string())));
+    }
+    h.runtime.pump();
+    assert_eq!(books.borrow().len(), 1);
+    assert_eq!(books.borrow()[0].bids[0].price, 42.0);
+    assert_eq!(books.borrow()[0].bids[1].total, 5.0);
+    assert_eq!(books.borrow()[0].asks[0].amount, 4.0);
+    assert_eq!(candles.borrow().len(), 1);
+    assert_eq!(candles.borrow()[0].timestamp, 1700000000.0);
+    assert_eq!(candles.borrow()[0].close, 44.0);
+    stop_book().unwrap();
+    stop_candle().unwrap();
+    assert!(
+        public
+            .sent
+            .borrow()
+            .iter()
+            .any(|message| message.contains("unsubscribe"))
+    );
+    h.venue().dispose().unwrap();
+}
+#[test]
+fn startup_publication_keeps_store_subscriber_cause_after_commit() {
+    use std::{cell::Cell, error::Error, rc::Rc};
+    let h = harness(ExchangeName::Coinbase, options(), script);
+    let cause: Rc<dyn Error> = Rc::new(std::io::Error::other("synthetic subscriber cause"));
+    let observed = cause.clone();
+    let _first = Store::subscribe(
+        h.store.as_ref(),
+        Box::new(move |data, _| {
+            assert_eq!(data.markets.len(), 1);
+            assert!(data.loaded.markets);
+            Err(StoreSubscriberError::new("synthetic subscriber failure")
+                .with_cause(observed.clone()))
+        }),
+    );
+    let later = Rc::new(Cell::new(0));
+    let capture = later.clone();
+    let _later = Store::subscribe(
+        h.store.as_ref(),
+        Box::new(move |_, _| {
+            capture.set(capture.get() + 1);
+            Ok(())
+        }),
+    );
+    let error = h.drive(h.venue().start()).unwrap_err();
+    assert_eq!(error.message, "synthetic subscriber failure");
+    assert!(!error.store_subscriber_ids.is_empty());
+    assert_eq!(
+        error.store_subscriber_cause.as_ref().unwrap(),
+        &StoreSubscriberError::new("synthetic subscriber failure").with_cause(cause)
+    );
+    assert_eq!(later.get(), 0);
+    assert!(h.store.loaded().markets);
+    assert_eq!(h.store.markets().len(), 1);
+    assert!(h.runtime.sockets.borrow().is_empty());
+}
+#[test]
+fn cached_balance_fallback_keeps_native_optional_fields_and_nested_currencies() {
+    let h = harness(ExchangeName::Coinbase, options(), |http| {
+        script(http);
+        http.routes
+            .borrow_mut()
+            .retain(|(_, path, _)| path != "/api/v3/brokerage/cfm/balance_summary");
+        http.ok(
+            "GET",
+            "/api/v3/brokerage/cfm/balance_summary",
+            json!({"balance_summary":{}}),
+        );
+        http.route(
+            "GET",
+            "/api/v3/brokerage/cfm/balance_summary",
+            503.0,
+            json!({"message":"synthetic unavailable"}),
+        );
+        // First breakdown selects the portfolio; the next rejected balance read
+        // must retain the original Store balance's complete native shape.
+        http.route(
+            "GET",
+            "/api/v3/brokerage/portfolios/portfolio-synthetic",
+            503.0,
+            json!({"message":"synthetic unavailable"}),
+        );
+    });
+    h.drive(h.venue().get_account()).unwrap();
+    let mut cached: Balance = serde_json::from_value(json!({"total":100,"free":70,"used":30,"upnl":2,"info":{"literal":"retained"},"coins":{"BTC":{"base":"BTC","amount":1,"notional":3}},"currencies":{"USDC":{"total":9,"free":7,"used":2,"upnl":0,"info":{"nested":true}}}})).unwrap();
+    cached
+        .coins
+        .as_mut()
+        .unwrap()
+        .get_mut("BTC")
+        .unwrap()
+        .amount = f64::INFINITY;
+    cached
+        .coins
+        .as_mut()
+        .unwrap()
+        .get_mut("BTC")
+        .unwrap()
+        .notional = -0.0;
+    cached.currencies.as_mut().unwrap().insert(
+        "native-alternate".into(),
+        safe_cex_types::CurrencyBalance::AvailableLocked {
+            available: f64::INFINITY,
+            locked: -0.0,
+        },
+    );
+    Store::update(
+        h.store.as_ref(),
+        StoreUpdate {
+            balance: Some(cached),
+            ..Default::default()
+        },
+        false,
+    )
+    .unwrap();
+    let balance = h.drive(h.exchange.fetch_balance()).unwrap();
+    let safe_cex_types::CurrencyBalance::AvailableLocked { available, locked } =
+        &balance.currencies.as_ref().unwrap()["native-alternate"]
+    else {
+        panic!("cached native row was normalized")
+    };
+    assert_eq!(*available, f64::INFINITY);
+    assert_eq!(locked.to_bits(), (-0.0_f64).to_bits());
+    assert_eq!(balance.info, Some(json!({"literal":"retained"})));
+    assert_eq!(balance.coins.as_ref().unwrap()["BTC"].amount, f64::INFINITY);
+    assert_eq!(
+        balance.coins.as_ref().unwrap()["BTC"].notional.to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    assert_eq!(
+        balance.currencies.as_ref().unwrap()["USDC"]
+            .as_balance()
+            .unwrap()
+            .info,
+        Some(json!({"nested":true}))
+    );
+}
