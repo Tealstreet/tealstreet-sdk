@@ -1649,9 +1649,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "0a109f226dfba4b27890731cf13ebfbb56e04e0e51e6fcc8d9e8f32203808195",
+      "producer_sha256": "58ca02279bf3aa45c646c86600d5272033c9bfd49031cc063cd04c3ccd32fbd1",
       "classification": "no-owned-latch",
-      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop. Reviewed transport installation: the query_in_url decision is synchronous and preserves HOW frame params. It changes no owner registration or child-future ownership."
+      "reason": "Caller owns the request, hosted adapter and sign/send child futures. Signed query serialization and effective response/error config projection are synchronous; no host-owned latch or registration outlives drop. Reviewed transport installation: the query_in_url decision is synchronous and preserves HOW frame params. It changes no owner registration or child-future ownership. Reviewed hosted-string ingress retains synchronous typed data provenance before the same signing/send child await; this adds no registration, task or shared owner."
     },
     {
       "owner": "src/js_runtime/client.rs::dispatch",

@@ -1088,3 +1088,12 @@ millisecond profile. The sequential `tests/js_throttle_controls.py` faults each
 of leading, trailing and maxWait; all three must compile and fail the source
 comparison, then pass after exact restoration. A fourth fault removes the shared
 import and must fail Polymarket construction, then restore all 15 concrete tests.
+
+The hosted HTTP bridge retains a JavaScript string as typed data until the
+remote signing adapter applies Axios transformation and tryParseJson. A form
+string cannot become opaque Encoded bytes before signing: that loses its origin
+and the transport correctly refuses it. Direct terminal requests keep their
+existing byte representation. `hosted_signing_accepts_source_string_data_before_wire_encoding`
+compares four form/empty/JSON-looking/scalar strings against the actual source
+remote adapter with installed Axios on both sides of the relay, including
+signer inputs and final transmitted text.

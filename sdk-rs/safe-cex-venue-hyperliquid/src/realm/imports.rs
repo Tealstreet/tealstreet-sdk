@@ -116,6 +116,7 @@ pub(crate) fn bind(realm: &Realm) {
     realm.define_hidden(&clock, PropKey::str("getCurrentTimeMs"), now);
     realm.bind_import("virtualClock", clock);
 
+    super::host_spot::bind_spot_imports(realm).expect("shared dayjs import exists");
     bind_cloid(realm);
     bind_startup(realm);
     super::imports_utils::bind(realm);
