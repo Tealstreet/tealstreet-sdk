@@ -15,16 +15,20 @@ import { buildScanner } from './accepted-scanner.mjs';
 
 const args = process.argv.slice(2);
 const root = fs.realpathSync(path.resolve(args.find(arg => arg.startsWith('--workspace='))?.slice(12) ?? path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')));
-const configuration = { target: args.find(arg => arg.startsWith('--target='))?.slice(9) ?? 'native', features: args.find(arg => arg.startsWith('--features='))?.slice(11).split(',').filter(Boolean) ?? [] };
+const jobFlags = args.filter(arg => arg.startsWith('--jobs='));
+assert.ok(jobFlags.length <= 1, 'accepted-set: duplicate --jobs');
+const jobs = jobFlags[0]?.slice(7) ?? '2';
+assert.match(jobs, /^[12]$/, 'accepted-set: --jobs must be 1 or 2');
+const configuration = { target: args.find(arg => arg.startsWith('--target='))?.slice(9) ?? 'native', features: args.find(arg => arg.startsWith('--features='))?.slice(11).split(',').filter(Boolean) ?? [], jobs: Number(jobs) };
 assert.ok(['native', 'wasm32-unknown-unknown'].includes(configuration.target), 'accepted-set: unsupported execution target');
 const targetArgs = configuration.target === 'native' ? [] : ['--target', configuration.target];
 const featureArgs = configuration.features.length ? ['--features', configuration.features.join(',')] : [];
 const selected = args.find(arg => arg.startsWith('--package='))?.slice(10);
-assert.ok(args.every(arg => arg === '--inventory' || arg === '--census' || arg === '--measure' || arg.startsWith('--package=') || arg.startsWith('--workspace=') || arg.startsWith('--contracts=') || arg.startsWith('--target=') || arg.startsWith('--features=')), 'accepted-set: unsupported argument');
+assert.ok(args.every(arg => arg === '--inventory' || arg === '--census' || arg === '--measure' || arg.startsWith('--package=') || arg.startsWith('--workspace=') || arg.startsWith('--contracts=') || arg.startsWith('--target=') || arg.startsWith('--features=') || arg.startsWith('--jobs=')), 'accepted-set: unsupported argument');
 function cargo(args, options = {}) {
   const result = spawnSync('cargo', ['--color', 'never', ...args], {
     cwd: root, encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
-    env: { ...process.env, CARGO_BUILD_JOBS: '2', ...options.env },
+    env: { ...process.env, CARGO_BUILD_JOBS: jobs, ...options.env },
   });
   assert.equal(result.status, 0, `accepted-set: cargo ${args.join(' ')} did not complete\n${result.error ?? ''}\n${result.stdout}\n${result.stderr}`);
   return result.stdout;
@@ -33,7 +37,7 @@ const metadata = JSON.parse(cargo(['metadata', '--locked', '--format-version', '
 const workspaceMembers = metadata.packages.filter(pkg => metadata.workspace_members.includes(pkg.id));
 const members = workspaceMembers.filter(pkg => !selected || pkg.name === selected);
 assert.ok(members.length, `accepted-set: no workspace packages matched ${selected ?? 'workspace'}`);
-const scanner = buildScanner();
+const scanner = buildScanner(jobs);
 const found = [];
 const queued = new Set(members.map(pkg => pkg.id));
 let compilerSysroot;
@@ -44,9 +48,9 @@ for (const pkg of members) {
   const guards = spawnSync(scanner, ['--doc-guards', target.src_path], { encoding: 'utf8' });
   assert.equal(guards.status, 0, `accepted-set: production module discovery assertion: ${guards.stderr}`);
   const selector = target.kind.includes('bin') ? ['--bin', target.name] : ['--lib'];
-  cargo(['rustdoc', '--locked', '-p', pkg.name, '--jobs', '2', ...selector, ...targetArgs, ...featureArgs, '--', '-Z', 'unstable-options', '--output-format', 'json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all'], { env: { RUSTC_BOOTSTRAP: '1' } });
+  cargo(['rustdoc', '--locked', '-p', pkg.name, '--jobs', jobs, ...selector, ...targetArgs, ...featureArgs, '--', '-Z', 'unstable-options', '--output-format', 'json', '--document-private-items', '--document-hidden-items', '-A', 'rustdoc::all'], { env: { RUSTC_BOOTSTRAP: '1' } });
   const doc = JSON.parse(fs.readFileSync(path.join(metadata.target_directory, ...(configuration.target === 'native' ? [] : [configuration.target]), 'doc', `${target.name.replaceAll('-', '_')}.json`), 'utf8'));
-  const artifacts = cargo(['check', '--locked', '-p', pkg.name, '--jobs', '2', ...selector, ...targetArgs, ...featureArgs, '--message-format=json']).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(item => item.reason === 'compiler-artifact');
+  const artifacts = cargo(['check', '--locked', '-p', pkg.name, '--jobs', jobs, ...selector, ...targetArgs, ...featureArgs, '--message-format=json']).trim().split('\n').filter(Boolean).map(line => JSON.parse(line)).filter(item => item.reason === 'compiler-artifact');
   const ownArtifact = artifacts.find(item => item.package_id === pkg.id && item.target.name === target.name);
   assert.ok(ownArtifact, `${pkg.name}: accepted-set assertion: missing production compiler artifact`);
   if (!compilerSysroot) {

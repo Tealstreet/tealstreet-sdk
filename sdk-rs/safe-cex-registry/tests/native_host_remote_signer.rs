@@ -11,7 +11,7 @@ use safe_cex_transport::{
     signing::{HttpSigningResponse, RemoteSignerRequest, RemoteSignerResponse, SignedConfig},
 };
 use safe_cex_types::ws_auth::WsAuthResponse;
-use safe_cex_venue_binance::private_event_value::EventValue;
+use safe_cex_venue_binance::private_event_value::{EventOps, EventValue};
 use serde_json::{Value, json};
 use std::{
     cell::{Cell, RefCell},
