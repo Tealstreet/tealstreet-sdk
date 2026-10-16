@@ -1026,6 +1026,22 @@ then overlays actual adapter fields; terminal extension updates survive too.
 Cookie promotion belongs exclusively to HOW, not the direct HTTP bridge.
 
 
+The common `Js::Builtin` variant retains an existing native `PrototypeRealm`
+intrinsic referent when decoded-data venue bodies interact with core socket
+statistics. `Js::from_prototype` preserves reference/realm identity and live
+primitive fields instead of copying a snapshot. This is the native data-reference
+profile: type/text/arity, scalar field access, enumerable assigned fields and
+identity; it does not supply intrinsic function execution or full descriptors.
+Unsupported intrinsic field writes are refused. Original-receiver prototype
+access and native error identity are covered by `tests/prototype_js_values.rs`.
+Binance's `EventValue` is now an alias to this graph, with its existing decoded
+coercion profile expressed as operations rather than another heap.
+`to_typed_preserving_undefined` is the declared-DTO mode of the same native
+visitor: own undefined fields enter as unit values, while callable fields are
+refused. Binance uses this existing DTO policy for nested `info`; the ordinary
+`to_typed` JSON-shaped omission policy is unchanged. The two modes have independent
+presence/null, native numeric-bit and callable-refusal tests in `typed_js_values`.
+
 The shared lodash import table supplies `times` for source order splitting.
 It truncates the coerced count, returns an empty array for invalid/nonpositive
 counts, and treats non-callable iteratees as identity (not a property shorthand).
@@ -1045,6 +1061,13 @@ an exhausted budget rejects the original error before sleeping or sending.
 including request overrides, async predicate results, timer failure and loss of
 an observer during a pending delay. This covers configured callbacks within the
 runtime's existing HTTP and timer profiles.
+
+Venue overrides whose source calls only `this.ws.close()` use
+`BaseWebSocket::close_current_websocket`. It forwards current native/relay close
+without superclass disposal or force-close metadata/task changes, and releases
+state borrows before invoking host close callbacks. Native and managed-relay
+state-retention witnesses cover this primitive; Backpack's bound disposal tests
+compare the source-specific cleanup and order independently.
 
 The shared utility import table also installs Lodash `throttle`. Its scheduler
 uses the existing Scope clock and cancellable timers, preserving leading and

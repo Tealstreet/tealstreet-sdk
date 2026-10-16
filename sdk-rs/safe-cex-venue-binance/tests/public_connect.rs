@@ -876,7 +876,7 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
     use safe_cex_num::{ProtoMember, PrototypeRealm, PrototypeScalar, PrototypeValue};
     use safe_cex_venue_binance::{
         order_history_native::map_binance_historical_order_native,
-        private_event_value::{EventValue, PrivateEnum},
+        private_event_value::{EventOps, EventValue, PrivateEnum},
         public_stats::record_binance_handler_stats,
     };
     fn number(value: PrototypeValue, expected: f64, label: &str) {
@@ -910,7 +910,7 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
             EventValue::Undefined => None,
             EventValue::Number(n) => Some(json!(n)),
             EventValue::Bool(v) => Some(json!(v)),
-            EventValue::Enum(v) => Some(v.wire()),
+            EventValue::String(units) => Some(json!(String::from_utf16(&units).unwrap())),
             _ => panic!("native scalar summary cannot hide a referent"),
         }
     }
@@ -1023,8 +1023,8 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
             );
             assert!(
                 matches!(
-                    EventValue::object(Default::default())
-                        .get("lastMessageTimestamp")
+                    EventValue::record_object(Default::default())
+                        .read("lastMessageTimestamp")
                         .unwrap(),
                     EventValue::Number(1000.0)
                 ),
@@ -1037,22 +1037,21 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
                 .unwrap()
                 .unwrap();
             assert!(
-                matches!(historical.get("type").unwrap(), EventValue::Number(1000.0)),
+                matches!(historical.read("type").unwrap(), EventValue::Number(1000.0)),
                 "native inherited historical type is 1000 before source"
             );
             assert!(
-                match (historical.get("status").unwrap(), count) {
-                    (
-                        EventValue::Enum(PrivateEnum::Status(safe_cex_types::OrderStatus::Closed)),
-                        None,
-                    ) => true,
+                match (historical.read("status").unwrap(), count) {
+                    (EventValue::String(units), None)
+                        if units.as_ref() == "closed".encode_utf16().collect::<Vec<_>>() =>
+                        true,
                     (EventValue::Number(n), Some(expected)) => n == expected as f64,
                     _ => false,
                 },
                 "native historical inherited status distinguishes nullish fallback and zero"
             );
             assert!(
-                match historical.get("positionSide").unwrap() {
+                match historical.read("positionSide").unwrap() {
                     EventValue::Bool(true) => has,
                     EventValue::Undefined => !has,
                     _ => false,
@@ -1060,37 +1059,44 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
                 "native historical inherited position side is original scalar"
             );
             assert!(
-                match historical.get("type").unwrap().get("hadHandlers").unwrap() {
+                match historical
+                    .read("type")
+                    .unwrap()
+                    .read("hadHandlers")
+                    .unwrap()
+                {
                     EventValue::Bool(true) => has,
                     EventValue::Undefined => !has,
                     _ => false,
                 },
                 "native numeric result boxes through execution realm prototype"
             );
-            let fallback_row = EventValue::object(row.spread());
-            fallback_row.define("origType", EventValue::String("lastCallbacksCount".into()));
+            let fallback_row = EventValue::record_object(row.spread());
+            fallback_row.write(
+                "origType",
+                EventValue::text_value("lastCallbacksCount".into()),
+            );
             let fallback = map_binance_historical_order_native(&fallback_row, &realm)
                 .unwrap()
                 .unwrap()
-                .get("type")
+                .read("type")
                 .unwrap();
             assert!(
                 match (&fallback, count) {
-                    (
-                        EventValue::Enum(PrivateEnum::Type(safe_cex_types::OrderType::Market)),
-                        None,
-                    ) => true,
+                    (EventValue::String(units), None)
+                        if units.as_ref() == "market".encode_utf16().collect::<Vec<_>>() =>
+                        true,
                     (EventValue::Number(n), Some(expected)) => *n == expected as f64,
                     _ => false,
                 },
                 "native historical type fallback preserves zero and suppresses eager fallback"
             );
-            let function_row = EventValue::object(row.spread());
-            function_row.define("origType", EventValue::String("constructor".into()));
+            let function_row = EventValue::record_object(row.spread());
+            function_row.write("origType", EventValue::text_value("constructor".into()));
             let function_output = map_binance_historical_order_native(&function_row, &realm)
                 .unwrap()
                 .unwrap()
-                .get("type")
+                .read("type")
                 .unwrap();
             assert!(
                 matches!(function_output,EventValue::Builtin(ref value) if *value==saved_constructor),
@@ -1098,17 +1104,17 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
             );
             assert!(
                 matches!(
-                    function_output.get("lastMessageTimestamp").unwrap(),
+                    function_output.read("lastMessageTimestamp").unwrap(),
                     EventValue::Number(1010.0)
                 ),
                 "native historical callable observes original referent writes"
             );
-            let prototype_row = EventValue::object(row.spread());
-            prototype_row.define("origType", EventValue::String("__proto__".into()));
+            let prototype_row = EventValue::record_object(row.spread());
+            prototype_row.write("origType", EventValue::text_value("__proto__".into()));
             let prototype_output = map_binance_historical_order_native(&prototype_row, &realm)
                 .unwrap()
                 .unwrap()
-                .get("type")
+                .read("type")
                 .unwrap();
             assert!(
                 matches!(prototype_output,EventValue::Builtin(ref value) if *value==prototype),
@@ -1144,7 +1150,7 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
                     safe_cex_venue_binance::class_jobs::reaction(std::future::ready(())).await;
                     safe_cex_venue_binance::private_event_value::table::<safe_cex_types::OrderType>(
                         &[],
-                        EventValue::String("lastMessageTimestamp".into()),
+                        EventValue::text_value("lastMessageTimestamp".into()),
                         PrivateEnum::Type,
                     )
                 }),
@@ -1193,7 +1199,7 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
                 };
                 assert!(
                     matches!(
-                        saved_mapper().get("type").unwrap(),
+                        saved_mapper().read("type").unwrap(),
                         EventValue::Number(1000.0)
                     ),
                     "native saved mapper retains original module table realm while another realm is bound"
@@ -1206,7 +1212,7 @@ fn prototype_statistics_sequences_preserve_native_values_and_realms_before_sourc
                     PrototypeValue::Number(n) => n,
                     _ => panic!("native second constructor timestamp remains numeric"),
                 };
-                let saved_mapper_type = observed(saved_mapper().get("type").unwrap());
+                let saved_mapper_type = observed(saved_mapper().read("type").unwrap());
                 assert!(
                     Rc::ptr_eq(&PrototypeRealm::current(), &other_realm),
                     "native saved mapper restores caller realm after execution"
