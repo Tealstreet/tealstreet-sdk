@@ -1756,6 +1756,7 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
             method: "POST".into(),
             url: "/remote-input".into(),
             skip_remote_signing: skip,
+            config_extensions: [("grvtCookie".into(), json!("gravity=retained"))].into(),
             body: Some(safe_cex_transport::RestBody::Untransformed(
                 json!({"input":79}),
             )),
@@ -1775,6 +1776,11 @@ fn remote_signing_signed_and_bypass_paths_preserve_inner_receipt() {
                 "/signed-before-terminal"
             },
             "receipt_remote_native_signed_config {skip}"
+        );
+        assert_eq!(
+            venue.requests.lock().unwrap()[0].config_extensions["grvtCookie"],
+            json!("gravity=retained"),
+            "REST CONFIG signed/bypass terminal extensions {skip}"
         );
         assert_eq!(
             signer.calls.lock().unwrap().len(),

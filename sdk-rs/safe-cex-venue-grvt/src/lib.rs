@@ -36,3 +36,5 @@ pub mod account_runtime;
 pub mod composition;
 pub mod signing_runtime;
 pub mod trading_runtime;
+
+pub mod binding;

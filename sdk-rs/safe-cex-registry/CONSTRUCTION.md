@@ -1,7 +1,8 @@
 # Rust venue construction through the registry
 
-Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`), Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
+Status: implemented for `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`),
+Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), `polymarket` and `woo`, 2026-10-16 (`src/rust_venues.rs`,
@@ -21,6 +22,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 `ExchangeName -> fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor`.
 
 - **Initial members:**
+  - `grvt`, built with `GrvtExchange::new` over shared js_runtime; its host supplies fresh HTTP and the common external-public-data factory. Active SDK signing requires a local wallet; the native hosted-signer host refuses this venue visibly.
   - `asterdex`, built with `native_exchange::AsterDEXExchange::new` on the shared
     js_runtime. Its HTTP factory receives each lane's options, including secondary
     credentials and proxy override. The native host routes signed requests through
@@ -31,6 +33,9 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around
     `BitgetExchange::new`; `BitgetDependencies` carries the runtime and a
     `JsHttpHost` built with js_runtime `rest_http_host`.
+  - `bitrue`, built with `BitrueExchange::new` on the shared js_runtime; the
+    native host supplies signed HTTP and the external-data gateway factory.
+    `tests/native_host_bitrue.rs` independently verifies the request HMAC.
   - `bitunix`, built with `BitunixVenue::new` from a registry-built `BaseExchange`
     and `BitunixDependencies` (runtime, per-lane client builder and transport
     install, optional externalPublicData provider).

@@ -22,7 +22,16 @@ struct Runtime {
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
+    exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
+    headers_capable: std::cell::Cell<bool>,
+    dials: RefCell<
+        Vec<(
+            String,
+            Vec<String>,
+            safe_cex_exchange::websocket::WebSocketConnectionOptions,
+        )>,
+    >,
 }
 struct Task;
 impl ExchangeTask for Task {
@@ -60,7 +69,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, _: &ExchangeError, _: &Value) {}
+    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+        self.exceptions
+            .borrow_mut()
+            .push((error.to_string(), context.clone()));
+    }
     fn report_raw_exception(&self, _: &Value, _: &Value) {}
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
@@ -1210,15 +1223,16 @@ impl safe_cex_exchange::websocket::WsRuntime for Runtime {
     }
     fn dial(
         &self,
-        _: String,
-        _: Vec<String>,
-        _: safe_cex_exchange::websocket::WebSocketConnectionOptions,
+        url: String,
+        protocols: Vec<String>,
+        options: safe_cex_exchange::websocket::WebSocketConnectionOptions,
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn safe_cex_exchange::websocket::WsSocket>> {
-        panic!("no sockets in js_runtime tests")
+        self.dials.borrow_mut().push((url, protocols, options));
+        Box::pin(async { Err(ExchangeError::new("recorded dial")) })
     }
     fn headers_capable(&self) -> bool {
-        false
+        self.headers_capable.get()
     }
     fn enable_reconnecting(&self) -> bool {
         false
@@ -1362,6 +1376,7 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
             method: method.into(),
             url: url.into(),
             params: Some(json!({"instId": "BTC-USDT-SWAP"})),
+            config_extensions: [("grvtCookie".into(), json!("gravity=bridge"))].into(),
             ..Default::default()
         };
         settle(
@@ -1389,6 +1404,11 @@ fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
     assert_eq!(
         http.sent.borrow()[0]["params"],
         json!({"instId": "BTC-USDT-SWAP"})
+    );
+    assert_eq!(
+        http.sent.borrow()[0]["grvtCookie"],
+        json!("gravity=bridge"),
+        "REST CONFIG native-to-JS bridge"
     );
     let upper =
         to_json(&run("GET", "/ok").expect("an uppercase verb dispatches like Axios")).unwrap();
@@ -3349,3 +3369,63 @@ fn disposed_assignment_matches_actual_venue_cleanup_sequence() {
         );
     }
 }
+
+#[test]
+fn rest_http_host_retains_adapter_config_without_inventing_direct_cookie_headers() {
+    let runtime = Rc::new(Runtime::default());
+    let terminal = std::sync::Arc::new(Terminal::default());
+    let xhr = client::create(
+        client::rest_http_host(runtime.clone(), terminal.clone()),
+        Js::object(vec![("baseURL", Js::str("https://trades.grvt.io"))]),
+    );
+    let response = settle(
+        &runtime,
+        xhr.call_method(
+            "post",
+            vec![
+                Js::str("/ok"),
+                Js::Null,
+                Js::object(vec![
+                    ("grvtCookie", Js::str("rm=true; gravity=session-42")),
+                    ("grvtAccountId", Js::str("42")),
+                    (
+                        "customTrace",
+                        Js::object(vec![("attempt", Js::Number(2.0))]),
+                    ),
+                    (
+                        "headers",
+                        Js::object(vec![("X-Ts-Grvt-Session", Js::str("session-42"))]),
+                    ),
+                ]),
+            ],
+        )
+        .unwrap(),
+    )
+    .unwrap();
+    let seen = terminal.seen.lock().unwrap();
+    assert_eq!(
+        seen[0].config_extensions["grvtCookie"],
+        json!("rm=true; gravity=session-42"),
+        "REST ADAPTER CONFIG lost GRVT cookie before terminal transport"
+    );
+    assert_eq!(seen[0].config_extensions["grvtAccountId"], json!("42"));
+    assert_eq!(
+        seen[0].config_extensions["customTrace"],
+        json!({"attempt":2.0})
+    );
+    assert!(
+        !seen[0].headers.contains_key("Cookie"),
+        "DIRECT source cookie behavior"
+    );
+    assert_eq!(seen[0].headers["X-Ts-Grvt-Session"], "session-42");
+    assert_eq!(
+        to_json(&response.get("config").unwrap().get("customTrace").unwrap()).unwrap(),
+        json!({"attempt":2.0})
+    );
+}
+
+#[path = "support/js_websocket_options.rs"]
+mod ws_options;
+
+#[path = "support/js_socket_dispose.rs"]
+mod socket_dispose;
