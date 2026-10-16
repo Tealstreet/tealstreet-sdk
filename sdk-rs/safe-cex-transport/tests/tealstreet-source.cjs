@@ -79,7 +79,7 @@ const directProvider=load('packages/safe-cex/src/transport/direct.ts').directTra
   const options={tealstreetProxy,tealstreetWsRoute,proxyRegion,bybitSiteId};
   routes.push({exchange,options,expected:routing.resolveExchangeRouting(exchange,options)});
  }
- assert.equal(routes.length,1128,'independent routing floor (47*2*2*3*2)');
+ assert.equal(routes.length,1152,'independent routing floor (48*2*2*3*2)');
  const direct={name:directProvider.name,...directProvider.rest(cases[0])};
  process.stdout.write(JSON.stringify({pools,cases:observations,auth,resolutions,connections,times,routes,direct}));
 })().catch(error=>{console.error(error);process.exitCode=1;});
