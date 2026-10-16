@@ -226,6 +226,7 @@ fn chaser_enrichment_retains_optional_field_identity() {
                 ("id", Some(actual.id.as_str())),
                 ("symbol", Some(actual.symbol.as_str())),
                 ("parentId", actual.parent_id.as_deref()),
+                ("clientOrderId", actual.client_order_id.as_deref()),
             ] {
                 assert_eq!(
                     value,

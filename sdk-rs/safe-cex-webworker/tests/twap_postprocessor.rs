@@ -125,7 +125,7 @@ fn projection_matches_live_manager_filter_spread_order_and_aliases() {
     );
     let data: Value = serde_json::from_slice(&output.stdout).unwrap();
     let identities = data["marketIdentity"].as_array().unwrap();
-    assert_eq!(identities.len(), 26, "TWAP-PROJECTION market cases execute");
+    assert_eq!(identities.len(), 36, "TWAP-PROJECTION market cases execute");
     for case in identities {
         let input = vec![(
             "identity-market".to_owned(),

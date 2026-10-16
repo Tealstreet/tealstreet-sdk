@@ -1,21 +1,28 @@
 //! Live native record/array values used by the concrete Backpack adapter frames.
 use crate::public_control::JsString;
+/// Adapter frames use the shared runtime graph directly, including callback aliases.
+pub use safe_cex_exchange::js_runtime::value::Js as Value;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::JsJsonValue;
 use std::{cell::RefCell, rc::Rc};
-#[derive(Clone, Debug)]
-pub enum Value {
-    Undefined,
-    Null,
-    Bool(bool),
-    Number(f64),
-    BigInt(String),
-    String(JsString),
-    Array(Rc<RefCell<Vec<Option<Value>>>>),
-    Object(Rc<RefCell<Vec<(JsString, Value)>>>),
+
+/// The adapter's explicit prepared-data/UTF-8 boundary over the shared graph.
+/// These operations do not allocate a second live value representation.
+pub trait NativeValue: Sized {
+    fn field(&self, key: &str) -> Result<Self, ExchangeError>;
+    fn array(&self) -> Result<Rc<RefCell<Vec<Option<Self>>>>, ExchangeError>;
+    fn string(&self) -> Result<JsString, ExchangeError>;
+    fn utf8(&self) -> Result<String, ExchangeError>;
+    fn float(&self) -> Result<f64, ExchangeError>;
+    fn number(&self) -> Result<f64, ExchangeError>;
+    fn same(&self, right: &Self) -> bool;
+    fn from_prepared(value: JsJsonValue) -> Self;
+    fn prepared(&self) -> Result<JsJsonValue, ExchangeError>;
+    fn spread(values: &[Self]) -> Result<Self, ExchangeError>;
 }
-impl Value {
-    pub fn field(&self, key: &str) -> Result<Self, ExchangeError> {
+
+impl NativeValue for Value {
+    fn field(&self, key: &str) -> Result<Self, ExchangeError> {
         match self {
             Self::Undefined | Self::Null => Err(ExchangeError::new(format!(
                 "Cannot read properties of {} (reading '{key}')",
@@ -25,75 +32,59 @@ impl Value {
                     "undefined"
                 }
             ))),
-            Self::Object(o) => Ok(o
-                .borrow()
-                .iter()
-                .rev()
-                .find(|(k, _)| k == &key.encode_utf16().collect::<Vec<_>>())
-                .map_or(Self::Undefined, |(_, v)| v.clone())),
+            Self::Object(_) if self.has_own(key) => self.get(key).map_err(Into::into),
             _ => Ok(Self::Undefined),
         }
     }
-    pub fn array(&self) -> Result<Rc<RefCell<Vec<Option<Self>>>>, ExchangeError> {
+    fn array(&self) -> Result<Rc<RefCell<Vec<Option<Self>>>>, ExchangeError> {
         if let Self::Array(v) = self {
             Ok(v.clone())
         } else {
             Err(ExchangeError::new("Value is not an array"))
         }
     }
-    pub fn truthy(&self) -> bool {
+    fn string(&self) -> Result<JsString, ExchangeError> {
         match self {
-            Self::Undefined | Self::Null => false,
-            Self::Bool(v) => *v,
-            Self::Number(n) => *n != 0.0 && !n.is_nan(),
-            Self::String(s) => !s.is_empty(),
-            Self::BigInt(s) => s != "0",
-            _ => true,
-        }
-    }
-    pub fn string(&self) -> Result<JsString, ExchangeError> {
-        Ok(match self {
-            Self::Undefined => "undefined".encode_utf16().collect(),
-            Self::Null => "null".encode_utf16().collect(),
-            Self::Bool(v) => if *v { "true" } else { "false" }.encode_utf16().collect(),
-            Self::Number(n) => safe_cex_num::js_number_string(*n).encode_utf16().collect(),
-            Self::String(s) => s.clone(),
-            Self::BigInt(s) => s.encode_utf16().collect(),
-            Self::Array(a) => {
-                let values = a.borrow().clone();
+            Self::Array(items) => {
+                let items = items.borrow().clone();
                 let mut text = vec![];
-                for (i, v) in values.iter().enumerate() {
+                for (i, item) in items.iter().enumerate() {
                     if i > 0 {
                         text.push(44);
                     }
-                    if let Some(v) = v {
-                        if !matches!(v, Self::Undefined | Self::Null) {
-                            text.extend(v.string()?);
-                        }
+                    if let Some(item) = item
+                        && !item.is_nullish()
+                    {
+                        text.extend(item.string()?);
                     }
                 }
-                text
+                Ok(text)
             }
             Self::Object(_) => {
-                if !matches!(self.field("toString")?, Self::Undefined) {
+                // The prepared object profile excludes executable coercion hooks.
+                if !self.field("toString")?.is_undefined() {
                     return Err(ExchangeError::new(
                         "Cannot convert object to primitive value",
                     ));
                 }
-                "[object Object]".encode_utf16().collect()
+                Ok("[object Object]".encode_utf16().collect())
             }
-        })
+            Self::Function(_) | Self::Promise(_) | Self::Map(_) | Self::Set(_) => Err(
+                ExchangeError::new("Value is outside the prepared-data boundary"),
+            ),
+            _ => Ok(self.to_js_string()?.to_vec()),
+        }
     }
-    pub fn utf8(&self) -> Result<String, ExchangeError> {
+    fn utf8(&self) -> Result<String, ExchangeError> {
         String::from_utf16(&self.string()?)
             .map_err(|e| ExchangeError::new(format!("Native UTF-8 boundary: {e}")))
     }
-    pub fn parse_float(&self) -> Result<f64, ExchangeError> {
+    fn float(&self) -> Result<f64, ExchangeError> {
         Ok(safe_cex_num::parse_float(&String::from_utf16_lossy(
             &self.string()?,
         )))
     }
-    pub fn number(&self) -> Result<f64, ExchangeError> {
+    fn number(&self) -> Result<f64, ExchangeError> {
         Ok(match self {
             Self::Undefined => f64::NAN,
             Self::Null => 0.0,
@@ -108,19 +99,10 @@ impl Value {
             _ => safe_cex_num::number_from_string(&String::from_utf16_lossy(&self.string()?)),
         })
     }
-    pub fn same(&self, right: &Self) -> bool {
-        match (self, right) {
-            (Self::Undefined, Self::Undefined) | (Self::Null, Self::Null) => true,
-            (Self::Bool(a), Self::Bool(b)) => a == b,
-            (Self::Number(a), Self::Number(b)) => a == b,
-            (Self::String(a), Self::String(b)) => a == b,
-            (Self::BigInt(a), Self::BigInt(b)) => a == b,
-            (Self::Array(a), Self::Array(b)) => Rc::ptr_eq(a, b),
-            (Self::Object(a), Self::Object(b)) => Rc::ptr_eq(a, b),
-            _ => false,
-        }
+    fn same(&self, right: &Self) -> bool {
+        self.strict_equals(right)
     }
-    pub fn from_prepared(v: JsJsonValue) -> Self {
+    fn from_prepared(v: JsJsonValue) -> Self {
         match v {
             JsJsonValue::Undefined => Self::Undefined,
             JsJsonValue::Null => Self::Null,
@@ -132,24 +114,25 @@ impl Value {
                     .map(|v| Some(Self::from_prepared(v)))
                     .collect(),
             ))),
-            JsJsonValue::Object(o) => Self::Object(Rc::new(RefCell::new(
-                o.into_iter()
-                    .map(|(k, v)| (k.encode_utf16().collect(), Self::from_prepared(v)))
-                    .collect(),
-            ))),
-            JsJsonValue::BigInt(v) => Self::BigInt(v.to_string()),
+            JsJsonValue::Object(o) => {
+                let value = Self::object(vec![]);
+                for (key, item) in o {
+                    value
+                        .define(&key, Self::from_prepared(item))
+                        .expect("fresh object");
+                }
+                value
+            }
+            JsJsonValue::BigInt(v) => Self::BigInt(Rc::new(v)),
         }
     }
-    pub fn prepared(&self) -> Result<JsJsonValue, ExchangeError> {
+    fn prepared(&self) -> Result<JsJsonValue, ExchangeError> {
         Ok(match self {
             Self::Undefined => JsJsonValue::Undefined,
             Self::Null => JsJsonValue::Null,
             Self::Bool(b) => JsJsonValue::Bool(*b),
             Self::Number(n) => JsJsonValue::Number(*n),
-            Self::BigInt(n) => JsJsonValue::BigInt(
-                n.parse()
-                    .map_err(|e| ExchangeError::new(format!("Invalid BigInt: {e}")))?,
-            ),
+            Self::BigInt(n) => JsJsonValue::BigInt((**n).clone()),
             Self::String(_) => JsJsonValue::String(self.utf8()?),
             Self::Array(a) => JsJsonValue::Array(
                 a.borrow()
@@ -157,8 +140,8 @@ impl Value {
                     .map(|v| v.as_ref().unwrap_or(&Self::Undefined).prepared())
                     .collect::<Result<_, _>>()?,
             ),
-            Self::Object(o) => JsJsonValue::Object(
-                o.borrow()
+            Self::Object(_) => JsJsonValue::Object(
+                self.own_entries()?
                     .iter()
                     .map(|(k, v)| {
                         Ok((
@@ -168,30 +151,19 @@ impl Value {
                     })
                     .collect::<Result<_, ExchangeError>>()?,
             ),
+            _ => {
+                return Err(ExchangeError::new(
+                    "Value is outside the prepared-data boundary",
+                ));
+            }
         })
     }
-    pub fn object(fields: Vec<(&str, Self)>) -> Self {
-        Self::Object(Rc::new(RefCell::new(
-            fields
-                .into_iter()
-                .map(|(k, v)| (k.encode_utf16().collect(), v))
-                .collect(),
-        )))
-    }
-    pub fn spread(values: &[Self]) -> Result<Self, ExchangeError> {
+    fn spread(values: &[Self]) -> Result<Self, ExchangeError> {
         let out = Self::object(vec![]);
-        let Self::Object(target) = &out else {
-            unreachable!()
-        };
-        for v in values {
-            if let Self::Object(o) = v {
-                for (k, v) in &*o.borrow() {
-                    let mut t = target.borrow_mut();
-                    if let Some((_, old)) = t.iter_mut().find(|(key, _)| key == k) {
-                        *old = v.clone();
-                    } else {
-                        t.push((k.clone(), v.clone()));
-                    }
+        for value in values {
+            if matches!(value, Self::Object(_)) {
+                for (key, item) in value.own_entries()? {
+                    out.define_key(&key, item)?;
                 }
             }
         }
