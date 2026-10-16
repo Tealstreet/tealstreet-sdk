@@ -145,7 +145,7 @@ pub fn run_api_callback<H, V: Clone, E>(
             // again would add quotes/escapes absent from the transmitted bytes.
             let body = if (r.is_string)(&data) {
                 (r.get)(h, &value, "data")?
-            } else if (r.truthy)(&data) {
+            } else if (r.truthy)(&(r.get)(h, &value, "data")?) {
                 (r.stringify)(h, (r.get)(h, &value, "data")?)?
             } else {
                 (r.text)("")
