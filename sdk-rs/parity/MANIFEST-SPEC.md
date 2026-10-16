@@ -1645,8 +1645,9 @@ message in `requestsLogAtom`; the actual dev/Cypress `__getRequestsLog()`
 returns it unchanged. At the split boundary the returned string has length
 4121 and unit D83D at index 4095. The helper is available in dev/Cypress, not
 plain production without Cypress. The source consumer proof is
-`safe-cex-types/tests/diagnostic_observability.test.cjs`, which executes the
-actual cap, callback and getter with real Jotai storage before serialization.
+tealstreet-next `scripts/sdk-diagnostic-observability.test.cjs`, which executes the
+actual cap, callback and getter with real Jotai storage before serialization. It
+lives in the monorepo because its consumer is apps/web, outside this slice.
 The cap row's FORCED clause must name this observation; do not classify it as
 CHOSEN merely because the event is called diagnostic. Its core owner retains
 responsibility for the native cap witness and row note.
