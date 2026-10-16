@@ -22,12 +22,12 @@ fn put(base: &Js, key: &[u16], value: Js) -> Result<(), Thrown> {
         Js::Array(_) if array_index(key).is_some() || key == utf16("length").as_ref() => {
             base.set_key(key, value)
         }
-        Js::Array(_) | Js::Map(_) | Js::Set(_) | Js::Promise(_) => Err(Thrown::type_error(
-            &format!(
+        Js::Array(_) | Js::Map(_) | Js::Set(_) | Js::Promise(_) => {
+            Err(Thrown::type_error(&format!(
                 "Cannot create property '{name}' on {}: the host runtime keeps no named own properties on this value",
                 base.to_display()
-            ),
-        )),
+            )))
+        }
         primitive => Err(Thrown::type_error(&format!(
             "Cannot create property '{name}' on {} '{}'",
             primitive.type_of(),
@@ -109,10 +109,7 @@ impl PositionFinder for ArrayFind {
             length.min(9_007_199_254_740_991.0) as usize
         };
         for index in 0..length {
-            let value = self
-                .receiver
-                .get(&index.to_string())
-                .map_err(to_signing)?;
+            let value = self.receiver.get(&index.to_string()).map_err(to_signing)?;
             let value = to_account(&value);
             if predicate(value.clone())?.truthy() {
                 return Ok(value);
@@ -163,4 +160,3 @@ impl PositionReadHost for Bound {
         Ok(to_account(&Js::array(values)))
     }
 }
-

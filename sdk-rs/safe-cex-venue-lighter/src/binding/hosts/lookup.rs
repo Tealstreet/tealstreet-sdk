@@ -30,6 +30,8 @@ impl AccountLookupHost for Bound {
         Ok(())
     }
     fn iterator(&self, source: AccountValue) -> SigningResult<Rc<dyn AccountLookupIterator>> {
-        Ok(Rc::new(JsIterator::open(&to_js(&source)).map_err(to_signing)?))
+        Ok(Rc::new(
+            JsIterator::open(&to_js(&source)).map_err(to_signing)?,
+        ))
     }
 }

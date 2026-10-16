@@ -93,6 +93,7 @@ pub mod ws_private_feed_helpers;
 pub mod public_ingress;
 pub mod ws_private_stream_handlers;
 
+mod binding;
 pub mod exchange_account_cache;
 pub mod exchange_account_lookup;
 pub mod exchange_batch_placement;
@@ -109,4 +110,3 @@ pub mod exchange_single_placement;
 pub mod signer_adapter;
 pub mod ws_private_class;
 pub mod ws_public_class;
-mod binding;

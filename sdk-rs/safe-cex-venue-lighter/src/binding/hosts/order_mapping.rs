@@ -4,13 +4,13 @@ use crate::{
     binding::{
         ops::{Arithmetic, JsIterator, Relation, arithmetic_value, copy_data, relation_bool},
         realm::Bound,
-        regexp::regexp,
         value::{to_account, to_js, to_signing},
     },
     exchange_order_mapping::{OrderMapBinary, OrderMapIterator, OrderMappingHost},
     sdk_account_api::AccountValue,
     transaction_signing::{SigningResult, TransactionSigningError},
 };
+use safe_cex_exchange::js_runtime::regexp::regexp;
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, utf16};
 
 pub(super) fn js<T>(result: Result<T, Thrown>) -> SigningResult<T> {
@@ -51,7 +51,9 @@ impl OrderMappingHost for Bound {
             OrderMapBinary::Subtract => Arithmetic::Subtract,
             OrderMapBinary::Multiply => Arithmetic::Multiply,
             OrderMapBinary::Divide => Arithmetic::Divide,
-            OrderMapBinary::LessOrEqual => return relation_bool(Relation::LessOrEqual, left, right),
+            OrderMapBinary::LessOrEqual => {
+                return relation_bool(Relation::LessOrEqual, left, right);
+            }
             OrderMapBinary::GreaterThan => return relation_bool(Relation::Greater, left, right),
             OrderMapBinary::GreaterOrEqual => {
                 return relation_bool(Relation::GreaterOrEqual, left, right);

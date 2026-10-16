@@ -2,8 +2,8 @@
 use crate::{
     binding::{
         ops::{
-            Arithmetic, JsIterator, Relation, arithmetic_value, copy_data, for_of,
-            relation_bool, spread_values, to_string,
+            Arithmetic, JsIterator, Relation, arithmetic_value, copy_data, for_of, relation_bool,
+            spread_values, to_string,
         },
         realm::Bound,
         value::{to_account, to_js, to_signing},

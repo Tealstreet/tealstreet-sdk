@@ -1,74 +1,53 @@
-//! ECMAScript semantics every host family shares that `js_runtime::ops` lacks:
-//! live ToPrimitive, exact BigInt relations, `%`, unary `-`, built-in iteration,
-//! HasProperty and CopyDataProperties. Primitive `+ - * /` delegate to js_runtime.
+//! ECMAScript semantics the host families share: operators delegate to
+//! `js_runtime::ops`; string-hint ToString, built-in iteration, HasProperty and
+//! CopyDataProperties are local because js_runtime has no equivalent.
 use super::value::{to_account, to_js, to_signing};
 use crate::{sdk_account_api::AccountValue, transaction_signing::SigningResult};
-use num_bigint::{BigInt, ToBigInt};
+
 use safe_cex_exchange::js_runtime::{
-    builtins,
-    ops as runtime,
+    builtins, ops as runtime,
     value::{Js, Str, Thrown, array_index, utf16},
 };
-use std::{cell::RefCell, cmp::Ordering, rc::Rc};
+use std::{cell::RefCell, rc::Rc};
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) enum Hint {
-    Default,
-    Number,
-    String,
-}
-
-/// ToPrimitive via OrdinaryToPrimitive over live valueOf/toString. An absent
-/// toString is the intrinsic one (js_runtime models no prototype methods).
-pub(crate) fn to_primitive(value: &Js, hint: Hint) -> Result<Js, Thrown> {
+/// ToString: ToPrimitive with the string hint (toString before valueOf), which
+/// `js_runtime::ops::to_primitive` (default/number hint only) does not cover.
+pub(crate) fn to_string(value: &Js) -> Result<Str, Thrown> {
     if !value.is_object() {
-        return Ok(value.clone());
+        return value.to_js_string();
     }
-    let order = if hint == Hint::String {
-        ["toString", "valueOf"]
-    } else {
-        ["valueOf", "toString"]
-    };
-    for name in order {
+    let mut callable = false;
+    for name in ["toString", "valueOf"] {
         let method = value.get(name)?;
         if method.is_callable() {
+            callable = true;
             let result = method.call(value.clone(), vec![])?;
             if !result.is_object() {
-                return Ok(result);
+                return result.to_js_string();
             }
-        } else if name == "toString" && method.is_undefined() {
-            return Ok(Js::String(value.to_js_string()?));
         }
     }
-    Err(Thrown::type_error("Cannot convert object to primitive value"))
-}
-
-/// ToString through ToPrimitive(string).
-pub(crate) fn to_string(value: &Js) -> Result<Str, Thrown> {
-    to_primitive(value, Hint::String)?.to_js_string()
+    if callable {
+        return Err(Thrown::type_error(
+            "Cannot convert object to primitive value",
+        ));
+    }
+    value.to_js_string()
 }
 
 /// ToNumeric: `Js::BigInt` or `Js::Number`.
 pub(crate) fn to_numeric(value: &Js) -> Result<Js, Thrown> {
-    runtime::to_numeric(&to_primitive(value, Hint::Number)?)
+    runtime::to_numeric(&runtime::to_primitive(value)?)
 }
 
 /// ToLength, clamped to 2^53 - 1.
 pub(crate) fn to_length(value: &Js) -> Result<usize, Thrown> {
-    let n = to_primitive(value, Hint::Number)?.to_number()?;
+    let n = runtime::to_primitive(value)?.to_number()?;
     Ok(if n.is_nan() || n <= 0.0 {
         0
     } else {
         n.min(9_007_199_254_740_991.0) as usize
     })
-}
-
-fn mixed_bigint() -> Thrown {
-    Thrown::type_error("Cannot mix BigInt and other types, use explicit conversions")
-}
-
-fn division_by_zero() -> Thrown {
-    Thrown::error("RangeError", "Division by zero")
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -80,98 +59,23 @@ pub(crate) enum Arithmetic {
     Remainder,
 }
 
-fn remainder(left: &Js, right: &Js) -> Result<Js, Thrown> {
-    match (runtime::to_numeric(left)?, runtime::to_numeric(right)?) {
-        (Js::Number(a), Js::Number(b)) => Ok(Js::Number(a % b)),
-        (Js::BigInt(_), Js::BigInt(b)) if *b == BigInt::default() => Err(division_by_zero()),
-        (Js::BigInt(a), Js::BigInt(b)) => Ok(Js::BigInt(Rc::new(&*a % &*b))),
-        _ => Err(mixed_bigint()),
-    }
-}
-
 /// The binary arithmetic operators: ToPrimitive left then right, then the
 /// primitive operation (string concatenation for `+`).
 pub(crate) fn arithmetic(op: Arithmetic, left: &Js, right: &Js) -> Result<Js, Thrown> {
-    let hint = if op == Arithmetic::Add {
-        Hint::Default
-    } else {
-        Hint::Number
-    };
-    let left = to_primitive(left, hint)?;
-    let right = to_primitive(right, hint)?;
+    let left = runtime::to_primitive(left)?;
+    let right = runtime::to_primitive(right)?;
     match op {
         Arithmetic::Add => runtime::add(&left, &right),
         Arithmetic::Subtract => runtime::subtract(&left, &right),
         Arithmetic::Multiply => runtime::multiply(&left, &right),
         Arithmetic::Divide => runtime::divide(&left, &right),
-        Arithmetic::Remainder => remainder(&left, &right),
+        Arithmetic::Remainder => runtime::remainder(&left, &right),
     }
 }
 
 /// Unary `-`; Number negation keeps -0.
 pub(crate) fn negate(value: &Js) -> Result<Js, Thrown> {
-    Ok(match to_numeric(value)? {
-        Js::BigInt(b) => Js::BigInt(Rc::new(-&*b)),
-        other => Js::Number(-other.to_number()?),
-    })
-}
-
-/// StringToBigInt; `None` is the spec's undefined for unparsable text.
-fn string_to_bigint(text: &[u16]) -> Option<BigInt> {
-    let text = String::from_utf16(text).ok()?;
-    let text = safe_cex_num::js_trim(&text);
-    if text.is_empty() {
-        return Some(BigInt::default());
-    }
-    let lower = text.to_ascii_lowercase();
-    for (prefix, radix) in [("0x", 16), ("0o", 8), ("0b", 2)] {
-        if let Some(digits) = lower.strip_prefix(prefix) {
-            if digits.is_empty() || !digits.chars().all(|c| c.is_digit(radix)) {
-                return None;
-            }
-            return BigInt::parse_bytes(digits.as_bytes(), radix);
-        }
-    }
-    let digits = text.strip_prefix(['+', '-']).unwrap_or(text);
-    if digits.is_empty() || !digits.bytes().all(|b| b.is_ascii_digit()) {
-        return None;
-    }
-    text.strip_prefix('+').unwrap_or(text).parse().ok()
-}
-
-/// Exact BigInt-vs-Number ordering; `None` for NaN.
-fn compare_bigint_number(big: &BigInt, number: f64) -> Option<Ordering> {
-    if number.is_nan() {
-        return None;
-    }
-    if number.is_infinite() {
-        return Some(if number > 0.0 {
-            Ordering::Less
-        } else {
-            Ordering::Greater
-        });
-    }
-    let whole = number.trunc().to_bigint()?;
-    Some(match big.cmp(&whole) {
-        Ordering::Equal => 0.0.partial_cmp(&number.fract())?,
-        other => other,
-    })
-}
-
-/// IsLessThan over primitives where at least one is a BigInt; `None` is undefined.
-fn bigint_less_than(x: &Js, y: &Js) -> Result<Option<bool>, Thrown> {
-    Ok(match (x, y) {
-        (Js::BigInt(a), Js::BigInt(b)) => Some(a < b),
-        (Js::BigInt(a), Js::String(b)) => string_to_bigint(b).map(|b| **a < b),
-        (Js::String(a), Js::BigInt(b)) => string_to_bigint(a).map(|a| a < **b),
-        (Js::BigInt(a), other) => {
-            compare_bigint_number(a, other.to_number()?).map(|o| o == Ordering::Less)
-        }
-        (other, Js::BigInt(b)) => {
-            compare_bigint_number(b, other.to_number()?).map(|o| o == Ordering::Greater)
-        }
-        _ => unreachable!("bigint_less_than needs a BigInt operand"),
-    })
+    runtime::negate(&runtime::to_primitive(value)?)
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -183,24 +87,15 @@ pub(crate) enum Relation {
 }
 
 /// The relational operators: ToPrimitive(number) left then right, then IsLessThan.
-/// js_runtime compares BigInt through f64, so BigInt operands stay exact here.
 pub(crate) fn relation(op: Relation, left: &Js, right: &Js) -> Result<bool, Thrown> {
-    let left = to_primitive(left, Hint::Number)?;
-    let right = to_primitive(right, Hint::Number)?;
-    if !matches!(left, Js::BigInt(_)) && !matches!(right, Js::BigInt(_)) {
-        return match op {
-            Relation::Less => runtime::less_than(&left, &right),
-            Relation::LessOrEqual => runtime::less_equal(&left, &right),
-            Relation::Greater => runtime::greater_than(&left, &right),
-            Relation::GreaterOrEqual => runtime::greater_equal(&left, &right),
-        };
+    let left = runtime::to_primitive(left)?;
+    let right = runtime::to_primitive(right)?;
+    match op {
+        Relation::Less => runtime::less_than(&left, &right),
+        Relation::LessOrEqual => runtime::less_equal(&left, &right),
+        Relation::Greater => runtime::greater_than(&left, &right),
+        Relation::GreaterOrEqual => runtime::greater_equal(&left, &right),
     }
-    Ok(match op {
-        Relation::Less => bigint_less_than(&left, &right)? == Some(true),
-        Relation::Greater => bigint_less_than(&right, &left)? == Some(true),
-        Relation::LessOrEqual => bigint_less_than(&right, &left)? == Some(false),
-        Relation::GreaterOrEqual => bigint_less_than(&left, &right)? == Some(false),
-    })
 }
 
 pub(crate) fn arithmetic_value(
@@ -444,13 +339,37 @@ mod tests {
 
     #[test]
     fn operators_follow_ecmascript() {
-        let valued = Js::object(vec![("valueOf", Js::function("valueOf", |_, _| Ok(Js::Number(5.0))))]);
+        let valued = Js::object(vec![(
+            "valueOf",
+            Js::function("valueOf", |_, _| Ok(Js::Number(5.0))),
+        )]);
         let sum = arithmetic(Arithmetic::Add, &valued, &Js::Number(1.0)).unwrap();
         assert!(sum.strict_equals(&Js::Number(6.0)));
-        assert!(relation(Relation::Less, &big("9007199254740993"), &Js::Number(9007199254740994.0)).unwrap());
-        assert!(!relation(Relation::Less, &big("9007199254740993"), &Js::Number(9007199254740992.0)).unwrap());
+        assert!(
+            relation(
+                Relation::Less,
+                &big("9007199254740993"),
+                &Js::Number(9007199254740994.0)
+            )
+            .unwrap()
+        );
+        assert!(
+            !relation(
+                Relation::Less,
+                &big("9007199254740993"),
+                &Js::Number(9007199254740992.0)
+            )
+            .unwrap()
+        );
         assert!(relation(Relation::GreaterOrEqual, &big("16"), &Js::str("0x10")).unwrap());
-        assert!(!relation(Relation::LessOrEqual, &Js::Number(f64::NAN), &Js::Number(1.0)).unwrap());
+        assert!(
+            !relation(
+                Relation::LessOrEqual,
+                &Js::Number(f64::NAN),
+                &Js::Number(1.0)
+            )
+            .unwrap()
+        );
         assert!(arithmetic(Arithmetic::Remainder, &big("1"), &big("0")).is_err());
         assert!(arithmetic(Arithmetic::Subtract, &big("1"), &Js::Number(1.0)).is_err());
         let zero = negate(&Js::Number(0.0)).unwrap().to_number().unwrap();

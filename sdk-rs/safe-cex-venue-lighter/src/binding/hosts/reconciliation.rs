@@ -18,7 +18,11 @@ impl ReconciliationHost for Bound {
     }
     fn pair(&self, value: AccountValue) -> SigningResult<(AccountValue, AccountValue)> {
         let iterator = JsIterator::open(&to_js(&value)).map_err(to_signing)?;
-        let next = || iterator.step().map_or(AccountValue::Undefined, |v| to_account(&v));
+        let next = || {
+            iterator
+                .step()
+                .map_or(AccountValue::Undefined, |v| to_account(&v))
+        };
         let first = next();
         let second = next();
         Ok((first, second))
@@ -39,6 +43,8 @@ impl ReconciliationHost for Bound {
         TradingHost::error_value(self, error)
     }
     fn template_string(&self, value: AccountValue) -> SigningResult<Vec<u16>> {
-        to_string(&to_js(&value)).map(|s| s.to_vec()).map_err(to_signing)
+        to_string(&to_js(&value))
+            .map(|s| s.to_vec())
+            .map_err(to_signing)
     }
 }

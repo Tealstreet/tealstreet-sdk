@@ -130,7 +130,10 @@ impl ExchangeAccountAccessHost for Bound {
         to_account(&self.owner)
     }
     fn get(&self, object: &AccountValue, key: &str) -> SigningResult<AccountValue> {
-        to_js(object).get(key).map(|v| to_account(&v)).map_err(to_signing)
+        to_js(object)
+            .get(key)
+            .map(|v| to_account(&v))
+            .map_err(to_signing)
     }
     fn set(&self, object: &AccountValue, key: &str, value: AccountValue) -> SigningResult<()> {
         to_js(object).set(key, to_js(&value)).map_err(to_signing)
@@ -300,7 +303,11 @@ impl ExchangeClassRealm for Realm {
         let _ = slot.set(class.clone());
         Ok(to_account(&class))
     }
-    fn define_prototype_method(&self, class: &AccountValue, body: ExchangeMethod) -> SigningResult<()> {
+    fn define_prototype_method(
+        &self,
+        class: &AccountValue,
+        body: ExchangeMethod,
+    ) -> SigningResult<()> {
         let prototype = to_js(class).get("prototype").map_err(to_signing)?;
         let realm = self.clone();
         let meta = body.metadata();
@@ -315,11 +322,18 @@ impl ExchangeClassRealm for Realm {
     fn arrow(&self, owner: &AccountValue, body: ExchangeMethod) -> SigningResult<AccountValue> {
         Ok(to_account(&self.method(to_js(owner), body)))
     }
-    fn define_data(&self, object: &AccountValue, key: &str, value: AccountValue) -> SigningResult<()> {
+    fn define_data(
+        &self,
+        object: &AccountValue,
+        key: &str,
+        value: AccountValue,
+    ) -> SigningResult<()> {
         to_js(object).define(key, to_js(&value)).map_err(to_signing)
     }
     fn binding_value(&self, name: &str) -> SigningResult<AccountValue> {
-        self.global(name).map(|v| to_account(&v)).map_err(to_signing)
+        self.global(name)
+            .map(|v| to_account(&v))
+            .map_err(to_signing)
     }
     fn array_literal(&self, values: &[AccountValue]) -> SigningResult<AccountValue> {
         Ok(to_account(&Js::array(values.iter().map(to_js).collect())))

@@ -103,6 +103,8 @@ impl ExchangeErrorRecoveryHost for Bound {
         Ok(matches_timeout(&text))
     }
     fn template_string(&self, value: AccountValue) -> SigningResult<Vec<u16>> {
-        to_string(&to_js(&value)).map(|s| s.to_vec()).map_err(to_signing)
+        to_string(&to_js(&value))
+            .map(|s| s.to_vec())
+            .map_err(to_signing)
     }
 }

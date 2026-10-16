@@ -1,11 +1,8 @@
 //! HistoricalFillsHost on Bound.
 use crate::{
     binding::{
-        ops::{
-            Arithmetic, Relation, arithmetic_value, for_of, relation_bool, spread_values,
-        },
+        ops::{Arithmetic, Relation, arithmetic_value, for_of, relation_bool, spread_values},
         realm::Bound,
-        regexp::regexp,
         value::{native_to_js, to_account, to_js, to_signing},
     },
     exchange_historical_fills::{FillBinary, FillVisitor, HistoricalFillsHost},
@@ -13,6 +10,7 @@ use crate::{
     transaction_promise::NativePromise,
     transaction_signing::SigningResult,
 };
+use safe_cex_exchange::js_runtime::regexp::regexp;
 use safe_cex_exchange::js_runtime::value::Thrown;
 
 impl HistoricalFillsHost for Bound {

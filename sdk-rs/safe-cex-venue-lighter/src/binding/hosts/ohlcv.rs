@@ -5,7 +5,6 @@ use crate::{
         ops::{
             Arithmetic, JsIterator, Relation, arithmetic_value, relation_value, spread_with_value,
         },
-        regexp::regexp,
         realm::Bound,
         value::{native_to_js, to_account, to_js, to_thrown},
     },
@@ -14,6 +13,7 @@ use crate::{
     transaction_promise::NativePromise,
     transaction_signing::SigningResult,
 };
+use safe_cex_exchange::js_runtime::regexp::regexp;
 use safe_cex_exchange::js_runtime::value::{FunctionData, Js, Thrown, utf16};
 use std::{
     cell::OnceCell,

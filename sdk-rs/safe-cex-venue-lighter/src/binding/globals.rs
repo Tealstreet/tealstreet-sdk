@@ -146,12 +146,26 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
             let index = optional_json(&input.get("configuredIntegratorIndex")?)?;
             let name = exchange_name(&input.get("exchangeName")?)?;
             Ok(
-                match resolve_lighter_builder_fee_config(testnet, mode.as_ref(), index.as_ref(), name.as_ref()) {
+                match resolve_lighter_builder_fee_config(
+                    testnet,
+                    mode.as_ref(),
+                    index.as_ref(),
+                    name.as_ref(),
+                ) {
                     None => Js::Undefined,
                     Some(config) => Js::object(vec![
-                        ("integratorAccountIndex", Js::BigInt(Rc::new(config.integrator_account_index))),
-                        ("integratorMakerFee", Js::Number(config.integrator_maker_fee)),
-                        ("integratorTakerFee", Js::Number(config.integrator_taker_fee)),
+                        (
+                            "integratorAccountIndex",
+                            Js::BigInt(Rc::new(config.integrator_account_index)),
+                        ),
+                        (
+                            "integratorMakerFee",
+                            Js::Number(config.integrator_maker_fee),
+                        ),
+                        (
+                            "integratorTakerFee",
+                            Js::Number(config.integrator_taker_fee),
+                        ),
                         ("mode", from_typed(&config.mode)?),
                     ]),
                 },
@@ -165,15 +179,19 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
         }),
         helper("extractLighterAccountTierFromPayload", |a| {
             let payload = optional_json(&arg(&a, 0))?;
-            Ok(match extract_lighter_account_tier_from_payload(payload.as_ref()).map_err(coercion)? {
-                None => Js::Undefined,
-                Some(tier) => from_typed(&tier)?,
-            })
+            Ok(
+                match extract_lighter_account_tier_from_payload(payload.as_ref())
+                    .map_err(coercion)?
+                {
+                    None => Js::Undefined,
+                    Some(tier) => from_typed(&tier)?,
+                },
+            )
         }),
         helper("isLighterAccountTierEligibleForPartnerAttribution", |a| {
-            Ok(Js::Bool(is_lighter_account_tier_eligible_for_partner_attribution(
-                tier(&arg(&a, 0))?,
-            )))
+            Ok(Js::Bool(
+                is_lighter_account_tier_eligible_for_partner_attribution(tier(&arg(&a, 0))?),
+            ))
         }),
     ];
     for (name, function) in helpers {
@@ -183,7 +201,10 @@ pub(crate) fn install(globals: &Js) -> Result<(), Thrown> {
         "ENDPOINTS",
         Js::object(ENDPOINTS.iter().map(|(k, v)| (*k, Js::str(v))).collect()),
     )?;
-    globals.define("GRAFANA_ENDPOINTS_EVERY", string_table(&GRAFANA_ENDPOINTS_EVERY))?;
+    globals.define(
+        "GRAFANA_ENDPOINTS_EVERY",
+        string_table(&GRAFANA_ENDPOINTS_EVERY),
+    )?;
     globals.define(
         "GRAFANA_ENDPOINTS_PERIODIC",
         string_table(&GRAFANA_ENDPOINTS_PERIODIC),

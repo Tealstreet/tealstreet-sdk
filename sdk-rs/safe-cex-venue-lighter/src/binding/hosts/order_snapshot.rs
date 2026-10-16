@@ -1,11 +1,8 @@
 //! OrderSnapshotHost on Bound and the cancelled-order `[id, timestamp]` cursor.
 use crate::{
     binding::{
-        ops::{
-            Arithmetic, JsIterator, Relation, arithmetic_value, has_property, relation_value,
-        },
+        ops::{Arithmetic, JsIterator, Relation, arithmetic_value, has_property, relation_value},
         realm::Bound,
-        regexp::regexp,
         value::{native_to_js, to_account, to_js, to_signing},
     },
     exchange_order_snapshot::{CancelledOrderEntries, CandidateVisitor, OrderSnapshotHost},
@@ -13,6 +10,7 @@ use crate::{
     transaction_promise::NativePromise,
     transaction_signing::{SigningResult, TransactionSigningError},
 };
+use safe_cex_exchange::js_runtime::regexp::regexp;
 use safe_cex_exchange::js_runtime::value::{Js, Thrown, utf16};
 
 /// `for (const [id, timestamp] of value)`; intrinsic iterators have no

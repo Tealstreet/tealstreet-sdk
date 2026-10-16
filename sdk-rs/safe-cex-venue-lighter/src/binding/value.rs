@@ -76,8 +76,10 @@ fn wrap(value: &Js) -> AccountValue {
             t.forward.insert(k, Rc::downgrade(&wrapper));
         }
         prune(&mut t.reverse);
-        t.reverse
-            .insert(Rc::as_ptr(&wrapper) as *const () as usize, Rc::downgrade(&wrapper));
+        t.reverse.insert(
+            Rc::as_ptr(&wrapper) as *const () as usize,
+            Rc::downgrade(&wrapper),
+        );
         AccountValue::Object(wrapper)
     })
 }
@@ -174,7 +176,11 @@ impl TransactionRuntime for Microtasks {
         if self.running.replace(true) {
             return;
         }
-        let (queue, running, slot) = (self.queue.clone(), self.running.clone(), self.drainer.clone());
+        let (queue, running, slot) = (
+            self.queue.clone(),
+            self.running.clone(),
+            self.drainer.clone(),
+        );
         let handle = self.runtime.spawn_local(Box::pin(async move {
             loop {
                 let next = queue.borrow_mut().pop_front();
@@ -199,7 +205,10 @@ impl TransactionRuntime for Microtasks {
     }
 }
 
-pub(crate) fn native_to_js(runtime: &Rc<dyn ExchangeRuntime>, value: NativePromise<AccountValue>) -> Js {
+pub(crate) fn native_to_js(
+    runtime: &Rc<dyn ExchangeRuntime>,
+    value: NativePromise<AccountValue>,
+) -> Js {
     let promise = Promise::pending(runtime);
     let settle = promise.clone();
     value.subscribe(move |result| {
