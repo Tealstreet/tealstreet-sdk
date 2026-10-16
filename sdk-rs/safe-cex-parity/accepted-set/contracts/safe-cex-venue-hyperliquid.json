@@ -4748,5 +4748,179 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_hyperliquid::types::OrderResponseStatusCase3": {
+    "shape": "string",
+    "literals": [
+      "waitingForFill"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the OrderResponseStatus union branch at hyperliquid.types.ts line 190, native OrderResponseStatusCase3::WaitingForFill, its exact private remote wire rename and public String admission. Only waitingForFill is accepted by this concrete owner. Native tests inspect the fixed enum variant before serialization, preserve its wire spelling and reject the other waiting status, the valid tagged-unit object and seven other invalid values through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract expressions compare native variants and ordinals before serialization. This reviews only this native/default owner; the outer status union, private schema, local helpers and target/feature obligations remain separate.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored status JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::WaitingForFill => serde_json::json!({\"ok\":true,\"variant\":\"WaitingForFill\",\"ordinal\":0})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"status decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"waitingForFill\"",
+          "output": {
+            "ok": true,
+            "variant": "WaitingForFill",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"waitingForFill\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "WaitingForFill",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"waitingForFill\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"waitingForTrigger\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::OrderResponseStatusCase4": {
+    "shape": "string",
+    "literals": [
+      "waitingForTrigger"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the OrderResponseStatus union branch at hyperliquid.types.ts line 191, native OrderResponseStatusCase4::WaitingForTrigger, its exact private remote wire rename and public String admission. Only waitingForTrigger is accepted by this concrete owner. Native tests inspect the fixed enum variant before serialization, preserve its wire spelling and reject the other waiting status, the valid tagged-unit object and seven other invalid values through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract expressions compare native variants and ordinals before serialization. This reviews only this native/default owner; the outer status union, private schema, local helpers and target/feature obligations remain separate.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored status JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::WaitingForTrigger => serde_json::json!({\"ok\":true,\"variant\":\"WaitingForTrigger\",\"ordinal\":0})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"status decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"waitingForTrigger\"",
+          "output": {
+            "ok": true,
+            "variant": "WaitingForTrigger",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"waitingForTrigger\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "WaitingForTrigger",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"waitingForTrigger\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"waitingForFill\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }
