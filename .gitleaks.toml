@@ -88,6 +88,25 @@ paths = [
   "sdk-rs/[^/]+/scripts/",
   "sdk-rs/[^/]+/[A-Z_]+\\.json$",
   "sdk-rs/[^/]+/[A-Za-z_]+\\.md$",
+  # 5. Gate EVIDENCE trees, measured 2026-10-16 on the commit that published
+  #    `sdk-rs` to the mirror: 1043 of 1054 findings, across 316 files, all in
+  #    an `evidence/` directory. Every one is a hash manifest or an oracle
+  #    capture - `"api_factory.rs": "<sha>"` is the shape, a FILE NAME beside
+  #    its content hash, which is the same false positive already recorded for
+  #    coinbase-tests.log below. The entries above only matched ONE directory
+  #    level under `sdk-rs/`, so `sdk-rs/parity/evidence/` and
+  #    `sdk-rs/<crate>/evidence/audit-*/` fell through them.
+  "sdk-rs/(.+/)?evidence/",
+  # 5b. The accepted-set contract fixtures: ten `"token": "..."` hits, all
+  #     hand-made JWT expiry vectors whose signature is the literal string
+  #     `sig` or `x`. Decoded: {"alg":"HS256"}.{"exp":2}.sig,
+  #     {}.{"exp":100}.sig and {}.{"exp":4102444800}.x - three segments of
+  #     base64 chosen to exercise expiry branches, not credentials.
+  "sdk-rs/safe-cex-parity/accepted-set/",
+  # 6. Manifest rows are prose plus mappings. The single remaining finding was
+  #    `keyed comparison, <phrase>` in a woo row note - English long enough to
+  #    trip the entropy heuristic, rule 4 above in a file type it did not list.
+  "sdk-rs/parity/manifest/",
 ]
 
 [[rules]]
@@ -100,4 +119,7 @@ content hash, not a token.
 """
 paths = [
   "sdk-rs/[^/]+/[A-Z_]+\\.json$",
+  # The same filename-beside-hash shape in the evidence trees: 27 hits on
+  # 2026-10-16, all inside an `evidence/` directory.
+  "sdk-rs/(.+/)?evidence/",
 ]
