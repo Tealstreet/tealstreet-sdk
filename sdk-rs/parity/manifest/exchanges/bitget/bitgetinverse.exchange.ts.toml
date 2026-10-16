@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/public_data.rs::fetch_inverse_markets"
 status = "ported"
-note = "Preserves fixed USD filter, precision/status/defaults, inverse-only isInverse marker, maxTradeNum fallback rather than Classic maxOrderQty/maxMarketOrderQty, and original info aliases. Actual body over fallible native receiver/HTTP/array/property/imported-operation bindings; opaque clones preserve native values and references. PUBLIC_DATA_EVIDENCE.md records native-before-source floors, discrimination and exact review/gate SHA. The onMarketsChanged argument prologue supplies added; captured methods retain their native owner. Concrete Exchange/socket/HTTP construction, callback callability, overridden operation/proxy/prototype behavior and complete calendar/input-domain semantics remain separate supplied binding obligations, not exhaustive fixture proofs."
+note = "Preserves fixed USD filter, precision/status/defaults, inverse-only isInverse marker, maxTradeNum fallback rather than Classic maxOrderQty/maxMarketOrderQty, and original info aliases. Actual body over fallible native receiver/HTTP/array/property/imported-operation bindings; opaque clones preserve native values and references. PUBLIC_DATA_EVIDENCE.md records native-before-source floors, discrimination and exact review/gate SHA. The onMarketsChanged argument prologue supplies added; captured methods retain their native owner. Concrete Exchange/socket/HTTP construction, callback callability, overridden operation/proxy/prototype behavior and complete calendar/input-domain semantics remain separate supplied binding obligations, not exhaustive fixture proofs. Renamed Rust target: safe-cex-venue-bitget/src/public_data.rs::fetch_inverse_markets."
 
 [[symbol]]
 ts = "BitgetInverseExchange.fetchBalance"
@@ -56,7 +56,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/account_positions.rs::fetch_inverse_balance"
 status = "ported"
-note = "Ports the source async body over supplied receiver/HTTP promises and native value language operations. Opaque Clone retains reference identity; UTF-16 strings, native nonfinite numbers, array holes/live length, object spread/own definitions and ordinary coin assignment are host contracts, not a JSON projection. Preserves routing/client selection, source fallbacks, numeric precedence, error scope and original aliases. Native expectations precede actual-source comparisons; ACCOUNT_POSITIONS_EVIDENCE.md binds the measured floor, mutation and review. Separately mapped callees and concrete Exchange/HTTP/native language binding remain separate; arbitrary proxy/getter effects and promise scheduling are not proven by the fixture."
+note = "Ports the source async body over supplied receiver/HTTP promises and native value language operations. Opaque Clone retains reference identity; UTF-16 strings, native nonfinite numbers, array holes/live length, object spread/own definitions and ordinary coin assignment are host contracts, not a JSON projection. Preserves routing/client selection, source fallbacks, numeric precedence, error scope and original aliases. Native expectations precede actual-source comparisons; ACCOUNT_POSITIONS_EVIDENCE.md binds the measured floor, mutation and review. Separately mapped callees and concrete Exchange/HTTP/native language binding remain separate; arbitrary proxy/getter effects and promise scheduling are not proven by the fixture. Renamed Rust target: safe-cex-venue-bitget/src/account_positions.rs::fetch_inverse_balance."
 
 [[symbol]]
 ts = "BitgetInverseExchange.fetchOpenPositions"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/inverse_positions.rs::fetch_open_positions"
 status = "ported"
-note = "Native unique market-base coin iteration, per-coin request/catch/continue, inverse reference price precedence and eight-place contracts, full decoded position fields/raw alias, synchronous logging/liquidation/clock collaborators. Bounded eight-scene source oracle; no live exchange claim."
+note = "Native unique market-base coin iteration, per-coin request/catch/continue, inverse reference price precedence and eight-place contracts, full decoded position fields/raw alias, synchronous logging/liquidation/clock collaborators. Bounded eight-scene source oracle; no live exchange claim. Renamed Rust target: safe-cex-venue-bitget/src/inverse_positions.rs::fetch_open_positions."
 
 [[symbol]]
 ts = "BitgetInverseExchange.cancelAllOrders"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/cancellation.rs::inverse_cancel_all_orders"
 status = "ported"
-note = "Exact cancellation body over supplied fallible receiver/call sites and JS property/spread/Promise.all intrinsics. Native UTF-16 ID normalization, partitioning, uniqueness, numeric key ordering, batches of 50, payload omission and source catch/rethrow/continue scopes retained. Shared dense order arrays retain live membership across awaits; records and opaque info aliases stay intact. 88 independent native/source cases. Concrete exchange/REST bindings and delegated child bodies (including UTA strategy not-found policy) remain independently mapped."
+note = "Exact cancellation body over supplied fallible receiver/call sites and JS property/spread/Promise.all intrinsics. Native UTF-16 ID normalization, partitioning, uniqueness, numeric key ordering, batches of 50, payload omission and source catch/rethrow/continue scopes retained. Shared dense order arrays retain live membership across awaits; records and opaque info aliases stay intact. 88 independent native/source cases. Concrete exchange/REST bindings and delegated child bodies (including UTA strategy not-found policy) remain independently mapped. Renamed Rust target: safe-cex-venue-bitget/src/cancellation.rs::inverse_cancel_all_orders."
 
 [[symbol]]
 ts = "BitgetInverseExchange.cancelNormalOrders"
@@ -80,7 +80,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/cancellation.rs::inverse_cancel_normal_orders"
 status = "ported"
-note = "Exact cancellation body over supplied fallible receiver/call sites and JS property/spread/Promise.all intrinsics. Native UTF-16 ID normalization, partitioning, uniqueness, numeric key ordering, batches of 50, payload omission and source catch/rethrow/continue scopes retained. Shared dense order arrays retain live membership across awaits; records and opaque info aliases stay intact. 88 independent native/source cases. Concrete exchange/REST bindings and delegated child bodies (including UTA strategy not-found policy) remain independently mapped."
+note = "Exact cancellation body over supplied fallible receiver/call sites and JS property/spread/Promise.all intrinsics. Native UTF-16 ID normalization, partitioning, uniqueness, numeric key ordering, batches of 50, payload omission and source catch/rethrow/continue scopes retained. Shared dense order arrays retain live membership across awaits; records and opaque info aliases stay intact. 88 independent native/source cases. Concrete exchange/REST bindings and delegated child bodies (including UTA strategy not-found policy) remain independently mapped. Renamed Rust target: safe-cex-venue-bitget/src/cancellation.rs::inverse_cancel_normal_orders."
 
 [[symbol]]
 ts = "BitgetInverseExchange.cancelAlgoOrders"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/cancellation.rs::inverse_cancel_algo_orders"
 status = "ported"
-note = "Exact cancellation body over supplied fallible receiver/call sites and JS property/spread/Promise.all intrinsics. Native UTF-16 ID normalization, partitioning, uniqueness, numeric key ordering, batches of 50, payload omission and source catch/rethrow/continue scopes retained. Shared dense order arrays retain live membership across awaits; records and opaque info aliases stay intact. 88 independent native/source cases. Concrete exchange/REST bindings and delegated child bodies (including UTA strategy not-found policy) remain independently mapped."
+note = "Exact cancellation body over supplied fallible receiver/call sites and JS property/spread/Promise.all intrinsics. Native UTF-16 ID normalization, partitioning, uniqueness, numeric key ordering, batches of 50, payload omission and source catch/rethrow/continue scopes retained. Shared dense order arrays retain live membership across awaits; records and opaque info aliases stay intact. 88 independent native/source cases. Concrete exchange/REST bindings and delegated child bodies (including UTA strategy not-found policy) remain independently mapped. Renamed Rust target: safe-cex-venue-bitget/src/cancellation.rs::inverse_cancel_algo_orders."
 
 [[symbol]]
 ts = "BitgetInverseExchange.formatAlgoOrder"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/order_preparation.rs::inverse_format_algo_order"
 status = "ported"
-note = "Executable normal/UTA/strategy/inverse formatting, virtual TP/SL and rollback replacement, or stop-sizing position lookup body retaining source field/capture/read/lot/ID/guard/catch/alias/cache/finally order. Supplied native receiver/callee/array/iterator/intrinsic and independently owned promise operations; decoded native expectations precede actual-source comparison in an 84-case floor. Concrete Exchange/HTTP/class assembly and arbitrary dynamic binding/prototype/coercion/concurrency domains remain separate pending obligations; no class or callee target fabricated"
+note = "Executable normal/UTA/strategy/inverse formatting, virtual TP/SL and rollback replacement, or stop-sizing position lookup body retaining source field/capture/read/lot/ID/guard/catch/alias/cache/finally order. Supplied native receiver/callee/array/iterator/intrinsic and independently owned promise operations; decoded native expectations precede actual-source comparison in an 84-case floor. Concrete Exchange/HTTP/class assembly and arbitrary dynamic binding/prototype/coercion/concurrency domains remain separate pending obligations; no class or callee target fabricated. Renamed Rust target: safe-cex-venue-bitget/src/order_preparation.rs::inverse_format_algo_order."
 
 [[symbol]]
 ts = "BitgetInverseExchange.placeOrderBatch"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/order_placement.rs::inverse_place_order_batch"
 status = "ported"
-note = "Executable source body retaining caller/routing/capture order, sequential requests and lot guards, branch-specific batching/ID fallbacks/catch/log/schedule behavior, over supplied native receiver/callable-owner/imported/intrinsic/array/iterator/promise/error operations. Direct native assertions precede actual-source comparisons in a fixed 59-case floor. Concrete Exchange/HTTP assembly and broad native binding/temporal domains remain separate pending obligations; no class/callee target fabricated."
+note = "Executable source body retaining caller/routing/capture order, sequential requests and lot guards, branch-specific batching/ID fallbacks/catch/log/schedule behavior, over supplied native receiver/callable-owner/imported/intrinsic/array/iterator/promise/error operations. Direct native assertions precede actual-source comparisons in a fixed 59-case floor. Concrete Exchange/HTTP assembly and broad native binding/temporal domains remain separate pending obligations; no class/callee target fabricated. Renamed Rust target: safe-cex-venue-bitget/src/order_placement.rs::inverse_place_order_batch."
 
 [[symbol]]
 ts = "BitgetInverseExchange.updateAlgoOrder"
@@ -112,7 +112,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/rest_actions.rs::inverse_update_algo_order"
 status = "ported"
-note = "Executable source body over supplied native receiver/callable-owner/intrinsic/property/array/error and independently-owned async operation bindings. Retains source guards, property-presence updates, payload fields, branch-specific routes, catch/error identity and cache effects. Native assertions precede actual-source comparisons in a fixed 65-case floor; concrete Exchange/HTTP assembly and native-binding domains remain pending obligations, not class targets. Preserves the original newSize check that clears size; no correction claimed."
+note = "Executable source body over supplied native receiver/callable-owner/intrinsic/property/array/error and independently-owned async operation bindings. Retains source guards, property-presence updates, payload fields, branch-specific routes, catch/error identity and cache effects. Native assertions precede actual-source comparisons in a fixed 65-case floor; concrete Exchange/HTTP assembly and native-binding domains remain pending obligations, not class targets. Preserves the original newSize check that clears size; no correction claimed. Renamed Rust target: safe-cex-venue-bitget/src/rest_actions.rs::inverse_update_algo_order."
 
 [[symbol]]
 ts = "BitgetInverseExchange.setLeverage"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/rest_actions.rs::inverse_set_leverage"
 status = "ported"
-note = "Executable source body over supplied native receiver/callable-owner/intrinsic/property/array/error and independently-owned async operation bindings. Retains source guards, property-presence updates, payload fields, branch-specific routes, catch/error identity and cache effects. Native assertions precede actual-source comparisons in a fixed 65-case floor; concrete Exchange/HTTP assembly and native-binding domains remain pending obligations, not class targets. "
+note = "Executable source body over supplied native receiver/callable-owner/intrinsic/property/array/error and independently-owned async operation bindings. Retains source guards, property-presence updates, payload fields, branch-specific routes, catch/error identity and cache effects. Native assertions precede actual-source comparisons in a fixed 65-case floor; concrete Exchange/HTTP assembly and native-binding domains remain pending obligations, not class targets. Renamed Rust target: safe-cex-venue-bitget/src/rest_actions.rs::inverse_set_leverage."
 
 [[symbol]]
 ts = "BitgetInverseExchange.changeMarginType"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/rest_actions.rs::inverse_change_margin_type"
 status = "ported"
-note = "Executable source body over supplied native receiver/callable-owner/intrinsic/property/array/error and independently-owned async operation bindings. Retains source guards, property-presence updates, payload fields, branch-specific routes, catch/error identity and cache effects. Native assertions precede actual-source comparisons in a fixed 65-case floor; concrete Exchange/HTTP assembly and native-binding domains remain pending obligations, not class targets. "
+note = "Executable source body over supplied native receiver/callable-owner/intrinsic/property/array/error and independently-owned async operation bindings. Retains source guards, property-presence updates, payload fields, branch-specific routes, catch/error identity and cache effects. Native assertions precede actual-source comparisons in a fixed 65-case floor; concrete Exchange/HTTP assembly and native-binding domains remain pending obligations, not class targets. Renamed Rust target: safe-cex-venue-bitget/src/rest_actions.rs::inverse_change_margin_type."
 
 [[symbol]]
 ts = "BitgetInverseExchange.mapOrder"
