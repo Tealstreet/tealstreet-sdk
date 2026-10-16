@@ -23,7 +23,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 
 - **Initial members:**
   - `lighter` and `lighter-robinhood`, built with the existing `LighterNativeExchange::new`; the name selects deployment URLs and quote currency. The host retains the runtime transport and local signer entropy.
-  - `grvt`, built with `GrvtExchange::new` over shared js_runtime; its host supplies fresh HTTP and the common external-public-data factory. Active SDK signing requires a local wallet; the native hosted-signer host refuses this venue visibly.
+  - `grvt`, built with `GrvtExchange::new` over shared js_runtime; its host supplies fresh HTTP and the common external-public-data factory. The shared hosted signer is installed on its HTTP clients; active SDK order signing still requires a local wallet.
   - `asterdex`, built with `native_exchange::AsterDEXExchange::new` on the shared
     js_runtime. Its HTTP factory receives each lane's options, including secondary
     credentials and proxy override. The native host routes signed requests through

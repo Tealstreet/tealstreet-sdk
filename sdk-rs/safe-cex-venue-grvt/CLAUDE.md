@@ -238,8 +238,14 @@ listed in the manifest. Socket scalar fields alias native state; map views read
 that state and refuse arbitrary protocol-cache writes. It does not establish
 arbitrary executable host-object or third-party SDK conformance. The five missing
 source Exchange methods retain their inherited `Not implemented` rejection.
-Hosted remote signing is explicitly refused by the native registry host because
-the active GRVT SDK order signer requires the local wallet.
+The native registry installs the shared hosted signer on GRVT's HTTP clients,
+including public requests that the source does not tag for bypass. Hosted
+`getAccount` works without a local secret; the provided callback owns returned
+authentication config. SDK order placement retains the source local-wallet
+requirement and fails before signing RPC or HTTP when that wallet is absent.
+`safe-cex-registry/tests/native_host_grvt_signer.rs` compares actual source
+factories and `getAccount` inputs, observes callback headers on real reqwest IO,
+and checks callback rejection and the independent SDK wallet guard.
 
 Each of the three API clients uses the shared
 `js_runtime::client::factory::create` with the runtime transport provider. This retains eager routing

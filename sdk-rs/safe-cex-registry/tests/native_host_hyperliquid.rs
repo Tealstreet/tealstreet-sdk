@@ -22,6 +22,70 @@ use tokio::{
 const KEY: &str = "0x0123456789012345678901234567890123456789012345678901234567890123";
 const ADDRESS: &str = "0x14791697260e4c9a71f18484c9f997b308e59325";
 
+#[test]
+fn hyperliquid_registry_folds_journal_records_over_native_http() {
+    support::run_local(async {
+        let h = support::venue_harness(
+            ExchangeName::Hyperliquid,
+            Rc::new(|request| {
+                let body: Value = serde_json::from_str(&request.body).unwrap();
+                assert_eq!(request.path, "/info");
+                assert_eq!(body["user"], ADDRESS);
+                match body["type"].as_str().unwrap() {
+                    "userFillsByTime" => Some(json!([
+                        {"coin":"BTC","tid":1,"oid":10,"time":1699999998000u64,"side":"B","px":"61000","sz":"1","fee":"1","feeToken":"USDC","closedPnl":"0","dir":"Open Long"},
+                        {"coin":"BTC","tid":2,"oid":11,"time":1699999999000u64,"side":"A","px":"62000","sz":"1","fee":"2","feeToken":"USDC","closedPnl":"1000","dir":"Close Long"}
+                    ])),
+                    "userFunding" => Some(json!([])),
+                    other => panic!("unexpected journal request {other}"),
+                }
+            }),
+            json!({"key":ADDRESS, "secret":"", "applicationId":ADDRESS}),
+            None,
+            safe_cex_exchange::native::native_runtime(),
+        ).await;
+        h.store
+            .update(
+                safe_cex_store::StoreUpdate {
+                    markets: Some(vec![serde_json::from_value(json!({
+                "id":"BTC", "symbol":"BTC-PERP", "base":"BTC", "quote":"USDC", "active":true,
+                "precision":{"amount":0.00001,"price":1},
+                "limits":{"amount":{"min":0.00001,"max":100},"leverage":{"min":1,"max":40}}
+            })).unwrap()]),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+        let records = h
+            .exchange
+            .fetch_historical_positions(safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "native-journal".into(),
+                from: Some(1_699_999_000_000.0),
+                to: Some(1_700_000_000_000.0),
+            })
+            .await
+            .unwrap();
+        assert_eq!(records.len(), 1);
+        let record: safe_cex_types::PositionRecord =
+            serde_json::from_value(records[0].clone()).unwrap();
+        assert_eq!(record.account, "native-journal");
+        assert_eq!(record.symbol, "BTC-PERP");
+        assert_eq!(record.settle_currency, "USDC");
+        assert_eq!(record.realized_pnl, 1000.0);
+        assert_eq!(record.fees, 3.0);
+        assert!(
+            h.seen.borrow().len() >= 3,
+            "real income and execution reads reached HTTP"
+        );
+        assert!(
+            h.peers.borrow().is_empty(),
+            "pure journal reads do not start sockets"
+        );
+        h.exchange.dispose().unwrap();
+    });
+}
+
 fn sign(body: &Value, mainnet: bool) -> Value {
     serde_json::to_value(
         safe_cex_venue_hyperliquid::signing::sign_l1_action(

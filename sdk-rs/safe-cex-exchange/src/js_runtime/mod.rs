@@ -12,4 +12,5 @@ pub mod regexp;
 pub mod scope;
 pub mod sockets;
 pub mod store;
+mod throttle;
 pub mod value;

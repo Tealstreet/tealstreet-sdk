@@ -1,11 +1,17 @@
-//! Concrete linear Bybit socket lifecycle. Message dispatch is still being wired.
+//! Concrete Bybit socket lifecycle and source private event delivery.
 use crate::exchange::BybitExchange;
 use safe_cex_exchange::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture},
     websocket::{BaseWebSocket, WsProtocol, WsRuntime},
 };
-use std::rc::{Rc, Weak};
+use std::{
+    cell::{Cell, RefCell},
+    rc::{Rc, Weak},
+};
+
+type FillTracker =
+    Box<dyn FnMut(&str, f64, Option<f64>) -> safe_cex_store::incremental_fills::IncrementalFill>;
 
 #[derive(Clone)]
 pub(crate) struct PrivateProtocolConfig {
@@ -20,6 +26,8 @@ pub(crate) struct PrivateProtocol {
     pub parent: Weak<BybitExchange>,
     pub runtime: Rc<dyn WsRuntime>,
     pub config: PrivateProtocolConfig,
+    pub(super) auth_retries: Cell<u32>,
+    pub(super) fills: RefCell<FillTracker>,
 }
 impl WsProtocol for PrivateProtocol {
     fn ping(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
@@ -48,11 +56,33 @@ impl WsProtocol for PrivateProtocol {
             self.config.relay_enabled,
         )
     }
+    fn on_message(
+        &self,
+        socket: &Rc<BaseWebSocket>,
+        frame: &safe_cex_transport::socket::SocketFrame,
+    ) -> Result<(), ExchangeError> {
+        self.message(socket, frame)
+    }
     fn on_open(&self, socket: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
         self.open(socket)
     }
 }
 impl PrivateProtocol {
+    pub(crate) fn new(
+        parent: Weak<BybitExchange>,
+        runtime: Rc<dyn WsRuntime>,
+        config: PrivateProtocolConfig,
+    ) -> Self {
+        Self {
+            parent,
+            runtime,
+            config,
+            auth_retries: Cell::new(0),
+            fills: RefCell::new(Box::new(
+                safe_cex_store::incremental_fills::create_incremental_fills(500.),
+            )),
+        }
+    }
     pub(crate) fn open(&self, socket: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
         let clock = self.config.sync_clock.clone();
         let now = self.config.now_ms.clone();
