@@ -52,5 +52,11 @@
     "file": "safe-cex-venue-coinbase/src/portfolios_balances.rs",
     "reason": "Reviewed portfolios_balances.rs: the Rc<H> impl forwards every PortfolioHost method to (**self) unchanged, so a retained class host is the same capability rather than a copy. Decoding of PortfolioReply belongs to the concrete H implementation, not this forwarding receiver.",
     "sourceSha256": "774fa7229b512ec22517c3a85a6d1089981cea82ae43821e42bddac9735762bc"
+  },
+  "safe_cex_exchange::exchange::Exchange::fetch_option_expiries": {
+    "category": "non-decoder",
+    "file": "safe-cex-exchange/src/exchange.rs",
+    "reason": "Reviewed the default fetch_option_expiries body: it ignores its underlying String, constructs options_unsupported(self.name(), \"Option expiries\"), and returns that venue-named error without parsing input or constructing an expiry. This matches packages/safe-cex/src/exchanges/base.ts::fetchOptionExpiries. Concrete overrides retain their own compiler inventory and decoder contracts; this entry does not classify fetch_option_chain, fetch_account_greeks, or the rest of Exchange. See sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
+    "sourceSha256": "f74dba4cce58600bf2df0fd455c4580a301decd76ab5ceb0fd226164cead4823"
   }
 }

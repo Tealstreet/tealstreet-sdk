@@ -22,7 +22,7 @@ function fixture(check) {
     check({ root, sysroot, std, syn, json, consumer, doc, metadata, artifacts });
   } finally { fs.rmSync(root, { recursive: true, force: true }); }
 }
-test('expression macro origins require active registry bindings and exact compiler artifacts', () => fixture(({ doc, consumer, metadata, artifacts, sysroot }) => {
+test('expression macro origins require active registry bindings and exact compiler artifacts', () => fixture(({ root, doc, consumer, metadata, artifacts, sysroot }) => {
   assert.deepEqual(verifiedMacroOrigins(doc, consumer, metadata, artifacts, sysroot), ['serde_json', 'std', 'syn']);
   const changed = structuredClone(metadata);
   changed.packages[0].version = '999.0.0';
@@ -35,6 +35,29 @@ test('expression macro origins require active registry bindings and exact compil
   assert.deepEqual(verifiedMacroOrigins(doc, consumer, changed, artifacts, sysroot), ['serde_json', 'std']);
   assert.deepEqual(verifiedMacroOrigins(doc, consumer, metadata, [...artifacts, artifacts[0]], sysroot), ['serde_json', 'std']);
   assert.deepEqual(verifiedMacroOrigins(doc, consumer, metadata, [{ ...artifacts[0], package_id: 'substitution' }, artifacts[1]], sysroot), ['serde_json', 'std']);
+  for (const [index, name] of ['serde', 'serde_core'].entries()) {
+    const file = path.join(root, `lib${name}-hash.rmeta`); fs.writeFileSync(file, 'compiler fixture');
+    doc.external_crates[index + 4] = { name, path: file };
+    metadata.packages.push({ id: `registry:${name}`, name, version: '1.0.229', source: 'registry+https://github.com/rust-lang/crates.io-index' });
+    artifacts.push({ package_id: `registry:${name}`, filenames: [file] });
+  }
+  metadata.resolve.nodes[0].deps.push({ name: 'serde', pkg: 'registry:serde' });
+  metadata.resolve.nodes.push({ id: 'registry:serde', deps: [{ name: 'serde_core', pkg: 'registry:serde_core' }] });
+  assert.ok(verifiedMacroOrigins(doc, consumer, metadata, artifacts, sysroot).includes('serde'));
+  for (const mutate of [
+    graph => { graph.packages.find(pkg => pkg.name === 'serde').version = '999.0.0'; },
+    graph => { graph.packages.find(pkg => pkg.name === 'serde').source = null; },
+    graph => { graph.packages.find(pkg => pkg.name === 'serde_core').version = '999.0.0'; },
+    graph => { graph.packages.find(pkg => pkg.name === 'serde_core').source = null; },
+    graph => { graph.resolve.nodes[1].deps[0].pkg = 'vendor'; },
+    graph => { graph.resolve.nodes[0].deps.find(dep => dep.name === 'serde').name = 'renamed'; },
+  ]) {
+    const graph = structuredClone(metadata); mutate(graph);
+    assert.ok(!verifiedMacroOrigins(doc, consumer, graph, artifacts, sysroot).includes('serde'), 'SERDE-FORWARD requires the actual reviewed facade and provider');
+  }
+  for (const compiled of [artifacts.slice(0, -1), [...artifacts, artifacts.at(-1)], artifacts.map(row => row.package_id === 'registry:serde_core' ? { ...row, package_id: 'vendor' } : row)]) {
+    assert.ok(!verifiedMacroOrigins(doc, consumer, metadata, compiled, sysroot).includes('serde'), 'SERDE-FORWARD refuses missing, duplicate or substituted provider artifacts');
+  }
 }));
 test('macro namespace capabilities reject missing, renamed and ambiguous bindings', () => fixture(({ doc, consumer, metadata, artifacts, sysroot }) => {
   for (const mutate of [
