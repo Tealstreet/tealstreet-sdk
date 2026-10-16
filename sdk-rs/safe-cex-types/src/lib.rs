@@ -591,6 +591,46 @@ pub struct CoinBalance {
     pub notional: f64,
 }
 
+/// A currency row preserves the shape returned by its source venue. Crypto.com
+/// REST returns available/locked rather than the statically declared Balance.
+#[derive(Debug, Clone, PartialEq, Serialize)]
+#[serde(untagged)]
+pub enum CurrencyBalance {
+    Declared(Balance),
+    AvailableLocked { available: f64, locked: f64 },
+}
+
+impl CurrencyBalance {
+    /// Read a declared Balance row without normalizing other source shapes.
+    pub fn as_balance(&self) -> Option<&Balance> {
+        match self {
+            Self::Declared(balance) => Some(balance),
+            Self::AvailableLocked { .. } => None,
+        }
+    }
+}
+impl From<Balance> for CurrencyBalance {
+    fn from(balance: Balance) -> Self {
+        Self::Declared(balance)
+    }
+}
+impl<'de> Deserialize<'de> for CurrencyBalance {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        #[derive(Deserialize)]
+        #[serde(untagged)]
+        enum Wire {
+            Declared(Balance),
+            AvailableLocked { available: f64, locked: f64 },
+        }
+        match Wire::deserialize(crate::strict_decode::object(deserializer))? {
+            Wire::Declared(balance) => Ok(Self::Declared(balance)),
+            Wire::AvailableLocked { available, locked } => {
+                Ok(Self::AvailableLocked { available, locked })
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, TS)]
 #[serde(rename_all = "camelCase")]
 #[ts(optional_fields)]
@@ -612,7 +652,7 @@ pub struct Balance {
         skip_serializing_if = "Option::is_none"
     )]
     #[ts(type = "{ [currency: string]: Balance }", optional)]
-    pub currencies: Option<crate::object_map::JsObjectMap<Balance>>,
+    pub currencies: Option<crate::object_map::JsObjectMap<crate::CurrencyBalance>>,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -3886,7 +3926,7 @@ mod strict_codecs {
             deserialize_with = "deserialize_present",
             skip_serializing_if = "Option::is_none"
         )]
-        currencies: Option<crate::object_map::JsObjectMap<Balance>>,
+        currencies: Option<crate::object_map::JsObjectMap<crate::CurrencyBalance>>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",

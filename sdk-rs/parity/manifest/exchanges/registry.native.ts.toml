@@ -78,9 +78,9 @@ note = "CHOSEN: native_binancespot selects the actual source module ./binance/bi
 ts = "exchangeRegistry.bingx"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_bingx"
+rs = [ "safe-cex-registry/src/loaders.rs::native_bingx", "safe-cex-registry/src/rust_venues.rs::bingx_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::bingx" ]
 status = "divergent"
-note = "CHOSEN: native_bingx selects the actual source module ./bingx/bingx.exchange and export BingxExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bingx. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_bingx selects the actual source module ./bingx/bingx.exchange and export BingxExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bingx. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members: `safe-cex-registry/src/rust_venues.rs::bingx_constructor`, `safe-cex-registry/src/rust_venues.rs::RustVenueHost::bingx`. Rust construction uses BingxExchange::new on shared js_runtime; native_host_bingx proves signed startup/placement/cancellation. The default remains module-host; see sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice."
 
 [[symbol]]
 ts = "exchangeRegistry.bitget"

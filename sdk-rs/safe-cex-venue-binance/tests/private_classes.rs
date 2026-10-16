@@ -1629,7 +1629,7 @@ fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
         balance.used = -0.0;
         let mut nested = balance.clone();
         nested.total = f64::NEG_INFINITY;
-        balance.currencies = Some([("witness".into(), nested)].into_iter().collect());
+        balance.currencies = Some([("witness".into(), nested.into())].into_iter().collect());
         Store::update(
             store.as_ref(),
             safe_cex_store::StoreUpdate {
