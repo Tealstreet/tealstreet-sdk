@@ -1522,3 +1522,23 @@ shared native dependencies and Kraken TypeScript oracle inputs. The full native
 and host/wasm Clippy receipts therefore remain applicable without repeating
 unchanged tests. Frozen installation and all-workspace formatting pass after
 integration; the selected production probe is rerun independently.
+
+
+### Master conflict refresh
+
+Master `f9b0ba6ec662c5c2ae084305751ec91a2c702ae3` integrated in
+`7e4ca5c5490fea969a872576653fdefac13f731d`. The sole conflict joined two appended
+parity-tool documentation sections: the complete master GRVT borrowed-map recipe
+and the scoped-checker guidance are both retained. The latter now sits beside
+structural-gate documentation, preserving the master append point. The CLI Rust
+source and its test fixture are byte-identical to the reviewed `2333c92883`.
+
+Master also changed the candle-cache dependency. Fresh full scoped Kraken tests
+pass **141/0 failures/0 ignored**, and fresh native plus wasm all-targets Clippy
+pass with warnings denied. Fresh scoped/global structural checks pass
+**134/539** and **7459/17204** respectively. Frozen installation and all-workspace
+formatting pass. The base-URL decoder, witness and guard-removal control remain
+unchanged; their source/dependency inputs for string admission are preserved.
+
+The fresh integrated production enum probe also passes: one actual runtime
+result, zero classification-only receipts, zero failed owners.
