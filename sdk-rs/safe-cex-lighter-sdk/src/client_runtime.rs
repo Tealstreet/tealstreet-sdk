@@ -157,6 +157,7 @@ pub struct LighterApiClient<H: ClientHost> {
 }
 impl<H: ClientHost + 'static> LighterApiClient<H> {
     pub fn new(h: Rc<H>, config: H::Value) -> Result<Self, H::Error> {
+        // Keep registrations explicit so production source discovery sees each callback.
         let mut methods = Vec::new();
         for name in [
             "addRequestInterceptor",
@@ -174,21 +175,6 @@ impl<H: ClientHost + 'static> LighterApiClient<H> {
         ] {
             methods.push(field(name, h.existing_method(name)?));
         }
-        macro_rules! sync_method {
-            ($name:literal,$body:ident) => {{
-                let runtime = h.clone();
-                let callback = h.function(Rc::new(move |r, args| {
-                    $body(
-                        runtime.clone(),
-                        r,
-                        args.first()
-                            .cloned()
-                            .unwrap_or_else(|| runtime.undefined_value()),
-                    )
-                }));
-                methods.push(field($name, callback));
-            }};
-        }
         {
             let runtime = h.clone();
             methods.push(field(
@@ -199,7 +185,19 @@ impl<H: ClientHost + 'static> LighterApiClient<H> {
                 })),
             ));
         }
-        sync_method!("handleApiError", handle_api_error);
+        {
+            let runtime = h.clone();
+            let callback = h.function(Rc::new(move |r, args| {
+                handle_api_error(
+                    runtime.clone(),
+                    r,
+                    args.first()
+                        .cloned()
+                        .unwrap_or_else(|| runtime.undefined_value()),
+                )
+            }));
+            methods.push(field("handleApiError", callback));
+        }
         {
             let runtime = h.clone();
             let callback = h.function(Rc::new(move |_, a| {
@@ -224,7 +222,19 @@ impl<H: ClientHost + 'static> LighterApiClient<H> {
             }));
             methods.push(field("buildOrderInfoPayload", callback));
         }
-        sync_method!("serializeTxInfo", serialize_tx_info);
+        {
+            let runtime = h.clone();
+            let callback = h.function(Rc::new(move |r, args| {
+                serialize_tx_info(
+                    runtime.clone(),
+                    r,
+                    args.first()
+                        .cloned()
+                        .unwrap_or_else(|| runtime.undefined_value()),
+                )
+            }));
+            methods.push(field("serializeTxInfo", callback));
+        }
         {
             let runtime = h.clone();
             methods.push(field(

@@ -26,7 +26,15 @@ fn base(rt: &Rt, name: Js, options: Js, store: Js) -> Result<Js, Thrown> {
         settings: super::exchange::settings(),
         external_public_data: extra.external_public_data.clone(),
     };
-    let (this, core) = base_exchange::create(&rt.shared.sockets, parts, name, options, store)?;
+    let spot = extra.name == safe_cex_types::ExchangeName::Krakenspot;
+    let (this, core) =
+        base_exchange::create(&rt.shared.sockets, parts, name, options, store, |this| {
+            // krakenspot.exchange.ts: isSpot = true; Futures inherits false.
+            if spot {
+                this.define("isSpot", Js::Bool(true))?;
+            }
+            Ok(())
+        })?;
     let _ = rt.shared.base.set(core);
     Ok(this)
 }

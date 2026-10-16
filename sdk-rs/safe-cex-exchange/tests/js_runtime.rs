@@ -25,6 +25,7 @@ struct Runtime {
     exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
+    dial_socket: RefCell<Option<Rc<dyn safe_cex_exchange::websocket::WsSocket>>>,
     dials: RefCell<
         Vec<(
             String,
@@ -1229,7 +1230,8 @@ impl safe_cex_exchange::websocket::WsRuntime for Runtime {
         _: bool,
     ) -> ExchangeFuture<'static, Rc<dyn safe_cex_exchange::websocket::WsSocket>> {
         self.dials.borrow_mut().push((url, protocols, options));
-        Box::pin(async { Err(ExchangeError::new("recorded dial")) })
+        let socket = self.dial_socket.borrow().clone();
+        Box::pin(async move { socket.ok_or_else(|| ExchangeError::new("recorded dial")) })
     }
     fn headers_capable(&self) -> bool {
         self.headers_capable.get()
@@ -1263,6 +1265,13 @@ fn base_exchange(options: Value) -> Result<Js, Thrown> {
 }
 
 fn assemble(options: Value) -> Result<Assembled, Thrown> {
+    assemble_with_fields(options, |_| Ok(()))
+}
+
+fn assemble_with_fields(
+    options: Value,
+    initialize_fields: impl FnOnce(&Js) -> Result<(), Thrown>,
+) -> Result<Assembled, Thrown> {
     use safe_cex_exchange::{
         client_order_id::pattern_client_order_id_rule,
         exchange::ExchangeSettings,
@@ -1294,6 +1303,7 @@ fn assemble(options: Value) -> Result<Assembled, Thrown> {
         Js::str("okx"),
         from_json(&options),
         Js::object(vec![]),
+        initialize_fields,
     )?;
     Ok(Assembled {
         this,
@@ -3429,3 +3439,162 @@ mod ws_options;
 
 #[path = "support/js_socket_dispose.rs"]
 mod socket_dispose;
+
+#[test]
+fn source_identity_fields_are_read_before_the_typed_base_is_published() {
+    for (spot, demo, expected_spot, expected_demo) in [
+        (Js::Bool(true), Js::Bool(false), true, false),
+        (Js::Bool(false), Js::Bool(true), false, true),
+        (Js::str("source truthy"), Js::Number(0.0), true, false),
+        (Js::Null, Js::object(vec![]), false, true),
+    ] {
+        let assembled = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
+            receiver.define_accessor("isSpot", Some(Rc::new(move |_| Ok(spot.clone()))), None);
+            receiver.define("isDemo", demo)
+        })
+        .unwrap();
+        assert_eq!(
+            assembled.base.is_spot, expected_spot,
+            "source isSpot projection"
+        );
+        assert_eq!(
+            assembled.base.is_demo, expected_demo,
+            "source isDemo projection"
+        );
+        assert_eq!(
+            assembled.this.get("isSpot").unwrap().truthy(),
+            expected_spot
+        );
+        assert_eq!(
+            assembled.this.get("isDemo").unwrap().truthy(),
+            expected_demo
+        );
+    }
+    let inherited = assemble(json!({"key":"k","secret":"s"})).unwrap();
+    assert!(!inherited.base.is_spot && !inherited.base.is_demo);
+    let cause = Thrown::error("RangeError", "source flag getter");
+    let expected = cause.value.clone();
+    let result = assemble_with_fields(json!({"key":"k","secret":"s"}), |receiver| {
+        receiver.define_accessor("isDemo", Some(Rc::new(move |_| Err(cause.clone()))), None);
+        Ok(())
+    });
+    assert!(result.err().unwrap().value.strict_equals(&expected));
+}
+
+#[test]
+#[allow(clippy::arc_with_non_send_sync)]
+fn hosted_signing_accepts_source_string_data_before_wire_encoding() {
+    use safe_cex_transport::signing::*;
+    use safe_cex_types::ExchangeName;
+    struct EchoSigner(Rc<RefCell<Vec<Option<Value>>>>);
+    impl RemoteSigner for EchoSigner {
+        fn sign(
+            &self,
+            request: RemoteSignerRequest,
+        ) -> safe_cex_transport::TransportFuture<'_, RemoteSignerResponse> {
+            let RemoteSignerRequest::Http(request) = request else {
+                panic!("HTTP expected")
+            };
+            self.0.borrow_mut().push(request.config.data.clone());
+            let data = request.config.data.map(|value| {
+                if value.is_object() || value.is_array() {
+                    Value::String(
+                        safe_cex_num::js_json_stringify(&value.into())
+                            .unwrap()
+                            .unwrap(),
+                    )
+                } else {
+                    value
+                }
+            });
+            Box::pin(async move {
+                Ok(RemoteSignerResponse::Http(HttpSigningResponse {
+                    id: request.id,
+                    error: None,
+                    config: Some(SignedConfig {
+                        headers: request.config.headers,
+                        data,
+                        ..Default::default()
+                    }),
+                }))
+            })
+        }
+    }
+    impl safe_cex_exchange::runtime::RemoteSigner for EchoSigner {
+        fn is_available(&self) -> bool {
+            true
+        }
+        fn on_availability_change(
+            &self,
+            _: Rc<dyn Fn(bool)>,
+        ) -> safe_cex_exchange::runtime::Cleanup {
+            Box::new(|| {})
+        }
+    }
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js_hosted_string_source.cjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(rows.len(), 4, "source string-data corpus count");
+    for row in rows {
+        let runtime = Rc::new(Runtime::default());
+        let terminal = std::sync::Arc::new(Terminal::default());
+        let calls = Rc::new(RefCell::new(Vec::new()));
+        let host = client::rest_http_host_signed(
+            runtime.clone(),
+            terminal.clone(),
+            Some((Rc::new(EchoSigner(calls.clone())), Some("hosted".into()))),
+        );
+        host.configure_exchange(ExchangeName::Apexomni).unwrap();
+        let xhr = client::create(host, Js::object(vec![]));
+        let response = xhr
+            .call_method(
+                "post",
+                vec![
+                    Js::str("/order"),
+                    Js::str(row["data"].as_str().unwrap()),
+                    safe_cex_exchange::js_runtime::value::from_json(
+                        &json!({"headers":{"Content-Type":row["contentType"]}}),
+                    ),
+                ],
+            )
+            .unwrap();
+        settle(&runtime, response).expect("hosted signing accepts a source JS string");
+        assert_eq!(
+            &*calls.borrow(),
+            &[Some(row["requestData"].clone())],
+            "remote signer sees source transform/tryParseJson data"
+        );
+        let seen = terminal.seen.lock().unwrap();
+        assert_eq!(seen.len(), 1);
+        let request = &seen[0];
+        let content_type = request
+            .headers
+            .iter()
+            .find(|(key, _)| key.eq_ignore_ascii_case("content-type"))
+            .map(|(_, value)| value.as_str());
+        let bytes = request
+            .body
+            .as_ref()
+            .unwrap()
+            .wire_bytes_for_content_type(content_type)
+            .unwrap();
+        assert_eq!(
+            String::from_utf8(bytes).unwrap(),
+            row["wireData"].as_str().unwrap(),
+            "signed source string reaches terminal unchanged"
+        );
+    }
+}
+
+#[path = "support/js_raw_socket_close.rs"]
+mod raw_socket_close;

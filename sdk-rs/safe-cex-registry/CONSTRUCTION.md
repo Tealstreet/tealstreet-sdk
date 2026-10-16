@@ -1,9 +1,10 @@
 # Rust venue construction through the registry
 
-Status: implemented for `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitrue`, `bitunix`, `blofin`, Bybit (`bybit`, `bybitdemo`),
-Coinbase (`coinbase`, `coinbasespot`), the Kraken family (`kraken`, `krakenspot`),
-`hyperliquid`, the Binance family (`binance`, `binancepm`,
+Coinbase (`coinbase`, `coinbasespot`), `cryptocom`, `phemex`,
+the Kraken family (`kraken`, `krakenspot`),
+`hyperliquid` and `hyperliquidspot`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), `polymarket`, `woo` and `weex`, 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
@@ -22,6 +23,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 `ExchangeName -> fn(Rc<dyn RustVenueHost>) -> ExchangeConstructor`.
 
 - **Initial members:**
+  - `lighter` and `lighter-robinhood`, built with the existing `LighterNativeExchange::new`; the name selects deployment URLs and quote currency. The host retains the runtime transport and local signer entropy.
   - `grvt`, built with `GrvtExchange::new` over shared js_runtime; its host supplies fresh HTTP and the common external-public-data factory. The shared hosted signer is installed on its HTTP clients; active SDK order signing still requires a local wallet.
   - `asterdex`, built with `native_exchange::AsterDEXExchange::new` on the shared
     js_runtime. Its HTTP factory receives each lane's options, including secondary
@@ -60,7 +62,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     `rest_http_host` over a fresh terminal adapter.
   - `binancepm` and `binancespot`, built with `BinancePMExchange::new` and
     `BinanceSpotExchange::new` on the same `RustVenueHost::binance` inputs.
-- `hyperliquid` calls its existing production constructor with `RustVenueHost::hyperliquid(options)`: the host resolves the API origin through the selected transport, composes hosted HTTP signing and supplies signer metadata plus the shared weight limiter. HyperliquidSpot remains outside this table.
+- `hyperliquid` and `hyperliquidspot` call their respective production constructors with `RustVenueHost::hyperliquid(name, options)`: the host resolves the API origin through the selected transport, composes hosted HTTP signing and supplies signer metadata plus the shared weight limiter. Source Spot order signing retains its local-wallet requirement.
 - `weex` uses `WeexExchange::new` with the shared signed HTTP/runtime hosts, gateway factory and native UTC date profile. `tests/native_host_weex.rs` verifies the actual HMAC at a local server; the native host takes the existing caller-owned Hyperliquid limiter.
 - **Dependencies:** `safe-cex-registry` gains direct dependencies on those venue
   crates. The edges go downward (registry is above venues), but layering alone
@@ -261,8 +263,30 @@ host all-target and wasm library clippy passed. Independently removing each of
 the three production table entries compiled and failed its native construction
 test with exit 101; exact source restoration passed both native test functions.
 
+Hyperliquid Spot is independently constructed as `Hyperliquidspot` through
+`hyperliquidspot_constructor`, using the Spot production class and the shared
+Hyperliquid dependency method. That method takes the selected name so native
+transport and hosted-signing metadata retain the correct registry name. Both
+names require the same caller-owned limiter and expose the configured public-data
+factory. `native_host_hyperliquidspot` verifies native local HTTP/WS startup,
+real action signatures, the caller cloid, shifted spot asset IDs and cancellation;
+`native_host_external_data` separately verifies gateway startup.
+
 ApexOmni is assembled through its shared js_runtime binding with a real
 OmniKey-seeded zkLink contract signer. Its native proof observes HTTP/WS startup,
 wire HMAC over the transmitted order form, caller ID, private WS order delivery
 and cancellation. Unsupported hosted signing/wallet-provider operations reject
 visibly. The module-host path remains the default.
+
+Crypto.com is in the Rust constructor table. `tests/native_host_cryptocom.rs`
+constructs the bound venue using production native inputs and the shared host
+limiter argument, then checks its identity, distinct market precision steps,
+real local HTTP dispatch and Store read purity. The registry passes through the
+account's hosted signer and external-public-data provider to the venue binding.
+
+Phemex constructs through `phemex_constructor` and the production shared Js HTTP
+host, including hosted signing and the external-public-data gateway. Native host
+callers supply the shared limiter as for other venues. Phemex currently refuses
+`tealstreetTunnel` when no transport installer is supplied; the native host has
+no Phemex tunnel installer. `tests/native_host_phemex.rs` verifies real local HTTP
+market precision/read purity and signed account-query bytes through the registry.

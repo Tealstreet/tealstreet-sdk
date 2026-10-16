@@ -102,6 +102,11 @@ runtime; the infallible protocol hook still permits core transport cleanup.
 The Weex source-member witness covers timer/listener cleanup, superclass order,
 direct and typed calls, repeated disposal and guard reset after errors.
 
+The returned JS websocket handle uses `close_current_websocket()` for `ws.close()`.
+This closes only the current transport and preserves the superclass force-closed
+flag and retained handles. The raw-close source witness executes both Crypto.com
+no-super disposal overrides and contrasts them with the source `forceClose()`.
+
 Socket options use `None` for omitted SDK tuning and `Some(options)` for explicit
 RWS options, including an empty object. Make absence a distinct representable
 state rather than a default value. Header presence does not select tuning.
@@ -1062,6 +1067,13 @@ including request overrides, async predicate results, timer failure and loss of
 an observer during a pending delay. This covers configured callbacks within the
 runtime's existing HTTP and timer profiles.
 
+Dispose delegation reviews name the actual TypeScript class and method span in
+`tests/override-base-delegations.json`. The live `dispose-source.cjs` gate resolves
+inheritance and AST super calls: a socket receiver type alone cannot justify base
+cleanup, and an own no-super override cannot use chosen-base to pass this gate.
+The shared BaseExchange bridge cites its actual base implementation separately.
+See `../parity/DISPOSE_AUDIT.md` for the complete venue sweep and routed mismatches.
+
 Venue overrides whose source calls only `this.ws.close()` use
 `BaseWebSocket::close_current_websocket`. It forwards current native/relay close
 without superclass disposal or force-close metadata/task changes, and releases
@@ -1081,3 +1093,39 @@ millisecond profile. The sequential `tests/js_throttle_controls.py` faults each
 of leading, trailing and maxWait; all three must compile and fail the source
 comparison, then pass after exact restoration. A fourth fault removes the shared
 import and must fail Polymarket construction, then restore all 15 concrete tests.
+
+The hosted HTTP bridge retains a JavaScript string as typed data until the
+remote signing adapter applies Axios transformation and tryParseJson. A form
+string cannot become opaque Encoded bytes before signing: that loses its origin
+and the transport correctly refuses it. Direct terminal requests keep their
+existing byte representation. `hosted_signing_accepts_source_string_data_before_wire_encoding`
+compares four form/empty/JSON-looking/scalar strings against the actual source
+remote adapter with installed Axios on both sides of the relay, including
+signer inputs and final transmitted text.
+
+The single `js_runtime::base_exchange::create` factory takes a synchronous source
+field initializer as its sixth argument. It initializes the JS receiver, reads
+`isSpot` and `isDemo` using shared property access/truthiness, then publishes the
+immutable typed base and installs its callbacks. Venue adapters own subclass
+field values; core contains no venue-name classification. Empty initializers keep
+the source base defaults. The hook must only initialize fields, without starting
+work or retaining the unpublished receiver. Typed flags are construction snapshots;
+later JS field changes do not rewrite them.
+Kraken/KuCoin Spot and Bybit/OKX Demo construction tests exercise actual facades.
+`tests/source_identity_controls.py` removes each projection, requires compiled
+assertion failures in both affected families, restores exact factory bytes and
+requires all four witnesses to pass. The runtime test also covers source getters,
+truthiness, inherited false defaults and original getter-error identity.
+
+The shared BigInt `toString` member honors radix 2 through 36, defaults omitted
+or undefined radix to decimal, truncates numeric radix arguments, and rejects
+out-of-range values with RangeError. Radix conversion uses the existing shared
+ToNumber profile; BigInt radix arguments retain its TypeError. Extracted methods
+read the actual call receiver and refuse non-BigInt values. Native arbitrary
+precision conversion supplies lowercase digits without losing integer bits.
+`tests/js_bigint_radix.rs` compares 472 engine cases against Node across every
+valid base, signed/large integers, defaults and scalar/array coercion boundaries.
+`tests/js_bigint_radix_controls.py` sequentially injects decimal-only output,
+incorrect rounding and base-two refusal; each must compile, fail the named source
+comparison and pass again after exact restoration. No venue-local radix shim is
+required.
