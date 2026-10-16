@@ -847,3 +847,412 @@ pub fn define_exchange<V: Clone + 'static, E: Clone + 'static>(
     )?;
     Ok(class)
 }
+
+#[cfg(test)]
+mod accepted_runtime_helpers {
+    use super::*;
+    use crate::native_bindings::BindingOps;
+    use safe_cex_exchange::js_runtime::value::{Js, Thrown};
+    use std::cell::RefCell;
+    type Trace = Rc<RefCell<Vec<&'static str>>>;
+    fn fixture(globals: Js, trace: Trace) -> RuntimeOps<Js, Thrown> {
+        let object_trace = trace.clone();
+        let value = Rc::new(SocketOps {
+            undefined: Rc::new(|| Js::Undefined),
+            boolean: Rc::new(Js::Bool),
+            number: Rc::new(Js::Number),
+            literal: Rc::new(Js::str),
+            object: Rc::new(move |fields| {
+                object_trace.borrow_mut().push("object");
+                Js::object(fields)
+            }),
+            array: Rc::new(Js::array),
+            get: Rc::new(|v, k| v.get(k)),
+            index: Rc::new(|_, _| panic!("unused index")),
+            key: Rc::new(|_| panic!("unused key")),
+            set: Rc::new(|_, _, _| panic!("unused set")),
+            set_index: Rc::new(|_, _, _| panic!("unused set_index")),
+            delete: Rc::new(|_, _| panic!("unused delete")),
+            global: Rc::new(move |name| globals.get(name)),
+            invoke: Rc::new(|f, this, args| f.call(this, args)),
+            function: Rc::new(|_, _, _| panic!("unused function")),
+            truthy: Rc::new(Js::truthy),
+            nullish: Rc::new(Js::is_nullish),
+            equal: Rc::new(|a, b| a.strict_equals(b)),
+            is_number: Rc::new(|_| panic!("unused is_number")),
+            has: Rc::new(|_, _| panic!("unused has")),
+            numeric: Rc::new(|_| panic!("unused numeric")),
+            text: Rc::new(|v| Ok(v.to_js_string()?.to_vec())),
+            utf16: Rc::new(|v| Js::utf16(&v)),
+            error_value: Rc::new(|_| panic!("unused error_value")),
+            spread: Rc::new(|_| panic!("unused spread")),
+            spread_object: Rc::new(|v| {
+                Ok(v.own_entries()?
+                    .into_iter()
+                    .map(|(k, v)| (Js::utf16(&k), v))
+                    .collect())
+            }),
+            object_keys: Rc::new(|fields| {
+                let v = Js::object(vec![]);
+                for (key, item) in fields {
+                    v.define_key(
+                        &key.to_js_string().expect("runtime helper expected success"),
+                        item,
+                    )
+                    .expect("runtime helper expected success");
+                }
+                v
+            }),
+            tuple_two: Rc::new(|_| panic!("unused tuple_two")),
+            await_value: Rc::new(|_| panic!("unused await_value")),
+        });
+        let binding = Rc::new(BindingOps {
+            null: Rc::new(|| Js::Null),
+            is_string: Rc::new(Js::is_string),
+            value: value.clone(),
+            binary: Rc::new(|_, _, _| panic!("unused binary")),
+            construct: Rc::new(|_, _| panic!("unused construct")),
+            throw_value: Rc::new(Thrown::new),
+            promise: Rc::new(|_| panic!("unused promise")),
+            iterator: Rc::new(|_| panic!("unused iterator")),
+            next: Rc::new(|_| panic!("unused next")),
+            close: Rc::new(|_| panic!("unused close")),
+            close_throw: Rc::new(|_, _| panic!("unused close_throw")),
+        });
+        RuntimeOps {
+            value,
+            is_string: Rc::new(Js::is_string),
+            regexp: Rc::new(|_, _| panic!("unused regexp")),
+            binary: Rc::new(|_, _, _| panic!("unused binary")),
+            construct: Rc::new(|_, _| panic!("unused construct")),
+            throw_value: Rc::new(Thrown::new),
+            promise: Rc::new(|_| panic!("unused promise")),
+            define: Rc::new(|_, _, _| panic!("unused define")),
+            superclass: Rc::new(|_| panic!("unused superclass")),
+            super_construct: Rc::new(|_, _, _| panic!("unused super_construct")),
+            derive: Rc::new(|_, _, _, _| panic!("unused derive")),
+            prototype_method: Rc::new(|_, _, _, _| panic!("unused prototype_method")),
+            prototype_getter: Rc::new(|_, _, _| panic!("unused prototype_getter")),
+            binding,
+        }
+    }
+    fn empty() -> (RuntimeOps<Js, Thrown>, Trace) {
+        let trace = Rc::new(RefCell::new(vec![]));
+        (fixture(Js::object(vec![]), trace.clone()), trace)
+    }
+    fn token() -> Js {
+        Js::object(vec![])
+    }
+    fn same(v: Js, expected: &Js) {
+        assert!(v.same_reference(expected), "runtime helper native identity");
+    }
+    fn thrown(result: Result<Js, Thrown>, expected: &Js) {
+        match result {
+            Err(e) => same(e.value, expected),
+            Ok(_) => panic!("runtime helper swallowed error"),
+        }
+    }
+    fn property(receiver: &Js, key: &str, value: Js, trace: Trace) {
+        receiver.define_accessor(
+            key,
+            Some(Rc::new(move |_| {
+                trace.borrow_mut().push("get");
+                Ok(value.clone())
+            })),
+            None,
+        );
+    }
+    #[test]
+    fn get_native_contract() {
+        let (h, trace) = empty();
+        let object = token();
+        let result = token();
+        property(&object, "item", result.clone(), trace.clone());
+        same(
+            get(&h, &object, "item").expect("runtime helper expected success"),
+            &result,
+        );
+        assert_eq!(*trace.borrow(), ["get"], "runtime helper get trace");
+        let error = token();
+        let kept = error.clone();
+        object.define_accessor(
+            "bad",
+            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+            None,
+        );
+        thrown(get(&h, &object, "bad"), &error);
+    }
+    #[test]
+    fn optional_native_contract() {
+        let (h, trace) = empty();
+        for value in [Js::Null, Js::Undefined] {
+            assert!(matches!(
+                optional(&h, value, "item").expect("runtime helper expected success"),
+                Js::Undefined
+            ));
+        }
+        assert!(trace.borrow().is_empty());
+        let object = token();
+        let result = token();
+        property(&object, "item", result.clone(), trace.clone());
+        same(
+            optional(&h, object, "item").expect("runtime helper expected success"),
+            &result,
+        );
+        assert_eq!(*trace.borrow(), ["get"], "runtime helper optional trace");
+        let error = token();
+        let kept = error.clone();
+        let object = token();
+        object.define_accessor(
+            "item",
+            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+            None,
+        );
+        thrown(optional(&h, object, "item"), &error);
+    }
+    fn method_probe(own_call: bool) {
+        let (h, trace) = empty();
+        let receiver = token();
+        let result = token();
+        let arg = token();
+        let expected_this = receiver.clone();
+        let expected_arg = arg.clone();
+        let expected_result = result.clone();
+        let invoked = trace.clone();
+        let f = Js::function("actual", move |this, args| {
+            invoked.borrow_mut().push("invoke");
+            assert!(this.same_reference(&expected_this));
+            assert_eq!(args.len(), 1, "runtime helper argument count");
+            assert!(args[0].same_reference(&expected_arg));
+            Ok(expected_result.clone())
+        });
+        property(&receiver, "run", f, trace.clone());
+        let args_trace = trace.clone();
+        let args = || {
+            args_trace.borrow_mut().push("args");
+            Ok(vec![arg])
+        };
+        let got = if own_call {
+            own(&h, &receiver, "run", args)
+        } else {
+            method(&h, receiver.clone(), "run", args)
+        };
+        same(got.expect("runtime helper expected success"), &result);
+        assert_eq!(
+            *trace.borrow(),
+            ["get", "args", "invoke"],
+            "runtime helper method/own order"
+        );
+        let error = token();
+        let kept = error.clone();
+        receiver.define_accessor(
+            "bad",
+            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+            None,
+        );
+        let got = if own_call {
+            own(&h, &receiver, "bad", || panic!("args after getter error"))
+        } else {
+            method(&h, receiver.clone(), "bad", || {
+                panic!("args after getter error")
+            })
+        };
+        thrown(got, &error);
+        let error = token();
+        let kept = error.clone();
+        let args = || Err(Thrown::new(kept));
+        let got = if own_call {
+            own(&h, &receiver, "run", args)
+        } else {
+            method(&h, receiver, "run", args)
+        };
+        thrown(got, &error);
+    }
+    #[test]
+    fn method_native_contract() {
+        method_probe(false);
+    }
+    #[test]
+    fn own_native_contract() {
+        method_probe(true);
+    }
+    #[test]
+    fn global_native_contract() {
+        let trace = Rc::new(RefCell::new(vec![]));
+        let globals = token();
+        let result = token();
+        let kept = result.clone();
+        let invoked = trace.clone();
+        let arg = token();
+        let expected_arg = arg.clone();
+        let f = Js::function("global", move |this, args| {
+            invoked.borrow_mut().push("invoke");
+            assert!(
+                matches!(this, Js::Undefined),
+                "runtime helper global receiver"
+            );
+            assert_eq!(args.len(), 1, "runtime helper argument count");
+            assert!(args[0].same_reference(&expected_arg));
+            Ok(kept.clone())
+        });
+        property(&globals, "task", f, trace.clone());
+        let h = fixture(globals.clone(), trace.clone());
+        let args_trace = trace.clone();
+        same(
+            global(&h, "task", || {
+                args_trace.borrow_mut().push("args");
+                Ok(vec![arg])
+            })
+            .expect("runtime helper expected success"),
+            &result,
+        );
+        assert_eq!(
+            *trace.borrow(),
+            ["get", "args", "invoke"],
+            "runtime helper global order"
+        );
+        let error = token();
+        let kept = error.clone();
+        globals.define_accessor(
+            "bad",
+            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+            None,
+        );
+        thrown(
+            global(&h, "bad", || panic!("args after global getter error")),
+            &error,
+        );
+    }
+    #[test]
+    fn text_native_contract() {
+        let (h, _) = empty();
+        let raw = Js::utf16(&[0xd800, 0x61, 0xdc00]);
+        let output = text(&h, "Ω", raw, "🚀").expect("runtime helper expected success");
+        assert_eq!(
+            output
+                .to_js_string()
+                .expect("runtime helper expected success")
+                .to_vec(),
+            [937, 0xd800, 0x61, 0xdc00, 55357, 56960],
+            "runtime helper text UTF16"
+        );
+        let error = token();
+        let kept = error.clone();
+        let object = token();
+        object
+            .define(
+                "toString",
+                Js::function("throws", move |_, _| Err(Thrown::new(kept.clone()))),
+            )
+            .expect("runtime helper expected success");
+        thrown(text(&h, "prefix", object, "suffix"), &error);
+    }
+    #[test]
+    fn loaded_native_contract() {
+        let (h, _) = empty();
+        let retained = token();
+        let original = Js::object(vec![
+            ("old", retained.clone()),
+            ("markets", Js::Bool(false)),
+        ]);
+        let receiver = Js::object(vec![(
+            "store",
+            Js::object(vec![("loaded", original.clone())]),
+        )]);
+        let output =
+            loaded(&h, &receiver, &["markets", "orders"]).expect("runtime helper expected success");
+        same(
+            output.get("old").expect("runtime helper expected success"),
+            &retained,
+        );
+        assert!(
+            matches!(
+                output
+                    .get("markets")
+                    .expect("runtime helper expected success"),
+                Js::Bool(true)
+            ),
+            "runtime helper loaded markets flag"
+        );
+        assert!(
+            matches!(
+                output
+                    .get("orders")
+                    .expect("runtime helper expected success"),
+                Js::Bool(true)
+            ),
+            "runtime helper loaded orders flag"
+        );
+        assert!(matches!(
+            original
+                .get("markets")
+                .expect("runtime helper expected success"),
+            Js::Bool(false)
+        ));
+        assert!(matches!(
+            original
+                .get("orders")
+                .expect("runtime helper expected success"),
+            Js::Undefined
+        ));
+        assert!(
+            !output.same_reference(&original),
+            "runtime helper loaded snapshot"
+        );
+        let copy = loaded(&h, &receiver, &[]).expect("runtime helper expected success");
+        same(
+            copy.get("old").expect("runtime helper expected success"),
+            &retained,
+        );
+        assert!(matches!(
+            copy.get("markets")
+                .expect("runtime helper expected success"),
+            Js::Bool(false)
+        ));
+    }
+    #[test]
+    fn update_native_contract() {
+        let (h, trace) = empty();
+        let store = token();
+        let expected_store = store.clone();
+        let value = token();
+        let expected_value = value.clone();
+        let invoked = trace.clone();
+        let f = Js::function("update", move |this, args| {
+            invoked.borrow_mut().push("invoke");
+            assert!(this.same_reference(&expected_store));
+            assert_eq!(args.len(), 1, "runtime helper argument count");
+            assert!(
+                args[0]
+                    .get("balance")
+                    .expect("runtime helper expected success")
+                    .same_reference(&expected_value)
+            );
+            Ok(token())
+        });
+        property(&store, "update", f, trace.clone());
+        let receiver = Js::object(vec![("store", store.clone())]);
+        let fields_trace = trace.clone();
+        update(&h, &receiver, || {
+            fields_trace.borrow_mut().push("fields");
+            Ok(vec![("balance", value)])
+        })
+        .expect("runtime helper expected success");
+        assert_eq!(
+            *trace.borrow(),
+            ["get", "fields", "object", "invoke"],
+            "runtime helper update order"
+        );
+        let error = token();
+        let kept = error.clone();
+        store.define_accessor(
+            "update",
+            Some(Rc::new(move |_| Err(Thrown::new(kept.clone())))),
+            None,
+        );
+        match update(&h, &receiver, || panic!("fields after getter error")) {
+            Err(e) => same(e.value, &error),
+            Ok(_) => panic!("runtime helper update swallowed error"),
+        };
+    }
+}

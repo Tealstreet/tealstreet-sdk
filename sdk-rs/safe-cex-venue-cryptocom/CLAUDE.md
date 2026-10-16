@@ -334,6 +334,12 @@ scripts/nested-wire-contracts.mjs for scope, native observations, exact selected
 construction reviews and compiling mutation controls. Other owners, aliases,
 locals, features and WASM contract execution remain separate obligations.
 
+Eight runtime helpers have individual accepted-set role reviews accompanied by
+direct private-function witnesses and compiling corruption controls. See
+RUNTIME_HELPER_CONTRACT_REVIEW.md and scripts/runtime-helper-contracts.mjs. These
+forwarding, dispatch and outbound rendering/state-write roles do not waive any
+downstream decoder, alias, construction, local or target-matrix obligation.
+
 
 Accepted signing roles: five individually reviewed native/default functions
 serialize existing data or construct outbound signatures/request fields.
