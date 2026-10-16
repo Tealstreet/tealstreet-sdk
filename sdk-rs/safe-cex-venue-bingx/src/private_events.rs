@@ -120,6 +120,7 @@ pub fn map_order(o: &Value, orders: &[Order], now: f64) -> Result<Option<Order>,
         None
     };
     Ok(Some(Order {
+        client_order_id: None,
         id,
         parent_id: None,
         status,

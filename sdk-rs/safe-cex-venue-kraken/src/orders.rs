@@ -161,6 +161,7 @@ pub async fn fetch_orders<F: Future<Output = Result<Option<JsNumberInput>, Excha
                 None
             };
             orders.push(Order {
+                client_order_id: None,
                 id,
                 parent_id: None,
                 status: OrderStatus::Open,
