@@ -54,6 +54,10 @@ native mutations must fail named assertions before a passing gate is evidence.
 accepted-contract batch against actual TS and production Rust. Its compiled
 controls and remaining scope are recorded in ACCEPTED_CONTRACT_REVIEW.md.
 
+`BUILDER_CONTRACT_REVIEW.md` records twelve additional builder contracts and
+their source/native witnesses. The selected runner and six compiled controls
+retain the separate obligations of lexical ordinary `Wire` decoders.
+
 `native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
 Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,
 AccountFetch/OrderExecution and public/private stream bodies; it never evaluates
