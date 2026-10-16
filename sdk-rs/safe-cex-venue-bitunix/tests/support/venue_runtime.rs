@@ -1,4 +1,5 @@
-//! Virtual-clock runtime and scripted REST transport for the concrete Bitunix venue.
+// Virtual-clock runtime and scripted REST transport for the concrete Bitunix venue.
+// Kept include-compatible for native accepted-set probes of concrete host adapters.
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     http::{HttpClientOptions, HttpFuture, HttpHost, safe_cex_axios_create_no_proxy},

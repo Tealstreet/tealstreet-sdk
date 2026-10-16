@@ -12,7 +12,7 @@ use safe_cex_num::{
 use safe_cex_types::{
     Order, OrderStatus, OrderStopTriggerType, OrderType, PlaceOrderOpts, Position, UpdateOrderOpts,
 };
-use serde_json::{Value, json as j};
+use serde_json::{Value, json};
 use std::{cell::RefCell, future::Future, rc::Rc};
 
 fn leg(name: &str) -> TpslLeg {
@@ -24,7 +24,7 @@ fn leg(name: &str) -> TpslLeg {
 }
 /// A canonical Order for helpers that read only id/type/amount/info of a JS order object.
 fn order_of(value: &Value) -> Result<Order, ExchangeError> {
-    let mut order = j!({"id":"","status":"open","symbol":"","type":"conditional","side":"buy","price":0,"amount":0,"filled":0,"remaining":0,"reduceOnly":false,"lastUpdate":0});
+    let mut order = json!({"id":"","status":"open","symbol":"","type":"conditional","side":"buy","price":0,"amount":0,"filled":0,"remaining":0,"reduceOnly":false,"lastUpdate":0});
     if let Some(fields) = value.as_object() {
         for (k, field) in fields {
             if !field.is_null() {
@@ -33,7 +33,7 @@ fn order_of(value: &Value) -> Result<Order, ExchangeError> {
         }
     }
     if serde_json::from_value::<OrderType>(order["type"].clone()).is_err() {
-        order["type"] = j!("conditional");
+        order["type"] = json!("conditional");
     }
     from_value(order)
 }
@@ -163,7 +163,7 @@ impl crate::order_models::OrderModelHost for OrderFrame {
         config: JsJsonValue,
     ) -> impl Future<Output = Result<Value, Fault>> {
         let f = self.venue.xhr().get(endpoint, config);
-        async move { Ok(j!({ "data": f.await? })) }
+        async move { Ok(json!({ "data": f.await? })) }
     }
     fn post(
         &mut self,
@@ -171,7 +171,7 @@ impl crate::order_models::OrderModelHost for OrderFrame {
         payload: JsJsonValue,
     ) -> impl Future<Output = Result<Value, Fault>> {
         let f = self.venue.unlimited().post(endpoint, payload);
-        async move { Ok(j!({ "data": f.await? })) }
+        async move { Ok(json!({ "data": f.await? })) }
     }
     fn cached_tif(&mut self, client_id: Option<&Value>) -> Result<Option<Value>, Fault> {
         let Some(client) = client_id.filter(|c| !c.is_null()) else {
@@ -533,7 +533,7 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
         Ok(units(&order.symbol))
     }
     fn parent_body(&mut self, parent: &Order, id: &[u16]) -> Result<JsJsonValue, ExchangeError> {
-        Ok(JsJsonValue::from(j!({
+        Ok(JsJsonValue::from(json!({
             "symbol": parent.symbol,
             "orderList": [{ "orderId": utf8(id)? }],
         })))
@@ -541,7 +541,7 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
     fn standalone_body(&mut self, order: &Order) -> Result<JsJsonValue, ExchangeError> {
         let raw = crate::order_links::get_tpsl_raw_order_id(order).map_err(coercion)?;
         Ok(JsJsonValue::from(
-            j!({ "symbol": order.symbol, "orderId": raw }),
+            json!({ "symbol": order.symbol, "orderId": raw }),
         ))
     }
     fn group_body(
@@ -549,9 +549,9 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
         symbol: &[u16],
         orders: &[Order],
     ) -> Result<JsJsonValue, ExchangeError> {
-        Ok(JsJsonValue::from(j!({
+        Ok(JsJsonValue::from(json!({
             "symbol": utf8(symbol)?,
-            "orderList": orders.iter().map(|o| j!({ "orderId": o.id })).collect::<Vec<_>>(),
+            "orderList": orders.iter().map(|o| json!({ "orderId": o.id })).collect::<Vec<_>>(),
         })))
     }
     fn post(
@@ -585,7 +585,7 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
         tp: Option<&Order>,
         sl: Option<&Order>,
     ) -> Result<PlaceOrderOpts, ExchangeError> {
-        let mut opts = j!({
+        let mut opts = json!({
             "symbol": parent.symbol,
             "type": parent.r#type,
             "side": parent.side,
@@ -594,13 +594,13 @@ impl crate::order_cancellation::CancellationHost for CancelFrame {
             "reduceOnly": parent.reduce_only,
         });
         if let Some(tp) = tp {
-            opts["takeProfit"] = j!(tp.price);
+            opts["takeProfit"] = json!(tp.price);
             if let Some(trigger) = tp.tp_trigger_type {
                 opts["tpTriggerType"] = to_value(&trigger)?;
             }
         }
         if let Some(sl) = sl {
-            opts["stopLoss"] = j!(sl.price);
+            opts["stopLoss"] = json!(sl.price);
             if let Some(trigger) = sl.sl_trigger_type {
                 opts["slTriggerType"] = to_value(&trigger)?;
             }
