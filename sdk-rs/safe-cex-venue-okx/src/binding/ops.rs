@@ -12,18 +12,102 @@ use crate::{
     order_reads::OrderReadOps,
     websocket_account_events::SocketEventOps,
 };
-use safe_cex_exchange::js_runtime::{
-    promise::await_js,
-    scope::{Scope, ScopeShared, bound_member},
-    value::{Js, Thrown, arg},
+use super::members::Variant;
+use crate::family_lifecycle;
+use safe_cex_exchange::{
+    client_order_id::{ClientOrderIdRule, ClientOrderIdRuleOverrides, pattern_client_order_id_rule},
+    exchange::ExchangeSettings,
+    js_runtime::{
+        base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory},
+        promise::await_js,
+        scope::{Scope, ScopeShared, bound_member, scope_of},
+        value::{Js, Thrown, arg, from_typed, to_json, to_typed},
+    },
 };
-use safe_cex_types::{ExchangeName, ExchangeOptions};
-use std::rc::Rc;
+use safe_cex_types::{ExchangeName, ExchangeOptions, exchange_metadata::get_exchange_metadata};
+use std::rc::{Rc, Weak};
 
 /// Venue-only shared state: the typed constructor inputs.
 pub struct OkxExtra {
     pub name: ExchangeName,
     pub options: ExchangeOptions,
+    pub external_public_data: Option<ExternalPublicDataFactory>,
+}
+
+impl OkxExtra {
+    pub(crate) fn variant(&self) -> Variant {
+        match self.name {
+            ExchangeName::Okxdemo => Variant::Demo,
+            ExchangeName::Okxeu => Variant::Eu,
+            ExchangeName::Okxeudemo => Variant::EuDemo,
+            _ => Variant::Global,
+        }
+    }
+}
+
+/// OKX's base.ts settings, read from its exchange metadata.
+pub(crate) fn settings(
+    name: &ExchangeName,
+    shared: Weak<OkxShared>,
+) -> Result<ExchangeSettings, Thrown> {
+    let key = to_json(&from_typed(name)?)?;
+    let meta = get_exchange_metadata(key.as_str().unwrap_or_default(), false)
+        .map_err(|e| Thrown::error("Error", &e))?;
+    Ok(ExchangeSettings {
+        tick_interval: Some(meta.tick_interval),
+        positions_supported: Some(meta.features.positions),
+        supports_public_only: meta.supports_public_only,
+        client_order_id_rule: Some(client_order_id_rule(shared)),
+    })
+}
+
+// ts: OKXExchange.clientOrderIdRule = patternClientOrderIdRule('OKX', /^[A-Za-z0-9]{1,32}$/, { mint })
+fn client_order_id_rule(shared: Weak<OkxShared>) -> ClientOrderIdRule {
+    pattern_client_order_id_rule(
+        "OKX".into(),
+        "/^[A-Za-z0-9]{1,32}$/".into(),
+        Rc::new(|id: &str| (1..=32).contains(&id.len()) && id.bytes().all(|b| b.is_ascii_alphanumeric())),
+        ClientOrderIdRuleOverrides {
+            mint: Some(Rc::new(move || {
+                let uuid = scope_of(&shared)
+                    .and_then(|s| s.global("uuid"))
+                    .and_then(|f| f.call(Js::Undefined, vec![]))
+                    .map(|id| id.to_display())
+                    .unwrap_or_default();
+                format!("{}{uuid}", crate::types::BROKER_ID).chars().take(32).collect()
+            })),
+            ..Default::default()
+        },
+    )
+}
+
+/// `super(name, opts, store)` inside OKXExchange's constructor: the JS BaseExchange.
+fn base_constructor(scope: &OkxScope) -> Js {
+    let shared = scope.shared.clone();
+    Js::constructor("BaseExchange", move |_, a| {
+        let options: ExchangeOptions = to_typed(&arg(&a, 1))?;
+        let parts = BaseExchangeParts {
+            name: shared.extra.name.clone(),
+            options,
+            store: shared.store.clone(),
+            settings: settings(&shared.extra.name, Rc::downgrade(&shared))?,
+            external_public_data: shared.extra.external_public_data.clone(),
+        };
+        let (this, base) =
+            base_exchange::create(&shared.sockets, parts, arg(&a, 0), arg(&a, 1), arg(&a, 2))?;
+        let _ = shared.base.set(base);
+        *shared.exchange.borrow_mut() = this.clone();
+        Ok(this)
+    })
+}
+
+/// `super(...)` from a demo class: the OKXExchange (or OKXEUExchange) constructor.
+fn okx_constructor(scope: &OkxScope) -> Js {
+    let scope = scope.with_this(Js::Undefined);
+    Js::constructor("OKXExchange", move |_, a| {
+        family_lifecycle::new_exchange(&lifecycle_ops(&scope), arg(&a, 0), arg(&a, 1), arg(&a, 2))
+            .map(|state| state.receiver)
+    })
 }
 
 pub(crate) type OkxScope = Scope<OkxExtra>;
@@ -39,8 +123,14 @@ impl IntrinsicHost for OkxScope {
     fn now_ms(&self) -> f64 {
         self.now()
     }
+    // Class fields (arrow members included) initialize right after super().
     fn initialize_okx_fields(&self, receiver: &Js) -> Result<(), Thrown> {
-        super::members::initialize_fields(&self.with_this(receiver.clone()))
+        let scope = self.with_this(receiver.clone());
+        super::members::initialize_fields(&scope)?;
+        let variant = scope.shared.extra.variant();
+        super::members::install(&scope, variant);
+        super::typed_members::install(&scope, variant);
+        Ok(())
     }
 }
 
@@ -59,6 +149,19 @@ fn items(v: &Js) -> Result<Vec<Js>, Thrown> {
 
 /// Resolve a capture name against the scope.
 pub(crate) fn capture(scope: &OkxScope, name: &str) -> Result<Js, Thrown> {
+    // Constructor bodies run before the receiver exists; super() assembles it.
+    let assembled;
+    let scope = if scope.this.is_undefined() {
+        assembled = scope.with_this(scope.shared.exchange.borrow().clone());
+        &assembled
+    } else {
+        scope
+    };
+    match name {
+        "super" => return Ok(base_constructor(scope)),
+        "super:OKXExchange" | "super:OKXEUExchange" => return Ok(okx_constructor(scope)),
+        _ => {}
+    }
     if name == "this" {
         return Ok(scope.this.clone());
     }
@@ -327,11 +430,11 @@ pub(crate) fn read_ops(scope: &OkxScope) -> OrderReadOps<'static, Js, Thrown> {
         // mapOkxPositionHistory(row, { account, toBase, resolveSymbol, resolveSettleCurrency })
         map_position: Rc::new(move |mapper, row, market, account| {
             let this = to_base.this.clone();
-            let by_id = move |this: &Js, id: &Js| -> Result<Js, Thrown> {
+            fn by_id(this: &Js, id: &Js) -> Result<Js, Thrown> {
                 this.get("store")?.get("marketsById")?.get_key(&id.to_js_string()?)
-            };
+            }
             let (t1, t2, t3) = (this.clone(), this.clone(), this);
-            let (b1, b2, b3) = (by_id.clone(), by_id.clone(), by_id);
+            let (b1, b2, b3) = (by_id, by_id, by_id);
             let fallback = market;
             let opts = Js::object(vec![
                 ("account", account),

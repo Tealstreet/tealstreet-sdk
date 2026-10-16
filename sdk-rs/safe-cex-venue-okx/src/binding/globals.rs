@@ -330,6 +330,7 @@ pub(crate) fn build(weak: Weak<OkxShared>) -> Js {
     library::install_library(&g, weak.clone());
     tables(&g);
     mappers(&g);
-    transport(&g, weak);
+    transport(&g, weak.clone());
+    super::sockets::register(&g, weak);
     g
 }
