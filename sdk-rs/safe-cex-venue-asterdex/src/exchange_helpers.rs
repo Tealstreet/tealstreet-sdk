@@ -1003,6 +1003,7 @@ pub fn transform_order(
     let amount = parse_float(&order.orig_qty);
     let filled = parse_float(&order.executed_qty);
     Ok(safe_cex_types::Order {
+        client_order_id: None,
         id: js_number_string(order.order_id),
         parent_id: None,
         symbol: order.symbol.clone(),

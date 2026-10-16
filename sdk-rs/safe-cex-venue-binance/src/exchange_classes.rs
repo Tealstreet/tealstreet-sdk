@@ -1224,9 +1224,11 @@ impl crate::order_operations::OrderBindings for Context {
         }))
     }
     fn capture_is_algo(&mut self) -> Result<crate::order_operations::Sync, Failure> {
+        // SDK callers arrive with the decoded string spelling, class callers with the native enum.
         Ok(Rc::new(|value| {
-            let EventValue::Enum(PrivateEnum::Type(kind)) = value else {
-                return Err(failure("native order type required"));
+            let kind = match value {
+                EventValue::Enum(PrivateEnum::Type(kind)) => kind,
+                other => typed::<safe_cex_types::OrderType>(&other)?,
             };
             Ok(EventValue::Bool(crate::order_logic::is_algo_order_type(
                 kind,
@@ -1639,49 +1641,53 @@ impl crate::public_rest::RestBindings for RestContext {
     }
 }
 fn market_value(m: &crate::public_rest::RestMarket) -> Result<EventValue, Failure> {
-    Ok(record([
-        ("id", string(&m.id)),
-        (
-            "symbol",
-            m.symbol
-                .clone()
-                .map_or(EventValue::Undefined, crate::private_session::native),
-        ),
-        (
-            "base",
-            m.base
-                .clone()
-                .map_or(EventValue::Undefined, crate::private_session::native),
-        ),
-        (
-            "quote",
-            m.quote
-                .clone()
-                .map_or(EventValue::Undefined, crate::private_session::native),
-        ),
-        ("active", EventValue::Bool(m.active)),
-        (
-            "isSpot",
-            m.is_spot.map_or(EventValue::Undefined, EventValue::Bool),
-        ),
-        ("precision", decoded(&m.precision)?),
-        (
-            "limits",
-            record([
-                ("amount", decoded(&m.amount)?),
-                (
-                    "leverage",
-                    record([
-                        ("min", number(m.leverage_min)),
-                        (
-                            "max",
-                            crate::private_session::native(m.leverage_max.clone()),
-                        ),
-                    ]),
-                ),
-            ]),
-        ),
-    ]))
+    // Only the Spot literal writes isSpot (binancespot.exchange.ts:220); Futures/PM omit the key.
+    let is_spot = m.is_spot.map(|v| ("isSpot", EventValue::Bool(v)));
+    Ok(record(
+        [
+            ("id", string(&m.id)),
+            (
+                "symbol",
+                m.symbol
+                    .clone()
+                    .map_or(EventValue::Undefined, crate::private_session::native),
+            ),
+            (
+                "base",
+                m.base
+                    .clone()
+                    .map_or(EventValue::Undefined, crate::private_session::native),
+            ),
+            (
+                "quote",
+                m.quote
+                    .clone()
+                    .map_or(EventValue::Undefined, crate::private_session::native),
+            ),
+            ("active", EventValue::Bool(m.active)),
+        ]
+        .into_iter()
+        .chain(is_spot)
+        .chain([
+            ("precision", decoded(&m.precision)?),
+            (
+                "limits",
+                record([
+                    ("amount", decoded(&m.amount)?),
+                    (
+                        "leverage",
+                        record([
+                            ("min", number(m.leverage_min)),
+                            (
+                                "max",
+                                crate::private_session::native(m.leverage_max.clone()),
+                            ),
+                        ]),
+                    ),
+                ]),
+            ),
+        ]),
+    ))
 }
 impl ExchangeState {
     pub fn public_only(&self) -> bool {

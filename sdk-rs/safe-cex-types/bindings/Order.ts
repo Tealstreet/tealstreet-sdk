@@ -19,6 +19,7 @@ export type Order = {
     readonly reduceOnly: boolean;
     readonly close?: boolean;
     readonly info?: any;
+    readonly clientOrderId?: string;
     readonly timeInForce?: OrderTimeInForce;
     readonly lastUpdate: number;
     readonly triggerType?: OrderStopTriggerType;

@@ -225,6 +225,7 @@ pub fn format_orders(
             }
         };
         orders.push(Order {
+            client_order_id: None,
             id: order.order_code.clone(),
             status,
             symbol: order.instrument.clone(),

@@ -135,6 +135,7 @@ pub fn candle(c: reads::Candle) -> Candle {
 }
 pub fn order(u: crate::private_events::OrderUpdate) -> Result<Order, ExchangeError> {
     Ok(Order {
+        client_order_id: None,
         id: text(&u.id)?,
         parent_id: None,
         status: u.status,

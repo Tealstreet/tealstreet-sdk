@@ -317,6 +317,14 @@ pub struct Order {
     )]
     #[ts(type = "any", optional)]
     pub info: Option<serde_json::Value>,
+    // The venue client order ID where the adapter maps it to the top level
+    // (Hyperliquid's cloid): `info` is stripped before a worker posts the store.
+    #[serde(
+        default,
+        deserialize_with = "deserialize_present",
+        skip_serializing_if = "Option::is_none"
+    )]
+    pub client_order_id: Option<String>,
     #[serde(
         default,
         deserialize_with = "deserialize_present",
@@ -3293,6 +3301,12 @@ mod strict_codecs {
             skip_serializing_if = "Option::is_none"
         )]
         info: Option<serde_json::Value>,
+        #[serde(
+            default,
+            deserialize_with = "deserialize_present",
+            skip_serializing_if = "Option::is_none"
+        )]
+        client_order_id: Option<String>,
         #[serde(
             default,
             deserialize_with = "deserialize_present",
