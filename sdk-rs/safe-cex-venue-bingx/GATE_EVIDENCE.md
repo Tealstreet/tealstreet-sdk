@@ -1458,3 +1458,7 @@ host all-targets and wasm library strict Clippy, workspace fmt and global parity
 (7459rows/17107public Rust items). Logs: /tmp/bingx-factory-{before,after,controls,
 full,clippy,wasm,fmt,parity}.txt. Native registry proof is reported separately once
 its loopback run completes.
+
+Native native_host_bingx also passes1 over real loopback HTTP/WS, checking startup,
+wire HMAC, bigint caller/order identifiers, placement and cancellation. Receipt:
+/tmp/bingx-factory-native.txt. No live credentials or exchange requests were used.
