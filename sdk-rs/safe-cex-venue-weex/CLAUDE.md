@@ -4,6 +4,13 @@ The frozen 35-row divergent audit is in `DIVERGENCE_AUDIT.md`. Class assembly an
 async observation choices cite their explicit MANIFEST-SPEC anchors; ready
 private-refresh reactions suspend before disposal checks, updates and reports.
 
+The API request callback signs an already serialized string body verbatim on
+replay, matching the bytes Axios sends. Other truthy values still use JSON
+stringification. `tests/replay-signing-oracle.cjs` executes the source interceptor
+for eight body cases, independently comparing signatures through the native
+callback in `tests/runtime.rs`. Removing the native string guard compiles and
+fails the serialized-body signature assertion.
+
 Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/weex/CLAUDE.md).
 
 `src/types.rs` mirrors the 26 value constants in `weex.types.ts`. Mapping tables

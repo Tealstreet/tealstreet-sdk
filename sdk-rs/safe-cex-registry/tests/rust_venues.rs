@@ -499,6 +499,7 @@ impl RustVenueHost for Venues {
         Ok(
             safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
                 runtime: self.runtime.clone(),
+                external_public_data: None,
                 http: self.wire.clone(),
                 limiter: Rc::new(safe_cex_venue_hyperliquid::rate_limit::RateLimiter::new(
                     Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
@@ -726,6 +727,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Bitget,
             ExchangeName::Bitgetinverse,
             ExchangeName::Bitgetusdc,
+            ExchangeName::Bitrue,
             ExchangeName::Bitunix,
             ExchangeName::Blofin,
             ExchangeName::Bybit,
@@ -743,6 +745,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Okxeu,
             ExchangeName::Okxeudemo,
             ExchangeName::Polymarket,
+            ExchangeName::Woo,
         ],
         "REGISTRY table membership is a deliberate, reviewed list"
     );

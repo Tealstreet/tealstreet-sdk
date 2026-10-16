@@ -85,8 +85,8 @@ fn probe<T: DeserializeOwned>(name: &str, schema: &Value, read: impl Fn(&T) -> V
         "ChaserOrderOptions" => (19, 12, None),
         "ChaserCompleteEvent" => (10, 8, None),
         "ChaserOrderState" => (5, 4, Some("/currentOrdersIds")),
-        "TwapOptions" => (49, 34, None),
-        "TwapState" => (46, 32, Some("/ordersSizes")),
+        "TwapOptions" => (59, 43, None),
+        "TwapState" => (56, 41, Some("/ordersSizes")),
         _ => panic!("TASK-CARDINALITY unknown record"),
     };
     let cases = schema["cases"].as_array().unwrap();

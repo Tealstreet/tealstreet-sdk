@@ -166,6 +166,9 @@ fn complete_task_graphs_match_source_numeric_bits() {
         "/activeMarket/limits/amount/max" => v.active_market.limits.amount.max,
         "/activeMarket/limits/leverage/min" => v.active_market.limits.leverage.min,
         "/activeMarket/limits/leverage/max" => v.active_market.limits.leverage.max,
+        "/activeMarket/limits/price/min" => v.active_market.limits.price.as_ref().unwrap().min,
+        "/activeMarket/option/expiry" => v.active_market.option.as_ref().unwrap().expiry,
+        "/activeMarket/option/strike" => v.active_market.option.as_ref().unwrap().strike,
         "/activeMarket/contractSize" => v.active_market.contract_size.unwrap(),
         "/activeMarket/info/nested/0" => {
             js_value_as_f64(&v.active_market.info.as_ref().unwrap()["nested"][0]).unwrap()
@@ -187,6 +190,9 @@ fn complete_task_graphs_match_source_numeric_bits() {
         "/activeMarket/limits/amount/max" => v.active_market.limits.amount.max,
         "/activeMarket/limits/leverage/min" => v.active_market.limits.leverage.min,
         "/activeMarket/limits/leverage/max" => v.active_market.limits.leverage.max,
+        "/activeMarket/limits/price/min" => v.active_market.limits.price.as_ref().unwrap().min,
+        "/activeMarket/option/expiry" => v.active_market.option.as_ref().unwrap().expiry,
+        "/activeMarket/option/strike" => v.active_market.option.as_ref().unwrap().strike,
         "/activeMarket/contractSize" => v.active_market.contract_size.unwrap(),
         "/activeMarket/info/nested/0" => {
             js_value_as_f64(&v.active_market.info.as_ref().unwrap()["nested"][0]).unwrap()
@@ -202,7 +208,7 @@ fn complete_task_graphs_match_source_numeric_bits() {
         "/startedAt" => v.started_at.unwrap(),
         _ => panic!("TASK-DOMAIN uncovered source path {path}"),
     });
-    assert_eq!(comparisons, 3420, "TASK-DOMAIN comparison inventory");
+    assert_eq!(comparisons, 3960, "TASK-DOMAIN comparison inventory");
 }
 
 #[test]

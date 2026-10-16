@@ -1,4 +1,5 @@
 //! Executable Backpack interceptors around the shared HTTP client.
+use crate::native_value::NativeValue;
 use crate::{api_factory as api, native_value::Value as Native};
 use safe_cex_exchange::{exchange::BaseExchange, http::HttpClient, runtime::ExchangeError};
 use safe_cex_num::JsJsonValue;

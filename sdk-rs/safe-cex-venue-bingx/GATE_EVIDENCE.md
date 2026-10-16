@@ -1430,3 +1430,35 @@ the actual maintained TypeScript adjust helper returns1.235/100.13. Separate
 binding-precision-controls.py mutations swap each production precision operand;
 both compile and fail their named wire quantity/price assertion, then restore.
 This strengthens the binding witness: integral inputs alone would mask a swap.
+
+
+## Shared HTTP factory follow-up, October2026
+
+The assembled host now delegates HTTP construction and transport-adapter selection
+to the landed shared factory. Current source safeCexAxiosCreate overwrites the
+venue timeout with20_000ms and merges Axios's Accept default. BingX's source
+installTransportAdapter call omits the variant argument, selecting Default.
+The prior native route instead retained extra.recvWindow, omitted Accept and
+requested BigInt. The three newly authored E2Es compiled against that production
+body and failed at those exact values:1234 versus20_000, missing Accept versus
+`application/json, text/plain, */*`, and BigInt versus Default.
+The custom adapter also observes the signature-rejection resend, proving both
+attempts use the selected transport while the scripted fallback remains unused.
+Raw-text bigint parsing and per-attempt retry signing remain on their existing
+bodies. No shared crate, registry or manifest edits are needed for this repair.
+
+The binding-factory-controls.py controller independently reintroduces each wrong
+behavior in the new bridge, rejects compiler errors as evidence, and restores
+production bytes in finally. Final gate counts and compiled-control receipts are
+reported in the follow-up PR before handoff.
+
+Measured on base master d2110dd1ec: full BingX suite95 (65 source witnesses and30
+assembled E2Es), three compiled factory regressions with three passing restores,
+host all-targets and wasm library strict Clippy, workspace fmt and global parity0
+(7459rows/17107public Rust items). Logs: /tmp/bingx-factory-{before,after,controls,
+full,clippy,wasm,fmt,parity}.txt. Native registry proof is reported separately once
+its loopback run completes.
+
+Native native_host_bingx also passes1 over real loopback HTTP/WS, checking startup,
+wire HMAC, bigint caller/order identifiers, placement and cancellation. Receipt:
+/tmp/bingx-factory-native.txt. No live credentials or exchange requests were used.

@@ -515,7 +515,6 @@ pub async fn fetch_markets<H: MarketDataHost>(h: &H) -> Result<H::Value, H::Erro
                 ("spot", h.boolean(false)),
                 ("swap", h.boolean(true)),
                 ("future", h.boolean(false)),
-                ("option", h.boolean(false)),
                 ("contract", h.boolean(true)),
                 ("linear", h.boolean(true)),
                 ("inverse", h.boolean(false)),

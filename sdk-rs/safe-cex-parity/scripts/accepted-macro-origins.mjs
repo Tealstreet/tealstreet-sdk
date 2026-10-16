@@ -2,9 +2,10 @@ import fs from 'node:fs';
 import path from 'node:path';
 
 const registry = 'registry+https://github.com/rust-lang/crates.io-index';
-// Reviewed json/json_internal expression arms and Token type-only arms.
+// Reviewed serde forwarding method arms, json/json_internal expression arms,
+// and Token type-only arms.
 // Updating one of these versions requires reviewing that macro's source again.
-const reviewedVersions = { serde_json: ['1.0.152'], syn: ['2.0.119', '3.0.7'] };
+const reviewedVersions = { serde: ['1.0.229'], serde_json: ['1.0.152'], syn: ['2.0.119', '3.0.7'] };
 function real(file) {
   if (!file) return undefined;
   try { return fs.realpathSync(file); }
@@ -30,7 +31,7 @@ export function verifiedMacroOrigins(doc, consumer, metadata, artifacts, sysroot
         && relative.split(path.sep).includes('rustlib')
         && path.basename(compilerPath).startsWith(`lib${root}-`)) origins.push(root);
   }
-  for (const root of ['serde_json', 'syn']) {
+  for (const root of Object.keys(reviewedVersions)) {
     const bindings = dependencies.filter(dep => dep.name === root);
     if (bindings.length !== 1) continue;
     const dependency = metadata.packages.find(pkg => pkg.id === bindings[0].pkg);
@@ -43,6 +44,21 @@ export function verifiedMacroOrigins(doc, consumer, metadata, artifacts, sysroot
       const matching = artifacts.filter(artifact => artifact.filenames?.some(file => real(file) === compilerPath));
       return matching.length === 1 && matching[0].package_id === dependency.id;
     });
+    if (root === 'serde') {
+      // The facade reexports this macro from serde_core. Verify the provider
+      // selected by that facade, including patched dependency substitutions.
+      const providerBindings = metadata.resolve?.nodes.find(node => node.id === dependency.id)?.deps.filter(dep => dep.name === 'serde_core') ?? [];
+      if (providerBindings.length !== 1) continue;
+      const provider = metadata.packages.find(pkg => pkg.id === providerBindings[0].pkg);
+      if (provider?.name !== 'serde_core' || provider.source !== registry || provider.version !== '1.0.229') continue;
+      const providers = compilerCrates.filter(crate => crate.name === 'serde_core').filter(crate => {
+        const compilerPath = real(crate.path);
+        if (!compilerPath) return false;
+        const matching = artifacts.filter(artifact => artifact.filenames?.some(file => real(file) === compilerPath));
+        return matching.length === 1 && matching[0].package_id === provider.id;
+      });
+      if (providers.length !== 1) continue;
+    }
     if (selected.length === 1) origins.push(root);
   }
   return origins.sort();

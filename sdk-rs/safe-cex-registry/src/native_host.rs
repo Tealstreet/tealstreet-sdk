@@ -277,6 +277,7 @@ impl RustVenueHost for NativeVenueHost {
         Ok(
             safe_cex_venue_hyperliquid::binding::HyperliquidDependencies {
                 runtime: self.runtime.clone(),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
                 http: Arc::new(HyperliquidHttp(client)),
                 limiter: self.hyperliquid_limiter.clone(),
                 signers: safe_cex_exchange::runtime::ExchangeSigners {
@@ -350,6 +351,18 @@ impl RustVenueHost for NativeVenueHost {
             http: safe_cex_exchange::js_runtime::client::rest_http_host(
                 self.runtime.clone(),
                 (self.adapter)()?,
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
+
+    fn woo(&self) -> Result<safe_cex_venue_woo::WooDependencies, ExchangeError> {
+        Ok(safe_cex_venue_woo::WooDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
@@ -474,6 +487,17 @@ impl RustVenueHost for NativeVenueHost {
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
             remote_signer_account_name: self.remote.as_ref().and_then(|(_, name)| name.clone()),
+        })
+    }
+    fn bitrue(&self) -> Result<safe_cex_venue_bitrue::BitrueDependencies, ExchangeError> {
+        Ok(safe_cex_venue_bitrue::BitrueDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
     fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
