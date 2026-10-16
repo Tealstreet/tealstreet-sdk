@@ -184,3 +184,12 @@ number tokens in a typed payload. The flat serialization schema and original
 `T: Deserialize<'de>` bound remain intact, including borrowed payloads. Metadata
 is checked even if a custom payload finishes early. Existing numeric-ingress
 frontdoors retain their ECMAScript Number and nonfinite-output checks.
+
+The original 44-owner native/default accepted-contract census has a closed
+compiler-selected runner, `scripts/accepted-census-contracts.mjs`, backed by the
+per-crate Phemex contract shard. It executes 30 decoder results and 14 individual
+classifications; independent native witnesses and mutation controls accompany
+non-decoder/typed roles. See safe-cex-parity/accepted-set/PHEMEX-REVIEW.md for the
+scope and commands. This is not full current discovery: post-census binding
+owners, aliases, local scopes, feature combinations and WASM remain explicit
+obligations rather than inheriting the selected contracts.

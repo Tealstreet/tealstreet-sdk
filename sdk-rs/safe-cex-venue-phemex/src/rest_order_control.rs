@@ -238,3 +238,16 @@ pub async fn cancel_symbol_orders<S, O, E, F: Future<Output = Result<(), E>>>(
     let orders = filter(&symbol)?;
     cancel(orders).await
 }
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn endpoint_lookup_preserves_selected_wire_paths() {
+        assert_eq!(endpoint("BATCH_ORDERS"), "/g-orders");
+        assert_eq!(endpoint("CANCEL_ORDER"), "/g-orders/cancel");
+        assert_eq!(endpoint("ORDER"), "/g-orders/create");
+        assert!(std::panic::catch_unwind(|| endpoint("not-an-endpoint")).is_err());
+    }
+}
