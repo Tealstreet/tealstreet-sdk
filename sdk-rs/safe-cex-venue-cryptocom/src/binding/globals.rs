@@ -253,9 +253,8 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
             use_pairs.borrow_mut().push((fulfilled.clone(), rejected));
             let tags = use_raised.clone();
             let tagged = Js::function("fulfilled", move |this, v| {
-                let result = fulfilled.call(this, v).map_err(|e| {
+                let result = fulfilled.call(this, v).inspect_err(|e| {
                     tags.borrow_mut().push((e.value.clone(), index));
-                    e
                 })?;
                 let Js::Promise(promise) = &result else {
                     return Ok(result);
@@ -265,9 +264,8 @@ fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
                     safe_cex_exchange::js_runtime::promise::Promise::spawn(
                         &promise.runtime(),
                         Box::pin(async move {
-                            await_js(Js::Promise(promise)).await.map_err(|e| {
+                            await_js(Js::Promise(promise)).await.inspect_err(|e| {
                                 tags.borrow_mut().push((e.value.clone(), index));
-                                e
                             })
                         }),
                     ),
