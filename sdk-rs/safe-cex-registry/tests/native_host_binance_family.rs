@@ -1,9 +1,9 @@
 //! BinancePMExchange and BinanceSpotExchange on the production native host, against
 //! local HTTP + WebSocket servers. Constructed through the production Rust registry.
+//! #133 centralizes construction in venue_harness; each proof supplies its registry name.
 #![cfg(not(target_arch = "wasm32"))]
 mod support;
 use hmac::{Hmac, Mac};
-use safe_cex_registry::rust_venues::rust_constructor;
 use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::rc::Rc;
@@ -86,18 +86,11 @@ fn binance_pm_runs_on_the_native_host_over_local_http_and_websocket() {
             peers,
             ..
         } = venue_harness(
+            ExchangeName::Binancepm,
             pm,
             json!({"key":"native-key","secret":SECRET}),
             None,
             safe_cex_exchange::native::native_runtime(),
-            |host, options, store| {
-                // The family entries landed in #120; exercise their dispatch here
-                // as well as the native dependencies the class receives.
-                rust_constructor(&ExchangeName::Binancepm, host)
-                    .expect("binancepm is a Rust-constructed venue")
-                    .construct(ExchangeName::Binancepm, options, store)
-                    .expect("registry constructs BinancePMExchange on the native host")
-            },
         )
         .await;
 
@@ -168,18 +161,11 @@ fn binance_spot_runs_on_the_native_host_over_local_http_and_websocket() {
             received,
             ..
         } = venue_harness(
+            ExchangeName::Binancespot,
             spot,
             json!({"key":"native-key","secret":SECRET}),
             None,
             safe_cex_exchange::native::native_runtime(),
-            |host, options, store| {
-                // The family entries landed in #120; exercise their dispatch here
-                // as well as the native dependencies the class receives.
-                rust_constructor(&ExchangeName::Binancespot, host)
-                    .expect("binancespot is a Rust-constructed venue")
-                    .construct(ExchangeName::Binancespot, options, store)
-                    .expect("registry constructs BinanceSpotExchange on the native host")
-            },
         )
         .await;
 
