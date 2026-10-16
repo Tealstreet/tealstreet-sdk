@@ -776,3 +776,31 @@ pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown>
         &serde_json::to_value(value).map_err(|e| Thrown::type_error(&e.to_string()))?,
     ))
 }
+
+/// The JSON-shaped projection a typed wire body takes, keeping undefined and BigInt.
+pub fn to_js_json(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown> {
+    use safe_cex_num::JsJsonValue as J;
+    Ok(match value {
+        Js::Undefined | Js::Function(_) => J::Undefined,
+        Js::Null => J::Null,
+        Js::Bool(b) => J::Bool(*b),
+        Js::Number(n) => J::Number(*n),
+        Js::BigInt(n) => J::BigInt((**n).clone()),
+        Js::String(s) => J::String(String::from_utf16_lossy(s)),
+        Js::Array(_) => J::Array(
+            value
+                .array_values()
+                .unwrap_or_default()
+                .iter()
+                .map(to_js_json)
+                .collect::<Result<_, _>>()?,
+        ),
+        _ => J::Object(
+            value
+                .own_entries()?
+                .into_iter()
+                .map(|(k, v)| Ok((String::from_utf16_lossy(&k), to_js_json(&v)?)))
+                .collect::<Result<_, Thrown>>()?,
+        ),
+    })
+}

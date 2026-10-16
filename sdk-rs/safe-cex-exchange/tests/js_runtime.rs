@@ -19,6 +19,7 @@ use std::{
 #[derive(Default)]
 struct Runtime {
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
+    clock: std::cell::Cell<f64>,
 }
 struct Task;
 impl ExchangeTask for Task {
@@ -26,12 +27,13 @@ impl ExchangeTask for Task {
 }
 impl ExchangeRuntime for Runtime {
     fn monotonic_now_ms(&self) -> f64 {
-        0.0
+        self.clock.get()
     }
     fn now_ms(&self) -> f64 {
         0.0
     }
-    fn sleep(&self, _: u64) -> ExchangeFuture<'static, ()> {
+    fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
+        self.clock.set(self.clock.get() + ms as f64);
         Box::pin(async { Ok(()) })
     }
     fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
@@ -274,6 +276,43 @@ fn operators_follow_ecmascript_and_refuse_bigint_mixing() {
     assert!(ops::less_than(&big(1), &Js::Number(1.5)).unwrap());
     assert!(!ops::less_equal(&Js::Number(f64::NAN), &Js::Number(1.0)).unwrap());
     assert!(ops::greater_equal(&big(2), &Js::str("2")).unwrap());
+    // Exact BigInt ordering beyond 2^53 and StringToBigInt radix literals.
+    let beyond = Js::BigInt(Rc::new("9007199254740993".parse().unwrap()));
+    assert!(ops::less_than(&beyond, &Js::Number(9007199254740994.0)).unwrap());
+    assert!(ops::greater_than(&beyond, &Js::Number(9007199254740992.0)).unwrap());
+    assert!(ops::less_than(&big(1), &Js::Number(1.5)).unwrap());
+    assert!(!ops::less_than(&big(2), &Js::Number(1.5)).unwrap());
+    assert!(ops::less_than(&big(15), &Js::str("0x10")).unwrap());
+    assert!(!ops::less_than(&big(1), &Js::str("1.5")).unwrap());
+    assert!(!ops::greater_equal(&big(1), &Js::str("1.5")).unwrap());
+    // OrdinaryToPrimitive consults an own valueOf.
+    let boxed = Js::object(vec![(
+        "valueOf",
+        Js::function("valueOf", |_, _| Ok(Js::Number(7.0))),
+    )]);
+    assert!(
+        ops::multiply(&boxed, &Js::Number(2.0))
+            .unwrap()
+            .strict_equals(&Js::Number(14.0))
+    );
+    // Remainder and unary minus.
+    assert!(
+        ops::remainder(&Js::Number(-7.0), &Js::Number(2.0))
+            .unwrap()
+            .strict_equals(&Js::Number(-1.0))
+    );
+    assert!(
+        ops::remainder(&big(-7), &big(2))
+            .unwrap()
+            .strict_equals(&big(-1))
+    );
+    assert_eq!(
+        ops::remainder(&big(1), &big(0)).unwrap_err().message(),
+        "Division by zero"
+    );
+    let negative_zero = ops::negate(&Js::Number(0.0)).unwrap().as_f64().unwrap();
+    assert!(negative_zero == 0.0 && negative_zero.is_sign_negative());
+    assert!(ops::negate(&big(3)).unwrap().strict_equals(&big(-3)));
 }
 
 #[test]
@@ -459,6 +498,81 @@ fn library_qs_stringify_and_hmac_digest() {
     );
 }
 
+fn regex(pattern: &str, flags: &str) -> Js {
+    let units = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+    safe_cex_exchange::js_runtime::regexp::regexp(&units(pattern), &units(flags)).unwrap()
+}
+
+fn string_method(receiver: &str, name: &str, args: Vec<Js>) -> Js {
+    Js::str(receiver).call_method(name, args).unwrap()
+}
+
+#[test]
+fn string_methods_dispatch_a_regexp_argument_to_its_symbol_method() {
+    // ts: normalizeSymbolForMatching(symbol).replace(/[-_/]/g, '')
+    let replaced = string_method(
+        "eth-usd_x/y",
+        "replace",
+        vec![regex("[-_/]", "g"), Js::str("")],
+    );
+    assert_eq!(replaced.to_display(), "ethusdxy");
+    // Captures are spliced into a regex split, as interval parsing relies on.
+    let parts = string_method("1h30m", "split", vec![regex(r"(\d+)", "")]);
+    assert_eq!(to_json(&parts).unwrap(), json!(["", "1", "h", "30", "m"]));
+    let address = format!("addr 0x{}", "aB".repeat(20));
+    let found = string_method(&address, "match", vec![regex("0x[a-fA-F0-9]{40}", "")]);
+    assert_eq!(found.get("0").unwrap().to_display(), &address[5..]);
+    assert!(matches!(
+        string_method("no address", "match", vec![regex("0x[a-f0-9]{40}", "")]),
+        Js::Null
+    ));
+    assert_eq!(
+        string_method("abc", "search", vec![regex("c", "")])
+            .to_number()
+            .unwrap(),
+        2.0
+    );
+    // A plain string pattern keeps the first-occurrence string semantics.
+    assert_eq!(
+        string_method("a-b-c", "replace", vec![Js::str("-"), Js::str("+")]).to_display(),
+        "a+b-c"
+    );
+    assert_eq!(
+        to_json(&string_method("a,b", "split", vec![Js::str(",")])).unwrap(),
+        json!(["a", "b"])
+    );
+}
+
+#[test]
+fn chained_rate_limits_hold_a_request_until_every_window_has_room() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    for (max, per) in [(4.0, 1000.0), (5.0, 6000.0)] {
+        xhr.call_method(
+            "__configureRateLimit",
+            vec![Js::object(vec![
+                ("maxRequests", Js::Number(max)),
+                ("perMilliseconds", Js::Number(per)),
+            ])],
+        )
+        .unwrap();
+    }
+    let mut sent_at = vec![];
+    for _ in 0..6 {
+        settle(
+            &runtime,
+            xhr.call_method("get", vec![Js::str("/ok")]).unwrap(),
+        )
+        .unwrap();
+        sent_at.push(runtime.clock.get());
+    }
+    assert_eq!(sent_at, [0.0, 0.0, 0.0, 0.0, 1000.0, 6000.0]);
+}
+
 impl safe_cex_exchange::websocket::WsRuntime for Runtime {
     fn transport(&self) -> std::sync::Arc<dyn safe_cex_transport::TransportProvider> {
         std::sync::Arc::new(safe_cex_transport::DirectTransport)
@@ -585,4 +699,140 @@ fn base_exchange_refuses_external_public_data_without_a_provider() {
             .message()
             .contains("no external public data provider")
     );
+}
+
+#[test]
+fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
+    use safe_cex_transport::{RestAdapter, RestRequest, RestResponseBody};
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    let adapter = Rc::new(client::JsRestAdapter::new(xhr));
+    let exchange_runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
+    let run = |url: &str| {
+        let adapter = adapter.clone();
+        let request = RestRequest {
+            method: "get".into(),
+            url: url.into(),
+            params: Some(json!({"instId": "BTC-USDT-SWAP"})),
+            ..Default::default()
+        };
+        settle(
+            &runtime,
+            Js::Promise(Promise::spawn(
+                &exchange_runtime,
+                Box::pin(async move {
+                    match adapter.execute(request).await {
+                        Ok(response) => {
+                            let RestResponseBody::Untransformed(body) = response.body else {
+                                panic!("adapter bodies are untransformed JSON");
+                            };
+                            Ok(safe_cex_exchange::js_runtime::value::from_json(
+                                &json!({"status": response.status, "body": body}),
+                            ))
+                        }
+                        Err(failure) => Err(adapter.thrown(failure)),
+                    }
+                }),
+            )),
+        )
+    };
+    let ok = to_json(&run("/ok").unwrap()).unwrap();
+    assert_eq!(ok, json!({"status": 200.0, "body": {"ok": true}}));
+    assert_eq!(
+        http.sent.borrow()[0]["params"],
+        json!({"instId": "BTC-USDT-SWAP"})
+    );
+    let rejected = run("/fail").unwrap_err();
+    assert_eq!(
+        to_json(
+            &rejected
+                .value
+                .get("response")
+                .unwrap()
+                .get("status")
+                .unwrap()
+        )
+        .unwrap(),
+        json!(500.0)
+    );
+}
+
+#[test]
+fn to_js_json_keeps_undefined_and_bigint_and_ordered_fields() {
+    use safe_cex_exchange::js_runtime::value::to_js_json;
+    use safe_cex_num::JsJsonValue as J;
+    let value = Js::object(vec![
+        ("b", Js::Number(1.0)),
+        ("a", Js::Undefined),
+        ("n", Js::BigInt(Rc::new(7.into()))),
+        ("xs", Js::array(vec![Js::Null, Js::str("s")])),
+    ]);
+    assert_eq!(
+        to_js_json(&value).unwrap(),
+        J::Object(vec![
+            ("b".into(), J::Number(1.0)),
+            ("a".into(), J::Undefined),
+            ("n".into(), J::BigInt(7.into())),
+            ("xs".into(), J::Array(vec![J::Null, J::String("s".into())])),
+        ])
+    );
+}
+
+#[test]
+fn ws_direct_fallback_moves_to_the_next_host_after_silent_connects() {
+    let g = library();
+    let fallback = run(&g, "WsDirectFallback", vec![Js::Number(1.0)]);
+    let resolve = |f: &Js| {
+        let url = f
+            .call_method(
+                "resolveUrl",
+                vec![
+                    Js::str("wss://primary"),
+                    Js::Undefined,
+                    Js::str("wss://backup"),
+                ],
+            )
+            .unwrap();
+        String::from_utf16_lossy(&url.to_js_string().unwrap())
+    };
+    assert_eq!(resolve(&fallback), "wss://primary");
+    fallback.call_method("onMessage", vec![]).unwrap();
+    assert_eq!(resolve(&fallback), "wss://primary");
+    assert_eq!(resolve(&fallback), "wss://backup");
+}
+
+#[test]
+fn emitter_on_and_off_follow_listener_identity() {
+    let this = base_exchange(json!({"key": "k", "secret": "s"})).unwrap();
+    let emitter = this.get("emitter").unwrap();
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    let listener = Js::function("listener", move |_, a| {
+        sink.borrow_mut().push(to_json(&Js::array(a)).unwrap());
+        Ok(Js::Undefined)
+    });
+    let other = Js::function("other", |_, _| Ok(Js::Undefined));
+    emitter
+        .call_method("on", vec![Js::str("markets:changed"), listener.clone()])
+        .unwrap();
+    emitter
+        .call_method("emit", vec![Js::str("markets:changed"), Js::Number(1.0)])
+        .unwrap();
+    emitter
+        .call_method("off", vec![Js::str("markets:changed"), other])
+        .unwrap();
+    emitter
+        .call_method("emit", vec![Js::str("markets:changed"), Js::Number(2.0)])
+        .unwrap();
+    emitter
+        .call_method("off", vec![Js::str("markets:changed"), listener])
+        .unwrap();
+    emitter
+        .call_method("emit", vec![Js::str("markets:changed"), Js::Number(3.0)])
+        .unwrap();
+    assert_eq!(*seen.borrow(), vec![json!([1.0]), json!([2.0])]);
 }
