@@ -454,3 +454,15 @@ mod accepted_native_contract {
         assert!(std::panic::catch_unwind(|| endpoint("not-an-endpoint")).is_err());
     }
 }
+
+#[cfg(test)]
+mod accepted_outbound_contract {
+    #[test]
+    fn text_keeps_raw_symbol_units_between_utf16_affixes() {
+        assert_eq!(
+            super::text("A🚀", &[0xd800, 0, 0xdfff], "é"),
+            [65, 0xd83d, 0xde80, 0xd800, 0, 0xdfff, 233]
+        );
+        assert_eq!(super::text("", &[], ""), Vec::<u16>::new());
+    }
+}

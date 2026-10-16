@@ -1120,3 +1120,34 @@ mod accepted_native_contract {
         assert!(std::panic::catch_unwind(|| endpoint("not-an-endpoint")).is_err());
     }
 }
+
+#[cfg(test)]
+mod accepted_outbound_contract {
+    #[allow(dead_code, unused_imports)]
+    mod fixture {
+        include!(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/support/accepted_host_fixture.rs"
+        ));
+    }
+    #[test]
+    fn label_encodes_supplied_text_through_host() {
+        use safe_cex_exchange::js_runtime::value::Js;
+        let mut host = fixture::Host::new(&serde_json::Value::Null);
+        for (text, expected) in [
+            ("A🚀\0", vec![65, 0xd83d, 0xde80, 0]),
+            ("é雪", vec![233, 38634]),
+            ("", vec![]),
+        ] {
+            let value = super::label(&mut host, text);
+            let Js::String(units) = value else {
+                panic!("label must return native text")
+            };
+            assert_eq!(
+                units.as_ref(),
+                expected.as_slice(),
+                "label native UTF16 units"
+            );
+        }
+    }
+}
