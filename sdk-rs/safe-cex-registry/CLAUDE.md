@@ -180,3 +180,7 @@ with no venue REST or private/public venue sockets in public-only mode.
 WEEX is registered through its concrete native binding and the shared signed HTTP
 host, gateway factory and UTC host date profile. `tests/native_host_weex.rs` checks
 its account read and exact request HMAC over loopback HTTP.
+
+TxFlow is constructible only as the source Phase-0 scaffold. Native inputs build
+its HTTP client, while start emits the exact refusal before IO. Keep its existing
+source start boundary and test both mainnet/testnet construction without network.
