@@ -14,6 +14,7 @@ COMMAND = [os.environ.get('CARGO', 'cargo'), 'test', '--locked', '--manifest-pat
            '-p', 'safe-cex-venue-bybit', '--test', 'inverse_binding', '--test', 'inverse_batch_binding']
 LOGS = Path(os.environ.get('INVERSE_CONTROL_LOG_DIR') or tempfile.mkdtemp(prefix='bybit-inverse-controls-'))
 LOGS.mkdir(parents=True, exist_ok=True)
+print(f"Control logs: {LOGS}", flush=True)
 METHODS = {
     'start': None, 'get_account': None, 'validate_account': None,
     'fetch_positions': None, 'fetch_orders': None, 'fetch_markets': None,
@@ -27,7 +28,7 @@ SELECTED = sys.argv[1:] or [*METHODS, 'constructor']
 assert all(name in METHODS or name == 'constructor' for name in SELECTED)
 
 def run(label, negative=False):
-    result = subprocess.run(COMMAND, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result = subprocess.run(COMMAND, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
     output = result.stdout.decode(errors='replace')
     (LOGS / f'{label}.log').write_text(output)
     if negative:

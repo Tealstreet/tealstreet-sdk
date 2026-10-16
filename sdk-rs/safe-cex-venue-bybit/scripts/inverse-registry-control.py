@@ -12,9 +12,10 @@ COMMAND = [os.environ.get('CARGO', 'cargo'), 'test', '--locked', '--manifest-pat
            '-p', 'safe-cex-registry', '--test', 'native_host_bybit']
 LOGS = Path(os.environ.get('INVERSE_REGISTRY_LOG_DIR') or tempfile.mkdtemp(prefix='bybit-inverse-registry-control-'))
 LOGS.mkdir(parents=True, exist_ok=True)
+print(f"Control logs: {LOGS}", flush=True)
 
 def run(label, negative=False):
-    result = subprocess.run(COMMAND, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
+    result = subprocess.run(COMMAND, cwd=ROOT, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
     output = result.stdout.decode(errors='replace')
     (LOGS / f'{label}.log').write_text(output)
     if negative:

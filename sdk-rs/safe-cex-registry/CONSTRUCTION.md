@@ -1,7 +1,7 @@
 # Rust venue construction through the registry
 
 Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `apexomni`, `grvt`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, `breakoutprop`, Bybit (`bybit`, `bybitdemo`, `bybitspot`),
+`bitgetusdc`), `bitrue`, `bitunix`, `blofin`, `breakoutprop`, Bybit (`bybit`, `bybitdemo`, `bybitspot`, `bybitinverse`),
 Coinbase (`coinbase`, `coinbasespot`), `cryptocom`, `phemex`,
 the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid` and `hyperliquidspot`, the Binance family (`binance`, `binancepm`,
@@ -53,11 +53,11 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
   - `blofin`, built with `BlofinNativeExchange::new` from a registry-built
     `BaseExchange` and `BlofinDependencies` (runtime, the common HTTP builder,
     optional externalPublicData provider, remote-signer account name).
-  - `bybit`, `bybitdemo` and `bybitspot`, built with `BybitExchange::create`. The host supplies
+  - `bybit`, `bybitdemo`, `bybitspot` and `bybitinverse`, built with `BybitExchange::create`. The host supplies
     the wire, HTTP host, runtime clocks and external-data factory. Hosted signing
     uses the shared signer bridge for both the source receiver and typed API
     clients; account names and availability follow the same capability. Native
-    sockets start on the direct path. `tests/native_host_bybit.rs` verifies both
+    sockets start on the direct path. `tests/native_host_bybit.rs` verifies all four
     names over local HTTP, including HMAC bytes with empty local credentials.
   - `coinbase` and `coinbasespot`, one constructor around `CoinbaseExchange::new`.
     `CoinbaseDependencies` carries the shared HTTP/runtime hosts, signing cache,
@@ -104,7 +104,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bybitinverse`, `hyrotrader`, `kucoin`, `mexc`, `lighter`
+follow-up PR. Expected next: `hyrotrader`, `kucoin`, `mexc`, `lighter`
 and `weex`.
 
 Each follow-up does four things:

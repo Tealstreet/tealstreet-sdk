@@ -3989,3 +3989,58 @@ through the runner while its finally block restored both Rust files byte for
 byte; the created directory's mode was 0700. The four actual compiled projection
 controls were then caught again and exact restoration passed all 28 binding
 tests. A read-only review of these runner changes reported no findings.
+
+## Dedicated Inverse receiver and native registry binding
+
+`BybitExchange::create(Bybitinverse, ...)` now installs the dedicated retained
+`BybitInverseExchange` receiver. Its typed source flags are false before the Rc
+is published. The existing registry host, hosted signer and caller-owned limiter
+construct it without a second host implementation. `native_host_bybit` passes
+all three tests; local and secretless-hosted loops include Inverse. Removing only
+the registry entry compiles, fails both constructor assertions, and restores to
+three passing tests. Registry membership passes all 15 tests.
+
+`inverse_binding` passes nine concrete trait/socket tests: account/validation,
+reads and all trading methods, exact inherited refusals, constructor identity,
+USD sizing/coin cache units, Brazil amend/cancel, source mode/margin behavior,
+strict leverage rejection, native NaN/-0, startup socket selection/auth,
+active-topic union and both callbacks, disposal/weak ownership, and physical
+private order/fill/position delivery. Private positions update existing rows
+only; their NaN leverage survives the landed shared Store patch bridge (#296).
+Execution and wallet frames remain source no-ops. The old constructor rejection
+fails the native witness before any implementation is admitted.
+
+`inverse_batch_binding` runs 36 independently counted actual-source batch/cache
+compositions against the physical native transport. It executes maintained
+placeOrders, batch grouping/processing/formatting, execution parameters,
+position/category selectors and recently-placed cache builders, with maintained
+tables, helpers and locked Lodash. Only external I/O, mode lookup, caller-ID
+validation and the outer fallback decision are scripted. Native assertions cover
+requests, errors, warnings, batch sleeps, IDs, amount, coin remaining and both USD
+extras. Four native NaN/infinity/-infinity/-0 amount cases are independently
+injected on each side; source `parseFloat(qty) || opts.amount || 0` intentionally
+caches zero for NaN while sending the source NaN request quantity.
+
+The consumer runner compiles and catches 19 independent faults (17 trait methods,
+disposal, constructor admission), then restores exact production bytes and
+passes all nine E2Es plus the source-composition test. Its full control run used
+the initial 32 finite-case corpus; expanding the same test to 36 cases changed
+no production body and passes separately. Both Inverse control runners now bound
+every Cargo subprocess to 600 seconds and print private mkdtemp log paths.
+Injected TimeoutExpired after a real mutation restores each source byte-for-byte.
+
+Five manifests are reconciled row by row: 52 Inverse receiver rows, five primary
+shared-body rows, eight public-socket rows, six private-socket rows and the native
+registry entry. Legacy helper mappings remain alongside their concrete consumers;
+history/candle/book/recovery class rows retain their pending scope. Parity passes
+with 7459 rows and 17198 public Rust items. No new exemption is added.
+
+The reviewed override export changes 1163 entries to 1166: four additions, one
+removal and 16 existing body changes, all inside this venue. Every foreign entry
+is unchanged. New edges are the dedicated source-super disposal and socket calls,
+the Inverse fetch helper reference, and the relocated public connection name
+lookup. Existing receiver/account/disposal bodies retain their primary behavior.
+The disposal citation independently describes TS BybitInverseExchange.dispose
+at lines 260–264, including its actual super.dispose call. All six override
+checks, including live source, and all seven cancellation inventory tests,
+including discovery export, pass without a new cancellation classification.
