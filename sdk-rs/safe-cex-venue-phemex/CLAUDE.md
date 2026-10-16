@@ -166,3 +166,8 @@ The Rust registry now constructs Phemex on the production native HTTP/WS host
 with hosted signing and the shared gateway provider. Its native construction
 regression reads markets and verifies the HMAC on an account query over local
 HTTP. The native host retains the shared caller-owned limiter argument.
+
+The production dispose wrapper delegates to the source body, which invokes
+BaseExchange.dispose once before its public/private socket cleanup. The wrapper
+does not add an earlier duplicate base call. The source-super regression and
+compiling skip-super mutation verify the flag and inherited listener cleanup.

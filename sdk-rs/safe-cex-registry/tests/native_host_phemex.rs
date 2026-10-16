@@ -63,7 +63,12 @@ fn phemex_registry_constructs_native_inputs_and_signs_account_http() {
         use hmac::{Hmac, Mac};
         let mut mac = Hmac::<sha2::Sha256>::new_from_slice(support::SECRET.as_bytes()).unwrap();
         mac.update(payload.as_bytes());
-        let expected: String = mac.finalize().into_bytes().iter().map(|b| format!("{b:02x}")).collect();
+        let expected: String = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
         assert_eq!(request.headers["x-phemex-request-signature"], expected);
         h.exchange.dispose().expect("Phemex dispose");
     });

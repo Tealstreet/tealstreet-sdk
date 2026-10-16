@@ -33,6 +33,7 @@ METHODS=[
  ('fetch_historical_fills','"fetchHistoricalFills"','"__mutation"','historical_fills_use_the_primary_symbol_scoped_route'),
 ]
 HELPERS=[
+ ('dispose_super','binding/session.rs','self.rt.base().dispose().map_err(Thrown::from)','Ok(())','exchange_binding','dispose_runs_source_super_cleanup'),
  ('symbol_in','utilities.rs','result.push(error.unpaired_surrogate())','result.push({ let _ = error; 0xfffd })','binding_values','symbol_in_preserves_every_lone_surrogate_unit'),
  ('symbol_out','utilities.rs','return Ok(found);','return Ok(Js::str("mutant"));','binding_values','symbol_out_preserves_raw_info_units'),
  ('raw_tickers','ticker_reads.rs','    Ok(data)\n','    Ok(Js::Null)\n','binding_values','raw_tickers_preserve_response_identity_and_units'),

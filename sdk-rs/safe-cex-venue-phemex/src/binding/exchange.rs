@@ -196,9 +196,8 @@ impl Exchange for PhemexExchange {
         &self.capabilities
     }
     fn dispose(&self) -> Result<(), ExchangeError> {
-        // js_runtime exposes isDisposed through the typed base's read-only
-        // getter. Close that owner before the source tears down its sockets.
-        self.base().dispose()?;
+        // The source body invokes superclass cleanup once before its sockets;
+        // do not add another base disposal ahead of that body.
         self.rt
             .this
             .call_method("dispose", vec![])

@@ -521,3 +521,29 @@ fn historical_fills_use_the_primary_symbol_scoped_route() {
     assert_eq!(fills[0].commission, Some(0.01));
     assert!(h.http.calls("/exchange/order/trade").is_empty());
 }
+
+#[test]
+fn dispose_runs_source_super_cleanup() {
+    use std::{cell::Cell, rc::Rc};
+    let h = venue();
+    let observed = Rc::new(Cell::new(0));
+    let seen = observed.clone();
+    h.venue().base().on(
+        "update",
+        Rc::new(move |_, _| {
+            seen.set(seen.get() + 1);
+            Ok(())
+        }),
+    );
+    h.venue().dispose().expect("source dispose");
+    assert!(
+        h.venue().base().is_disposed(),
+        "source super call sets shared state"
+    );
+    h.venue().base().emit("update", json!({})).unwrap();
+    assert_eq!(
+        observed.get(),
+        0,
+        "source super call removes inherited listeners"
+    );
+}
