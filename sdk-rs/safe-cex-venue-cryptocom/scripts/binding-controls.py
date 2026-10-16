@@ -13,7 +13,7 @@ GLOBALS = "safe-cex-venue-cryptocom/src/binding/globals.rs"
 # Whole-file controls for the module-scope helpers the trait methods depend on.
 GLOBAL_MUTATIONS = [
     ("onRejected replay", "with_rejected_handlers(&rt, client::create(rt.shared.http.clone(), arg(&a, 0)))",
-     "{ let _ = with_rejected_handlers; Ok(client::create(rt.shared.http.clone(), arg(&a, 0))) }", "validate_account_reports_an_authentication_rejection"),
+     "{ let _ = with_rejected_handlers; Ok(client::create(rt.shared.http.clone(), arg(&a, 0))) }", "a_non_2xx_signature_rejection_retries_through_axios_retry"),
     ("resendOnSignatureRejection", 'xhr.call_method("request", vec![resend])', '{ let _ = (xhr, resend); Ok(Js::Undefined) }',
      "a_signature_rejection_in_a_200_envelope_resends_once_resigned"),
     ("signatureRejectedResponse", "config.set(SIGNATURE_RETRY_CONFIG_KEY, Js::Bool(true))?;\n                Ok(Js::Bool(true))",

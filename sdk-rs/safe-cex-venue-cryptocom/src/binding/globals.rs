@@ -233,10 +233,11 @@ fn throttle(rt: &Rt, callback: Js, wait: f64) -> Js {
     throttled
 }
 
-/// Axios runs a response interceptor's `onRejected` for a failure raised before
-/// it; the shared client keeps only `onFulfilled`. Record each pair, tag what a
-/// fulfilled handler throws with its index, and replay the rejected handlers
-/// after that index on every verb's rejection.
+/// axios-retry precedes the venue's rejection formatter in the source, while
+/// the shared client's retry loop surrounds the entire response chain. Keep
+/// rejection formatting outside that loop so it retains response/config when
+/// checking retries. Tag fulfilled-handler errors to skip their own rejected
+/// partner, as Axios does, then replay the remaining rejection chain.
 fn with_rejected_handlers(rt: &Rt, xhr: Js) -> Result<Js, Thrown> {
     type Pairs = Rc<RefCell<Vec<(Js, Js)>>>;
     type Raised = Rc<RefCell<Vec<(Js, usize)>>>;

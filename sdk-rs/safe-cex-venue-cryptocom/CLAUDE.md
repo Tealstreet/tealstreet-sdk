@@ -18,14 +18,19 @@ request or socket construction follows. It also checks read purity, public-only
 startup and private subscription ordering across failed/successful auth acks.
 `scripts/binding-controls.py` runs compiling production mutations sequentially,
 restoring exact source bytes and requiring each named test to pass again.
+The venue's rejection wrapper remains necessary: the shared HTTP client's retry
+loop surrounds the complete response chain, while axios-retry runs before the
+venue's rejection formatter. Delaying rejection formatting preserves the HTTP
+response/config used to identify a signature rejection. Removing the wrapper
+must fail the non-2xx signature-resend E2E test until the shared ordering is fixed.
 
 Open binding finding: source REST `fetchBalance` returns currency records with
 `available`/`locked` fields under an `as any` cast. The inherited binding projects
 them to the shared typed Balance shape. This changes observable output and is
 tracked on the class manifest row; it is not accepted as parity. Resolve that
 boundary before marking the binding ready. Run `parity:check` against the actual
-workspace; the historical one-crate source-view helper can miss mappings owned
-by shared manifests.
+workspace; the historical one-crate source view lacks the workspace's exemption
+and structural re-export context.
 
 The first slice mirrors the eight configuration constants and
 `mapCandlestickInterval` from `cryptocom.types.ts`. Eleven wire records (Instrument, Ticker, Candlestick, PositionBalance, Error, Trade, AccountsResponse, BalanceSummary, Book, TradeFill and Order)
