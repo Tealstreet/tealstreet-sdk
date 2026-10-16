@@ -42,7 +42,10 @@ non-decoder classification receipts. Those receipts are not runtime tests.
 Selected validation passed: the two live native targets (280 serializer
 comparisons and 42 auth cases), all five compiling corruption/restoration
 controls, and five fresh API classification receipts with zero failed owners.
-The full integrated readiness checks are pending. No production code or manifest
+Integrated readiness requires the full scoped suite, strict host/WASM
+all-target Clippy, formatting, the manifest invention/status gate and a final
+fresh five-owner check. The [PR validation record](https://github.com/Tealstreet/tealstreet-sdk/pull/348)
+records those results against merged master. No production code or manifest
 status changes are proposed. Scope is these five original native/default
 owners; other owners, aliases, construction, locals, features and WASM contract
 execution remain separate obligations.
