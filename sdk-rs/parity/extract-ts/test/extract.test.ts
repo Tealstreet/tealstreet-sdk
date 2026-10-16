@@ -519,7 +519,7 @@ test('real safe-cex Program includes Bybit and BaseExchange callable instance fi
   }
   for (const file of ['exchanges/registry.ts', 'exchanges/registry.native.ts']) {
     assert.equal(files.find((source) => source.ts === sourcePrefix + file)?.symbols
-      .filter((row) => row.ts.startsWith('exchangeRegistry.') && row.kind === 'field-fn').length, 47);
+      .filter((row) => row.ts.startsWith('exchangeRegistry.') && row.kind === 'field-fn').length, 48);
   }
   const aster = files.find((source) => source.ts === sourcePrefix + 'exchanges/asterdex/asterdex.exchange.ts');
   assert.ok(!aster?.symbols.some((row) => row.ts === 'AsterDEXExchange.primaryAPI'));
