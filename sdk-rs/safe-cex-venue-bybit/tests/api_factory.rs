@@ -47,7 +47,7 @@ use std::{
 const GET_ONE: &str = "d7679158b705d7843f97a42f20daf61e69e0a0508c27764103c814be66e10d24";
 const GET_TWO: &str = "ba3a0f7ba95d8b58f6fded292ee626c757f5827ff24f3335c0a3a96c5a35b7a6";
 const POST_ONE: &str = "6018b8615688d269d61a0f28357023f50edb484ce66230a5e0cef9e5b87027c8";
-const CLOCK_TWO: &str = "6e758e958c81be2e0c3ae31b74336d3d385be1bd8277d658f8cab2f2ba4026fc";
+const CLOCK_TWO: &str = "7cf184fece248efb635e17e5814ad883608fcc8c998bad31cc6a082b449e8656";
 fn ready<F: Future>(future: F) -> F::Output {
     let mut future = std::pin::pin!(future);
     match future
@@ -1245,7 +1245,7 @@ fn source_and_native_factory_surface() {
             + timeouts.len()
             + clock_budgets.len()
             + params.len(),
-        85,
+        87,
         "factory_native_complete_corpus_before_source"
     );
     compare_response_and_clock_reentry(&responses);
@@ -1275,12 +1275,12 @@ fn retry_condition_cases() -> Vec<Value> {
         (
             "lower-array-exact",
             r#"{"ret_msg":["other","error sign!"]}"#,
-            "retry",
+            "original",
         ),
         (
             "camel-array-exact",
             r#"{"retMsg":["error sign!"]}"#,
-            "retry",
+            "original",
         ),
         (
             "lower-array-substring-does-not-match",
@@ -1290,30 +1290,30 @@ fn retry_condition_cases() -> Vec<Value> {
         (
             "lower-empty-array-falls-through",
             r#"{"ret_msg":[],"retMsg":["error sign!"]}"#,
-            "retry",
+            "original",
         ),
         (
             "lower-null-falls-through",
             r#"{"ret_msg":null,"retMsg":["error sign!"]}"#,
-            "retry",
+            "original",
         ),
-        ("lower-empty-object", r#"{"ret_msg":{}}"#, "TypeError"),
-        ("lower-number", r#"{"ret_msg":17}"#, "TypeError"),
-        ("lower-boolean", r#"{"ret_msg":false}"#, "TypeError"),
+        ("lower-empty-object", r#"{"ret_msg":{}}"#, "original"),
+        ("lower-number", r#"{"ret_msg":17}"#, "original"),
+        ("lower-boolean", r#"{"ret_msg":false}"#, "original"),
         (
             "lower-own-includes-null",
             r#"{"ret_msg":{"includes":null}}"#,
-            "TypeError",
+            "original",
         ),
         (
             "lower-own-includes-string",
             r#"{"ret_msg":{"includes":"error sign!"}}"#,
-            "TypeError",
+            "original",
         ),
         (
-            "lower-array-true-skips-camel-object",
+            "lower-array-is-not-a-message",
             r#"{"ret_msg":["error sign!"],"retMsg":{}}"#,
-            "retry",
+            "original",
         ),
         (
             "lower-string-true-skips-camel-boolean",
@@ -1323,17 +1323,17 @@ fn retry_condition_cases() -> Vec<Value> {
         (
             "lower-array-false-reaches-camel-object",
             r#"{"ret_msg":[],"retMsg":{}}"#,
-            "TypeError",
+            "original",
         ),
         (
-            "lower-object-throws-before-positive-camel",
+            "lower-object-yields-to-positive-camel",
             r#"{"ret_msg":{},"retMsg":"error sign!"}"#,
-            "TypeError",
+            "retry",
         ),
         (
             "lower-empty-string-reaches-camel-number",
             r#"{"ret_msg":"","retMsg":0}"#,
-            "TypeError",
+            "original",
         ),
         (
             "camel-array-substring-does-not-match",
@@ -1348,10 +1348,20 @@ fn retry_condition_cases() -> Vec<Value> {
         (
             "json-proto-key-does-not-install-includes",
             r#"{"ret_msg":{"__proto__":{"includes":"error sign!"}}}"#,
-            "TypeError",
+            "original",
+        ),
+        (
+            "code-10004-without-sign-text",
+            r#"{"retCode":10004,"retMsg":"signature mismatch"}"#,
+            "retry",
+        ),
+        (
+            "capitalised-error-sign-wording",
+            r#"{"retCode":10001,"retMsg":"Error sign, please check your signature generation algorithm"}"#,
+            "retry",
         ),
     ];
-    assert_eq!(inputs.len(), 20, "factory_condition_native_declared_cases");
+    assert_eq!(inputs.len(), 22, "factory_condition_native_declared_cases");
     let mut results = Vec::new();
     let mut totals = [0_usize; 3];
     let mut predicate_totals = [0_usize; 3];
@@ -1374,35 +1384,14 @@ fn retry_condition_cases() -> Vec<Value> {
             context: Some(Box::new(json!({"retainedCause":71}))),
         };
         let predicate = safe_cex_venue_bybit::api::should_retry_bybit_request(&predicate_error);
-        let expected_message = if id == "lower-array-false-reaches-camel-object"
-            || id == "lower-empty-string-reaches-camel-number"
-        {
-            "error?.response?.data?.retMsg?.includes is not a function"
-        } else {
-            "error?.response?.data?.ret_msg?.includes is not a function"
-        };
-        let predicate_observation = if expected == "TypeError" {
-            let error = predicate.unwrap_err();
-            assert_eq!(
-                error.name, "TypeError",
-                "factory_condition_native_pure_error_name {id}"
-            );
-            assert_eq!(
-                error.message, expected_message,
-                "factory_condition_native_pure_error_message {id}"
-            );
-            predicate_totals[2] += 1;
-            json!({"kind":"error","name":error.name,"message":error.message})
-        } else {
-            let value = predicate.unwrap();
-            assert_eq!(
-                value,
-                expected == "retry",
-                "factory_condition_native_pure_value {id}"
-            );
-            predicate_totals[usize::from(!value)] += 1;
-            json!({"kind":"boolean","value":value})
-        };
+        let value = predicate.unwrap();
+        assert_eq!(
+            value,
+            expected == "retry",
+            "factory_condition_native_pure_value {id}"
+        );
+        predicate_totals[usize::from(!value)] += 1;
+        let predicate_observation = json!({"kind":"boolean","value":value});
         let f = fixture(vec![
             Reply::Rejected(RestResponseBody::Encoded(raw.as_bytes().to_vec())),
             response(r#"{"retCode":0,"retMsg":"OK"}"#),
@@ -1428,7 +1417,7 @@ fn retry_condition_cases() -> Vec<Value> {
             f.runtime.console.borrow().is_empty(),
             "factory_condition_native_no_console {id}"
         );
-        let (outcome, error_message) = match expected {
+        let outcome = match expected {
             "retry" => {
                 totals[0] += 1;
                 let result = result.unwrap();
@@ -1442,7 +1431,7 @@ fn retry_condition_cases() -> Vec<Value> {
                     2,
                     "factory_condition_native_unwind_auth {id}"
                 );
-                ("resolved-after-retry", None)
+                "resolved-after-retry"
             }
             "original" => {
                 totals[1] += 1;
@@ -1470,42 +1459,19 @@ fn retry_condition_cases() -> Vec<Value> {
                     f.owner.accesses.borrow().is_empty(),
                     "factory_condition_native_original_no_auth {id}"
                 );
-                ("original-rejection", None)
-            }
-            "TypeError" => {
-                totals[2] += 1;
-                let error = result.unwrap_err();
-                let Some(cause) = error.transport_error else {
-                    panic!("factory_condition_native_error_cause {id}");
-                };
-                let TransportError::JavaScript(cause) = *cause else {
-                    panic!("factory_condition_native_error_kind {id}");
-                };
-                assert_eq!(
-                    cause.name, "TypeError",
-                    "factory_condition_native_error_name {id}"
-                );
-                assert_eq!(
-                    cause.message, expected_message,
-                    "factory_condition_native_error_message {id}"
-                );
-                assert!(
-                    f.owner.accesses.borrow().is_empty(),
-                    "factory_condition_native_error_no_auth {id}"
-                );
-                (cause.name, Some(cause.message))
+                "original-rejection"
             }
             _ => unreachable!(),
         };
-        results.push(json!({"id":id,"attempts":attempts,"outcome":outcome,"authFailures":f.owner.base.auth_failure_streak(),"authSuccesses":f.owner.accesses.borrow().len(),"errorMessage":error_message,"predicate":predicate_observation}));
+        results.push(json!({"id":id,"attempts":attempts,"outcome":outcome,"authFailures":f.owner.base.auth_failure_streak(),"authSuccesses":f.owner.accesses.borrow().len(),"predicate":predicate_observation}));
     }
     assert_eq!(
         predicate_totals,
-        [8, 3, 9],
+        [6, 16, 0],
         "factory_condition_native_pure_branch_floors"
     );
-    assert_eq!(totals, [8, 3, 9], "factory_condition_native_branch_floors");
-    assert_eq!(results.len(), 20, "factory_condition_native_executed_cases");
+    assert_eq!(totals, [6, 16, 0], "factory_condition_native_branch_floors");
+    assert_eq!(results.len(), 22, "factory_condition_native_executed_cases");
     results
 }
 #[test]
@@ -1513,8 +1479,8 @@ fn native_fallible_signature_retry_conditions() {
     retry_condition_cases();
 }
 fn compare_retry_condition_boundaries(native: &[Value]) {
-    let source = source("create-api-retry-condition-boundaries.cjs", 20);
-    for i in 0..20 {
+    let source = source("create-api-retry-condition-boundaries.cjs", 22);
+    for i in 0..22 {
         assert_eq!(
             native[i]["id"], source["cases"][i]["id"],
             "factory_condition_source_id {i}"
@@ -1529,12 +1495,6 @@ fn compare_retry_condition_boundaries(native: &[Value]) {
             assert_eq!(
                 native[i][field], source["cases"][i]["source"][field],
                 "factory_condition_source_value {i}/{field}"
-            );
-        }
-        if native[i]["outcome"] == "TypeError" {
-            assert_eq!(
-                native[i]["errorMessage"], source["cases"][i]["source"]["errorMessage"],
-                "factory_condition_source_error {i}"
             );
         }
     }
@@ -1557,4 +1517,76 @@ fn native_clock_reentry_retains_consumed_retry_budget() {
 #[test]
 fn native_params_spread_matches_both_carriers() {
     api_factory_params::collect_native();
+}
+
+// Resolved sign rejections re-sign once through the whole pipeline; the stamp is shared
+// with the rejected-response condition, and each retry unwind reprocesses the response.
+#[test]
+fn native_resolved_signature_rejection_resends_once() {
+    const SIGN: &str = r#"{"retCode":10004,"retMsg":"error sign!"}"#;
+    let cases: [(&str, Vec<Reply>, (usize, f64, u8, usize)); 4] = [
+        (
+            "resolved-sign-then-ok",
+            vec![response(SIGN), response(r#"{"retCode":0,"retMsg":"OK"}"#)],
+            (2, 0., 0, 1),
+        ),
+        (
+            "resolved-sign-twice",
+            vec![response(SIGN), response(SIGN)],
+            (2, 10004., 1, 0),
+        ),
+        (
+            "rejected-then-resolved-sign",
+            vec![
+                Reply::Rejected(RestResponseBody::Encoded(SIGN.as_bytes().to_vec())),
+                response(SIGN),
+            ],
+            (2, 10004., 2, 0),
+        ),
+        (
+            "resolved-other-error",
+            vec![response(r#"{"retCode":10001,"retMsg":"params error"}"#)],
+            (1, 10001., 0, 0),
+        ),
+    ];
+    let mut native = Vec::new();
+    for (id, replies, (attempts, ret_code, failures, successes)) in cases {
+        let f = fixture(replies);
+        let mut request = get("/private");
+        request.method = "post".into();
+        request.body = Some(RestBody::Untransformed(json!({"request":true})));
+        let result = ready(f.api.execute_with_receipt(request)).unwrap();
+        let requests = f.wire.requests.borrow();
+        assert_eq!(
+            requests.len(),
+            attempts,
+            "factory_resend_native_attempts {id}"
+        );
+        let code = result.response.body.clone().into_data()["retCode"].as_f64();
+        assert_eq!(
+            code,
+            Some(ret_code),
+            "factory_resend_native_final_code {id}"
+        );
+        let streak = f.owner.base.auth_failure_streak();
+        assert_eq!(streak, failures, "factory_resend_native_auth_failures {id}");
+        let recorded = f.owner.accesses.borrow().len() - usize::from(streak);
+        assert_eq!(
+            recorded, successes,
+            "factory_resend_native_auth_successes {id}"
+        );
+        native.push(json!({"id":id,"attempts":attempts,"retCode":ret_code,"authFailures":streak,"authSuccesses":recorded}));
+    }
+    let source = source("create-api-signature-resend-boundaries.cjs", 4);
+    for (index, case) in native.iter().enumerate() {
+        let source = &source["cases"][index];
+        assert_eq!(case["id"], source["id"], "factory_resend_source_id {index}");
+        for field in ["attempts", "retCode", "authFailures", "authSuccesses"] {
+            assert_eq!(
+                case[field].as_f64(),
+                source["source"][field].as_f64(),
+                "factory_resend_source_value {index}/{field}"
+            );
+        }
+    }
 }

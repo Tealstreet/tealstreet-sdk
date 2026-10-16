@@ -357,7 +357,7 @@ fn observe_local(value: &V) -> Json {
 }
 fn base_opts() -> V {
     o(vec![
-        ("symbol", s("BTCUSD")),
+        ("symbol", s("BTCUSDT")),
         ("type", enum_value(OrderType::Limit)),
         ("side", enum_value(OrderSide::Buy)),
         ("amount", V::N(7.)),
@@ -370,7 +370,7 @@ fn expected_record(amount: f64, price: f64, opts: &V, reduce: bool, tif: OrderTi
     o(vec![
         ("id", s("order-1")),
         ("status", enum_value(OrderStatus::Open)),
-        ("symbol", s("BTCUSD")),
+        ("symbol", s("BTCUSDT")),
         ("type", get(opts, "type")),
         ("side", enum_value(OrderSide::Buy)),
         ("price", V::N(price)),
@@ -431,7 +431,7 @@ fn original_order(info: V) -> V {
     o(vec![
         ("id", s("order-1")),
         ("status", enum_value(OrderStatus::Open)),
-        ("symbol", s("BTCUSD")),
+        ("symbol", s("BTCUSDT")),
         ("type", enum_value(OrderType::Limit)),
         ("side", enum_value(OrderSide::Buy)),
         ("price", V::N(11.)),
@@ -500,7 +500,7 @@ fn primary_local_order_write_native_source_oracle() {
             ]);
             let original_opts = h.spread(opts.clone()).unwrap();
             let original_payload = h.spread(payload.clone()).unwrap();
-            let result = api::record_recently_placed_order_from_opts(
+            let result = primary::record_recently_placed_order_from_opts(
                 &h,
                 &h.inner.owner,
                 s("order-1"),
@@ -646,7 +646,7 @@ fn primary_local_order_write_native_source_oracle() {
         }
         let original_opts = h.spread(opts.clone()).unwrap();
         let original_payload = h.spread(payload.clone()).unwrap();
-        api::record_recently_placed_order_from_opts(
+        primary::record_recently_placed_order_from_opts(
             &h,
             &h.inner.owner,
             s("order-1"),
@@ -939,7 +939,7 @@ fn primary_local_order_write_native_source_oracle() {
             ("price", s("4.25")),
             ("triggerPrice", s("99")),
         ]);
-        api::record_recently_placed_order_from_opts(
+        primary::record_recently_placed_order_from_opts(
             &h,
             &h.inner.owner,
             s("order-1"),
@@ -981,6 +981,126 @@ fn primary_local_order_write_native_source_oracle() {
         1,
         "local_write_native_dependency_profile_floor"
     );
+    let mut inverse_records = vec![];
+    for (kind, changes, payload) in [
+        (
+            "contracts-at-price",
+            vec![],
+            vec![("qty", s("100")), ("price", s("25000"))],
+        ),
+        (
+            "fallback-price",
+            vec![],
+            vec![("qty", s("100")), ("price", s("0"))],
+        ),
+        (
+            "non-positive-price",
+            vec![("price", V::N(-5.))],
+            vec![("qty", s("100")), ("price", s("-5"))],
+        ),
+        (
+            "dated-future",
+            vec![("symbol", s("ETHUSDZ26"))],
+            vec![("qty", s("30")), ("price", s("3"))],
+        ),
+    ] {
+        let h = LocalHost::new(true);
+        let opts = base_opts();
+        put(&opts, "symbol", s("BTCUSD"));
+        for (key, value) in changes {
+            put(&opts, key, value);
+        }
+        let payload = o(payload);
+        primary::record_recently_placed_order_from_opts(
+            &h,
+            &h.inner.owner,
+            s("order-1"),
+            opts.clone(),
+            payload.clone(),
+        )
+        .unwrap();
+        assert_eq!(h.event_keys(), ["clock", "record"], "inverse record {kind}");
+        inverse_records.push(json!({"kind":kind,"opts":observe_local(&opts),"payload":observe_local(&payload),"events":h.observed_events()}));
+    }
+    let recorded = |index: usize, key: &str| inverse_records[index]["events"][1][1][key].clone();
+    assert_eq!(
+        recorded(0, "remaining"),
+        observe_local(&V::N(0.004)),
+        "native inverse remaining in coin"
+    );
+    assert_eq!(
+        recorded(0, "extra"),
+        json!({"remainingNative": observe_local(&V::N(100.))}),
+        "native inverse contracts retained"
+    );
+    assert_eq!(
+        recorded(2, "remaining"),
+        observe_local(&V::N(100.)),
+        "native non-positive price keeps contracts"
+    );
+    assert_eq!(
+        recorded(2, "extra"),
+        Json::Null,
+        "native no extra without price"
+    );
+    let mut inverse_updates = vec![];
+    for (kind, patch, extra) in [
+        ("price-amend", vec![("price", V::N(20.))], false),
+        ("amount-amend", vec![("amount", V::N(10.))], false),
+        ("retained-native", vec![], true),
+        ("zero-price", vec![("price", V::N(0.))], false),
+        (
+            "amount-and-price",
+            vec![("amount", V::N(9.)), ("price", V::N(4.))],
+            true,
+        ),
+    ] {
+        let h = LocalHost::new(true);
+        let order = o(vec![
+            ("id", s("order-1")),
+            ("symbol", s("BTCUSD")),
+            ("price", V::N(11.)),
+            ("amount", V::N(7.)),
+            ("filled", V::N(2.)),
+            ("remaining", V::N(5.)),
+            ("lastUpdate", V::N(42.)),
+        ]);
+        let retained = o(vec![("remainingNative", V::N(50.)), ("keep", s("x"))]);
+        if extra {
+            put(&order, "extra", retained.clone());
+        }
+        let patch = o(patch);
+        primary::apply_local_order_update_after_rest_write(
+            &h,
+            &h.inner.owner,
+            order.clone(),
+            patch.clone(),
+        )
+        .unwrap();
+        if extra {
+            assert!(
+                eq(&get(&order, "extra"), &retained),
+                "inverse original extra alias {kind}"
+            );
+            native(
+                &retained,
+                &o(vec![("remainingNative", V::N(50.)), ("keep", s("x"))]),
+                "inverse original extra untouched",
+            );
+        }
+        let passed = h.passed.borrow().clone();
+        inverse_updates.push(json!({"kind":kind,"order":observe_local(&order),"patch":observe_local(&patch),"events":h.observed_events(),"passed":passed.as_ref().map(observe_local).unwrap_or_else(||observe_local(&V::U))}));
+    }
+    assert_eq!(
+        inverse_updates[0]["passed"][0]["remaining"],
+        observe_local(&V::N(0.25)),
+        "native price-only amend rescales coin remaining"
+    );
+    assert_eq!(
+        inverse_records.len() + inverse_updates.len(),
+        9,
+        "local_write_native_inverse_floor"
+    );
     let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
         .parent()
         .unwrap()
@@ -1004,6 +1124,8 @@ fn primary_local_order_write_native_source_oracle() {
         ("supplements", supplements, 10),
         ("updates", updates, 10),
         ("dependencyProfiles", dependency_profiles, 1),
+        ("inverseRecords", inverse_records, 4),
+        ("inverseUpdates", inverse_updates, 5),
     ] {
         assert_eq!(
             source[key].as_array().unwrap().len(),

@@ -39,17 +39,30 @@ pub fn is_bybit_env_probe_request(config: &Value) -> bool {
     truthy(&config[BYBIT_ENV_PROBE_CONFIG_KEY])
 }
 
+// ts: isBybitSignRejection — Bybit has said both "error sign!" and "Error sign, please
+// check your signature generation algorithm"; 10004 is the code behind either.
+pub fn is_bybit_sign_rejection(data: &Value) -> bool {
+    let meta = crate::response::get_bybit_response_meta(data);
+    meta.ret_code == Some(10004.)
+        || meta
+            .ret_msg
+            .as_deref()
+            .unwrap_or("")
+            .to_ascii_lowercase()
+            .contains("error sign")
+}
+
+/// Source retry condition before its one-shot signature stamp, which the factory owns.
 pub fn should_retry_bybit_request(
     error: &safe_cex_transport::RestFailure,
 ) -> Result<bool, safe_cex_num::JsCoercionError> {
     let network = safe_cex_transport::retry::is_network_error(error)
         && safe_cex_transport::retry::is_read_only_method(&error.request);
-    let signature = match error.response.as_deref() {
-        Some(response) => safe_cex_transport::retry::is_error_signature(response)?,
-        None => false,
-    };
     if !network {
-        return Ok(signature);
+        return Ok(error
+            .response
+            .as_deref()
+            .is_some_and(|response| is_bybit_sign_rejection(&response.body.clone().into_data())));
     }
     Ok(error.request.url != "/v5/market/instruments-info")
 }

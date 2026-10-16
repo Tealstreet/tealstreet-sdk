@@ -6,7 +6,9 @@ function methods(a,cls,names){const c=a.statements.find(s=>ts.isClassDeclaration
 const wa=ast('packages/safe-cex/src/exchanges/bybit/bybit.ws-public.ts'),ea=ast('packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts'),ta=ast('packages/safe-cex/src/exchanges/bybit/bybit.types.ts');
 const logAst=ast('packages/logging/src/LogSeverity.ts'); const enumText=logAst.statements.find(s=>ts.isEnumDeclaration(s)&&s.name.text==='LogSeverity').getText(logAst).replace(/^export\s+/,'');
 const wsNames=['onOpen','clearOhlcvNoDataTimeout','armOhlcvNoDataTimeout','armExistingOhlcvNoDataTimeouts','maybeRecoverOhlcvStream','maybeRecoverOhlcvStreamFromTopics','onMarketsChanged'];
-const exchangeNames=['fetchMarkets','fetchFees','fetchTradingMarketsResponse'];
+const exchangeNames=['fetchMarkets','fetchOptionMarkets','fetchFees','fetchTradingMarketsResponse'];
+const deps=path.dirname(process.env.SAFE_CEX_TYPESCRIPT_PATH),{mapSeries}=require(path.join(deps,'p-iteration'));
+const getKey={exports:{}};vm.runInNewContext(ts.transpileModule(fs.readFileSync(path.join(root,'packages/safe-cex/src/utils/get-key.ts'),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022}}).outputText,{exports:getKey.exports,require:spec=>require(path.join(deps,spec))});
 const code=ts.transpileModule(`${enumText}\n${declarations(ta,['ENDPOINTS','INTERVAL'])}\n${declarations(wa,['OHLCV_NO_DATA_TIMEOUT_MS','OHLCV_RECOVERY_COOLDOWN_MS'])}\n${declarations(ea,['BYBIT_TRADING_MARKETS_RETRY_DELAY_MS'])}\nclass Ws {${methods(wa,'BybitPublicWebsocket',wsNames)}}\nclass Exchange {${methods(ea,'BybitExchange',exchangeNames)}}\nglobalThis.classes={Ws,Exchange}`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText;
 const decode=v=>v&&v.fixtureUndefined?undefined:Array.isArray(v)?v.map(decode):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,v])=>[k,decode(v)])):v;
 const observe=v=>v===undefined?{undefined:true}:Array.isArray(v)?Array.from(v,observe):v&&typeof v==='object'?Object.fromEntries(Object.entries(v).map(([k,v])=>[k,observe(v)])):v;
@@ -18,7 +20,7 @@ async function run(input){const events=[],errors={},payloads=[],frames=[];let ti
  const oldTickers=decode(input.tickers??['old']);topics0.tickers=oldTickers;
  const added=(input.markets??[{symbol:'BTC',quote:'USDT'},{symbol:'ETH',quote:'USDC'},{symbol:'INV',quote:'BTC'}]).map(m=>({...m}));
  const feeData=decode(Object.hasOwn(input,'data')?input.data:{result:{list:[{symbol:'BTC',rate:'0.001'}]}}),cache=decode(input.cache??[{symbol:'CACHE'}]),replacement=[{symbol:'REPLACED'}],reply={data:{result:{list:[{symbol:'REPLY'}]}}};let store=cache;
- const context=vm.createContext({ENABLE_RECONNECTING_WEBSOCKET:!!input.reconnecting,chunk:(a,n)=>Array.from({length:Math.ceil(a.length/n)},(_,i)=>a.slice(i*n,(i+1)*n)),sleep:n=>{event('sleep',n);return input.failAsync==='sleep'?Promise.reject(errors.sleep??=Object.assign(new Error('sleep'),{origin:'sleep'})):Promise.resolve()},Date:{now:()=>{event('clock');return Number(input.now??10000)}},clearTimeout:id=>event('clear',observe(id)),setTimeout:(cb,delay)=>{event('set',delay);callbacks.push(cb);if(input.swapTimer)api.ohlcvNoDataTimeouts=m1;return 't'+timerIndex++},isRetryableBybitTradingMarketsFailure:e=>{event('retryable',e.origin);return !!input.retryable},describeBybitMarketsFailure:e=>{event('describe',e.origin);return 'why'},BybitTradingMarketsRequestError:class Wrapped extends Error{constructor(cause,retry){super('wrapped');this.origin='wrapped';this.cause=cause;this.retry=retry;event('wrap',cause.origin,retry??null)}},});
+ const context=vm.createContext({ENABLE_RECONNECTING_WEBSOCKET:!!input.reconnecting,chunk:(a,n)=>Array.from({length:Math.ceil(a.length/n)},(_,i)=>a.slice(i*n,(i+1)*n)),sleep:n=>{event('sleep',n);return input.failAsync==='sleep'?Promise.reject(errors.sleep??=Object.assign(new Error('sleep'),{origin:'sleep'})):Promise.resolve()},Date:{now:()=>{event('clock');return Number(input.now??10000)}},clearTimeout:id=>event('clear',observe(id)),setTimeout:(cb,delay)=>{event('set',delay);callbacks.push(cb);if(input.swapTimer)api.ohlcvNoDataTimeouts=m1;return 't'+timerIndex++},isRetryableBybitTradingMarketsFailure:e=>{event('retryable',e.origin);return !!input.retryable},describeBybitMarketsFailure:e=>{event('describe',e.origin);return 'why'},v:getKey.exports.v,mapSeries,mapBybitOptionInstrument:row=>{event('mapOption',observe(row));if(input.failMap&&row?.symbol===input.failMap)throw Object.assign(new Error('mapOption'),{origin:'mapOption'});return row?.status==='Trading'?{symbol:row.symbol,option:{strike:row.strike}}:null},BybitTradingMarketsRequestError:class Wrapped extends Error{constructor(cause,retry){super('wrapped');this.origin='wrapped';this.cause=cause;this.retry=retry;event('wrap',cause.origin,retry??null)}},});
  vm.runInContext(code,context);api=new (input.op.startsWith('fetch')?context.classes.Exchange:context.classes.Ws)();api.topics=t0;api.ohlcvNoDataTimeouts=m0;api.lastOhlcvRecoveryAtByTopic=last;api.messageHandlers=handlers;api.ws=input.ws!==false;api.isDisposed=!!input.disposed;api.parent={store:{markets:added},log:(m,s)=>event('log',m,s)};
  Object.defineProperty(api,'category',{get(){event('category');if(input.swapTopics)api.topics=t1;if(input.mutateMarket){added[0].symbol='MUTATED';added[0].quote='USDT';}return input.category??'linear'}});
  const emitter=id=>({off:(name,h)=>event('off',id,name,h),on:(name,h)=>event('on',id,name,h)});api.parent.emitter=emitter(0);
@@ -27,8 +29,9 @@ async function run(input){const events=[],errors={},payloads=[],frames=[];let ti
  Object.defineProperty(api,'isConnected',{get(){event('connected');return input.connected!==false}});api.reconnect=()=>event('reconnect');api.sendOhlcvDiagnosticPayload=p=>{event('diagnostic',p.op,p.args.slice());payloads.push(p);if(input.mutateArgs&&payloads.length===1)p.args.push('MUTATED')};api.send=frame=>{const decoded=JSON.parse(frame);event('send',decoded.op,decoded.args);frames.push(frame);if(input.disposeOnSend)api.isDisposed=true};
  api.log=(m,s)=>{event('log',m,s);if(input.replaceCache)store=replacement};api.store={};Object.defineProperty(api.store,'markets',{get(){event('stored');return store}});
  const request=asyncResult=>{if(input.failAsync===asyncResult)throw errors[asyncResult]??=(Object.assign(new Error(asyncResult),{origin:asyncResult}));return reply};
- api.xhr={get:(endpoint,{params})=>{const name='get'+getIndex++;event(name,endpoint,params);if(input.failAsync===name)return Promise.reject(errors[name]??=(Object.assign(new Error(name),{origin:name})));if(input.op==='fetchFees')return Promise.resolve({data:feeData});return Promise.resolve(reply)}};
- api.fetchMarketsHelper=category=>{event('helper',category);if(input.brandError||input.failAsync==='helper'){const err=input.brandError?new context.BybitTradingMarketsRequestError({origin:'cause'}):Object.assign(new Error('helper'),{origin:'helper'});if(input.brandError)events.pop();if(input.syncBrandThrow)throw err;return Promise.reject(err)}return Promise.resolve(reply)};
+ api.xhr={get:(endpoint,{params}={})=>{const name='get'+getIndex++;event(name,endpoint,params);if(input.failAsync===name)return Promise.reject(errors[name]??=(Object.assign(new Error(name),{origin:name})));if(input.op==='fetchFees')return Promise.resolve({data:feeData});if(input.optionPages)return Promise.resolve({data:decode(input.optionPages[getIndex-1])});return Promise.resolve(reply)}};
+ api.inverseEnabled=()=>{event('inverseEnabled');return !!input.inverse};api.optionsEnabled=()=>{event('optionsEnabled');return !!input.options};if(input.op==='fetchMarkets')api.fetchOptionMarkets=()=>{event('optionMarkets');if(input.failAsync==='optionMarkets')return Promise.reject(errors.optionMarkets??=Object.assign(new Error('optionMarkets'),{origin:'optionMarkets'}));return Promise.resolve([{symbol:'OPT'}])};
+ api.fetchMarketsHelper=category=>{event('helper',category);if(input.brandError||input.failAsync==='helper'){const err=input.brandError?new context.BybitTradingMarketsRequestError({origin:'cause'}):Object.assign(new Error('helper'),{origin:'helper'});if(input.brandError)events.pop();if(input.syncBrandThrow)throw err;return Promise.reject(err)}return Promise.resolve(input.arrays?[{symbol:category}]:reply)};
  let result,before,error;try{let value;
  if(input.op==='onOpen'){api.armExistingOhlcvNoDataTimeouts=api.armExistingOhlcvNoDataTimeoutsHost;value=api.onOpen()}
  else if(input.op==='clear')value=api.clearOhlcvNoDataTimeout('k');
@@ -39,6 +42,7 @@ async function run(input){const events=[],errors={},payloads=[],frames=[];let ti
  else if(input.op==='markets'){if(input.swapTickerRead)Object.defineProperty(topics0,'tickers',{get(){event('tickers');api.topics=t1;return tickerReadValue??oldTickers},set(v){tickerReadValue=v},configurable:true});value=originalChanged({added});}
  else if(input.op==='fetchFees')value=api.fetchFees(input.category??'linear');
  else if(input.op==='fetchMarkets')value=api.fetchMarkets();
+ else if(input.op==='fetchOptionMarkets')value=api.fetchOptionMarkets();
  else if(input.op==='fetchRetry')value=api.fetchTradingMarketsResponse(input.category??'linear');
  else throw Error(input.op);
  before=events.slice();result=await value;
@@ -55,8 +59,21 @@ const cases=[
  ...[{}, {now:9999},{now:10000,last:1},{now:10001,last:1},{last:'NaN'},{handlers:{k:0}},{handlers:{s:0}},{secondary:false},{connected:false},{mutateArgs:true},{fail:'diagnostic'},{fail:'log'}].map(c=>({op:'recovery',...c})),
  ...[{}, {markets:[]},{ws:false},{disposed:true},{category:'inverse'},{swapTickerRead:true},{tickers:'A😀'},{swapTopics:true},{fail:'send'},{failAsync:'sleep'},{disposeOnSend:true,markets:Array.from({length:21},(_,i)=>({symbol:'M'+i,quote:'USDT'}))}].map(c=>({op:'markets',...c})),
  ...[{}, {data:null},{data:{result:{list:false}}},{data:{result:{list:[]}}},{data:{result:{list:'non-array'}}},{fail:'get0'},{failAsync:'get0'}].map(c=>({op:'fetchFees',...c})),
- ...[{}, {brandError:true},{brandError:true,cache:[]},{brandError:true,replaceCache:true},{failAsync:'helper'},{fail:'helper'},{brandError:true,fail:'log'},{brandError:true,syncBrandThrow:true}].map(c=>({op:'fetchMarkets',...c})),
+ ...[{}, {brandError:true},{brandError:true,cache:[]},{brandError:true,replaceCache:true},{failAsync:'helper'},{fail:'helper'},{brandError:true,fail:'log'},{brandError:true,syncBrandThrow:true},{arrays:true,inverse:true},{arrays:true,options:true},{arrays:true,inverse:true,options:true},{inverse:true,arrays:true,failAsync:'helper'},{arrays:true,options:true,failAsync:'optionMarkets'},{arrays:true,inverse:true,fail:'inverseEnabled'}].map(c=>({op:'fetchMarkets',...c})),
+ ...[
+  {optionPages:[{retCode:0,result:{list:[{baseCoin:'BTC'},{baseCoin:'ETH'}]}},{retCode:'0',result:{list:[{symbol:'B1',status:'Trading',strike:1},{symbol:'B2',status:'Closed'}],nextPageCursor:'p2'}},{retCode:0,result:{list:[{symbol:'B3',status:'Trading',strike:3}]}},{ret_code:0,result:{list:[{symbol:'E1',status:'Trading',strike:5}],nextPageCursor:''}}]},
+  {optionPages:[{retCode:0,result:{}}]},
+  {optionPages:[{retCode:0}]},
+  {optionPages:[{retCode:10001,retMsg:'denied'}],cache:[{symbol:'L'},{symbol:'O',option:{strike:1}},{symbol:'Z',option:null}]},
+  {optionPages:[{retCode:'x'}],cache:[{symbol:'O',option:{strike:1}}]},
+  {optionPages:[{retCode:null,result:{list:[{baseCoin:'BTC'}]}},{retCode:1,retMsg:7}]},
+  {optionPages:[{retCode:0,result:{list:[{baseCoin:'BTC'}]}},{retCode:0,result:{list:[{symbol:'B1',status:'Trading',strike:1}]}}],failMap:'B1',cache:[{symbol:'O',option:{strike:1}}]},
+  {optionPages:[{retCode:0,result:{list:[null]}}]},
+  {optionPages:[{retCode:0,result:{list:[{baseCoin:'BTC'}]}}],failAsync:'get1',cache:[{symbol:'O',option:{strike:1}}]},
+  {optionPages:[{retCode:0,result:{list:[{baseCoin:'BTC'}]}},{retCode:0,result:{list:[{symbol:'B1',status:'Trading',strike:1}],nextPageCursor:null}}]},
+  {optionPages:[{retCode:0,result:{list:[{baseCoin:'BTC'}]}}],failAsync:'get1',fail:'log'},
+ ].map(c=>({op:'fetchOptionMarkets',...c})),
  ...[{}, {fail:'get0'},{failAsync:'get0'},{failAsync:'get0',retryable:true},{failAsync:'get0',retryable:true,fail:'get1'},{failAsync:'get0',retryable:true,fail:'describe'},{failAsync:'get0',retryable:true,fail:'log'},{failAsync:'get0',retryable:true,fail:'sleep'},{failAsync:'get0',retryable:true,category:'inverse'},{fail:'get0',retryable:true,failAsync:'get1'}].map(c=>({op:'fetchRetry',...c})),
 ];
-assert.equal(cases.length,81,'RECOVERY independent scenario floor');
+assert.equal(cases.length,98,'RECOVERY independent scenario floor');
 (async()=>{const rows=[];for(const input of cases)rows.push(await run(input));process.stdout.write(JSON.stringify(rows))})().catch(e=>{console.error(e);process.exitCode=1});
