@@ -3922,3 +3922,70 @@ UTF-8 boundaries, and Scope cancellation stops tails that a source Promise can
 continue after disposal. No arbitrary executable option getter/mutation claim is
 made. The dedicated Inverse formatter/submission and HyroTrader facade remain
 separate work; this change enables primary Bybit and Demo batching only.
+
+## Native leverage and position-mode publication (ddi2il-42)
+
+Two real-facade regressions fail on the former receiver adapters. A fetched
+position with `leverage: "NaN"` reaches the native model correctly, but the old
+cached-position JSON projection changes it to null, defaults current leverage
+to one and skips a requested update to one. Separately, placement's
+`fetchPositionMode` maps that same row, projects NaN to null, and fails typed
+Store publication with `invalid type: null, expected f64` before order creation.
+
+Both receiver bodies now retain shared `Js` values through selection, mapping,
+comparison and Store publication. No serializer bridge is introduced. The
+leverage body still refuses options before lookup, clamps at the live market
+limits, uses strict change detection, accepts the primary not-modified responses,
+and refreshes after an accepted write. Mode lookup preserves first cached mode,
+array-only response lists, source proxy-status diagnostics, nonempty-list
+failure override and the first mapped mode. Its private retained status helper
+specializes the maintained response helper's four consumed status fields; the
+separate legacy JSON APIs keep their existing declared input/output profiles.
+
+`exchange_binding` passes 28 tests with installed TypeScript, including the
+existing 92 source order-write cases and a new fixed 32-case comparison of the
+maintained `setLeverage`, `fetchPositionMode`, `mapPosition`, category and refusal
+bodies. The new source runner imports the maintained response, symbol, get-key,
+ID and enum helpers. I/O and outer Store publication are scripted. Independent
+native assertions inspect NaN and negative-zero bits before any output encoding;
+the source comparison encodes those scalars explicitly for transport. Cases span
+Bybit/Demo, cached/fetched positions, NaN/infinity/-0/equal-one, request payloads,
+cache bypass and final Store values. Eight native response cases separately
+witness numeric/string/proxy/absent status, malformed lists and nonempty failure
+rows. Accepted/rejected not-modified writes and option refusal are also native.
+
+`scripts/native-position-controls.py` compiles four JSON projection faults:
+current leverage, initial fetched publication, accepted-write refresh and mapped
+mode publication. All four fail named runtime assertions; compilation failures
+do not count. Exact source restoration passes all 28 tests. Host all-targets and
+wasm library clippy pass. Parity is zero (7459 rows/17183 public Rust items), and
+the extractor reports zero updates/additions/orphans.
+
+The override inventory changes from 1136 to 1135 rows, removing only the former
+`controls::set_leverage` reference in the replaced receiver function (fingerprint
+`444f3b058e699912`). No new/changed reference, foreign row or delegation exemption
+is added. The source body now executes directly on its receiver; the standalone
+legacy helper remains independently mapped. Scope still owns asynchronous tails;
+shared typed Store snapshots and UTF-8 boundaries remain explicit host choices.
+
+A read-only cross-venue census found no other leverage adapter with the exact
+cached-positions `serde_json::to_value` pattern. ApexOmni's private position
+projection immediately restores native scalar fields with ModelPatch; Backpack's
+Market snapshot projections are a broader candidate outside its leverage setter,
+without a proven failure in this work. No foreign production file is changed.
+
+The mandatory full `venue-oracle:bybit` command passes 204 tests across 49 test
+binaries (42 contain tests; seven contain zero), with zero failures or ignored
+tests. It runs with `SAFE_CEX_TYPESCRIPT_PATH` pointing at the installed compiler.
+Latest master `efbc4969b6` merges cleanly: the incoming Asterdex inventory reviews
+are preserved alongside the single owned Bybit removal. No Bybit or shared
+runtime production body changes in that integration.
+
+
+The native position control runner bounds every Cargo subprocess to 600 seconds
+and prints an independently created private `tempfile.mkdtemp` directory for its
+logs. An injected TimeoutExpired after the first real source mutation propagated
+through the runner while its finally block restored both Rust files byte for
+byte; the created directory's mode was 0700. The four actual compiled projection
+controls were then caught again and exact restoration passed all 28 binding
+tests. A read-only review of these runner changes reported no findings.
