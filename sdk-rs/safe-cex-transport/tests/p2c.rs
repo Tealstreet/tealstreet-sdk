@@ -9,6 +9,19 @@ use std::future::Future;
 use std::sync::{Arc, Mutex};
 use std::task::{Context, Poll, Waker};
 
+fn retry_signature_rejection<'a>(
+    request: ClassifiedRequest,
+    adapter: &'a dyn RestAdapter,
+    retries: usize,
+    venue: SignatureRetryVenue,
+    clock: &'a dyn RateLimitClock,
+) -> impl Future<Output = Result<RestResponse, safe_cex_transport::RestFailure>> + 'a {
+    async move {
+        retry_signature_rejection_with_receipt(request, adapter, retries, venue, clock)
+            .await
+            .map(|execution| execution.response)
+    }
+}
 fn run<T>(future: impl Future<Output = T>) -> T {
     let waker = Waker::noop();
     let mut future = std::pin::pin!(future);
@@ -479,33 +492,38 @@ fn polling_override_replaces_clamps_and_preserves_wildcard_fallthrough() {
 #[test]
 fn bybit_excludes_instruments_network_retry_but_keeps_signature_retry() {
     let venue = Venue::default();
-    venue.replies.lock().unwrap().push_back(Err(reset()));
-    let policy = signature_error_on_read(
-        read(
+    let instruments = || {
+        ClassifiedRequest::Read(read(
             ReadClassification::Methods,
             req("GET", "/v5/market/instruments-info"),
-        ),
-        3,
-        SignatureRetryVenue::Bybit,
+        ))
+    };
+    venue.replies.lock().unwrap().push_back(Err(reset()));
+    assert!(
+        run(retry_signature_rejection(
+            instruments(),
+            &venue,
+            3,
+            SignatureRetryVenue::Bybit,
+            &RetryClock::default(),
+        ))
+        .is_err()
     );
-    assert!(run(policy.execute(&venue, &RetryClock::default())).is_err());
     assert_eq!(venue.accepted.lock().unwrap().len(), 1);
     let mut failure = signature_failure(br#"{"retMsg":"error sign!"}"#.to_vec());
     failure.request = Box::new(req("GET", "/v5/market/instruments-info"));
     venue.replies.lock().unwrap().push_back(Err(failure));
-    assert!(run(policy.execute(&venue, &RetryClock::default())).is_ok());
-    assert_eq!(venue.accepted.lock().unwrap().len(), 3);
-    venue.replies.lock().unwrap().push_back(Err(reset()));
-    let policy = signature_error_on_read(
-        read(
-            ReadClassification::Methods,
-            req("GET", "/v5/market/instruments-info"),
-        ),
-        1,
-        SignatureRetryVenue::Bitrue,
+    assert!(
+        run(retry_signature_rejection(
+            instruments(),
+            &venue,
+            3,
+            SignatureRetryVenue::Bybit,
+            &RetryClock::default(),
+        ))
+        .is_ok()
     );
-    assert!(run(policy.execute(&venue, &RetryClock::default())).is_ok());
-    assert_eq!(venue.accepted.lock().unwrap().len(), 5);
+    assert_eq!(venue.accepted.lock().unwrap().len(), 3);
 }
 
 struct HeldClock(Mutex<u64>);

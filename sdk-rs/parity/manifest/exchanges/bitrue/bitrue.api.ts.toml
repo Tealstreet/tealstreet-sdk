@@ -1,14 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bitrue/bitrue.api.ts"
-rust_files = [ "safe-cex-transport/src/retry.rs", "safe-cex-venue-bitrue/src/private_auth.rs" ]
-
-[[symbol]]
-ts = "isErrorSignature"
-kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-transport/src/retry.rs::SignatureRetryVenue", "safe-cex-transport/src/retry.rs::is_error_signature", "safe-cex-transport/src/retry.rs::signature_error_on_read", "safe-cex-transport/src/retry.rs::retry_signature_rejection" ]
-status = "ported"
-note = "Shared signature-error predicate splits into a read-only network/signature policy and a rejected-request executor that exits on network failure. Resolved 2xx bodies never enter signature retry. Rejected signature responses may retry writes, as TS does; the final full failure survives exhaustion. Bybit alone excludes the exact instruments-info URL from network retry, not from rejected signature retry. Bitrue callers supply the listen-key read classification; venue factories remain P4/P5. Adapted targets: `safe-cex-transport/src/retry.rs::SignatureRetryVenue`, `safe-cex-transport/src/retry.rs::signature_error_on_read`, `safe-cex-transport/src/retry.rs::retry_signature_rejection`."
+rust_files = [ "safe-cex-venue-bitrue/src/private_auth.rs" ]
 
 [[symbol]]
 ts = "createAPI"

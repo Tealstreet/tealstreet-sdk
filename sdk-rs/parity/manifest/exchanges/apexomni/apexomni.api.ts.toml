@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/apexomni/apexomni.api.ts"
-rust_files = [ "safe-cex-transport/src/retry.rs", "safe-cex-venue-apexomni/src/api.rs", "safe-cex-venue-apexomni/src/api_runtime.rs", "safe-cex-venue-apexomni/src/data.rs" ]
+rust_files = [ "safe-cex-venue-apexomni/src/api.rs", "safe-cex-venue-apexomni/src/api_runtime.rs", "safe-cex-venue-apexomni/src/data.rs" ]
 
 [[symbol]]
 ts = "serializeApexPayload"
@@ -17,14 +17,6 @@ layer = "adapted"
 rs = "safe-cex-venue-apexomni/src/api.rs::serialize_apex_payload_legacy"
 status = "divergent"
 note = "MIXED: FORCED sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict . Source payload.x contains materialized D800 and the returned query is x=%F0%90%80%80. Native JsJsonValue::String(String) cannot receive that value; the shared String-valued JSON ingress refuses the whole payload, so neither native serializer is invoked for it. Independent local choice: CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Owned prepared data replaces getters, mutable prototypes, Date instances and cyclic/executable objects; introducing a second JavaScript heap into signed request data would detach this from shared transport. Native query serialization preserves source recursive filtering, indexed arrays, RFC3986 encoding and stable key collation using shared pinned root collation under the measured en-US oracle locale. Thirteen actual-source inputs include falsy/nullish values, Unicode keys, nested arrays, nonfinite numbers, negative zero and BigInt. A compiled primary/legacy filter control fails the named native string assertion and restores. Renamed to `safe-cex-venue-apexomni/src/api.rs::serialize_apex_payload_legacy`. New observation floor:10 cases per row, stopped index9;6 direct native positives and4 whole-input refusals per row. Positive literal backslash-u text is distinct from materialized units. See sdk-rs/safe-cex-venue-apexomni/GATE_EVIDENCE.md for exact-SHA controls."
-
-[[symbol]]
-ts = "isErrorSignature"
-kind = "const-fn"
-layer = "adapted"
-rs = [ "safe-cex-transport/src/retry.rs::SignatureRetryVenue", "safe-cex-transport/src/retry.rs::is_error_signature", "safe-cex-transport/src/retry.rs::signature_error_on_read", "safe-cex-transport/src/retry.rs::retry_signature_rejection" ]
-status = "ported"
-note = "Shared signature-error predicate splits into a read-only network/signature policy and a rejected-request executor that exits on network failure. Resolved 2xx bodies never enter signature retry. Rejected signature responses may retry writes, as TS does; the final full failure survives exhaustion. Bybit alone excludes the exact instruments-info URL from network retry, not from rejected signature retry. Bitrue callers supply the listen-key read classification; venue factories remain P4/P5. Adapted targets: `safe-cex-transport/src/retry.rs::SignatureRetryVenue`, `safe-cex-transport/src/retry.rs::signature_error_on_read`, `safe-cex-transport/src/retry.rs::retry_signature_rejection`."
 
 [[symbol]]
 ts = "createAPI"
