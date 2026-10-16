@@ -17,6 +17,7 @@ const routes = {
   'GET /fapi/v3/account': { totalWalletBalance: '100', availableBalance: '60', totalUnrealizedProfit: '1', assets: [], positions: [] },
   'GET /fapi/v1/openOrders': [{ orderId: 77, clientOrderId: 'c77', symbol: 'BTCUSDT', side: 'BUY', type: 'LIMIT', origQty: '1', price: '10', stopPrice: '0', status: 'NEW', executedQty: '0', reduceOnly: false, positionSide: 'BOTH', time: 1 }],
   'GET /fapi/v1/openAlgoOrders': [],
+  'GET /fapi/v1/income': [],
 };
 const server = createServer((request, response) => {
   // overrideProxyUrl prefixes the venue base: /https://fapi.binance.com/fapi/v1/...
@@ -62,6 +63,10 @@ assert.equal(account.apiKey, 'smoke-key');
 const accountSign = signed.find((r) => r.config.url.endsWith('/fapi/v3/account'));
 assert.equal(accountSign.type, 'http');
 assert.equal(accountSign.accountName, 'smoke-account');
+
+const history = JSON.parse(await native.nativeAccountCallMethod(id, 'fetchHistoricalPositions', JSON.stringify([{ account: 'smoke-account', from: 1700000000000, to: 1700000060000 }])));
+assert.deepEqual(history, [], 'native journal method is available through the JSON account surface');
+assert.ok(seen.some((s) => s.key === 'GET /fapi/v1/income'), 'journal reads reach the native signed income pager');
 assert.ok(seen.every((s) => s.key in routes), `every request had a local route: ${JSON.stringify(seen)}`);
 
 await assert.rejects(native.nativeAccountCallMethod(id, 'noSuchMethod', '[]'), /Unknown method noSuchMethod/);

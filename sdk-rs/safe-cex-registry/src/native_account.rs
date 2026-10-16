@@ -317,6 +317,27 @@ pub fn native_account_call(
                     .await,
             )
             .and_then(encode),
+            "fetchHistoricalPositions" => {
+                #[derive(serde::Deserialize)]
+                struct Options {
+                    account: String,
+                    from: Option<f64>,
+                    to: Option<f64>,
+                }
+                let options: Options = arg(&args, 0)?;
+                done(
+                    venue
+                        .fetch_historical_positions(
+                            safe_cex_exchange::journal::HistoricalPositionOptions {
+                                account: options.account,
+                                from: options.from,
+                                to: options.to,
+                            },
+                        )
+                        .await,
+                )
+                .and_then(encode)
+            }
             "fetchHistoricalFills" => {
                 done(venue.fetch_historical_fills(arg(&args, 0)?).await).and_then(encode)
             }
