@@ -246,6 +246,42 @@ record!(FetchUtaOrdersResponse {
     request_time => "requestTime",
     data => "data",
 });
+record!(BitgetUtaFillFeeDetailItem {
+    fee_coin => "feeCoin",
+    fee => "fee",
+    total_fee => "totalFee",
+});
+record!(BitgetUtaFill {
+    category => "category",
+    symbol => "symbol",
+    exec_id => "execId",
+    exec_link_id => "execLinkId",
+    order_id => "orderId",
+    client_oid => "clientOid",
+    order_type => "orderType",
+    side => "side",
+    pos_side => "posSide",
+    exec_price => "execPrice",
+    exec_qty => "execQty",
+    exec_value => "execValue",
+    trade_scope => "tradeScope",
+    trade_side => "tradeSide",
+    fee_detail => "feeDetail",
+    created_time => "createdTime",
+    updated_time => "updatedTime",
+    exec_pnl => "execPnl",
+    is_rpi => "isRPI",
+});
+record!(FetchUtaFillsResponseData {
+    list => "list",
+    cursor => "cursor",
+});
+record!(FetchUtaFillsResponse {
+    code => "code",
+    msg => "msg",
+    request_time => "requestTime",
+    data => "data",
+});
 record!(FetchPositionsV2ResponseDataItem {
     margin_coin => "marginCoin",
     symbol => "symbol",
@@ -351,7 +387,7 @@ fn live_native_wire_field_identity() {
     let oracle: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(
         oracle["samples"].as_object().unwrap().len(),
-        8,
+        10,
         "native wire root inventory"
     );
     let categories = [
@@ -412,6 +448,10 @@ fn live_native_wire_field_identity() {
     fields += probe::<BitgetUtaOrder>(&oracle, "BITGET_UTA_ORDER", "");
     fields += probe::<FetchUtaOrdersResponseData>(&oracle, "FETCH_UTA_ORDERS_RESPONSE", "/data");
     fields += probe::<FetchUtaOrdersResponse>(&oracle, "FETCH_UTA_ORDERS_RESPONSE", "");
+    fields += probe::<BitgetUtaFillFeeDetailItem>(&oracle, "BITGET_UTA_FILL", "/feeDetail/0");
+    fields += probe::<BitgetUtaFill>(&oracle, "BITGET_UTA_FILL", "");
+    fields += probe::<FetchUtaFillsResponseData>(&oracle, "FETCH_UTA_FILLS_RESPONSE", "/data");
+    fields += probe::<FetchUtaFillsResponse>(&oracle, "FETCH_UTA_FILLS_RESPONSE", "");
     fields += probe::<FetchPositionsV2ResponseDataItem>(
         &oracle,
         "FETCH_POSITIONS_V2_RESPONSE",
@@ -419,7 +459,7 @@ fn live_native_wire_field_identity() {
     );
     fields += probe::<FetchPositionsV2Response>(&oracle, "FETCH_POSITIONS_V2_RESPONSE", "");
     assert_eq!(
-        fields, 178,
-        "native declared wire field inventory (17 records)"
+        fields, 206,
+        "native declared wire field inventory (21 records)"
     );
 }

@@ -159,10 +159,12 @@ where
 // ts: BitgetExchange.fetchHistoricalFills
 // Detection includes the post-await usesUtaRouting getter. Resolver results
 // project the existing market operation's id and symbol, without a local store.
-pub async fn fetch_historical_fills<D, R>(
+// UTA routing delegates to the supplied existing _fetchHistoricalUtaFills operation.
+pub async fn fetch_historical_fills<'a, D, U, R>(
     public_data_only: bool,
-    opts: &safe_cex_types::ExecutionsOptions,
+    opts: &'a safe_cex_types::ExecutionsOptions,
     detect_then_uses_uta: impl FnOnce() -> D,
+    uta_fills: impl FnOnce(&'a safe_cex_types::ExecutionsOptions) -> U,
     mut resolve_market: impl FnMut(&str) -> Result<Option<(String, String)>, ExchangeError>,
     mut product_type: impl FnMut() -> Result<String, ExchangeError>,
     mut read_page: impl FnMut(safe_cex_num::JsJsonValue) -> R,
@@ -173,6 +175,7 @@ pub async fn fetch_historical_fills<D, R>(
 ) -> Result<Vec<safe_cex_types::Execution>, ExchangeError>
 where
     D: Future<Output = Result<bool, ExchangeError>>,
+    U: Future<Output = Result<Vec<safe_cex_types::Execution>, ExchangeError>>,
     R: Future<Output = Result<(Vec<Value>, Option<String>), ExchangeError>>,
 {
     use safe_cex_num::{JsJsonValue, js_number_string, math_min};
@@ -180,7 +183,7 @@ where
         return Ok(Vec::new());
     }
     if detect_then_uses_uta().await? {
-        return Ok(Vec::new());
+        return uta_fills(opts).await;
     }
     let venue_symbol = if let Some(symbol) = opts.symbol.as_deref().filter(|s| !s.is_empty()) {
         let Some((id, _)) = resolve_market(symbol)? else {
@@ -256,6 +259,166 @@ where
                     break;
                 }
                 cursor = end_id;
+            }
+        }
+        Ok(())
+    }
+    .await;
+    if let Err(error) = outcome {
+        let error = error_value(&error);
+        let message = error
+            .as_ref()
+            .and_then(|error| error.get("response"))
+            .and_then(|response| response.get("data"))
+            .and_then(|data| data.get("msg"))
+            .filter(|message| js_truthy(Some(message)))
+            .or_else(|| error.as_ref().and_then(|error| error.get("message")))
+            .cloned();
+        report(message)?;
+    }
+    Ok(executions)
+}
+
+// ts: BitgetExchange._fetchUtaFillsPage
+// Same boundary as fetch_fills_page: the read returns xhr.get's decoded
+// response.data and its failure propagates unchanged; a failure is never empty.
+pub async fn fetch_uta_fills_page<E, F>(
+    params: safe_cex_num::JsJsonValue,
+    read: impl FnOnce(&'static str, safe_cex_num::JsJsonValue) -> F,
+) -> Result<(Vec<Value>, Option<String>), E>
+where
+    E: From<JsCoercionError> + From<ExchangeError>,
+    F: Future<Output = Result<Option<Value>, E>>,
+{
+    let url = crate::protocol::ENDPOINTS
+        .iter()
+        .find(|entry| entry.name == "UTA_ORDER_FILLS")
+        .ok_or_else(|| ExchangeError::new("Bitget protocol table is missing UTA_ORDER_FILLS"))?
+        .path;
+    let data = read(url, params).await?;
+    let code = data.as_ref().and_then(|data| data.get("code"));
+    if js_truthy(code) && !crate::normalization::is_bitget_success_code(code)? {
+        // getBitgetApiErrorMessage: `payload?.msg || fallback` keeps a truthy non-string msg.
+        let message = data.as_ref().and_then(|data| data.get("msg"));
+        let message = if js_truthy(message) {
+            js_string(message)?
+        } else {
+            "Bitget UTA fills request failed".into()
+        };
+        return Err(ExchangeError::new(message).into());
+    }
+    let payload = data.as_ref().and_then(|data| data.get("data"));
+    let rows = payload
+        .and_then(|data| data.get("list"))
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
+    let cursor = payload.and_then(|data| data.get("cursor"));
+    let cursor = if js_truthy(cursor) {
+        Some(js_string(cursor)?)
+    } else {
+        None
+    };
+    Ok((rows, cursor))
+}
+
+// ts: BitgetExchange._fetchHistoricalUtaFills
+// Mirrors the Classic walk with a sub-30-day window, category read per page,
+// optional orderId, a cursor param and post-map normalized-symbol filtering.
+pub async fn fetch_historical_uta_fills<R>(
+    opts: &safe_cex_types::ExecutionsOptions,
+    mut resolve_market: impl FnMut(&str) -> Result<Option<(String, String)>, ExchangeError>,
+    mut uta_category: impl FnMut() -> Result<String, ExchangeError>,
+    mut read_page: impl FnMut(safe_cex_num::JsJsonValue) -> R,
+    (mut error_value, mut report): (
+        impl FnMut(&ExchangeError) -> Option<Value>,
+        impl FnMut(Option<Value>) -> Result<(), ExchangeError>,
+    ),
+) -> Result<Vec<safe_cex_types::Execution>, ExchangeError>
+where
+    R: Future<Output = Result<(Vec<Value>, Option<String>), ExchangeError>>,
+{
+    use safe_cex_num::{JsJsonValue, js_number_string, math_min};
+    let normalized_symbol = if let Some(symbol) = opts.symbol.as_deref().filter(|s| !s.is_empty()) {
+        let Some((_, symbol)) = resolve_market(symbol)? else {
+            return Ok(Vec::new());
+        };
+        Some(symbol)
+    } else {
+        None
+    };
+    let windows = match (opts.from, opts.to) {
+        (Some(from), Some(to)) => safe_cex_candle_cache::calendar::split_time_range(
+            from,
+            to,
+            30.0 * 24.0 * 60.0 * 60.0 * 1000.0 - 1.0,
+        )
+        .into_iter()
+        .map(Some)
+        .collect(),
+        _ => vec![None],
+    };
+    let mut executions = Vec::new();
+    let mut seen = std::collections::HashSet::new();
+    let outcome: Result<(), ExchangeError> = async {
+        for window in windows {
+            let mut cursor: Option<String> = None;
+            for _ in 0..100 {
+                let mut params = vec![
+                    ("category".into(), JsJsonValue::String(uta_category()?)),
+                    (
+                        "limit".into(),
+                        JsJsonValue::Number(math_min(opts.limit.unwrap_or(100.0), 100.0)),
+                    ),
+                ];
+                if let Some(order_id) = opts.order_id.as_ref().filter(|s| !s.is_empty()) {
+                    params.push(("orderId".into(), JsJsonValue::String(order_id.clone())));
+                }
+                if let Some(window) = &window {
+                    for field in ["startTime", "endTime"] {
+                        params.push((field.into(), JsJsonValue::from(window[field].clone())));
+                    }
+                }
+                if let Some(cursor) = cursor.as_ref().filter(|s| !s.is_empty()) {
+                    params.push(("cursor".into(), JsJsonValue::String(cursor.clone())));
+                }
+                let (rows, next_cursor) = read_page(JsJsonValue::Object(params)).await?;
+                if rows.is_empty() {
+                    break;
+                }
+                let mapped = crate::fills::map_bitget_uta_fills(
+                    &rows,
+                    &mut crate::fills::BitgetFillDeps {
+                        resolve_symbol: &mut |symbol| {
+                            Ok(resolve_market(symbol)?.map(|(_, symbol)| symbol))
+                        },
+                        to_timestamp: &mut |ms| Ok((ms / 1000.0).floor()),
+                    },
+                )?;
+                for execution in mapped {
+                    if normalized_symbol
+                        .as_ref()
+                        .is_some_and(|symbol| !symbol.is_empty() && execution.symbol != *symbol)
+                    {
+                        continue;
+                    }
+                    let id = execution.id.clone().unwrap_or_else(|| {
+                        format!(
+                            "{}|{}|{}|{}",
+                            execution.symbol,
+                            js_number_string(execution.timestamp),
+                            js_number_string(execution.qty),
+                            js_number_string(execution.price)
+                        )
+                    });
+                    if seen.insert(id) {
+                        executions.push(execution);
+                    }
+                }
+                if next_cursor.as_ref().is_none_or(String::is_empty) || next_cursor == cursor {
+                    break;
+                }
+                cursor = next_cursor;
             }
         }
         Ok(())
