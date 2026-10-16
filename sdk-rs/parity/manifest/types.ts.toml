@@ -85,33 +85,33 @@ note = "Venue-published greeks with the units string recording what was measured
 [[symbol]]
 ts = "OptionQuote"
 kind = "type"
-layer = ""
-rs = ""
-status = "pending"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::OptionQuote"
+status = "ported"
 note = ""
 
 [[symbol]]
 ts = "OptionChainQuery"
 kind = "type"
-layer = ""
-rs = ""
-status = "pending"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::OptionChainQuery"
+status = "ported"
 note = ""
 
 [[symbol]]
 ts = "OptionChainRow"
 kind = "type"
-layer = ""
-rs = ""
-status = "pending"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::OptionChainRow"
+status = "ported"
 note = ""
 
 [[symbol]]
 ts = "AccountGreeks"
 kind = "type"
-layer = ""
-rs = ""
-status = "pending"
+layer = "mirror"
+rs = "safe-cex-types/src/lib.rs::AccountGreeks"
+status = "ported"
 note = ""
 
 [[symbol]]
