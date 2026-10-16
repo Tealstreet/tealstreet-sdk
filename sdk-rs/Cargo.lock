@@ -3888,6 +3888,7 @@ dependencies = [
  "serde_json",
  "syn 3.0.7",
  "tokio",
+ "tokio-tungstenite",
  "trybuild",
 ]
 
@@ -3966,6 +3967,7 @@ dependencies = [
  "safe-cex-venue-binance",
  "safe-cex-venue-bingx",
  "safe-cex-venue-bitget",
+ "safe-cex-venue-bitrue",
  "safe-cex-venue-bitunix",
  "safe-cex-venue-blofin",
  "safe-cex-venue-bybit",
@@ -3976,6 +3978,7 @@ dependencies = [
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
  "safe-cex-venue-polymarket",
+ "safe-cex-venue-woo",
  "serde",
  "serde_json",
  "sha2 0.10.9",
