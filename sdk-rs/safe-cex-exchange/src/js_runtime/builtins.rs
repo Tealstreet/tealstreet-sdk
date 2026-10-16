@@ -63,7 +63,42 @@ pub fn member(receiver: &Js, key: &[u16]) -> Option<Js> {
     }
 }
 
+fn is_regexp(value: &Js) -> bool {
+    matches!(value, Js::Object(o) if o.class == "RegExp")
+}
+
+/// replace/split/match/search hand a RegExp argument to its @@ method; match and
+/// search build a RegExp from any other pattern, as String.prototype does.
 fn string_member(s: Str, name: &str) -> Option<Js> {
+    let symbol = match name {
+        "replace" => "@@replace",
+        "split" => "@@split",
+        "match" => "@@match",
+        "search" => "@@search",
+        _ => return plain_string_member(s, name),
+    };
+    let plain = plain_string_member(s.clone(), name);
+    let receiver = Js::String(s);
+    Some(method(name, move |a| {
+        let mut pattern = arg(&a, 0);
+        if !is_regexp(&pattern) {
+            if let Some(plain) = &plain {
+                return plain.call(Js::Undefined, a);
+            }
+            let source = if pattern.is_undefined() {
+                Vec::new()
+            } else {
+                pattern.to_js_string()?.to_vec()
+            };
+            pattern = super::regexp::regexp(&source, &[])?;
+        }
+        let mut args = vec![receiver.clone()];
+        args.extend(a.into_iter().skip(1));
+        pattern.call_method(symbol, args)
+    }))
+}
+
+fn plain_string_member(s: Str, name: &str) -> Option<Js> {
     let st = String::from_utf16_lossy(&s);
     Some(match name {
         "toUpperCase" => method(name, move |_| Ok(Js::str(&st.to_uppercase()))),

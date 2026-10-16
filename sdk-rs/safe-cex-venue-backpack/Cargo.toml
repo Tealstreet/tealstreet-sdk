@@ -7,6 +7,10 @@ publish.workspace = true
 [lints]
 workspace = true
 
+[features]
+# Production native host inputs over safe-cex-exchange's native runtime.
+native = ["safe-cex-exchange/native", "safe-cex-transport/native"]
+
 [dependencies]
 safe-cex-num.workspace = true
 safe-cex-types.workspace = true

@@ -141,3 +141,12 @@ WS_CONTRACT.md owns its managed-wrapper lifecycle and remaining option gaps.
 RestResponseBody::json_value captures encoded bytes through RetainedJsonInput
 before constructing Value, preserving literal reserved-looking object keys.
 This model read does not change the separately observable Axios transform.
+
+**`native` (feature, non-wasm only) is the physical I/O under every codec.**
+`ReqwestAdapter` sends exactly the bytes it is given and settles non-2xx as a
+response-bearing failure, like axios `settle()`; leftover params use axios's
+default encoder only when no factory codec consumed them. `connect_websocket`
+queues events from connection and offers exactly `http/1.1` ALPN, which tradetunnel
+requires (REST keeps the default). One TLS stack: rustls on the `ring` provider with
+native roots; do not add a dependency that pulls aws-lc. Run inside a tokio
+`LocalSet`. Proofs live in `safe-cex-registry/tests/native_host_*.rs`.

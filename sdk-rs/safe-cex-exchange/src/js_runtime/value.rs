@@ -485,7 +485,10 @@ impl Js {
                 items.borrow_mut().resize(len, None);
                 return Ok(());
             }
-            return Ok(());
+            return Err(Thrown::type_error(&format!(
+                "js_runtime arrays carry no named properties (setting '{}')",
+                String::from_utf16_lossy(key)
+            )));
         }
         let Some(props) = self.own_props() else {
             if self.is_nullish() {
@@ -495,7 +498,13 @@ impl Js {
                     String::from_utf16_lossy(key)
                 )));
             }
-            return Ok(());
+            // Strict-mode [[Set]] on a primitive throws; Map/Set/Promise expandos are unsupported.
+            return Err(Thrown::type_error(&format!(
+                "Cannot create property '{}' on {} '{}'",
+                String::from_utf16_lossy(key),
+                self.type_of(),
+                self.to_display()
+            )));
         };
         let existing = props.borrow().get(key).cloned();
         match existing {
@@ -766,4 +775,32 @@ pub fn from_typed<T: serde::Serialize + ?Sized>(value: &T) -> Result<Js, Thrown>
     Ok(from_json(
         &serde_json::to_value(value).map_err(|e| Thrown::type_error(&e.to_string()))?,
     ))
+}
+
+/// The JSON-shaped projection a typed wire body takes, keeping undefined and BigInt.
+pub fn to_js_json(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown> {
+    use safe_cex_num::JsJsonValue as J;
+    Ok(match value {
+        Js::Undefined | Js::Function(_) => J::Undefined,
+        Js::Null => J::Null,
+        Js::Bool(b) => J::Bool(*b),
+        Js::Number(n) => J::Number(*n),
+        Js::BigInt(n) => J::BigInt((**n).clone()),
+        Js::String(s) => J::String(String::from_utf16_lossy(s)),
+        Js::Array(_) => J::Array(
+            value
+                .array_values()
+                .unwrap_or_default()
+                .iter()
+                .map(to_js_json)
+                .collect::<Result<_, _>>()?,
+        ),
+        _ => J::Object(
+            value
+                .own_entries()?
+                .into_iter()
+                .map(|(k, v)| Ok((String::from_utf16_lossy(&k), to_js_json(&v)?)))
+                .collect::<Result<_, Thrown>>()?,
+        ),
+    })
 }

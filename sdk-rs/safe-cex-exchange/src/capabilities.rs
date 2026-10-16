@@ -3,8 +3,9 @@ use crate::{
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_types::{
-    ClosedPnlEntry, Execution, ExecutionsOptions, HistoricalOrder, HistoricalTradeOptions,
-    IncomeHistoryOptions, IncomeRecord, OrderHistoryOptions, PlaceOrderOpts,
+    AccountGreeks, ClosedPnlEntry, ExchangeName, Execution, ExecutionsOptions, HistoricalOrder,
+    HistoricalTradeOptions, IncomeHistoryOptions, IncomeRecord, OptionChainQuery, OptionChainRow,
+    OrderHistoryOptions, PlaceOrderOpts,
 };
 use std::{borrow::Borrow, rc::Rc};
 
@@ -18,6 +19,9 @@ pub enum BaseCapabilityMethod {
     PlaceOrder,
     PlaceOrders,
     Start,
+    FetchOptionChain,
+    FetchOptionExpiries,
+    FetchAccountGreeks,
 }
 #[derive(Clone, Copy)]
 enum Origin {
@@ -50,6 +54,14 @@ impl<A, R> CapabilityBinding<A, R> {
     pub fn call<'a>(&self, exchange: &'a dyn Exchange, args: A) -> ExchangeFuture<'a, R> {
         (self.handler)(exchange, args)
     }
+}
+/// ts: base.ts option fallbacks, `${what} are not supported on ${this._exchangeName}`.
+pub(crate) fn options_unsupported(name: &ExchangeName, what: &str) -> ExchangeError {
+    let name = serde_json::to_value(name).expect("exchange name");
+    ExchangeError::new(format!(
+        "{what} are not supported on {}",
+        name.as_str().expect("exchange name string")
+    ))
 }
 pub(crate) fn mark_base_capability_fallback<A, R>(
     method: BaseCapabilityMethod,
@@ -281,12 +293,16 @@ pub struct ExchangeCapabilities {
     pub fetch_closed_pnl: CapabilityBinding<HistoricalTradeOptions, Vec<ClosedPnlEntry>>,
     pub fetch_historical_orders:
         CapabilityBinding<Option<OrderHistoryOptions>, Vec<HistoricalOrder>>,
+    pub fetch_option_chain: CapabilityBinding<OptionChainQuery, Vec<OptionChainRow>>,
+    pub fetch_option_expiries: CapabilityBinding<String, Vec<f64>>,
+    pub fetch_account_greeks: CapabilityBinding<(), Vec<AccountGreeks>>,
 }
 impl Default for ExchangeCapabilities {
     fn default() -> Self {
         use BaseCapabilityMethod::{
-            FetchClosedPnl, FetchHistoricalFills, FetchHistoricalOrders, FetchIncomeHistory,
-            FetchIncomeHistoryRange, Start,
+            FetchAccountGreeks, FetchClosedPnl, FetchHistoricalFills, FetchHistoricalOrders,
+            FetchIncomeHistory, FetchIncomeHistoryRange, FetchOptionChain, FetchOptionExpiries,
+            Start,
         };
         Self {
             start: mark_base_capability_fallback(Start, |_, _| {
@@ -311,6 +327,21 @@ impl Default for ExchangeCapabilities {
                 FetchHistoricalOrders,
                 |_, _| Box::pin(async { Ok(vec![]) }),
             ),
+            fetch_option_chain: mark_base_capability_fallback(FetchOptionChain, |venue, _| {
+                let error = options_unsupported(venue.name(), "Option chains");
+                Box::pin(async move { Err(error) })
+            }),
+            fetch_option_expiries: mark_base_capability_fallback(
+                FetchOptionExpiries,
+                |venue, _| {
+                    let error = options_unsupported(venue.name(), "Option expiries");
+                    Box::pin(async move { Err(error) })
+                },
+            ),
+            fetch_account_greeks: mark_base_capability_fallback(FetchAccountGreeks, |venue, ()| {
+                let error = options_unsupported(venue.name(), "Account greeks");
+                Box::pin(async move { Err(error) })
+            }),
         }
     }
 }
@@ -353,5 +384,25 @@ impl ExchangeCapabilities {
         options: Option<OrderHistoryOptions>,
     ) -> ExchangeFuture<'a, Vec<HistoricalOrder>> {
         self.fetch_historical_orders.call(venue, options)
+    }
+    pub fn fetch_option_chain<'a>(
+        &self,
+        venue: &'a dyn Exchange,
+        query: OptionChainQuery,
+    ) -> ExchangeFuture<'a, Vec<OptionChainRow>> {
+        self.fetch_option_chain.call(venue, query)
+    }
+    pub fn fetch_option_expiries<'a>(
+        &self,
+        venue: &'a dyn Exchange,
+        underlying: String,
+    ) -> ExchangeFuture<'a, Vec<f64>> {
+        self.fetch_option_expiries.call(venue, underlying)
+    }
+    pub fn fetch_account_greeks<'a>(
+        &self,
+        venue: &'a dyn Exchange,
+    ) -> ExchangeFuture<'a, Vec<AccountGreeks>> {
+        self.fetch_account_greeks.call(venue, ())
     }
 }

@@ -84,6 +84,12 @@ pub trait PrivateBase {
     fn reconnect(&self) -> Result<(), Failure>;
     fn dispose(&self) -> Result<(), Failure>;
     fn emit_error(&self, message: String) -> Result<(), Failure>;
+    /// Hosts whose socket core drives ping/reconnect call back into these.
+    fn install_hooks(&self, _ping: Action, _connect: Action) {}
+    /// The core socket backing this base, registered as the exchange's private slot.
+    fn core_socket(&self) -> Option<Rc<safe_cex_exchange::websocket::BaseWebSocket>> {
+        None
+    }
 }
 /// The source parent methods; a concrete exchange implements this interface.
 pub trait PrivateParent {
@@ -104,6 +110,10 @@ pub trait PrivateParent {
     fn replace_positions(&self, positions: EventValue) -> Result<(), Failure>;
     fn post_key(&self, endpoint: &'static str) -> Result<PinKey, Failure>;
     fn put_key(&self, endpoint: &'static str) -> Result<NativeFuture<()>, Failure>;
+    /// The exchange as a core socket parent, for hosts that back the base with BaseWebSocket.
+    fn socket_parent(&self) -> Option<Rc<dyn safe_cex_exchange::websocket::WsParent>> {
+        None
+    }
     fn remote_sign(&self, signer: EventValue) -> Result<RemoteSignCall, Failure>;
     fn log(&self, message: String, severity: LogSeverity) -> Result<(), Failure>;
 }
@@ -276,6 +286,16 @@ impl PrivateSocket {
             .into_iter()
             .map(|event| state.callback(event))
             .collect();
+        let (ping, connect) = (Rc::downgrade(&state), Rc::downgrade(&state));
+        base.install_hooks(
+            Rc::new(move || ping.upgrade().map_or(Ok(()), |state| state.ping())),
+            Rc::new(move || {
+                if let Some(state) = connect.upgrade() {
+                    class_jobs::detach(state.runtime.clone(), state.connect_and_subscribe());
+                }
+                Ok(())
+            }),
+        );
         Ok(Rc::new(Self {
             state,
             base,
