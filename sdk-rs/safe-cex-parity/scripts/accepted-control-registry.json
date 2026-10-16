@@ -171,6 +171,10 @@
     ],
     "accepted-function-pointer-native.test.mjs": [
       "reviewed function pointers execute actual SDK alias identity and trait probes"
+    ],
+    "accepted-weex-kline-alias.test.mjs": [
+      "exact Weex kline tuple policy refuses slot root and caller redirects",
+      "Weex kline tuple executes actual native slots identity and trait probes"
     ]
   },
   "mutations": [
@@ -312,6 +316,9 @@
     "function pointer nested root identity",
     "function pointer caller redirection",
     "function pointer retry native identity",
-    "function pointer factory native identity"
+    "function pointer factory native identity",
+    "Weex kline expanded slots",
+    "Weex kline native identity",
+    "Weex kline policy routing"
   ]
 }
