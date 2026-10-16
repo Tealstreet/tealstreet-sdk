@@ -423,6 +423,7 @@ fn configured_harness(
         store.clone(),
         BybitDependencies {
             runtime: runtime.clone(),
+            remote_signer: None,
             wire: wire.clone(),
             http_host: Rc::new(Host),
             rate_limit_clock: Arc::new(Clock(runtime.now.clone())),
