@@ -12,6 +12,9 @@ pub mod regex;
 pub mod value;
 
 mod builtins;
+pub mod facade_exchange;
+pub mod facade_rest;
+pub mod facade_store;
 mod host_classes;
 mod host_core;
 mod host_leaves;

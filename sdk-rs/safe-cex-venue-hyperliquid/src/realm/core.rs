@@ -168,6 +168,16 @@ impl Realm {
             _ => self.primitive_proto(v),
         };
         while let Some(o) = current {
+            let exotic = match &o.borrow().kind {
+                Kind::Exotic(view) => Some(view.clone()),
+                _ => None,
+            };
+            if let Some(view) = exotic
+                && o.borrow().own(key).is_none()
+                && let Some(v) = view.lookup(self, key)
+            {
+                return Ok(v);
+            }
             if let Some(slot) = Self::own_slot(&o, key) {
                 return match slot {
                     Slot::Data(value) => Ok(value),
@@ -383,6 +393,15 @@ impl Realm {
         };
         let mut current = Some(o.clone());
         while let Some(c) = current {
+            let exotic = match &c.borrow().kind {
+                Kind::Exotic(view) => Some(view.clone()),
+                _ => None,
+            };
+            if let Some(view) = exotic
+                && view.keys().iter().any(|k| k.same(key))
+            {
+                return Ok(true);
+            }
             if Self::own_slot(&c, key).is_some() {
                 return Ok(true);
             }
@@ -391,7 +410,10 @@ impl Realm {
         Ok(false)
     }
     pub fn has_own(&self, target: &Value, key: &PropKey) -> bool {
-        target.object().is_some_and(|o| Self::own_slot(o, key).is_some())
+        target.object().is_some_and(|o| {
+            Self::own_slot(o, key).is_some()
+                || matches!(&o.borrow().kind, Kind::Exotic(view) if view.keys().iter().any(|k| k.same(key)))
+        })
     }
     /// OrdinaryOwnPropertyKeys order: integer keys ascending, then strings by
     /// insertion. `enumerable_only` filters for Object.keys / for-in / spread.
@@ -407,6 +429,14 @@ impl Realm {
         let mut strings = vec![];
         if let Kind::Array(items) = &data.kind {
             ints.extend((0..items.len()).map(|i| (i, index_key(i))));
+        }
+        if let Kind::Exotic(view) = &data.kind {
+            for key in view.keys() {
+                match key.array_index() {
+                    Some(i) => ints.push((i, key)),
+                    None => strings.push(key),
+                }
+            }
         }
         for p in &data.props {
             if enumerable_only && !p.enumerable {

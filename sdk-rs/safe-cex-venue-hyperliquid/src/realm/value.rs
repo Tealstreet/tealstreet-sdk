@@ -103,6 +103,15 @@ pub enum Kind {
     RegExp(Rc<super::regex::Pattern>),
     /// An opaque native resource (socket, client) the facades downcast.
     Host(Rc<dyn std::any::Any>),
+    /// A read-only keyed view whose entries are produced on lookup.
+    Exotic(Rc<dyn Exotic>),
+}
+
+/// Keyed views (store tables) materialize one entry per lookup rather than
+/// converting the whole table on every read.
+pub trait Exotic {
+    fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Option<Value>;
+    fn keys(&self) -> Vec<PropKey>;
 }
 
 pub struct ObjectData {
