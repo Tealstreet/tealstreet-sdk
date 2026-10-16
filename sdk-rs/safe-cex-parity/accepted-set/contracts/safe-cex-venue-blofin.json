@@ -15963,5 +15963,2418 @@
       }
     ],
     "evidence": "This specific private lifecycle/read error constructor wraps the source message unchanged in its actual ServiceError::Input variant. Fixed String host errors and two independently chosen messages are observed directly; this is not a neighboring parser exemption."
+  },
+  "safe_cex_venue_blofin::order_services::body": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "body",
+      "signature": {
+        "inputs": [
+          [
+            "body",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestResponseBody",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let body=if $value[\"phase\"]==\"encoded\"{safe_cex_transport::RestResponseBody::Encoded($value[\"text\"].as_str().unwrap().as_bytes().to_vec())}else if $value[\"phase\"]==\"transformed\"{safe_cex_transport::RestResponseBody::Transformed($value[\"value\"].clone())}else{safe_cex_transport::RestResponseBody::Untransformed($value[\"value\"].clone())};match $type::<String>(&body){Ok(native)=>{let value=native.json();match value{serde_json::Value::Object(map)=>serde_json::json!({\"kind\":\"object\",\"numberBits\":map.get(\"n\").map(|n|format!(\"{:016x}\",n.as_f64().unwrap().to_bits())),\"falsePresent\":map.get(\"flag\")==Some(&serde_json::Value::Bool(false))}),serde_json::Value::String(text)=>serde_json::json!({\"kind\":\"string\",\"text\":text}),_=>panic!(\"unexpected native retained variant\")}},Err(_)=>serde_json::json!({\"error\":true})}}",
+    "cases": [
+      {
+        "input": {
+          "phase": "encoded",
+          "text": "{\"n\":1.25,\"flag\":false}"
+        },
+        "output": {
+          "kind": "object",
+          "numberBits": "3ff4000000000000",
+          "falsePresent": true
+        }
+      },
+      {
+        "input": {
+          "phase": "native",
+          "value": "{\"n\":1.25}"
+        },
+        "output": {
+          "kind": "string",
+          "text": "{\"n\":1.25}"
+        }
+      },
+      {
+        "input": {
+          "phase": "transformed",
+          "value": {
+            "n": 2.5,
+            "flag": false
+          }
+        },
+        "output": {
+          "kind": "object",
+          "numberBits": "4004000000000000",
+          "falsePresent": true
+        }
+      },
+      {
+        "input": {
+          "phase": "encoded",
+          "text": "not JSON"
+        },
+        "output": {
+          "error": true
+        }
+      }
+    ],
+    "evidence": "The actual order_services::body response-body bridge parses only Encoded JSON bytes, preserving already-native and transformed strings as data. Direct returned retained Value variants, false property presence and numeric bits distinguish body provenance; malformed encoded text refuses rather than being silently reinterpreted. Fixed String host errors do not classify neighboring functions."
+  },
+  "safe_cex_venue_blofin::reads::body": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "body",
+      "signature": {
+        "inputs": [
+          [
+            "body",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestResponseBody",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::tickers::TickerInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::reads::ReadError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let body=if $value[\"phase\"]==\"encoded\"{safe_cex_transport::RestResponseBody::Encoded($value[\"text\"].as_str().unwrap().as_bytes().to_vec())}else if $value[\"phase\"]==\"transformed\"{safe_cex_transport::RestResponseBody::Transformed($value[\"value\"].clone())}else{safe_cex_transport::RestResponseBody::Untransformed($value[\"value\"].clone())};match $type::<String>(&body){Ok(native)=>{let value=native.retained();match value{serde_json::Value::Object(map)=>serde_json::json!({\"kind\":\"object\",\"numberBits\":map.get(\"n\").map(|n|format!(\"{:016x}\",n.as_f64().unwrap().to_bits())),\"falsePresent\":map.get(\"flag\")==Some(&serde_json::Value::Bool(false))}),serde_json::Value::String(text)=>serde_json::json!({\"kind\":\"string\",\"text\":text}),_=>panic!(\"unexpected native retained variant\")}},Err(_)=>serde_json::json!({\"error\":true})}}",
+    "cases": [
+      {
+        "input": {
+          "phase": "encoded",
+          "text": "{\"n\":1.25,\"flag\":false}"
+        },
+        "output": {
+          "kind": "object",
+          "numberBits": "3ff4000000000000",
+          "falsePresent": true
+        }
+      },
+      {
+        "input": {
+          "phase": "native",
+          "value": "{\"n\":1.25}"
+        },
+        "output": {
+          "kind": "string",
+          "text": "{\"n\":1.25}"
+        }
+      },
+      {
+        "input": {
+          "phase": "transformed",
+          "value": {
+            "n": 2.5,
+            "flag": false
+          }
+        },
+        "output": {
+          "kind": "object",
+          "numberBits": "4004000000000000",
+          "falsePresent": true
+        }
+      },
+      {
+        "input": {
+          "phase": "encoded",
+          "text": "not JSON"
+        },
+        "output": {
+          "error": true
+        }
+      }
+    ],
+    "evidence": "The actual reads::body response-body bridge parses only Encoded JSON bytes, preserving already-native and transformed strings as data. Direct returned retained Value variants, false property presence and numeric bits distinguish body provenance; malformed encoded text refuses rather than being silently reinterpreted. Fixed String host errors do not classify neighboring functions."
+  },
+  "safe_cex_venue_blofin::types::present": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "present",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{match $type::<_,String>($value.clone()){Ok(value)=>serde_json::json!({\"present\":value.is_some(),\"text\":value}),Err(_)=>serde_json::json!({\"rejected\":true})}}",
+    "cases": [
+      {
+        "input": "first",
+        "output": {
+          "present": true,
+          "text": "first"
+        }
+      },
+      {
+        "input": "second",
+        "output": {
+          "present": true,
+          "text": "second"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "rejected": true
+        }
+      },
+      {
+        "input": 17,
+        "output": {
+          "rejected": true
+        }
+      }
+    ],
+    "evidence": "The exact generic present decoder is executed at T=String over the actual Value deserializer: a supplied valid string becomes Some, while null/wrong primitive refuses. Omitted field defaults belong to the enclosing wire records and cannot be manufactured by this supplied-value decoder. No other T or private helper is exempted."
+  },
+  "safe_cex_venue_blofin::order_services::request": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "request",
+      "signature": {
+        "inputs": [
+          [
+            "xhr",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without external scheduling\")} struct Probe {seen:std::sync::Arc<std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>>,data:serde_json::Value} impl safe_cex_transport::RestAdapter for Probe {fn execute(&self,request:safe_cex_transport::RestRequest)->safe_cex_transport::RestFuture<'_,safe_cex_transport::RestResponse>{self.seen.lock().unwrap().push(request);let data=self.data.clone();Box::pin(async move{Ok(safe_cex_transport::RestResponse{status:200,reason:None,headers:Default::default(),body:safe_cex_transport::RestResponseBody::Untransformed(data)})})}}let seen=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));let xhr=Probe{seen:seen.clone(),data:$value[\"response\"].clone()};let native=run($type::<String>(&xhr,$value[\"method\"].as_str().unwrap(),\"MARKETS\",$value.get(\"params\").cloned(),$value.get(\"body\").cloned())).unwrap();let requests=seen.lock().unwrap();assert_eq!(requests.len(),1,\"exactly one actual configured adapter call\");let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(value)=>value.clone(),_=>panic!(\"source requests an untransformed payload\")});serde_json::json!({\"method\":request.method,\"url\":request.url,\"params\":request.params,\"paramsPresent\":request.params.is_some(),\"body\":body,\"bodyPresent\":request.body.is_some(),\"responseEcho\":native.json().get(\"echo\")})}",
+    "cases": [
+      {
+        "input": {
+          "method": "POST",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": {
+            "reduceOnly": false
+          },
+          "response": {
+            "echo": "first"
+          }
+        },
+        "output": {
+          "method": "POST",
+          "url": "/api/v1/market/instruments",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": {
+            "reduceOnly": false
+          },
+          "responseEcho": "first",
+          "paramsPresent": true,
+          "bodyPresent": true
+        }
+      },
+      {
+        "input": {
+          "method": "GET",
+          "response": {
+            "echo": false
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/api/v1/market/instruments",
+          "params": null,
+          "body": null,
+          "responseEcho": false,
+          "paramsPresent": false,
+          "bodyPresent": false
+        }
+      }
+    ],
+    "evidence": "The actual order_services::request configured REST helper executes against a bounded scripted RestAdapter, not a replacement response parser. Native request method, exact endpoint, optional params/body and returned retained payload are independently observed. Immediately-ready futures exercise any explicit yield before completion; real network timing and arbitrary host errors remain outside these native/default cases."
+  },
+  "safe_cex_venue_blofin::order_reads::get": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "xhr",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without external scheduling\")} struct Probe {seen:std::sync::Arc<std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>>,data:serde_json::Value} impl safe_cex_transport::RestAdapter for Probe {fn execute(&self,request:safe_cex_transport::RestRequest)->safe_cex_transport::RestFuture<'_,safe_cex_transport::RestResponse>{self.seen.lock().unwrap().push(request);let data=self.data.clone();Box::pin(async move{Ok(safe_cex_transport::RestResponse{status:200,reason:None,headers:Default::default(),body:safe_cex_transport::RestResponseBody::Untransformed(data)})})}}let seen=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));let xhr=Probe{seen:seen.clone(),data:$value[\"response\"].clone()};let native=run($type::<String>(&xhr,\"/native-reader\",$value[\"params\"].clone())).unwrap();let requests=seen.lock().unwrap();assert_eq!(requests.len(),1,\"exactly one actual configured adapter call\");let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(value)=>value.clone(),_=>panic!(\"source requests an untransformed payload\")});serde_json::json!({\"method\":request.method,\"url\":request.url,\"params\":request.params,\"paramsPresent\":request.params.is_some(),\"body\":body,\"bodyPresent\":request.body.is_some(),\"responseEcho\":native.json().get(\"echo\")})}",
+    "cases": [
+      {
+        "input": {
+          "params": {
+            "instId": "BTC"
+          },
+          "response": {
+            "echo": "first"
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/native-reader",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": null,
+          "responseEcho": "first",
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      },
+      {
+        "input": {
+          "params": null,
+          "response": {
+            "echo": false
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/native-reader",
+          "params": null,
+          "body": null,
+          "responseEcho": false,
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      }
+    ],
+    "evidence": "The actual order_reads::get configured REST helper executes against a bounded scripted RestAdapter, not a replacement response parser. Native request method, exact endpoint, optional params/body and returned retained payload are independently observed. Immediately-ready futures exercise any explicit yield before completion; real network timing and arbitrary host errors remain outside these native/default cases."
+  },
+  "safe_cex_venue_blofin::position_reads::get": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "xhr",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without external scheduling\")} struct Probe {seen:std::sync::Arc<std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>>,data:serde_json::Value} impl safe_cex_transport::RestAdapter for Probe {fn execute(&self,request:safe_cex_transport::RestRequest)->safe_cex_transport::RestFuture<'_,safe_cex_transport::RestResponse>{self.seen.lock().unwrap().push(request);let data=self.data.clone();Box::pin(async move{Ok(safe_cex_transport::RestResponse{status:200,reason:None,headers:Default::default(),body:safe_cex_transport::RestResponseBody::Untransformed(data)})})}}let seen=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));let xhr=Probe{seen:seen.clone(),data:$value[\"response\"].clone()};let native=run($type::<String>(&xhr,\"MARKETS\",$value[\"params\"].clone())).unwrap();let requests=seen.lock().unwrap();assert_eq!(requests.len(),1,\"exactly one actual configured adapter call\");let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(value)=>value.clone(),_=>panic!(\"source requests an untransformed payload\")});serde_json::json!({\"method\":request.method,\"url\":request.url,\"params\":request.params,\"paramsPresent\":request.params.is_some(),\"body\":body,\"bodyPresent\":request.body.is_some(),\"responseEcho\":native.json().get(\"echo\")})}",
+    "cases": [
+      {
+        "input": {
+          "params": {
+            "instId": "BTC"
+          },
+          "response": {
+            "echo": "first"
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/api/v1/market/instruments",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": null,
+          "responseEcho": "first",
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      },
+      {
+        "input": {
+          "params": null,
+          "response": {
+            "echo": false
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/api/v1/market/instruments",
+          "params": null,
+          "body": null,
+          "responseEcho": false,
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      }
+    ],
+    "evidence": "The actual position_reads::get configured REST helper executes against a bounded scripted RestAdapter, not a replacement response parser. Native request method, exact endpoint, optional params/body and returned retained payload are independently observed. Immediately-ready futures exercise any explicit yield before completion; real network timing and arbitrary host errors remain outside these native/default cases."
+  },
+  "safe_cex_venue_blofin::rest_lifecycle::get": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "xhr",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "url",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without external scheduling\")} struct Probe {seen:std::sync::Arc<std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>>,data:serde_json::Value} impl safe_cex_transport::RestAdapter for Probe {fn execute(&self,request:safe_cex_transport::RestRequest)->safe_cex_transport::RestFuture<'_,safe_cex_transport::RestResponse>{self.seen.lock().unwrap().push(request);let data=self.data.clone();Box::pin(async move{Ok(safe_cex_transport::RestResponse{status:200,reason:None,headers:Default::default(),body:safe_cex_transport::RestResponseBody::Untransformed(data)})})}}let seen=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));let xhr=Probe{seen:seen.clone(),data:$value[\"response\"].clone()};let native=run($type::<String>(&xhr,\"/native-reader\".into(),$value.get(\"params\").cloned())).unwrap();let requests=seen.lock().unwrap();assert_eq!(requests.len(),1,\"exactly one actual configured adapter call\");let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(value)=>value.clone(),_=>panic!(\"source requests an untransformed payload\")});serde_json::json!({\"method\":request.method,\"url\":request.url,\"params\":request.params,\"paramsPresent\":request.params.is_some(),\"body\":body,\"bodyPresent\":request.body.is_some(),\"responseEcho\":native.json().get(\"echo\")})}",
+    "cases": [
+      {
+        "input": {
+          "params": {
+            "instId": "BTC"
+          },
+          "response": {
+            "echo": "first"
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/native-reader",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": null,
+          "responseEcho": "first",
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      },
+      {
+        "input": {
+          "response": {
+            "echo": false
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/native-reader",
+          "params": null,
+          "body": null,
+          "responseEcho": false,
+          "paramsPresent": false,
+          "bodyPresent": false
+        }
+      }
+    ],
+    "evidence": "The actual rest_lifecycle::get configured REST helper executes against a bounded scripted RestAdapter, not a replacement response parser. Native request method, exact endpoint, optional params/body and returned retained payload are independently observed. Immediately-ready futures exercise any explicit yield before completion; real network timing and arbitrary host errors remain outside these native/default cases."
+  },
+  "safe_cex_venue_blofin::order_services::emit": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "emit",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_blofin::order_services::ServiceHost",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "lifetime": "'_"
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{use crate::order_services::{ServiceHost,ServiceError};let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let host=ServiceHost::<String>{emit_and_log_error:Box::new(|emitted|{if let Some(emitted)=emitted{assert!(std::ptr::eq(emitted,$value.get(\"value\").unwrap()),\"original emitted value identity\");}trace.borrow_mut().push(serde_json::json!({\"emitPresent\":emitted.is_some(),\"value\":emitted}));if $value[\"hostFail\"]==true{Err(\"emitter failed\".into())}else{Ok(())}}),log:Box::new(|text,severity|{trace.borrow_mut().push(serde_json::json!({\"text\":text,\"severity\":format!(\"{severity:?}\")}));if $value[\"hostFail\"]==true{Err(\"logger failed\".into())}else{Ok(())}})};let result=$type(&host, $value.get(\"value\"));let (class,message)=match result{Ok(())=>(\"ok\".to_owned(),None),Err(ServiceError::Host(text))=>(\"host\".to_owned(),Some(text)),Err(ServiceError::Input(text))=>(\"input\".to_owned(),Some(text)),_=>panic!(\"unexpected error class\")};drop(host);serde_json::json!({\"class\":class,\"message\":message,\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "class": "ok",
+          "message": null,
+          "trace": [
+            {
+              "emitPresent": false,
+              "value": null
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "rejected"
+        },
+        "output": {
+          "class": "ok",
+          "message": null,
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": "rejected"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 17
+        },
+        "output": {
+          "class": "ok",
+          "message": null,
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": 17
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "class": "ok",
+          "message": null,
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": null
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "bad",
+          "hostFail": true
+        },
+        "output": {
+          "class": "host",
+          "message": "emitter failed",
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": "bad"
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "The maintained error path forwards the original value to emitAndLogError before throwing Error(value), preserving missing versus null and host-failure short circuit. Native ServiceError variants, callback presence/value and actual borrowed pointer identity are observed. This bounded helper contract grants no neighboring REST orchestration exemption."
+  },
+  "safe_cex_venue_blofin::order_reads::fail": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "fail",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_blofin::order_services::ServiceHost",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "lifetime": "'_"
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{use crate::order_services::{ServiceHost,ServiceError};let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let host=ServiceHost::<String>{emit_and_log_error:Box::new(|emitted|{if let Some(emitted)=emitted{assert!(std::ptr::eq(emitted,$value.get(\"value\").unwrap()),\"original emitted value identity\");}trace.borrow_mut().push(serde_json::json!({\"emitPresent\":emitted.is_some(),\"value\":emitted}));if $value[\"hostFail\"]==true{Err(\"emitter failed\".into())}else{Ok(())}}),log:Box::new(|text,severity|{trace.borrow_mut().push(serde_json::json!({\"text\":text,\"severity\":format!(\"{severity:?}\")}));if $value[\"hostFail\"]==true{Err(\"logger failed\".into())}else{Ok(())}})};let result=$type(&host, &$value[\"value\"]);let (class,message)=match result{Ok(())=>(\"ok\".to_owned(),None),Err(ServiceError::Host(text))=>(\"host\".to_owned(),Some(text)),Err(ServiceError::Input(text))=>(\"input\".to_owned(),Some(text)),_=>panic!(\"unexpected error class\")};drop(host);serde_json::json!({\"class\":class,\"message\":message,\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {
+          "value": "rejected"
+        },
+        "output": {
+          "class": "input",
+          "message": "rejected",
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": "rejected"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 17
+        },
+        "output": {
+          "class": "input",
+          "message": "17",
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": 17
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "class": "input",
+          "message": "null",
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": null
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "bad",
+          "hostFail": true
+        },
+        "output": {
+          "class": "host",
+          "message": "emitter failed",
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": "bad"
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "The maintained error path forwards the original value to emitAndLogError before throwing Error(value), preserving missing versus null and host-failure short circuit. Native ServiceError variants, callback presence/value and actual borrowed pointer identity are observed. This bounded helper contract grants no neighboring REST orchestration exemption."
+  },
+  "safe_cex_venue_blofin::order_rest::reject": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "reject",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_blofin::order_services::ServiceHost",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "lifetime": "'_"
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{use crate::order_services::{ServiceHost,ServiceError};let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let host=ServiceHost::<String>{emit_and_log_error:Box::new(|emitted|{if let Some(emitted)=emitted{assert!(std::ptr::eq(emitted,$value.get(\"value\").unwrap()),\"original emitted value identity\");}trace.borrow_mut().push(serde_json::json!({\"emitPresent\":emitted.is_some(),\"value\":emitted}));if $value[\"hostFail\"]==true{Err(\"emitter failed\".into())}else{Ok(())}}),log:Box::new(|text,severity|{trace.borrow_mut().push(serde_json::json!({\"text\":text,\"severity\":format!(\"{severity:?}\")}));if $value[\"hostFail\"]==true{Err(\"logger failed\".into())}else{Ok(())}})};let result=$type(&host, $value.get(\"value\"));let (class,message)=match result{Ok(())=>(\"ok\".to_owned(),None),Err(ServiceError::Host(text))=>(\"host\".to_owned(),Some(text)),Err(ServiceError::Input(text))=>(\"input\".to_owned(),Some(text)),_=>panic!(\"unexpected error class\")};drop(host);serde_json::json!({\"class\":class,\"message\":message,\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "class": "input",
+          "message": "",
+          "trace": [
+            {
+              "emitPresent": false,
+              "value": null
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "rejected"
+        },
+        "output": {
+          "class": "input",
+          "message": "rejected",
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": "rejected"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": 17
+        },
+        "output": {
+          "class": "input",
+          "message": "17",
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": 17
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "class": "input",
+          "message": "null",
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": null
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "value": "bad",
+          "hostFail": true
+        },
+        "output": {
+          "class": "host",
+          "message": "emitter failed",
+          "trace": [
+            {
+              "emitPresent": true,
+              "value": "bad"
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "The maintained error path forwards the original value to emitAndLogError before throwing Error(value), preserving missing versus null and host-failure short circuit. Native ServiceError variants, callback presence/value and actual borrowed pointer identity are observed. This bounded helper contract grants no neighboring REST orchestration exemption."
+  },
+  "safe_cex_venue_blofin::order_reads::log": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "log",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_blofin::order_services::ServiceHost",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "lifetime": "'_"
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{use crate::order_services::{ServiceHost,ServiceError};let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let host=ServiceHost::<String>{emit_and_log_error:Box::new(|emitted|{if let Some(emitted)=emitted{assert!(std::ptr::eq(emitted,$value.get(\"value\").unwrap()),\"original emitted value identity\");}trace.borrow_mut().push(serde_json::json!({\"emitPresent\":emitted.is_some(),\"value\":emitted}));if $value[\"hostFail\"]==true{Err(\"emitter failed\".into())}else{Ok(())}}),log:Box::new(|text,severity|{trace.borrow_mut().push(serde_json::json!({\"text\":text,\"severity\":format!(\"{severity:?}\")}));if $value[\"hostFail\"]==true{Err(\"logger failed\".into())}else{Ok(())}})};let result=$type(&host,\"risk warning\");let (class,message)=match result{Ok(())=>(\"ok\".to_owned(),None),Err(ServiceError::Host(text))=>(\"host\".to_owned(),Some(text)),Err(ServiceError::Input(text))=>(\"input\".to_owned(),Some(text)),_=>panic!(\"unexpected error class\")};drop(host);serde_json::json!({\"class\":class,\"message\":message,\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "class": "ok",
+          "message": null,
+          "trace": [
+            {
+              "text": "risk warning",
+              "severity": "Warning"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "hostFail": true
+        },
+        "output": {
+          "class": "host",
+          "message": "logger failed",
+          "trace": [
+            {
+              "text": "risk warning",
+              "severity": "Warning"
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "Native ServiceHost logging retains the exact text and Warning enum before distinguishing success from ServiceError::Host. Callbacks execute, and no transport behavior is inferred from the receipt."
+  },
+  "safe_cex_venue_blofin::order_services::log": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "log",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_blofin::order_services::ServiceHost",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "lifetime": "'_"
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "severity",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::runtime::LogSeverity",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{use crate::order_services::{ServiceHost,ServiceError};let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let host=ServiceHost::<String>{emit_and_log_error:Box::new(|emitted|{if let Some(emitted)=emitted{assert!(std::ptr::eq(emitted,$value.get(\"value\").unwrap()),\"original emitted value identity\");}trace.borrow_mut().push(serde_json::json!({\"emitPresent\":emitted.is_some(),\"value\":emitted}));if $value[\"hostFail\"]==true{Err(\"emitter failed\".into())}else{Ok(())}}),log:Box::new(|text,severity|{trace.borrow_mut().push(serde_json::json!({\"text\":text,\"severity\":format!(\"{severity:?}\")}));if $value[\"hostFail\"]==true{Err(\"logger failed\".into())}else{Ok(())}})};let result=$type(&host,\"risk warning\",safe_cex_exchange::runtime::LogSeverity::Warning);let (class,message)=match result{Ok(())=>(\"ok\".to_owned(),None),Err(ServiceError::Host(text))=>(\"host\".to_owned(),Some(text)),Err(ServiceError::Input(text))=>(\"input\".to_owned(),Some(text)),_=>panic!(\"unexpected error class\")};drop(host);serde_json::json!({\"class\":class,\"message\":message,\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "class": "ok",
+          "message": null,
+          "trace": [
+            {
+              "text": "risk warning",
+              "severity": "Warning"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "hostFail": true
+        },
+        "output": {
+          "class": "host",
+          "message": "logger failed",
+          "trace": [
+            {
+              "text": "risk warning",
+              "severity": "Warning"
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "Native ServiceHost logging retains the exact text and Warning enum before distinguishing success from ServiceError::Host. Callbacks execute, and no transport behavior is inferred from the receipt."
+  },
+  "safe_cex_venue_blofin::order_reads::error_value": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "error_value",
+      "signature": {
+        "inputs": [
+          [
+            "error",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "include_message",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "unknown",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "serde_json::value::Value",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::fmt::Display",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{use crate::order_services::ServiceError;let error:ServiceError<String>=if $value[\"kind\"]==\"rest\"{let mut failure=safe_cex_transport::RestFailure::pre_transmit($value[\"message\"].as_str().unwrap().to_owned(),Default::default());failure.response=Some(Box::new(safe_cex_transport::RestResponse{status:400,reason:None,headers:Default::default(),body:safe_cex_transport::RestResponseBody::Untransformed($value[\"body\"].clone())}));ServiceError::Rest(Box::new(failure))}else if $value[\"kind\"]==\"host\"{ServiceError::Host($value[\"message\"].as_str().unwrap().to_owned())}else{ServiceError::Input($value[\"message\"].as_str().unwrap().to_owned())};let value=$type(&error,$value[\"includeMessage\"]==true,$value.get(\"fallback\").and_then(|v|v.as_str()));match value{serde_json::Value::String(text)=>serde_json::json!({\"kind\":\"string\",\"text\":text}),serde_json::Value::Number(number)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",number.as_f64().unwrap().to_bits())}),_=>panic!(\"unexpected value variant\")}}",
+    "cases": [
+      {
+        "input": {
+          "kind": "rest",
+          "message": "http",
+          "body": {
+            "msg": 17,
+            "message": "secondary"
+          }
+        },
+        "output": {
+          "kind": "number",
+          "bits": "4031000000000000"
+        }
+      },
+      {
+        "input": {
+          "kind": "rest",
+          "message": "http",
+          "body": {
+            "msg": "",
+            "message": "secondary"
+          },
+          "includeMessage": true
+        },
+        "output": {
+          "kind": "string",
+          "text": "secondary"
+        }
+      },
+      {
+        "input": {
+          "kind": "rest",
+          "message": "http",
+          "body": {
+            "msg": false,
+            "message": "secondary"
+          }
+        },
+        "output": {
+          "kind": "string",
+          "text": "http"
+        }
+      },
+      {
+        "input": {
+          "kind": "rest",
+          "message": "",
+          "body": {},
+          "fallback": "unknown"
+        },
+        "output": {
+          "kind": "string",
+          "text": "unknown"
+        }
+      },
+      {
+        "input": {
+          "kind": "host",
+          "message": "host issue"
+        },
+        "output": {
+          "kind": "string",
+          "text": "host issue"
+        }
+      },
+      {
+        "input": {
+          "kind": "input",
+          "message": "",
+          "fallback": "fallback"
+        },
+        "output": {
+          "kind": "string",
+          "text": "fallback"
+        }
+      }
+    ],
+    "evidence": "Source catch paths prefer truthy response msg, optionally message, then error.message and the selected unknown fallback. Actual native Rest/Input/Host variants and the returned String-versus-Number value/bits distinguish preference, flag and fallback behavior. REST body capture remains the separately reviewed numeric ingress boundary."
+  },
+  "safe_cex_venue_blofin::public_stream_data::book_snapshot": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "book_snapshot",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "needs_ts",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": null,
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{let input=crate::utility::UtilityInput::from_retained($value[\"frame\"].clone());let result=$type(&input,$value[\"needsTs\"]==true);if let Some(selected)=result{let raw=&input.json()[\"data\"];let expected=if raw.is_array(){&raw[0]}else{raw};assert!(std::ptr::eq(selected,expected),\"native snapshot borrows actual selected payload\");let first=selected[\"bids\"][0][0].as_f64();serde_json::json!({\"selected\":true,\"firstBidBits\":first.map(|n|format!(\"{:016x}\",n.to_bits()))})}else{serde_json::json!({\"selected\":false})}}",
+    "cases": [
+      {
+        "input": {
+          "frame": {}
+        },
+        "output": {
+          "selected": false
+        }
+      },
+      {
+        "input": {
+          "frame": {
+            "data": []
+          }
+        },
+        "output": {
+          "selected": false
+        }
+      },
+      {
+        "input": {
+          "frame": {
+            "data": {
+              "bids": [],
+              "asks": null
+            }
+          }
+        },
+        "output": {
+          "selected": false
+        }
+      },
+      {
+        "input": {
+          "frame": {
+            "data": {
+              "bids": [
+                [
+                  1.25,
+                  2
+                ]
+              ],
+              "asks": []
+            }
+          }
+        },
+        "output": {
+          "selected": true,
+          "firstBidBits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": {
+          "frame": {
+            "data": [
+              {
+                "bids": [
+                  [
+                    1.25,
+                    2
+                  ]
+                ],
+                "asks": [],
+                "ts": 0
+              }
+            ]
+          },
+          "needsTs": true
+        },
+        "output": {
+          "selected": false
+        }
+      },
+      {
+        "input": {
+          "frame": {
+            "data": [
+              {
+                "bids": [
+                  [
+                    1.25,
+                    2
+                  ]
+                ],
+                "asks": [],
+                "ts": 17
+              }
+            ]
+          },
+          "needsTs": true
+        },
+        "output": {
+          "selected": true,
+          "firstBidBits": "3ff4000000000000"
+        }
+      }
+    ],
+    "evidence": "The maintained book listener selects first array payload or direct object, requiring bid/ask arrays and optionally truthy ts. Native admission cases preserve missing/empty/malformed distinctions, first bid binary64 bits and actual pointer identity of the borrowed payload. This does not claim the full listener receiver contract."
+  },
+  "safe_cex_venue_blofin::public_stream_data::entry": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "entry",
+      "signature": {
+        "inputs": [
+          [
+            "channel",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "id",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "callback",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_blofin::public_stream_data::PublicDataCallback",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "E"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_blofin::public_stream_data::ListenerEntry",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let calls=std::rc::Rc::new(std::cell::RefCell::new(Vec::<String>::new()));let observed=calls.clone();let callback:super::PublicDataCallback<String>=std::rc::Rc::new(move |input|{observed.borrow_mut().push(input.borrow().json()[\"witness\"].as_str().unwrap().to_owned());Ok(())});let entry=$type($value[\"channel\"].as_str().unwrap(),$value[\"id\"].as_str().unwrap(),callback.clone());assert!(std::rc::Rc::ptr_eq(&callback,&entry.callback),\"listener retains actual callback allocation\");(entry.callback)(std::rc::Rc::new(std::cell::RefCell::new(crate::utility::UtilityInput::from_retained(serde_json::json!({\"witness\":\"called\"}))))).unwrap();serde_json::json!({\"key\":entry.key,\"channel\":entry.topic.fields[\"channel\"].as_str().unwrap(),\"instId\":entry.topic.fields[\"instId\"].as_str().unwrap(),\"calls\":calls.borrow().clone()})}",
+    "cases": [
+      {
+        "input": {
+          "channel": "books5",
+          "id": "BTC-USDT"
+        },
+        "output": {
+          "key": "books5.BTC-USDT",
+          "channel": "books5",
+          "instId": "BTC-USDT",
+          "calls": [
+            "called"
+          ]
+        }
+      },
+      {
+        "input": {
+          "channel": "candle1m",
+          "id": "a.b"
+        },
+        "output": {
+          "key": "candle1m.a.b",
+          "channel": "candle1m",
+          "instId": "a.b",
+          "calls": [
+            "called"
+          ]
+        }
+      }
+    ],
+    "evidence": "The listener entry builds channel.id and preserves the two native subscription fields. Actual Rc callback identity is checked before invoking the retained callback on a native captured payload, observing execution rather than assigning a callback-only classification."
   }
 }

@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import test from 'node:test';
@@ -46,7 +47,7 @@ test('default inventory supplies every inherited body and never infers exemption
 test('Exchange default classifications cover only sixteen reviewed candidates and preserve source refusal', async () => {
   const fs = await import('node:fs'); const { spawnSync } = await import('node:child_process');
   const compiler = JSON.parse(fs.readFileSync(new URL('../accepted-set/exchange-defaults-fixture.json', import.meta.url)));
-  const records = JSON.parse(fs.readFileSync(new URL('../accepted-set/default-traits.json', import.meta.url)));
+  const records = loadPolicy('default-traits');
   const text = fs.readFileSync(new URL('../../safe-cex-exchange/src/exchange.rs', import.meta.url));
   assert.equal(compiler.methods.length, 53, 'review snapshot includes all fifty-three defaults');
   assert.equal(records[compiler.name].reviewedMethods.length, 16, 'independent reviewed candidate floor');
@@ -68,7 +69,7 @@ test('Exchange default classifications cover only sixteen reviewed candidates an
     ['Exchange default reviewed source changed', 'bytes=Buffer.concat([bytes,Buffer.from("\\nchanged body")]);', 'reviewed Exchange default source changed'],
     ['Exchange default reviewed candidate omitted', 'records[trait.name].reviewedMethods.pop();', 'reviewed Exchange candidate set changed'],
   ]) {
-    const program = `import fs from 'node:fs';import {reviewedDefaultTrait} from ${JSON.stringify(new URL('./accepted-defaults.mjs', import.meta.url).href)};const trait=JSON.parse(fs.readFileSync(new URL(${JSON.stringify(new URL('../accepted-set/exchange-defaults-fixture.json', import.meta.url).href)})));const records=JSON.parse(fs.readFileSync(new URL(${JSON.stringify(new URL('../accepted-set/default-traits.json', import.meta.url).href)})));let bytes=fs.readFileSync(new URL(${JSON.stringify(new URL('../../safe-cex-exchange/src/exchange.rs', import.meta.url).href)}));${mutation}reviewedDefaultTrait(trait,records,bytes);`;
+    const program = `import fs from 'node:fs';import {loadPolicy} from ${JSON.stringify(new URL('./accepted-policy-files.mjs', import.meta.url).href)};import {reviewedDefaultTrait} from ${JSON.stringify(new URL('./accepted-defaults.mjs', import.meta.url).href)};const trait=JSON.parse(fs.readFileSync(new URL(${JSON.stringify(new URL('../accepted-set/exchange-defaults-fixture.json', import.meta.url).href)})));const records=loadPolicy('default-traits');let bytes=fs.readFileSync(new URL(${JSON.stringify(new URL('../../safe-cex-exchange/src/exchange.rs', import.meta.url).href)}));${mutation}reviewedDefaultTrait(trait,records,bytes);`;
     const result = spawnSync(process.execPath, ['--input-type=module', '--eval', program], { encoding: 'utf8' });
     assert.equal(result.status, 1, result.stderr); assert.match(result.stderr, new RegExp(assertion));
     console.log(`${label}: named assertion; process exit 1`);

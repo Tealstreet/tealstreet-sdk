@@ -1,40 +1,4 @@
 {
-  "safe_cex_store::model_patch::PatchModel::patch_field for safe_cex_types::Market": {
-    "category": "delegated",
-    "file": "safe-cex-store/src/model_patch.rs",
-    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Market decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver.",
-    "sourceSha256": "1bc2c75a56015f62831ae998546b254932297193206a2912baaa63653f2499e4"
-  },
-  "safe_cex_store::model_patch::PatchModel::patch_field for safe_cex_types::Order": {
-    "category": "delegated",
-    "file": "safe-cex-store/src/model_patch.rs",
-    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Order decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver.",
-    "sourceSha256": "1bc2c75a56015f62831ae998546b254932297193206a2912baaa63653f2499e4"
-  },
-  "safe_cex_store::model_patch::PatchModel::patch_field for safe_cex_types::Position": {
-    "category": "delegated",
-    "file": "safe-cex-store/src/model_patch.rs",
-    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Position decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver.",
-    "sourceSha256": "1bc2c75a56015f62831ae998546b254932297193206a2912baaa63653f2499e4"
-  },
-  "safe_cex_store::model_patch::PatchModel::patch_field for safe_cex_types::Ticker": {
-    "category": "delegated",
-    "file": "safe-cex-store/src/model_patch.rs",
-    "reason": "Reviewed model_patch.rs: the crate-private PatchModel impl for Ticker decodes one patch field per call into a cloned candidate; model_patch::apply commits the candidate only after every field succeeds. Its only callers are the Store update entrypoints taking &dyn PatchSource, which the inventory treats as raw input, so field-decoding coverage belongs to those public owners' probes, not to this private receiver.",
-    "sourceSha256": "1bc2c75a56015f62831ae998546b254932297193206a2912baaa63653f2499e4"
-  },
-  "safe_cex_store::model_patch::PatchSource::visit for serde_json::map::Map<alloc::string::String, serde_json::value::Value>": {
-    "category": "non-decoder",
-    "file": "safe-cex-store/src/model_patch.rs",
-    "reason": "Reviewed model_patch.rs: the Map impl hands each existing JSON entry to the caller's visitor unchanged as PatchValueRef::Json(&value), in map order, and stops at the first visitor error. It constructs no typed value; field decoding happens in the store patch applicator that consumes the visitor, which keeps its own coverage.",
-    "sourceSha256": "1bc2c75a56015f62831ae998546b254932297193206a2912baaa63653f2499e4"
-  },
-  "safe_cex_transport::signing::RemoteSigner::sign_query": {
-    "category": "non-decoder",
-    "file": "safe-cex-transport/src/signing.rs",
-    "reason": "Reviewed signing.rs: the default ignores its typed HttpSigningRequest and returns TransportError::Host refusing native query signing. It reads no raw input and produces no decoded value; implementors that override it are inventoried at their own impls.",
-    "sourceSha256": "09fb855499e465f6d6fac49e0926a2d2e121806252d3a2bace8ad75c8d1134e8"
-  },
   "safe_cex_venue_binance::private_classes::PrivateBase::send_with_log": {
     "category": "non-decoder",
     "file": "safe-cex-venue-binance/src/private_classes.rs",
@@ -82,23 +46,5 @@
     "file": "safe-cex-venue-binance/src/exchange_classes.rs",
     "reason": "Reviewed this default only: it returns value.read(key) on an existing EventValue response/header handle. The string is a property name; this method neither parses it nor decodes the returned value. Concrete overrides remain independently inventoried. Native evidence: tests/private_classes.rs::native_import_default_weight_property_returns_existing_values constructs the production native dependencies, invokes the inherited default through &dyn ExchangeImports, and observes header reference identity, numeric status, missing undefined and null TypeError; the injected transport refuses any I/O.",
     "sourceSha256": "fa707e05e230e0f39f294d16fadbfa0f278346c22675ba78f387e450dfacc7b9"
-  },
-  "safe_cex_venue_blofin::exchange::BlofinPublicListeners::listen_book for alloc::rc::Rc<safe_cex_venue_blofin::public_stream_data::BlofinPublicWebsocket<H>>": {
-    "category": "delegated",
-    "file": "safe-cex-venue-blofin/src/exchange.rs",
-    "reason": "Reviewed exchange.rs: listen_book on the Rc<BlofinPublicWebsocket<H>> receiver forwards the symbol and callback to BlofinPublicWebsocket::listen_order_book unchanged. Book message decoding belongs to that websocket owner; this impl adds no parsing. Re-reviewed against seed 91a50c7a2c: the only whole-file change passes account_modes into change_margin_type; this listener impl is unchanged. Native evidence: tests/complete.rs::exchange_class_native constructs the actual Rc receiver, registers a book listener and executes its cleanup; forwarding_book_native independently checks symbol, callback and cleanup identity.",
-    "sourceSha256": "5407b8dc70eb63fd27b77897f6b39d7976680436cd3f9b871e6c5d591c768595"
-  },
-  "safe_cex_venue_coinbase::portfolios_balances::PortfolioHost::get for alloc::rc::Rc<H>": {
-    "category": "delegated",
-    "file": "safe-cex-venue-coinbase/src/portfolios_balances.rs",
-    "reason": "Reviewed portfolios_balances.rs: the Rc<H> impl forwards every PortfolioHost method to (**self) unchanged, so a retained class host is the same capability rather than a copy. Decoding of PortfolioReply belongs to the concrete H implementation, not this forwarding receiver.",
-    "sourceSha256": "774fa7229b512ec22517c3a85a6d1089981cea82ae43821e42bddac9735762bc"
-  },
-  "safe_cex_exchange::exchange::Exchange::fetch_option_expiries": {
-    "category": "non-decoder",
-    "file": "safe-cex-exchange/src/exchange.rs",
-    "reason": "Reviewed the default fetch_option_expiries body: it ignores its underlying String, constructs options_unsupported(self.name(), \"Option expiries\"), and returns that venue-named error without parsing input or constructing an expiry. This matches packages/safe-cex/src/exchanges/base.ts::fetchOptionExpiries. Concrete overrides retain their own compiler inventory and decoder contracts; this entry does not classify fetch_option_chain, fetch_account_greeks, or the rest of Exchange. See sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Re-reviewed 08e1c1ef3a^..eb2949866a: only SocketRegistration lookup support before Exchange and BaseExchange disposal/socket methods after it changed; the entire Exchange trait, including this default body and API, is byte-identical. This pin refresh grants no new receiver role.",
-    "sourceSha256": "5a9f1df2a0f8887e8385a451e743aafd70ee2e2a775dee0c5ee6b088cf31f587"
   }
 }

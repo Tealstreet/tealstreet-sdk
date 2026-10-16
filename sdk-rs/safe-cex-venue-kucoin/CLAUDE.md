@@ -308,3 +308,10 @@ projection and leverage/mode policy. Existing typed helpers remain mapped;
 these components are not yet installed by the owning exchange class. Its
 finite language fixture now distinguishes own definition from prototype
 assignment after a production mutation survived the earlier instrument.
+
+`KucoinDependencies.hosted_signer` supplies the same optional account capability
+to the shared BaseExchange bridge and concrete per-options HTTP host. Native
+registry hosts retain it for primary and unlimited clients. Private WS auth
+continues to obtain a bullet-private token through HTTP; no separate hosted WS
+protocol is introduced. Existing local hosts supply None. Actual-source/native
+evidence and omission controls are in [HOSTED_SIGNER_EVIDENCE.md](HOSTED_SIGNER_EVIDENCE.md).

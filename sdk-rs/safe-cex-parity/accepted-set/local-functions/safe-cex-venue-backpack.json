@@ -1,0 +1,7 @@
+{
+  "safe-cex-venue-backpack/src/native_http.rs::LOCAL_FUNCTION:query": {
+    "category": "non-decoder",
+    "reason": "Inside qs_repeat: maps an outbound JsJsonValue request parameter tree to QueryValue for query-string serialization. Outbound encoding only; no inbound decode.",
+    "sourceSha256": "7dff403b1e4ce80bf5b1556ef17ed33722c50a08b5688fd3b285c0419076bf21"
+  }
+}
