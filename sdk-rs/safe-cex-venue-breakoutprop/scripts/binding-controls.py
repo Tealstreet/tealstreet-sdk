@@ -43,7 +43,7 @@ def main():
   print(f'{label}: exit {result.returncode}', flush=True)
   return result
  baseline = run('baseline')
- assert baseline.returncode == 0 and '13 passed; 0 failed' in baseline.stdout, baseline.stdout
+ assert baseline.returncode == 0 and '14 passed; 0 failed' in baseline.stdout, baseline.stdout
  try:
   for method, target, test in CONTROLS:
    start = text.index(f'    fn {method}(', text.index('impl Exchange for BreakoutpropExchange'))
@@ -60,9 +60,9 @@ def main():
  finally:
   SOURCE.write_bytes(original)
  restored = run('restored')
- assert restored.returncode == 0 and '13 passed; 0 failed' in restored.stdout, restored.stdout
+ assert restored.returncode == 0 and '14 passed; 0 failed' in restored.stdout, restored.stdout
  assert SOURCE.read_bytes() == original
- print('16/16 compiling dispatch controls failed named tests; restored 13/13 pass',flush=True)
+ print('16/16 compiling dispatch controls failed named tests; restored 14/14 pass',flush=True)
 
 if __name__ == '__main__':
  main()

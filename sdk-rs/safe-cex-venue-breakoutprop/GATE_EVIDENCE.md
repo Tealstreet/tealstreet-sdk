@@ -469,19 +469,19 @@ network websocket; the scripted runtime panics on any dial.
 
 Measured verification:
 
-- Full venue suite, including the existing actual-TypeScript oracles: 69 tests
-  passed. Production binding target: 13 passed. Source oracles still load the
+- Full venue suite, including the existing actual-TypeScript oracles: 70 tests
+  passed. Production binding target: 14 passed. Source oracles still load the
   actual mirror source; no TypeScript or original fixture values were edited.
 - scripts/binding-controls.py: all 16 independent dispatch changes compiled,
   failed their named production E2E at exit101, then restored source passed
-  13/13. These prove dispatch coverage, not complete JavaScript semantics.
+  14/14. These prove dispatch coverage, not complete JavaScript semantics.
 - scripts/registry-control.py: removal of only the Breakoutprop table entry
   compiled and failed the actual native registry construction witness; original
   source bytes restored and the native HTTP test passed 1/1.
 - http_failure_preserves_axios_code_and_config compiled and failed on lost
   ECONNABORTED metadata before the bridge fix. The fixed production wire retains
   code, config, Axios identity and response alongside original native metadata;
-  all 13 binding tests pass. Preliminary fixtures using an allowed network retry
+  all 14 binding tests pass. Preliminary fixtures using an allowed network retry
   code did not isolate metadata loss and are not counted as this proof.
 - Native registry E2E uses loopback reqwest HTTP for DXtrade login, startup,
   reads, placement and cancellation. It checks the source login body, DXAPI
@@ -506,6 +506,15 @@ Manifests were reconciled row by row, never regenerated.
 Final local gates: native venue all-targets strict clippy, native registry strict
 clippy and venue/registry wasm32 library strict clippy pass; scoped formatting
 passes. Native registry HTTP passes 1/1 and the constructor suite passes 13/13.
-Global parity passes with 7,459 rows and 17,106 public Rust items (zero findings).
+Global parity passes with 7,459 rows and 17,108 public Rust items (zero findings).
 Layers pass 88/88; the live registry oracle observes 48 ordered names and its
 script test passes 1/1. Gate and mutation logs stay outside the repository.
+
+
+The production polling bridge reuses shared loop_util for the source five-second
+fallback, warning deduplication and deferred callback. An infinite interval
+returns before scheduling any task. poll_loop_uses_source_fallback_and_disables_infinity
+compiled and failed the original immediate callback, then passed after the fix.
+It covers omitted, zero, negative, NaN, configured finite and infinite intervals,
+and checks callback deferral separately from the sleep deadline. This adds one
+binding test; the final binding target is 14/14 and full venue suite is 70/70.

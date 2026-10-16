@@ -197,18 +197,53 @@ impl NativeRuntimeHost for ProductionHost {
         next: Rc<dyn Fn() -> ExchangeFuture<'static, ()>>,
         delay: Option<f64>,
     ) -> Result<(), ExchangeError> {
+        if delay == Some(f64::INFINITY) {
+            return Ok(());
+        }
         let parent = self.parent()?;
         let runtime = self.deps.runtime.clone();
+        let sleep_runtime = runtime.clone();
+        let warn_runtime = runtime.clone();
+        let owner = self.clone();
+        let enqueue = Rc::new(move |callback: Rc<dyn Fn()>| -> Result<(), String> {
+            let parent = owner.parent().map_err(|error| error.message)?;
+            let runtime = owner.deps.runtime.clone();
+            parent.base.start_owned_operation(async move {
+                if let Err(error) = runtime.sleep(0).await {
+                    runtime.report_exception(
+                        &error,
+                        &json!({"venue":"breakoutprop","source":"poll callback"}),
+                    );
+                    return;
+                }
+                callback();
+            });
+            Ok(())
+        });
+        let host = safe_cex_exchange::loop_util::LoopHost {
+            sleep: Rc::new(move |ms| {
+                let pending = sleep_runtime.sleep(ms.max(0.0) as u64);
+                Box::pin(async move { pending.await.map_err(|error| error.message) })
+            }),
+            // Native and worker hosts have no visible browser document.
+            document_visible: Rc::new(|| false),
+            request_animation_frame: enqueue.clone(),
+            set_timeout_zero: enqueue,
+            warn: Rc::new(move |message| warn_runtime.console("warn", message)),
+        };
+        let owner = self.clone();
+        let callback = Rc::new(move || owner.owned(next()));
         parent.base.start_owned_operation(async move {
-            let delay = delay.filter(|v| v.is_finite() && *v > 0.0).unwrap_or(0.0) as u64;
-            if let Err(error) = async {
-                runtime.sleep(delay).await?;
-                next().await
-            }
+            if let Err(error) = safe_cex_exchange::loop_util::loop_once(
+                callback,
+                &"() => this.tick()".encode_utf16().collect::<Vec<_>>(),
+                delay,
+                &host,
+            )
             .await
             {
                 runtime.report_exception(
-                    &error,
+                    &ExchangeError::new(error),
                     &json!({"venue":"breakoutprop","source":"poll loop"}),
                 );
             }

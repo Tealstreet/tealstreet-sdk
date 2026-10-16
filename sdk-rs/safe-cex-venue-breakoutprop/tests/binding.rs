@@ -19,10 +19,11 @@ use safe_cex_types::*;
 use safe_cex_venue_breakoutprop::{
     host::{BreakoutDependencies, ProductionHost},
     lifecycle::BreakoutpropExchange,
+    native_reads::NativeRuntimeHost,
 };
 use serde_json::{Value, json};
 use std::{
-    cell::RefCell,
+    cell::{Cell, RefCell},
     collections::VecDeque,
     future::Future,
     rc::Rc,
@@ -147,6 +148,7 @@ struct Fixture {
     wire: Rc<Wire>,
     store: Rc<DefaultStore>,
     exchange: Rc<BreakoutpropExchange>,
+    host: Rc<ProductionHost>,
 }
 impl Fixture {
     fn run<T>(&self, future: impl Future<Output = T>) -> T {
@@ -205,7 +207,7 @@ fn fixture() -> Fixture {
         local_to_utc: Rc::new(|value| value),
     });
     let exchange = BreakoutpropExchange::new(
-        host,
+        host.clone(),
         ExchangeName::Breakoutprop,
         serde_json::from_value(json!({"key":"k","secret":"s"})).unwrap(),
         store.clone(),
@@ -216,6 +218,7 @@ fn fixture() -> Fixture {
         wire,
         store,
         exchange,
+        host,
     }
 }
 fn opts() -> PlaceOrderOpts {
@@ -447,4 +450,48 @@ fn http_failure_preserves_axios_code_and_config() {
     assert_eq!(failure.code, Some(json!("ECONNABORTED")));
     assert!(failure.is_axios_error);
     assert_eq!(failure.config.as_ref().unwrap()["url"], "instruments/query");
+}
+
+#[test]
+fn poll_loop_uses_source_fallback_and_disables_infinity() {
+    for delay in [
+        None,
+        Some(0.0),
+        Some(-1.0),
+        Some(f64::NAN),
+        Some(125.0),
+        Some(f64::INFINITY),
+    ] {
+        let f = fixture();
+        let calls = Rc::new(Cell::new(0));
+        let observed = calls.clone();
+        let before = f.runtime.tasks.borrow().len();
+        f.host
+            .schedule_loop(
+                Rc::new(move || {
+                    observed.set(observed.get() + 1);
+                    Box::pin(async { Ok(()) })
+                }),
+                delay,
+            )
+            .unwrap();
+        if delay == Some(f64::INFINITY) {
+            assert_eq!(
+                f.runtime.tasks.borrow().len(),
+                before,
+                "infinite interval schedules nothing"
+            );
+            continue;
+        }
+        let deadline = if delay == Some(125.0) { 125 } else { 5000 };
+        f.runtime.advance(0);
+        assert_eq!(calls.get(), 0, "poll loop must not run immediately");
+        f.runtime.advance(deadline - 1);
+        assert_eq!(calls.get(), 0, "source interval must elapse");
+        f.runtime.advance(deadline);
+        assert_eq!(calls.get(), 0, "source enqueues callback after sleep");
+        f.runtime.advance(deadline);
+        assert_eq!(calls.get(), 1, "deferred callback runs exactly once");
+        f.exchange.dispose().unwrap();
+    }
 }

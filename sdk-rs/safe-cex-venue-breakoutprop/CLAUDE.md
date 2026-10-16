@@ -242,7 +242,7 @@ apply; shared typed conversion captures native Number events before JSON.
 
 Run tests/binding.rs for the production constructor and all 16 trait methods.
 Run python3 scripts/binding-controls.py from this crate (or repository root) for
-16 independent compiling dispatch failures and restored 13/13 passing tests.
+16 independent compiling dispatch failures and restored 14/14 passing tests.
 These are dispatch controls, not full JavaScript semantics or live API parity.
 Run them alone, never alongside another Cargo command; logs stay outside the repo.
 
