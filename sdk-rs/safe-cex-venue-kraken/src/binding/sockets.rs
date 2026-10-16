@@ -707,8 +707,8 @@ impl BookHost for SocketHost {
         let map = cache.get(side_name(side)).map_err(ex)?;
         let entries = map.call_method("entries", vec![]).map_err(ex)?;
         let mut out = entries
-            .array_values()
-            .unwrap_or_default()
+            .iterable_values()
+            .map_err(ex)?
             .iter()
             .map(|pair| {
                 let price = pair.get("0").and_then(|v| v.to_number()).map_err(ex)?;

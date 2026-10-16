@@ -1154,3 +1154,31 @@ absence. Native websocket tests check exact numeric bits and the connected
 health/timestamp transition through assignment and reset. The adjacent
 `tests/raw_last_received_controls.py` requires compiled failures when assignment
 is removed or signed zero is erased, with exact restoration after each fault.
+
+Map/Set `values`, `keys`, `entries` and the well-known iterator method now return
+live iterator objects. Native computed access uses `Js::get_property` with
+`Js::SymbolIterator`, keeping that key distinct from every string. `Js::iterator`
+implements GetIterator and `iterable_values` consumes it for spread adapters.
+The shared `Array.from`, Map and Set constructors consume the same protocol;
+Array.from mapping runs between iterator steps and closes on mapper failure.
+Iterator next methods use the actual branded receiver, keep source values and
+references, and release the collection on permanent exhaustion. Set keys/values
+and each collection's default iterator retain the source method aliases.
+
+`Collection<T>` keeps dense native access with stable insertion positions:
+deleting/clearing cannot shift a suspended cursor, and reinsertion appends a new
+position. Native host adapters must use its mutation methods rather than replace
+the backing Vec; the OKX state and Bitget lifecycle adapters preserve surviving
+positions when updating typed views. Kraken, WEEX, OKX, Paradex and Polymarket
+spread/iteration consumers use the shared protocol instead of array indexing.
+`tests/js_collection_iterators.rs` compares 80 Node traces and checks native
+numeric bits, references, aliases, actual receivers, ownership and constructors.
+Bybit's `hyro_native_iterator` executes the existing source reset body over these
+values, including an ACK rejection that appends another pending ACK; its trace
+comes from the current TypeScript method. The adjacent compiled control runner
+faults both snapshot-array factories, frozen iteration, terminal exhaustion and
+IteratorClose cleanup,
+then restores exact source bytes. Algorithms follow
+[CreateMapIterator](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-createmapiterator)
+and [CreateSetIterator](https://tc39.es/ecma262/multipage/keyed-collections.html#sec-createsetiterator)
+within the runtime's existing value/property profile.

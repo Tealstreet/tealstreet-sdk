@@ -120,11 +120,11 @@ enum Cursor {
         next: usize,
     },
     Map {
-        entries: Rc<RefCell<Vec<(Js, Js)>>>,
+        entries: Rc<RefCell<safe_cex_exchange::js_runtime::collections::Collection<(Js, Js)>>>,
         visited: Vec<Js>,
     },
     Set {
-        values: Rc<RefCell<Vec<Js>>>,
+        values: Rc<RefCell<safe_cex_exchange::js_runtime::collections::Collection<Js>>>,
         visited: Vec<Js>,
     },
 }

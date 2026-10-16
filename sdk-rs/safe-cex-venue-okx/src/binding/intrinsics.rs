@@ -237,7 +237,7 @@ pub(crate) fn intrinsic(host: &dyn IntrinsicHost, name: &str, a: Vec<Js>) -> Res
         }
         "new-Map" => Js::new_map(),
         "new-Set" => Js::new_set(),
-        "Map.values-spread" => x.call_method("values", vec![])?,
+        "Map.values-spread" => Js::array(x.call_method("values", vec![])?.iterable_values()?),
         "Map.set-tranId-record" => x.call_method("set", vec![y.get("tranId")?, y])?,
         "Set.has-order-id" => x.call_method("has", vec![y.get("id")?])?,
         "Set.add-order-id" => x.call_method("add", vec![y.get("id")?])?,

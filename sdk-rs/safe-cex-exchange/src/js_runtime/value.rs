@@ -34,6 +34,8 @@ pub enum Prop {
 
 pub struct ObjectData {
     pub class: &'static str,
+    pub(crate) iterator_next: RefCell<Option<NativeFn>>,
+    pub(crate) symbol_iterator: RefCell<Option<Prop>>,
     pub props: RefCell<IndexMap<Str, Prop>>,
     pub proto: RefCell<Option<Js>>,
 }
@@ -47,6 +49,8 @@ pub struct FunctionData {
 #[derive(Clone)]
 pub enum Js {
     Undefined,
+    /// The well-known iterator symbol; distinct from every UTF-16 string key.
+    SymbolIterator,
     Null,
     Bool(bool),
     Number(f64),
@@ -59,8 +63,8 @@ pub enum Js {
     Object(Rc<ObjectData>),
     Function(Rc<FunctionData>),
     Promise(super::promise::Promise),
-    Map(Rc<RefCell<Vec<(Js, Js)>>>),
-    Set(Rc<RefCell<Vec<Js>>>),
+    Map(Rc<RefCell<super::collections::Collection<(Js, Js)>>>),
+    Set(Rc<RefCell<super::collections::Collection<Js>>>),
 }
 
 /// A thrown JS value. Native failures keep their ExchangeError metadata.
@@ -156,6 +160,7 @@ impl fmt::Debug for Js {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Js::Undefined => write!(f, "undefined"),
+            Js::SymbolIterator => write!(f, "Symbol(Symbol.iterator)"),
             Js::Null => write!(f, "null"),
             Js::Bool(b) => write!(f, "{b}"),
             Js::Number(n) => write!(f, "{}", js_number_string(*n)),
@@ -217,6 +222,8 @@ impl Js {
     pub fn object_with_class(class: &'static str, fields: Vec<(&str, Js)>) -> Js {
         Js::Object(Rc::new(ObjectData {
             class,
+            iterator_next: RefCell::new(None),
+            symbol_iterator: RefCell::new(None),
             props: RefCell::new(
                 fields
                     .into_iter()
@@ -244,12 +251,44 @@ impl Js {
         }))
     }
     pub fn new_map() -> Js {
-        Js::Map(Rc::new(RefCell::new(vec![])))
+        Js::Map(Rc::default())
     }
     pub fn new_set() -> Js {
-        Js::Set(Rc::new(RefCell::new(vec![])))
+        Js::Set(Rc::default())
     }
 
+    /// Computed property access preserving the well-known iterator symbol.
+    pub fn get_property(&self, key: &Js) -> Result<Js, Thrown> {
+        if matches!(key, Js::SymbolIterator) {
+            return super::collections::iterator_method(self);
+        }
+        self.get_key(&key.to_js_string()?)
+    }
+    /// GetIterator for iterable spread and for-of consumers.
+    pub fn iterator(&self) -> Result<Js, Thrown> {
+        let method = self.get_property(&Js::SymbolIterator)?;
+        let iterator = method.call(self.clone(), vec![])?;
+        if !iterator.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
+        }
+        Ok(iterator)
+    }
+    /// Consume the shared iterator protocol for spread/Array.from adapters.
+    pub fn iterable_values(&self) -> Result<Vec<Js>, Thrown> {
+        let iterator = self.iterator()?;
+        let next = iterator.get("next")?;
+        let mut values = vec![];
+        loop {
+            let item = next.call(iterator.clone(), vec![])?;
+            if !item.is_object() {
+                return Err(Thrown::type_error("Iterator result is not an object"));
+            }
+            if item.get("done")?.truthy() {
+                return Ok(values);
+            }
+            values.push(item.get("value")?);
+        }
+    }
     pub fn is_undefined(&self) -> bool {
         matches!(self, Js::Undefined)
     }
@@ -265,7 +304,13 @@ impl Js {
     pub fn is_object(&self) -> bool {
         !matches!(
             self,
-            Js::Undefined | Js::Null | Js::Bool(_) | Js::Number(_) | Js::BigInt(_) | Js::String(_)
+            Js::Undefined
+                | Js::SymbolIterator
+                | Js::Null
+                | Js::Bool(_)
+                | Js::Number(_)
+                | Js::BigInt(_)
+                | Js::String(_)
         )
     }
     pub fn is_callable(&self) -> bool {
@@ -275,6 +320,7 @@ impl Js {
     pub fn type_of(&self) -> &'static str {
         match self {
             Js::Undefined => "undefined",
+            Js::SymbolIterator => "symbol",
             Js::Null => "object",
             Js::Bool(_) => "boolean",
             Js::Number(_) => "number",
@@ -298,7 +344,9 @@ impl Js {
     /// Strict equality (===).
     pub fn strict_equals(&self, other: &Js) -> bool {
         match (self, other) {
-            (Js::Undefined, Js::Undefined) | (Js::Null, Js::Null) => true,
+            (Js::Undefined, Js::Undefined)
+            | (Js::Null, Js::Null)
+            | (Js::SymbolIterator, Js::SymbolIterator) => true,
             (Js::Bool(a), Js::Bool(b)) => a == b,
             (Js::Number(a), Js::Number(b)) => a == b,
             (Js::BigInt(a), Js::BigInt(b)) => a == b,
@@ -358,7 +406,16 @@ impl Js {
                             Js::Function(_) => "Function",
                             Js::Object(object) if object.class == "Buffer" => "Uint8Array",
                             Js::Object(object)
-                                if matches!(object.class, "Error" | "Blob" | "ArrayBuffer") =>
+                                if matches!(
+                                    object.class,
+                                    "Error"
+                                        | "Blob"
+                                        | "ArrayBuffer"
+                                        | "Map Iterator"
+                                        | "Set Iterator"
+                                        | "Array Iterator"
+                                        | "String Iterator"
+                                ) =>
                             {
                                 object.class
                             }
@@ -413,6 +470,11 @@ impl Js {
     fn intrinsic_string(&self) -> Result<Str, Thrown> {
         Ok(match self {
             Js::Undefined => utf16("undefined"),
+            Js::SymbolIterator => {
+                return Err(Thrown::type_error(
+                    "Cannot convert a Symbol value to a string",
+                ));
+            }
             Js::Null => utf16("null"),
             Js::Bool(b) => utf16(if *b { "true" } else { "false" }),
             Js::Number(n) => utf16(&js_number_string(*n)),
@@ -435,7 +497,15 @@ impl Js {
                 out.into()
             }
             Js::Object(o) => {
-                if o.class == "Blob" || o.class == "ArrayBuffer" {
+                if matches!(
+                    o.class,
+                    "Blob"
+                        | "ArrayBuffer"
+                        | "Map Iterator"
+                        | "Set Iterator"
+                        | "Array Iterator"
+                        | "String Iterator"
+                ) {
                     utf16(&format!("[object {}]", o.class))
                 } else if o.class == "Error" {
                     let name = self.get("name")?;
@@ -482,6 +552,11 @@ impl Js {
     pub fn to_number(&self) -> Result<f64, Thrown> {
         Ok(match self {
             Js::Undefined => f64::NAN,
+            Js::SymbolIterator => {
+                return Err(Thrown::type_error(
+                    "Cannot convert a Symbol value to a number",
+                ));
+            }
             Js::Null => 0.0,
             Js::Bool(b) => f64::from(u8::from(*b)),
             Js::Number(n) => *n,
@@ -583,6 +658,13 @@ impl Js {
                 return Ok(super::builtins::member(self, key).unwrap_or(Js::Undefined));
             }
             _ => {}
+        }
+        if let Js::Object(data) = self
+            && key == utf16("next").as_ref()
+            && data.iterator_next.borrow().is_some()
+            && !data.props.borrow().contains_key(key)
+        {
+            return Ok(super::collections::iterator_next_method(data.class));
         }
         let Some(props) = self.own_props() else {
             return Ok(Js::Undefined);
@@ -1099,7 +1181,7 @@ pub fn from_json(value: &serde_json::Value) -> Js {
 /// JSON projection used at typed boundaries. Lone surrogates are refused.
 pub fn to_json(value: &Js) -> Result<serde_json::Value, Thrown> {
     Ok(match value {
-        Js::Undefined | Js::Null => serde_json::Value::Null,
+        Js::Undefined | Js::SymbolIterator | Js::Null => serde_json::Value::Null,
         Js::Bool(b) => serde_json::Value::Bool(*b),
         Js::Number(n) => serde_json::Number::from_f64(*n)
             .map(serde_json::Value::Number)
