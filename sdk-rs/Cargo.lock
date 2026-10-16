@@ -2903,6 +2903,7 @@ dependencies = [
  "napi-sys",
  "nohash-hasher",
  "rustc-hash",
+ "tokio",
 ]
 
 [[package]]
@@ -3877,6 +3878,8 @@ dependencies = [
  "napi-derive",
  "safe-cex",
  "safe-cex-registry",
+ "serde_json",
+ "tokio",
  "wasm-bindgen",
 ]
 
