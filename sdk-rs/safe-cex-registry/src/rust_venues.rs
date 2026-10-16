@@ -110,6 +110,12 @@ pub trait RustVenueHost {
             "WOO dependencies were not supplied by this RustVenueHost",
         ))
     }
+    /// Bybit linear/options and Demo share the same concrete binding inputs.
+    fn bybit(&self) -> Result<safe_cex_venue_bybit::BybitDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Bybit inputs are unavailable on this host",
+        ))
+    }
     fn coinbase(&self) -> Result<CoinbaseDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "Coinbase dependencies were not supplied by this RustVenueHost",
@@ -164,6 +170,8 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Bybit, bybit_constructor),
+    (ExchangeName::Bybitdemo, bybit_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
     (ExchangeName::Coinbasespot, coinbase_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
@@ -344,6 +352,14 @@ fn external_factory(
 pub fn woo_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         Ok(WooExchange::new(name, options, store, host.woo()?)?)
+    })
+}
+
+pub fn bybit_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange =
+            safe_cex_venue_bybit::BybitExchange::create(name, options, store, host.bybit()?)?;
+        Ok(exchange)
     })
 }
 
