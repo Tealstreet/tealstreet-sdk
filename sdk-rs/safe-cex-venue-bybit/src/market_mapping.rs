@@ -89,6 +89,7 @@ pub(crate) fn map_market(
                     nested("leverageFilter", "maxLeverage")?
                 },
             },
+            price: None,
         },
         is_expiring: Some(if spot {
             false
@@ -109,6 +110,7 @@ pub(crate) fn map_market(
         pretty_symbol: None,
         contract_size: None,
         is_read_only: None,
+        option: None,
     })
 }
 

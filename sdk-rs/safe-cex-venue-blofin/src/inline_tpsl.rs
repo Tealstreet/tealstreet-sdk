@@ -90,6 +90,7 @@ pub fn add_inline_tpsl_fallback_orders(
                 );
                 if !protective.contains(&key) {
                     fallback.push(Order {
+                        client_order_id: None,
                         id: format!("{}{suffix}", order.id),
                         status: OrderStatus::Open,
                         symbol: order.symbol.clone(),

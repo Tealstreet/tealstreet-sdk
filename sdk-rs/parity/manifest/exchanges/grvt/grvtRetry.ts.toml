@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/grvt/grvtRetry.ts"
-rust_files = [ "safe-cex-transport/src/retry.rs" ]
+rust_files = [ "safe-cex-transport/src/retry.rs", "safe-cex-venue-grvt/src/api_runtime.rs" ]
 
 [[symbol]]
 ts = "lastSegment"

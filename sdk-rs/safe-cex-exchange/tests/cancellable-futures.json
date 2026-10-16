@@ -125,7 +125,7 @@
         "async-block",
         "async-block"
       ],
-      "producer_sha256": "90cc35b7b53c7ee16e3b40c741af0686fe3fc16815a125e9a2a706fbb11ab4f7",
+      "producer_sha256": "af92b2262176a88f1b2acfa65eb54addffaa2f8f2db052b97169006469315b47",
       "classification": "delegated",
       "delegate": "registered concrete capability callback / BaseExchange validated placement",
       "reason": "default owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
@@ -845,7 +845,7 @@
       "source_dependencies": [
         {
           "file": "src/exchange.rs",
-          "sha256": "f907fbb465bc3477fec84fb899d0bd483adc51f3c46864899c380706342af02e"
+          "sha256": "e737d9ae8b4c4f8c2a6ef81c5c8a4b48e6d78fd35ae944de0fd7eae2aae3f3d2"
         }
       ],
       "guards": [
@@ -1573,7 +1573,7 @@
         },
         {
           "file": "src/exchange.rs",
-          "sha256": "f907fbb465bc3477fec84fb899d0bd483adc51f3c46864899c380706342af02e"
+          "sha256": "e737d9ae8b4c4f8c2a6ef81c5c8a4b48e6d78fd35ae944de0fd7eae2aae3f3d2"
         }
       ],
       "guards": [
@@ -1959,7 +1959,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "1c773a68a1f0268b567ca0f7d0387eae755e74f1c2d40fa7d1ccfa138968c19f"
+          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2004,7 +2004,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "1c773a68a1f0268b567ca0f7d0387eae755e74f1c2d40fa7d1ccfa138968c19f"
+          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2108,7 +2108,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "1c773a68a1f0268b567ca0f7d0387eae755e74f1c2d40fa7d1ccfa138968c19f"
+          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
         },
         {
           "file": "src/owned_tasks.rs",
@@ -2152,7 +2152,7 @@
       "source_dependencies": [
         {
           "file": "src/websocket.rs",
-          "sha256": "1c773a68a1f0268b567ca0f7d0387eae755e74f1c2d40fa7d1ccfa138968c19f"
+          "sha256": "91192c63819c364cf42224e83146b97a4fbbe6e9aac4820cfb5e0493cb85ec69"
         }
       ],
       "guards": [

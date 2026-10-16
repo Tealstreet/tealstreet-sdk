@@ -299,6 +299,7 @@ impl BingxDataReads {
                                     min: 1.0,
                                     max: 100.0,
                                 },
+                                price: None,
                             },
                             pretty_symbol: None,
                             is_read_only: None,
@@ -310,6 +311,7 @@ impl BingxDataReads {
                             info: None,
                             taker_fee: None,
                             maker_fee: None,
+                            option: None,
                         },
                         base,
                         quote,
@@ -582,6 +584,7 @@ fn empty_position(metadata: PositionMetadata) -> Position {
         realized_pnl: None,
         extra: None,
         last_update: None,
+        option: None,
     }
 }
 impl BingxDataReads {
@@ -677,6 +680,7 @@ impl BingxDataReads {
                         realized_pnl: None,
                         extra: None,
                         last_update: None,
+                        option: None,
                     },
                     inherited_side,
                 ));
