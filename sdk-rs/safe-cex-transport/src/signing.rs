@@ -519,8 +519,7 @@ fn warn_double_serialization(exchange: &ExchangeName, config: &SigningConfig) {
     eprintln!("{message}");
     #[cfg(target_arch = "wasm32")]
     {
-        use wasm_bindgen::prelude::*;
-        #[wasm_bindgen]
+        #[wasm_bindgen::prelude::wasm_bindgen]
         extern "C" {
             #[wasm_bindgen(js_namespace = console, js_name = warn)]
             fn warn(message: &str);

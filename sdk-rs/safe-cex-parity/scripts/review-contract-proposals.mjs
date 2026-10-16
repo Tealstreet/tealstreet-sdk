@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
 import path from 'node:path';
@@ -172,7 +173,7 @@ export function main(args) {
   const pkg = packages[0];
   const references = testIndex(path.dirname(pkg.manifest_path), repository);
   const contracts = loadContracts(path.join(workspace, 'safe-cex-parity/accepted-set/contracts'));
-  const construction = JSON.parse(fs.readFileSync(path.join(workspace, 'safe-cex-parity/accepted-set/construction.json'), 'utf8'));
+  const construction = loadPolicy('construction', path.join(workspace, 'safe-cex-parity/accepted-set'));
   const targets = [];
   for (const row of rows) {
     const target = pkg.targets.find(target => target.name === row.target && target.kind.some(kind => ['lib', 'cdylib', 'bin'].includes(kind)));
