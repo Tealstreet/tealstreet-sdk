@@ -106,6 +106,19 @@ Response-shape helpers use shared js_own_keys before the six-key cutoff. Array
 validators borrow the original rows and preserve TypeError from message coercion.
 The live corpus carries ordered pairs so JSON transport cannot hide key-order bugs.
 
+The response-shape accepted-set review separates three executed outputs (both
+borrowed-array validators and the qualified native error conversion) from four
+diagnostic non-decoder roles (three descriptors and the typed error formatter).
+Classification receipts do not execute those diagnostic functions. Each has its
+own direct named native test, including both private helpers. Preserve nonempty
+slice identity, native element fields/bits, error name/message and Display before
+serialization. `scripts/response-shape-controls.py` requires seven independently
+compiled failures and exact-restoration passes; fresh production observations and
+classification receipts are checked by `scripts/response-shape-contracts.mjs`.
+This selected native/default scope does not cover other owners or the feature
+matrix. Keep the existing [string](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary)
+and [typed-output](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary) boundaries.
+
 Spot order formatting consumes BaseExchange's client-ID resolution and final
 native-count assertion directly. Its market snapshot is cloned before errors
 can emit through the store. Preserve attached-order field inheritance, post-only
