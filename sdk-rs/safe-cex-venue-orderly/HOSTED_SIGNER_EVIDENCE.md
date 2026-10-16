@@ -49,9 +49,11 @@ its manifest row remains divergent; hosted signing introduces no new difference.
 Native empty-secret tests observe that warning, reconnect count and no frames.
 
 `safe-cex-registry/scripts/orderly-hosted-controls.py` independently omits hosted
-capability or account metadata, and injects an invented valid-secret fallback
-into the local signing helper. Both entrypoints fail the shared-host omissions;
-only the empty-secret entrypoint fails the fallback control. Every mutation must
+capability or account metadata, injects an invented valid-secret fallback
+into the local signing helper, and drops the signature after the hosted callback.
+Both entrypoints fail the shared-host omissions; only the empty-secret entrypoint
+fails the fallback control, and only the valid-secret entrypoint fails the
+wire-signature control. Every mutation must
 compile and fail its named behavioral assertions. Exact-byte restorations must
 pass both entrypoints, executing all twelve native cases again. Negative runs
 abort at their first failing family case; they are not six separate mutation
@@ -63,11 +65,21 @@ arbitrary callbacks or source event-loop scheduling. Callback markers are not
 claimed to implement browser cryptography; local Ed25519 is verified separately.
 
 Both new native entrypoints first compiled and failed the old registry refusal,
-then passed all six names after the factory was wired. Three compiled controls
+then passed all six names after the factory was wired. Four compiled controls
 failed at their expected assertions: two entrypoints for each shared-host omission,
-and one for the invented local-secret fallback. All three exact restorations
+one for the invented local-secret fallback and one for post-callback signature loss.
+All four exact restorations
 passed both entrypoints. The full scoped Orderly all-target/include-ignored suite
 passed 83 tests across 18 targets; three registry tests also passed, including the
 existing six-name local account/signature witness. Logs remain in /tmp and are
 not committed. Source and native witnesses now additionally check local preimage
 and signature header retention across the callback to the HTTP wire.
+
+After the clean master refresh containing #315, strict host registry-test lint,
+strict wasm32 registry-library lint and formatting passed. The all-features
+exchange override audit passed 6/6; parity passed with 0 findings across 7,459
+manifest rows and 17,204 public Rust items; layers passed 88/88; registry
+matched all 48 ordered names and passed its corruption control. No reviewed
+contract or policy records are changed by this slice; every master shard is
+retained. The signature-loss control was executed separately after the first
+three controls, with fresh baseline and exact restoration passes.

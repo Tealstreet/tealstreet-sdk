@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Compile hosted bridge omissions and an invented empty-secret signing fallback."""
+"""Compile hosted bridge omissions, a secret fallback and wire signature loss."""
 from pathlib import Path
 import os
 import subprocess
@@ -34,6 +34,13 @@ end = original_host.index('    #[expect', start)
 region = original_host[start:end]
 needle = '                        remote.clone(),'
 assert region.count(needle) == 1
+wire_needle = '''impl RestAdapter for SourceApiRest {
+    fn execute(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        Box::pin(async move {'''
+assert original_host.count(wire_needle) == 1
 controls = [
     ('hosted-capability', host, original_host,
      original_host[:start] + region.replace(needle, '                        remote.clone().filter(|_| false),') + original_host[end:],
@@ -45,8 +52,14 @@ controls = [
      "secret.split(':').nth(1).ok_or_else",
      "secret.split(':').nth(1).or(Some(\"11111111111111111111111111111111\")).ok_or_else",
      1, ['ORDERLY HOSTED private HTTP still requires source local secret']),
+    ('wire-signature', host, wire_needle,
+     wire_needle.replace('        Box::pin(async move {',
+                         '        let _ = request.headers.shift_remove("orderly-signature");\n        Box::pin(async move {'),
+     1, ['ORDERLY HOSTED local signing survives callback to wire orderly-signature']),
 ]
-for name, source, before, after, failures, markers in controls:
+start_control = int(os.environ.get('ORDERLY_HOSTED_CONTROL_START', '0'))
+assert 0 <= start_control < len(controls)
+for name, source, before, after, failures, markers in controls[start_control:]:
     original = source.read_bytes()
     text = original.decode()
     assert text.count(before) == 1, name
@@ -58,4 +71,4 @@ for name, source, before, after, failures, markers in controls:
         source.write_bytes(original)
     assert source.read_bytes() == original
     run(f'{name}-restored', 0)
-print(f'Three compiled faults caught; exact restorations pass all six-name cases; logs {LOGS}')
+print(f'{len(controls)-start_control} compiled faults caught; exact restorations pass all six-name cases; logs {LOGS}')

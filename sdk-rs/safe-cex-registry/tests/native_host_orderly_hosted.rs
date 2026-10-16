@@ -214,8 +214,8 @@ async fn exercise(local: bool) {
             if local {
                 for field in ["orderly-textsign", "orderly-signature"] {
                     assert_eq!(
-                        seen[0].headers[field],
-                        calls[0]["config"]["headers"][field].as_str().unwrap(),
+                        seen[0].headers.get(field).map(String::as_str),
+                        calls[0]["config"]["headers"][field].as_str(),
                         "ORDERLY HOSTED local signing survives callback to wire {field}"
                     );
                 }
@@ -313,8 +313,18 @@ async fn exercise(local: bool) {
         );
         let path = h.peers.borrow()[0].path.clone();
         let source_dial = expected["dials"][0].as_str().unwrap();
-        assert!(
-            source_dial.ends_with(&path),
+        let source_path = format!(
+            "/{}",
+            source_dial
+                .split_once("://")
+                .unwrap()
+                .1
+                .split_once('/')
+                .unwrap()
+                .1
+        );
+        assert_eq!(
+            path, source_path,
             "ORDERLY HOSTED source application WS route {label}"
         );
         h.exchange.dispose().unwrap();
