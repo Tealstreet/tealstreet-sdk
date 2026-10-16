@@ -85,6 +85,11 @@ alone to remove each object response's guard in turn: a complete valid array in
 Serde field order must fail the named assertion, then restoring the guard must
 pass all four tests. The record union continues to admit arrays.
 
+Thirty-four selected helper contracts record individually reviewed dispatch,
+request-construction and host-operation roles with exact compiler signatures.
+Their native receipts are classification evidence. Response owners use the
+separate executed decoder observations above.
+
 Seven enum normalizers in `src/utils.rs` mirror their source control flow and use
 the actual shared tables. `WeexUtilityInput` captures its opaque `value` with
 `js_deserialize_passthrough` before constructing Value, with explicit passthrough

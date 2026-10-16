@@ -133856,5 +133856,4845 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_weex::utils::utility_type_error": {
+    "api": {
+      "kind": "function",
+      "name": "utility_type_error",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::Into",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::utils::WeexUtilityError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl Into<String>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::convert::Into",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::string::String",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Constructs a TypeError from an already typed Into<String> message; it has no admission grammar or raw-input deserializer.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/utils.rs at 236-241. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::account_actions::endpoint": {
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Looks up a caller-selected static key in the reviewed ENDPOINTS table and returns its static URL; the string is a code identifier rather than a wire document.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/account_actions.rs at 62-64. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::account_actions::text": {
+    "api": {
+      "kind": "function",
+      "name": "text",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::account_actions::WeexActionValue",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Encodes a typed request string as UTF-16 WeexActionValue::String without interpreting or validating its contents.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/account_actions.rs at 65-67. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::account_actions::delete": {
+    "api": {
+      "kind": "function",
+      "name": "delete",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "tuple": [
+                                        {
+                                          "borrowed_ref": {
+                                            "lifetime": "'static",
+                                            "is_mutable": false,
+                                            "type": {
+                                              "primitive": "str"
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_weex::account_actions::WeexActionValue",
+                                            "args": null
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::account_actions::WeexActionRequest",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Constructs a typed DELETE request from an endpoint identifier and already typed optional parameters; no response or parameter decoding occurs.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/account_actions.rs at 71-78. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::account_actions::post": {
+    "api": {
+      "kind": "function",
+      "name": "post",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "body",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_venue_weex::account_actions::WeexActionValue",
+                                "args": null
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::account_actions::WeexActionRequest",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Constructs a typed POST request from an endpoint identifier and already typed body fields; it preserves the fields without admitting serialized input.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/account_actions.rs at 79-86. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::account_reads::endpoint": {
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "u16"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Selects a static ENDPOINTS entry by its internal name and encodes the URL as UTF-16; it does not parse a response or arbitrary request grammar.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/account_reads.rs at 74-82. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::market_reads::endpoint": {
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Returns a static URL selected by an internal ENDPOINTS key; its str argument identifies code data rather than a serialized market record.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/market_reads.rs at 84-86. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::market_reads::get_request": {
+    "api": {
+      "kind": "function",
+      "name": "get_request",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "timeout",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_venue_weex::market_reads::WeexMarketReadRequest",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Packages a selected static URL, generic already-carried parameters and optional typed timeout into WeexMarketReadRequest.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/market_reads.rs at 87-93. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::public_feed::template": {
+    "api": {
+      "kind": "function",
+      "name": "template",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::public_feed::WeexPublicFeedRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "parts",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "generic": "V"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "separators",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Concatenates typed literal separators and host template-string callback outputs into UTF-16; conversion of V remains the explicit host callback contract.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/public_feed.rs at 112-125. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::public_feed::numeric": {
+    "api": {
+      "kind": "function",
+      "name": "numeric",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::public_feed::WeexPublicFeedRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "object",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "default",
+            {
+              "generic": "V"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Selects one property using the host property callback and delegates numeric conversion with the caller supplied V default; it defines no independent JSON admission shape.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/public_feed.rs at 126-134. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::public_feed::construct_public_websocket_with_bind": {
+    "api": {
+      "kind": "function",
+      "name": "construct_public_websocket_with_bind",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "rt",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::public_feed::WeexPublicConstructionRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "parent",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "bind",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "H"
+                                }
+                              }
+                            },
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "V"
+                                }
+                              }
+                            },
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "generic": "V"
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&H, &V, &'static str) -> Result<V, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "H"
+                                  }
+                                }
+                              },
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "V"
+                                  }
+                                }
+                              },
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "V"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Assembles an existing host base socket, initializes fields, installs named callbacks and registers the parent event handler; parent V and binding capabilities are already supplied.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/public_feed.rs at 184-239. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::prop": {
+    "api": {
+      "kind": "function",
+      "name": "prop",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "keys",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Walks a caller-provided ordered property-name list with host get/nullish operations and returns an already carried V; it performs no deserialization.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 89-97. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::opt": {
+    "api": {
+      "kind": "function",
+      "name": "opt",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Delegates a typed field lookup to the optional_get host capability; the str is a property identifier, not serialized input.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 98-100. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::num": {
+    "api": {
+      "kind": "function",
+      "name": "num",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "keys",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Composes prop with the host to_number callback and a host numeric zero; it introduces no local parser or new input admission policy.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 104-106. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::norm": {
+    "api": {
+      "kind": "function",
+      "name": "norm",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "kind",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "v",
+            {
+              "generic": "V"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Passes a static enum-operation selector and existing V to the host enum_normalize capability; the helper does not implement a second enum decoder.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 107-109. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::words": {
+    "api": {
+      "kind": "function",
+      "name": "words",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "prefix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "suffix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Builds a UTF-16 string from literal prefix/suffix and the host template conversion of V; it does not decode those typed strings.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 113-124. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::error_message": {
+    "api": {
+      "kind": "function",
+      "name": "error_message",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "e",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "E"
+                }
+              }
+            }
+          ],
+          [
+            "placement",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "default",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Projects response.data error fields and fallback message from an already carried E via host callbacks; returns the selected V without parsing a new wire document.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 133-157. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::endpoint": {
+    "api": {
+      "kind": "function",
+      "name": "endpoint",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": "'static",
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Selects a static ENDPOINTS URL by its internal key; it does not validate or decode external endpoint text.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 158-160. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::invoke": {
+    "api": {
+      "kind": "function",
+      "name": "invoke",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Resolves a statically named receiver method and calls it with an existing Vec<V>; this is dispatch, with conversion owned by the selected method.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 161-169. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::invoke_async": {
+    "api": {
+      "kind": "function",
+      "name": "invoke_async",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::pin::Pin",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::boxed::Box",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "dyn_trait": {
+                                                "traits": [
+                                                  {
+                                                    "trait": {
+                                                      "path": "core::future::future::Future",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [],
+                                                          "constraints": [
+                                                            {
+                                                              "name": "Output",
+                                                              "args": null,
+                                                              "binding": {
+                                                                "equality": {
+                                                                  "type": {
+                                                                    "resolved_path": {
+                                                                      "path": "core::result::Result",
+                                                                      "args": {
+                                                                        "angle_bracketed": {
+                                                                          "args": [
+                                                                            {
+                                                                              "type": {
+                                                                                "generic": "V"
+                                                                              }
+                                                                            },
+                                                                            {
+                                                                              "type": {
+                                                                                "generic": "E"
+                                                                              }
+                                                                            }
+                                                                          ],
+                                                                          "constraints": []
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ]
+                                                        }
+                                                      }
+                                                    },
+                                                    "generic_params": []
+                                                  }
+                                                ],
+                                                "lifetime": "'a"
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "outlives": "'a"
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "outlives": "'a"
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Resolves a statically named receiver method and calls the host async capability with existing arguments; it returns the host future without decoding its output.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 170-178. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::adjusted": {
+    "api": {
+      "kind": "function",
+      "name": "adjusted",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "opts",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "market",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "step",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Reads an option field and the selected market precision field, then delegates arithmetic to the adjust host capability; field/step strings are internal selectors.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 580-592. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::reverse": {
+    "api": {
+      "kind": "function",
+      "name": "reverse",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "opts",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "table",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Reads a selected option property and delegates reverse-table lookup to the host; field/table arguments identify reviewed code data.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 600-608. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::preset": {
+    "api": {
+      "kind": "function",
+      "name": "preset",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "opts",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "market",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Uses host truthiness to select adjusted price string construction or undefined; it composes typed host operations rather than admitting a serialized order.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 609-622. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::working": {
+    "api": {
+      "kind": "function",
+      "name": "working",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "opts",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "condition",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "field",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "default",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Selects a conditional trigger-type table lookup with a typed default literal; it does not implement the host table converter or a separate wire decoder.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 623-637. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::trading::is_undefined": {
+    "api": {
+      "kind": "function",
+      "name": "is_undefined",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::trading::WeexTradingRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "v",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "V"
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Reads a property identified by key and applies the supplied is_undefined predicate; its output is a typed boolean with no decoding step.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/trading.rs at 1136-1144. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::lifecycle::property": {
+    "api": {
+      "kind": "function",
+      "name": "property",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::lifecycle::WeexLifecycleRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Reads a named property from the current host receiver; the static property name is a dispatch identifier.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/lifecycle.rs at 71-73. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::lifecycle::method": {
+    "api": {
+      "kind": "function",
+      "name": "method",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::lifecycle::WeexLifecycleRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Looks up a statically named method on the current host receiver; the returned V is an executable handle rather than a decoded wire value.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/lifecycle.rs at 74-76. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::lifecycle::call": {
+    "api": {
+      "kind": "function",
+      "name": "call",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::lifecycle::WeexLifecycleRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Resolves a named receiver method and invokes the host call capability with already carried arguments.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/lifecycle.rs at 77-84. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::lifecycle::async_call": {
+    "api": {
+      "kind": "function",
+      "name": "async_call",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::lifecycle::WeexLifecycleRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::pin::Pin",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "alloc::boxed::Box",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "dyn_trait": {
+                                                "traits": [
+                                                  {
+                                                    "trait": {
+                                                      "path": "core::future::future::Future",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [],
+                                                          "constraints": [
+                                                            {
+                                                              "name": "Output",
+                                                              "args": null,
+                                                              "binding": {
+                                                                "equality": {
+                                                                  "type": {
+                                                                    "resolved_path": {
+                                                                      "path": "core::result::Result",
+                                                                      "args": {
+                                                                        "angle_bracketed": {
+                                                                          "args": [
+                                                                            {
+                                                                              "type": {
+                                                                                "generic": "V"
+                                                                              }
+                                                                            },
+                                                                            {
+                                                                              "type": {
+                                                                                "generic": "E"
+                                                                              }
+                                                                            }
+                                                                          ],
+                                                                          "constraints": []
+                                                                        }
+                                                                      }
+                                                                    }
+                                                                  }
+                                                                }
+                                                              }
+                                                            }
+                                                          ]
+                                                        }
+                                                      }
+                                                    },
+                                                    "generic_params": []
+                                                  }
+                                                ],
+                                                "lifetime": "'a"
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Resolves a named receiver method and invokes the host async call capability; output decoding is not performed in this helper.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/lifecycle.rs at 85-92. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::lifecycle::store_method": {
+    "api": {
+      "kind": "function",
+      "name": "store_method",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::lifecycle::WeexLifecycleRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Reads the existing Store property and resolves a named method through the host; no Store snapshot or serialized document is decoded.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/lifecycle.rs at 93-99. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::lifecycle::loaded": {
+    "api": {
+      "kind": "function",
+      "name": "loaded",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::lifecycle::WeexLifecycleRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "keys",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": "'static",
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Copies the existing loaded object through the host and marks the named flags true; keys are typed property identifiers.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/lifecycle.rs at 106-117. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::lifecycle::update": {
+    "api": {
+      "kind": "function",
+      "name": "update",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::lifecycle::WeexLifecycleRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "fields",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "generic": "V"
+                            }
+                          ]
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "keys",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": "'static",
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Packages already carried update fields with the copied loaded flags and invokes the existing Store update method; it does not decode a Store update envelope.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/lifecycle.rs at 118-129. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::lifecycle::construct_exchange_with_bind": {
+    "api": {
+      "kind": "function",
+      "name": "construct_exchange_with_bind",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "r",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::lifecycle::WeexExchangeConstructionRuntime",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "V"
+                            }
+                          },
+                          {
+                            "type": {
+                              "generic": "E"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "options",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "store",
+            {
+              "generic": "V"
+            }
+          ],
+          [
+            "bind",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "H"
+                                }
+                              }
+                            },
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "V"
+                                }
+                              }
+                            },
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "generic": "V"
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "V"
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "V",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::clone::Clone",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&H, &V, &'static str) -> Result<V, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "H"
+                                  }
+                                }
+                              },
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "V"
+                                  }
+                                }
+                              },
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "V"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Assembles the supplied base, client, socket and method-binding capabilities and initializes source fields; name/options/store remain generic host values, with no local wire parser.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/lifecycle.rs at 213-301. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
+  },
+  "safe_cex_venue_weex::classes::bind": {
+    "api": {
+      "kind": "function",
+      "name": "bind",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::rc::Rc",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "generic": "H"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "kind",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_weex::classes::ClassKind",
+                "args": null
+              }
+            }
+          ],
+          [
+            "prepared",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::vec::Vec",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "tuple": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": "'static",
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                },
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_weex::classes::NativeMember",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "qualified_path": {
+                                                "name": "Value",
+                                                "args": null,
+                                                "self_type": {
+                                                  "generic": "H"
+                                                },
+                                                "trait": {
+                                                  "path": "safe_cex_venue_weex::classes::ClassHost",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          },
+                                          {
+                                            "type": {
+                                              "qualified_path": {
+                                                "name": "Error",
+                                                "args": null,
+                                                "self_type": {
+                                                  "generic": "H"
+                                                },
+                                                "trait": {
+                                                  "path": "safe_cex_venue_weex::classes::ClassHost",
+                                                  "args": null
+                                                }
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ]
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "receiver",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "qualified_path": {
+                    "name": "Value",
+                    "args": null,
+                    "self_type": {
+                      "generic": "H"
+                    },
+                    "trait": {
+                      "path": "",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Value",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_weex::classes::ClassHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Finds a prepared native body by static method name, captures its host binding capability, and installs an arrow callback; it does not turn input text into a class or decoder.",
+    "evidence": "Reviewed actual helper body in sdk-rs/safe-cex-venue-weex/src/classes.rs at 106-128. The exact compiler signature receives an executed native classification receipt; this is a function-specific role classification, not an exemption for its host callbacks or callers."
   }
 }
