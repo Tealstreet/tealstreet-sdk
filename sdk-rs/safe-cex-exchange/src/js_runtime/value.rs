@@ -43,6 +43,7 @@ pub enum Js {
     Null,
     Bool(bool),
     Number(f64),
+    BigInt(Rc<num_bigint::BigInt>),
     String(Str),
     Array(Rc<RefCell<Vec<Option<Js>>>>),
     Object(Rc<ObjectData>),
@@ -139,6 +140,7 @@ impl fmt::Debug for Js {
             Js::Null => write!(f, "null"),
             Js::Bool(b) => write!(f, "{b}"),
             Js::Number(n) => write!(f, "{}", js_number_string(*n)),
+            Js::BigInt(n) => write!(f, "{n}n"),
             Js::String(s) => write!(f, "{:?}", String::from_utf16_lossy(s)),
             Js::Array(a) => f.debug_list().entries(a.borrow().iter()).finish(),
             Js::Object(o) => {
@@ -229,7 +231,7 @@ impl Js {
     pub fn is_object(&self) -> bool {
         !matches!(
             self,
-            Js::Undefined | Js::Null | Js::Bool(_) | Js::Number(_) | Js::String(_)
+            Js::Undefined | Js::Null | Js::Bool(_) | Js::Number(_) | Js::BigInt(_) | Js::String(_)
         )
     }
     pub fn is_callable(&self) -> bool {
@@ -241,6 +243,7 @@ impl Js {
             Js::Null => "object",
             Js::Bool(_) => "boolean",
             Js::Number(_) => "number",
+            Js::BigInt(_) => "bigint",
             Js::String(_) => "string",
             Js::Function(_) => "function",
             _ => "object",
@@ -251,6 +254,7 @@ impl Js {
             Js::Undefined | Js::Null => false,
             Js::Bool(b) => *b,
             Js::Number(n) => *n != 0.0 && !n.is_nan(),
+            Js::BigInt(n) => **n != num_bigint::BigInt::default(),
             Js::String(s) => !s.is_empty(),
             _ => true,
         }
@@ -261,6 +265,7 @@ impl Js {
             (Js::Undefined, Js::Undefined) | (Js::Null, Js::Null) => true,
             (Js::Bool(a), Js::Bool(b)) => a == b,
             (Js::Number(a), Js::Number(b)) => a == b,
+            (Js::BigInt(a), Js::BigInt(b)) => a == b,
             (Js::String(a), Js::String(b)) => a == b,
             _ => self.same_reference(other),
         }
@@ -290,6 +295,7 @@ impl Js {
             Js::Null => utf16("null"),
             Js::Bool(b) => utf16(if *b { "true" } else { "false" }),
             Js::Number(n) => utf16(&js_number_string(*n)),
+            Js::BigInt(n) => utf16(&n.to_string()),
             Js::String(s) => s.clone(),
             Js::Array(items) => {
                 let items = items.borrow().clone();
@@ -355,6 +361,11 @@ impl Js {
             Js::Null => 0.0,
             Js::Bool(b) => f64::from(u8::from(*b)),
             Js::Number(n) => *n,
+            Js::BigInt(_) => {
+                return Err(Thrown::type_error(
+                    "Cannot convert a BigInt value to a number",
+                ));
+            }
             Js::String(s) => string_to_number(&String::from_utf16_lossy(s)),
             Js::Array(_) | Js::Object(_) => {
                 string_to_number(&String::from_utf16_lossy(&self.to_js_string()?))
@@ -418,7 +429,12 @@ impl Js {
             Js::Set(s) if key == utf16("size").as_ref() => {
                 return Ok(Js::Number(s.borrow().len() as f64));
             }
-            Js::Map(_) | Js::Set(_) | Js::Promise(_) | Js::Number(_) | Js::Bool(_) => {
+            Js::Map(_)
+            | Js::Set(_)
+            | Js::Promise(_)
+            | Js::Number(_)
+            | Js::BigInt(_)
+            | Js::Bool(_) => {
                 return Ok(super::builtins::member(self, key).unwrap_or(Js::Undefined));
             }
             _ => {}
@@ -710,6 +726,7 @@ pub fn to_json(value: &Js) -> Result<serde_json::Value, Thrown> {
         Js::Number(n) => serde_json::Number::from_f64(*n)
             .map(serde_json::Value::Number)
             .unwrap_or(serde_json::Value::Null),
+        Js::BigInt(n) => serde_json::Value::String(n.to_string()),
         Js::String(s) => serde_json::Value::String(
             String::from_utf16(s)
                 .map_err(|_| Thrown::type_error("lone UTF-16 surrogate at a typed boundary"))?,
