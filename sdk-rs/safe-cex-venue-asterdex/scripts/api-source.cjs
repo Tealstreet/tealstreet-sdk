@@ -7,9 +7,9 @@ const ethersName=process.env.ASTERDEX_API_PACKAGE_CONTROL==='missing-ethers'?'as
 const ethers=require(path.join(path.dirname(compilerRoot),ethersName));
 const retry=load('packages/safe-cex/src/utils/retryReadsOnly.ts',[],{'axios-retry':unavailable});
 let clockNow=0;
-const api=load('packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts',['buildV3Nonce','isAsterdexRead','buildQueryString','buildV3SigningPayload','stripQueryString','isPublicEndpoint','isAsterDEXCodeSignedEndpoint','shouldSuppressUnknownOrderError','getAsterDEXErrorDetail','generateV1Signature','generateAsterDEXCodeMessageSignature'],{
+const api=load('packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts',['buildV3Nonce','isAsterdexRead','buildQueryString','buildV3SigningPayload','stripQueryString','isPublicEndpoint','isAsterDEXCodeSignedEndpoint','shouldSuppressUnknownOrderError','getAsterDEXErrorDetail','generateV1Signature','generateAsterDEXCodeMessageSignature','withoutSigningFields'],{
  crypto:require('node:crypto'),axios:unavailable,'axios-rate-limit':unavailable,'axios-retry':unavailable,ethers,
- '../../createApiWithSecondaryKey':unavailable,'../../safeCexAxiosCreate':unavailable,'../../types':unavailable,'../../utils/httpFailure':unavailable,'../../utils/retryReadsOnly':retry,'./asterdex.types':require('./source.cjs').values,'./asterdex.virtualClock':{asterDEXVirtualClock:{getCurrentTimeMs:()=>clockNow}},
+ '../../createApiWithSecondaryKey':unavailable,'../../safeCexAxiosCreate':unavailable,'../../types':unavailable,'../../utils/httpFailure':unavailable,'../../utils/retryReadsOnly':retry,'../../utils/signatureRejection':load('packages/safe-cex/src/utils/signatureRejection.ts',[],{}),'./asterdex.types':require('./source.cjs').values,'./asterdex.virtualClock':{asterDEXVirtualClock:{getCurrentTimeMs:()=>clockNow}},
 },source=>{
  if(process.env.ASTERDEX_API_SIGNATURE_CONTROL==='wrong-chain'){
   const before='chainId: getAsterDEXCodeChainId(testnet)';
