@@ -112,6 +112,8 @@ export type ExchangeOptions = {
   readonly enableSpotMarkets?: boolean;
   /** See `ExchangeAccountConfig.enableOptionMarkets`. Default off. */
   readonly enableOptionMarkets?: boolean;
+  /** See `ExchangeAccountConfig.enableInverseMarkets`. Default off. */
+  readonly enableInverseMarkets?: boolean;
   /** Bybit Brazil accounts require this site id on REST and WS upgrade requests. */
   readonly bybitSiteId?: 'BRA_BTL';
   readonly publicDataOnly?: boolean;
@@ -285,6 +287,12 @@ export interface ExchangeAccountConfig {
    * and request volume must be unchanged unless they ask for options.
    */
   enableOptionMarkets?: boolean;
+
+  /**
+   * Opt this account into the exchange's inverse (coin-margined) markets, for venues that trade them in the same
+   * account as their linear derivatives (`supportsInverseToggle` metadata). Default off, as for options.
+   */
+  enableInverseMarkets?: boolean;
 
   /**
    * Bybit Brazil accounts use the global Bybit hosts but require

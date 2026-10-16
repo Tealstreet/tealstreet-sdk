@@ -79,6 +79,11 @@ export type ExchangeMetadata = {
    * (`ExchangeAccountConfig.enableOptionMarkets`).
    */
   supportsOptionsToggle?: boolean;
+  /**
+   * Whether this exchange trades inverse contracts in the same account as its linear derivatives, and therefore
+   * offers a per-account "also trade inverse" toggle (`ExchangeAccountConfig.enableInverseMarkets`).
+   */
+  supportsInverseToggle?: boolean;
   /** Whether the exchange supports testnet/paper trading */
   supportsTestnet: boolean;
   /** Predefined leverage values for quick selection in the UI */
@@ -325,6 +330,7 @@ const BybitMetadata: ExchangeMetadata = {
   supportsPublicOnly: true,
   exchangeName: 'bybit' as ExchangeName,
   supportsOptionsToggle: true,
+  supportsInverseToggle: true,
   logo: '/static/exchanges/logos/BYBIT/logo.svg',
   lightLogo: '/static/exchanges/logos/BYBIT/light.png',
   darkLogo: '/static/exchanges/logos/BYBIT/dark.png',
@@ -378,6 +384,7 @@ const BybitDemoMetadata: ExchangeMetadata = {
   exchangeName: 'bybitdemo' as ExchangeName,
   // Not confirmed that the demo environment lists options.
   supportsOptionsToggle: false,
+  supportsInverseToggle: false,
   prettyName: 'Bybit Demo',
   supportedOnMobile: true,
   supportsTestnet: false,
@@ -416,6 +423,7 @@ const BybitSpotMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   // Options trade on the `bybit` connection.
   supportsOptionsToggle: false,
+  supportsInverseToggle: false,
   exchangeName: 'bybitspot' as ExchangeName,
   prettyName: 'Bybit Spot',
   supportedOnMobile: true,
@@ -443,6 +451,7 @@ const BybitInverseMetadata: ExchangeMetadata = {
   ...BybitMetadata,
   // Options trade on the `bybit` connection.
   supportsOptionsToggle: false,
+  supportsInverseToggle: false,
   exchangeName: 'bybitinverse' as ExchangeName,
   prettyName: 'Bybit Inverse',
   supportedOnMobile: true,

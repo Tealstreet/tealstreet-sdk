@@ -7,14 +7,14 @@ import { jsonParse } from '@tealstreet/json-parse/src/jsonParse';
 import { sleep } from '@tealstreet/sleep/src/sleep';
 import { ENABLE_RECONNECTING_WEBSOCKET } from '../../config/config';
 import { getTransport, resolveTransportRouting } from '../../transport/registry';
-import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { isWsRelayEnabled } from '../../transport/tealstreet/wsRelay';
 import { OrderStatus, Position, Writable } from '../../types';
-import { cleanFloat, createIncrementalFills } from '../../utils/incrementalFills';
-import { resolveBybitExecution } from './bybit.fill-event';
 import { v } from '../../utils/get-key';
+import { cleanFloat, createIncrementalFills } from '../../utils/incrementalFills';
 import { virtualClock } from '../../utils/virtualClock';
+import { WsDirectFallback } from '../../utils/wsDirectFallback';
 import { BaseWebSocket } from '../base.ws';
+import { resolveBybitExecution } from './bybit.fill-event';
 import { getBybitWebSocketOptions } from './bybit.site';
 import { BASE_WS_URL, DEMO_WS_URL } from './bybit.types';
 
@@ -33,7 +33,8 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
       const network = this.parent.options.testnet ? 'testnet' : 'livenet';
       const route = resolveTransportRouting(this.parent.name, this.parent.options).wsPrivate;
       const directUrl =
-        this.parent.getBybitPrivateWsUrl?.(network) ?? (this.parent.isDemo ? DEMO_WS_URL : BASE_WS_URL).private[network];
+        this.parent.getBybitPrivateWsUrl?.(network) ??
+        (this.parent.isDemo ? DEMO_WS_URL : BASE_WS_URL).private[network];
       const baseUrl = this.directFallback.resolveUrl(
         route.tunnelled && route.host ? route.host : directUrl,
         isWsRelayEnabled() ? route.relay : undefined,
@@ -41,7 +42,10 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
       );
       if (baseUrl === route.fallback || baseUrl === route.relay) {
         try {
-          this.parent.emitter.emit('grafana-info', `Using tealstreet bybit private ${baseUrl === route.relay ? 'relay' : 'proxy'}`);
+          this.parent.emitter.emit(
+            'grafana-info',
+            `Using tealstreet bybit private ${baseUrl === route.relay ? 'relay' : 'proxy'}`,
+          );
         } catch (_e) {}
       }
       const webSocketOptions = this.parent.isDemo ? undefined : getBybitWebSocketOptions(this.parent.options);
@@ -129,12 +133,14 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
 
       if (json?.topic === 'order') {
         this.recordMessageHandlerStats('order');
-        this.handleOrderTopic(json.data);
+        const orders = this.rowsThisConnectionTrades(json.data);
+        if (orders.length) this.handleOrderTopic(orders);
       }
 
       if (json?.topic === 'position') {
         this.recordMessageHandlerStats('position');
-        this.handlePositionTopic(json.data);
+        const positions = this.rowsThisConnectionTrades(json.data);
+        if (positions.length) this.handlePositionTopic(positions);
       }
 
       if (json?.op === 'pong') {
@@ -166,6 +172,10 @@ export class BybitPrivateWebsocket extends BaseWebSocket<BybitExchange> {
       this.sendWithLog(JSON.stringify({ op: 'ping' }));
     }
   };
+
+  /** Inverse and option rows arrive on this socket whatever the account turned on; see `tradesCategoryOf`. */
+  private rowsThisConnectionTrades = (data: unknown): Array<Record<string, any>> =>
+    Array.isArray(data) ? data.filter((row) => this.parent.tradesCategoryOf(String(row?.symbol ?? ''))) : [];
 
   handleOrderTopic = (data: Array<Record<string, any>>) => {
     data.forEach((order: Record<string, any>) => {

@@ -1720,6 +1720,31 @@ Two rules for calling them:
 | Execution queries     | Yes                            | Yes                                 | No                                  | Yes (inherited)              |
 | Market fetch parallel | Yes (PreLaunch in parallel)    | No (sequential)                     | No (single request, no PreLaunch)   | Yes (inherited)              |
 
+## Inverse and options on the `bybit` connection (opt-in, off for Tealstreet)
+
+`BybitExchange` can also trade inverse contracts (`enableInverseMarkets`) and options
+(`enableOptionMarkets`) on the same unified account. **Both are off by default and no
+Tealstreet app sets them** — only exchange-mcp's `EXCHANGE_INVERSE` / `EXCHANGE_OPTIONS`
+do. Tealstreet users trade inverse on the separate `bybitinverse` adapter. Do not wire
+either toggle into the web or mobile account form without a product decision.
+
+- **The private socket drops rows for categories the connection does not trade**
+  (`tradesCategoryOf`, `rowsThisConnectionTrades` in `bybit.ws-private.ts`). Bybit's
+  `/v5/private` carries every category on the account, and the mappers decide inverse
+  and option handling by SYMBOL, so without this gate a linear-only user holding BTCUSD
+  had it stored in coin units and its USD value moved their balance upnl. Gated by
+  `bybit.private-socket-category-gate.test.ts`. Do not remove it to "show everything".
+- Categories route by symbol shape: `isBybitInverseSymbol` (`bybit.inverse.ts`, checked
+  live against all 26 inverse and 906 linear symbols) and `isBybitOptionSymbol`. Inverse
+  takes a second public socket on `/v5/public/inverse`, created only when the toggle is on.
+- A failed inverse or option read keeps that category's stored rows
+  (`fetchCategoryRowsOrKeep`), so one bad poll neither wipes them nor jumps the balance.
+- **Known gaps, all opt-in only:** UTA 1.0 accounts (status 3/4) are not excluded, though
+  their inverse sits in the CONTRACT wallet, so `total` comes out low by the inverse PnL;
+  a Brazil-account amend writes `remaining` in USD (`applyLocalOrderUpdateAfterRestWrite`
+  skips `remainingInStoreUnits`); account-wide order history lists linear then inverse
+  rather than newest first.
+
 ## Testing / Validation
 
 Run from the `packages/safe-cex` directory:

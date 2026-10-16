@@ -67,6 +67,7 @@ import { createAPI } from './bybit.api';
 import { mapBybitClosedPnl } from './bybit.closed-pnl';
 import { bybitFeeOverlay } from './bybit.fee-overlay';
 import { fetchBybitIncomeHistory, fetchBybitIncomeHistoryRange } from './bybit.income';
+import { isBybitInverseSymbol, positionUpnlInQuote } from './bybit.inverse';
 import {
   buildOptionChain,
   isBybitOptionSymbol,
@@ -540,12 +541,44 @@ export class BybitExchange extends BaseExchange {
   }
 
   getCategoryForSymbol = (symbol: string) => {
-    return isBybitOptionSymbol(symbol) ? 'option' : 'linear';
+    if (isBybitOptionSymbol(symbol)) return 'option';
+    return isBybitInverseSymbol(symbol) ? 'inverse' : 'linear';
+  };
+
+  /**
+   * The shared /v5/private socket carries every category on the account. This connection keeps only the ones it
+   * trades, so a linear-only account never stores, sizes or values an inverse or option row.
+   */
+  tradesCategoryOf = (symbol: string): boolean => {
+    const category = this.getCategoryForSymbol(symbol);
+    if (category === 'option') return this.optionsEnabled();
+    if (category === 'inverse') return this.inverseEnabled();
+    return true;
   };
 
   /** Options join this connection only when the account opted in; subclasses that cannot trade them return false. */
   protected optionsEnabled() {
     return Boolean(this.options.enableOptionMarkets);
+  }
+
+  /** Inverse contracts join this connection only when the account opted in; subclasses that cannot trade them return false. */
+  protected inverseEnabled() {
+    // A shared public data source has no inverse markets, so an account reading one cannot size inverse positions.
+    return Boolean(this.options.enableInverseMarkets) && !this.options.externalPublicData;
+  }
+
+  /** Inverse quantities are USD contracts; the store holds `remaining` in the coin at `price` and the contracts in `extra`. */
+  private remainingInStoreUnits(symbol: string, remainingNative: number, price: number) {
+    if (!isBybitInverseSymbol(symbol) || !(price > 0)) return { remaining: remainingNative };
+    return { remaining: Math.round((remainingNative / price) * 1e8) / 1e8, extra: { remainingNative } };
+  }
+
+  private publicSocketFor(symbol: string): BybitPublicWebsocket {
+    return (this.getCategoryForSymbol(symbol) === 'inverse' && this.inversePublicWebsocket) || this.publicWebsocket;
+  }
+
+  private get inversePublicWebsocket(): BybitPublicWebsocket | undefined {
+    return this.publicWebsocketSecondary as BybitPublicWebsocket | undefined;
   }
 
   getTickerSymbolsForCategory(category: 'linear' | 'inverse') {
@@ -570,6 +603,7 @@ export class BybitExchange extends BaseExchange {
     this.unlimitedXHR = createAPI(opts, this);
 
     this.publicWebsocket = new BybitPublicWebsocket(this, 'linear');
+    if (this.inverseEnabled()) this.publicWebsocketSecondary = new BybitPublicWebsocket(this, 'inverse');
     this.privateWebsocket = new BybitPrivateWebsocket(this);
   }
 
@@ -703,7 +737,7 @@ export class BybitExchange extends BaseExchange {
       price,
       amount: qty,
       filled: 0,
-      remaining: qty,
+      ...this.remainingInStoreUnits(opts.symbol, qty, price),
       reduceOnly: (opts.type === OrderType.Conditional ? false : opts.reduceOnly) || false,
       timeInForce: opts.timeInForce || OrderTimeInForce.GoodTillCancel,
       lastUpdate: virtualClock.getCurrentTimeMs(),
@@ -929,6 +963,7 @@ export class BybitExchange extends BaseExchange {
 
           // start public websocket streams as soon as markets loaded.
           this.publicWebsocket.connectAndSubscribe();
+          this.inversePublicWebsocket?.connectAndSubscribe();
 
           return markets;
         }),
@@ -1176,7 +1211,7 @@ export class BybitExchange extends BaseExchange {
     }
     const [firstAccount] = rawBalance;
     const coins = Array.isArray(firstAccount.coin) ? firstAccount.coin : [];
-    const upnl = this.store.positions.reduce((acc, p) => acc + p.unrealizedPnl, 0);
+    const upnl = this.store.positions.reduce((acc, p) => acc + positionUpnlInQuote(p), 0);
     const totalEquity = parseBybitFiniteNumber(firstAccount.totalEquity);
     const totalWalletBalance = parseBybitFiniteNumber(firstAccount.totalWalletBalance);
     const totalMarginBalance = parseBybitFiniteNumber(firstAccount.totalMarginBalance);
@@ -1297,23 +1332,28 @@ export class BybitExchange extends BaseExchange {
     const orders = await mapSeries(settleCoins, async (settleCoin) => {
       return this.fetchOrdersHelper('linear', settleCoin);
     });
+    if (this.inverseEnabled()) orders.push(await this.fetchOrdersHelper('inverse'));
     if (this.optionsEnabled())
-      orders.push(await this.fetchOptionRowsOrKeep('orders', () => this.fetchOrdersHelper('option')));
+      orders.push(await this.fetchCategoryRowsOrKeep('option', 'orders', () => this.fetchOrdersHelper('option')));
     // Every consumer of this result wholesale-replaces store.orders, so shield
     // just-placed orders REST hasn't indexed yet (worst on api-demo).
     return this.preserveRecentlyPlacedOrders(orders.flat());
   };
 
-  /** A failed option read keeps the option rows the store holds, so one bad poll does not wipe them. */
-  private fetchOptionRowsOrKeep = async <T extends { symbol: string }>(
+  /**
+   * A failed read of an opted-in category keeps that category's rows the store holds, so one bad poll does not
+   * wipe them, or move the balance by their PnL, until the next one.
+   */
+  private fetchCategoryRowsOrKeep = async <T extends { symbol: string }>(
+    category: 'inverse' | 'option',
     what: 'orders' | 'positions',
     fetch: () => Promise<T[]>,
   ): Promise<T[]> => {
     try {
       return await fetch();
     } catch (err: any) {
-      this.log(`Failed to refresh Bybit option ${what}: ${err?.message ?? err}`, LogSeverity.Warning);
-      return (this.store[what] as unknown as T[]).filter((row) => isBybitOptionSymbol(row.symbol));
+      this.log(`Failed to refresh Bybit ${category} ${what}: ${err?.message ?? err}`, LogSeverity.Warning);
+      return (this.store[what] as unknown as T[]).filter((row) => this.getCategoryForSymbol(row.symbol) === category);
     }
   };
 
@@ -1366,9 +1406,16 @@ export class BybitExchange extends BaseExchange {
       const positions = await mapSeries(settleCoins, async (settleCoin) => {
         return this.fetchPositionsHelper(undefined, 'linear', settleCoin);
       });
+      if (this.inverseEnabled()) {
+        positions.push(
+          await this.fetchCategoryRowsOrKeep('inverse', 'positions', () =>
+            this.fetchPositionsHelper(undefined, 'inverse', undefined, true),
+          ),
+        );
+      }
       if (this.optionsEnabled()) {
         positions.push(
-          await this.fetchOptionRowsOrKeep('positions', () =>
+          await this.fetchCategoryRowsOrKeep('option', 'positions', () =>
             this.fetchPositionsHelper(undefined, 'option', undefined, true),
           ),
         );
@@ -1485,7 +1532,10 @@ export class BybitExchange extends BaseExchange {
   };
 
   fetchTickersRaw = async () => {
-    const tickers = await this.fetchTickersRawHelper('linear');
+    const tickers = [
+      ...(await this.fetchTickersRawHelper('linear')),
+      ...(this.inverseEnabled() ? await this.fetchTickersRawHelper('inverse') : []),
+    ];
     if (tickers.some((t: any) => t === null)) {
       this.emitAndLogError('Failed to fetch tickers');
       return null;
@@ -1519,7 +1569,8 @@ export class BybitExchange extends BaseExchange {
       if (!market) continue;
 
       const lastPrice = parseFloat(t.lastPrice);
-      const volume24h = parseFloat(t.volume24h);
+      // An inverse ticker's volume24h is in USD contracts and its turnover24h in the coin.
+      const volume24h = parseFloat(market.isInverse ? t.turnover24h : t.volume24h);
       tickers.push({
         id: market.id,
         symbol: market.symbol,
@@ -1533,7 +1584,7 @@ export class BybitExchange extends BaseExchange {
         fundingRate: market.isExpiring ? 0 : parseFloat(t.fundingRate),
         fundingTime: market.isExpiring ? 0 : parseFloat(t.nextFundingTime),
         volume: volume24h,
-        quoteVolume: volume24h * lastPrice,
+        quoteVolume: market.isInverse ? parseFloat(t.volume24h) : volume24h * lastPrice,
       });
     }
     return tickers;
@@ -1542,6 +1593,7 @@ export class BybitExchange extends BaseExchange {
   fetchMarkets = async () => {
     try {
       const markets = await this.fetchMarketsHelper('linear');
+      if (this.inverseEnabled()) markets.push(...(await this.fetchMarketsHelper('inverse')));
       return this.optionsEnabled() ? [...markets, ...(await this.fetchOptionMarkets())] : markets;
     } catch (e) {
       if (e instanceof BybitTradingMarketsRequestError && this.store.markets.length > 0) {
@@ -1724,6 +1776,7 @@ export class BybitExchange extends BaseExchange {
           },
         },
         isExpiring: Boolean(parseFloat(market.deliveryTime)),
+        ...(category === 'inverse' ? { isInverse: true } : {}),
         ...(fee
           ? {
               takerFee: parseFloat(fee.takerFeeRate),
@@ -1866,7 +1919,7 @@ export class BybitExchange extends BaseExchange {
 
           const rows = (data.result?.list || []) as Array<Record<string, any>>;
           for (const row of rows) {
-            const entry = mapBybitClosedPnl(row, opts.accountName || '');
+            const entry = mapBybitClosedPnl(row, opts.accountName || '', isBybitInverseSymbol(row.symbol));
             if (entry) entries.push(entry);
           }
 
@@ -2394,15 +2447,21 @@ export class BybitExchange extends BaseExchange {
         opts?.from !== undefined && opts?.to !== undefined
           ? splitTimeRange(opts.from, opts.to, ORDER_HISTORY_MAX_WINDOW_MS)
           : [{ startTime: opts?.from, endTime: opts?.to }];
+      const categories = opts?.symbol
+        ? [this.getCategoryForSymbol(opts.symbol)]
+        : this.inverseEnabled()
+          ? ['linear', 'inverse']
+          : ['linear'];
+      const queries = categories.flatMap((category) => windows.map((window) => ({ category, window })));
 
-      for (const window of windows) {
+      for (const { category, window } of queries) {
         let cursor: string | undefined = undefined;
         for (page = 0; page < MAX_PAGES; page += 1) {
           // `params` is annotated rather than inferred: `cursor` feeds into it and is then
           // reassigned FROM the response, so letting omitUndefined's generic carry cursor's
           // type into the request makes `data` circular (TS7022).
           const params: Record<string, any> = omitUndefined({
-            category: opts?.symbol ? this.getCategoryForSymbol(opts.symbol) : 'linear',
+            category,
             symbol: opts?.symbol,
             startTime: window.startTime,
             endTime: window.endTime,
@@ -2452,42 +2511,58 @@ export class BybitExchange extends BaseExchange {
   // BaseExchange rather than this one, can reuse them with its own category. Kept as
   // instance arrow properties: capability detection reads the subclass property
   // shadowing the branded base stub, and a prototype method would not shadow it.
-  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> =>
-    fetchBybitIncomeHistory(this.incomeContext, opts);
+  fetchIncomeHistory = async (opts?: IncomeHistoryOptions): Promise<IncomeRecord[]> => {
+    const records = (await mapSeries(this.incomeContexts, (ctx) => fetchBybitIncomeHistory(ctx, opts))).flat();
+    if (!this.inverseEnabled()) return records;
+    const newestFirst = records.sort((a, b) => b.timestamp - a.timestamp);
+    return opts?.limit ? newestFirst.slice(0, opts.limit) : newestFirst;
+  };
 
   /**
    * Fetch income history for a date range.
    * Bybit limits queries to 7 days per request, so we chunk the range.
    */
   fetchIncomeHistoryRange = async (startTime: number, endTime: number, incomeType?: string): Promise<IncomeRecord[]> =>
-    fetchBybitIncomeHistoryRange(this.incomeContext, startTime, endTime, incomeType);
+    (
+      await mapSeries(this.incomeContexts, (ctx) => fetchBybitIncomeHistoryRange(ctx, startTime, endTime, incomeType))
+    ).flat();
 
-  private get incomeContext(): BybitIncomeContext {
-    return { xhr: this.xhr, log: this.log, category: 'linear', accountType: 'UNIFIED' };
+  private get incomeContexts(): BybitIncomeContext[] {
+    const categories: Array<BybitIncomeContext['category']> = this.inverseEnabled()
+      ? ['linear', 'inverse']
+      : ['linear'];
+    return categories.map((category) => ({ xhr: this.xhr, log: this.log, category, accountType: 'UNIFIED' }));
   }
 
   listenOHLCV = (opts: OHLCVOptions, callback: (candle: Candle) => void) => {
-    return this.publicWebsocket.listenOHLCV(opts, callback);
+    return this.publicSocketFor(opts.symbol).listenOHLCV(opts, callback);
   };
 
   listenOHLCVs = (
     opts: OHLCVSOptions,
     callback: (candle: Candle & { symbol: string; interval: Timeframe }) => void,
   ) => {
-    this.publicWebsocket.listenOHLCVs(opts, callback);
+    const bySocket = new Map<BybitPublicWebsocket, string[]>();
+    for (const symbol of opts.symbols) {
+      const socket = this.publicSocketFor(symbol);
+      bySocket.set(socket, [...(bySocket.get(socket) ?? []), symbol]);
+    }
+    for (const [socket, symbols] of bySocket) socket.listenOHLCVs({ ...opts, symbols }, callback);
   };
 
   listenOrderBook = (symbol: string, callback: (orderBook: OrderBook) => void) => {
-    return this.publicWebsocket.listenOrderBook(symbol, callback);
+    return this.publicSocketFor(symbol).listenOrderBook(symbol, callback);
   };
 
   _hasFullSizedPositionOppositeSide = (symbol: string, side: OrderSide, amount: number) => {
+    // An order's amount is in USD contracts on an inverse market, so compare it with the position's native size.
+    const size = (p: Position) => (isBybitInverseSymbol(symbol) ? (p.extra?.contractsNative ?? 0) : p.contracts);
     return side === OrderSide.Buy
       ? this.store.positions.some(
-          (p) => p.symbol === symbol && p.side === PositionSide.Short && p.contracts !== 0 && p.contracts >= amount,
+          (p) => p.symbol === symbol && p.side === PositionSide.Short && p.contracts !== 0 && size(p) >= amount,
         )
       : this.store.positions.some(
-          (p) => p.symbol === symbol && p.side === PositionSide.Long && p.contracts !== 0 && p.contracts >= amount,
+          (p) => p.symbol === symbol && p.side === PositionSide.Long && p.contracts !== 0 && size(p) >= amount,
         );
   };
 
@@ -3364,6 +3439,9 @@ export class BybitExchange extends BaseExchange {
 
   changePositionMode = async (hedged: boolean, symbol?: string) => {
     this.refuseOptionSymbol(symbol, 'position mode');
+    if (symbol && isBybitInverseSymbol(symbol)) {
+      throw new Error(`Bybit position mode can only be changed on linear markets here (${symbol})`);
+    }
     symbol = undefined;
     if (symbol) {
       // linear only supports USDT for changing pos modes
@@ -3438,13 +3516,14 @@ export class BybitExchange extends BaseExchange {
     const market = this.store.marketsBySymbol[p.symbol];
     const contractsNative = contracts;
     let notional = parseFloat(v(p, 'positionValue') || 0);
-    if (market?.isInverse) {
+    const inverse = isBybitInverseSymbol(p.symbol);
+    if (inverse) {
+      // `size` is USD contracts. `contracts` is the coin amount at the mark, and `unrealizedPnl` stays in the coin,
+      // both as on `bybitinverse`.
       const ticker = this.store.tickersBySymbol[p.symbol];
-      const referencePrice = ticker?.last || ticker?.mark || entryPrice;
-      if (referencePrice) {
-        contracts = adjust(contracts / referencePrice, 0.0000001);
-      }
-      notional = contracts;
+      const referencePrice = ticker?.mark || parseFloat(v(p, 'markPrice') || 0) || ticker?.last || entryPrice;
+      if (referencePrice > 0) contracts = Math.round((contractsNative / referencePrice) * 1e8) / 1e8;
+      notional = contractsNative;
     } else if (!p.symbol.endsWith('USDT')) {
       const ticker = this.store.tickersBySymbol[p.symbol];
       if (market && market.quote === 'USDC' && ticker) {
@@ -3476,6 +3555,7 @@ export class BybitExchange extends BaseExchange {
       marginType,
       extra: {
         contractsNative,
+        ...(inverse ? { unrealizedPnlNative: unrealizedPnl } : {}),
       },
       info: p,
       lastUpdate: virtualClock.getCurrentTimeMs(),
@@ -3536,13 +3616,9 @@ export class BybitExchange extends BaseExchange {
     const side = ORDER_SIDE[o.side] ?? (isProtectiveOrder ? this.inferProtectiveOrderSide(o) : undefined);
     const timeInForce = ORDER_TIME_IN_FORCE[o.timeInForce];
 
-    let remaining = o.leavesQty ? parseFloat(o.leavesQty) : subtract(o.qty ?? 0, v(o, 'cumExecQty') ?? 0);
-    const remainingNative = remaining;
+    const remainingNative = o.leavesQty ? parseFloat(o.leavesQty) : subtract(o.qty ?? 0, v(o, 'cumExecQty') ?? 0);
     const price = parseFloat(oPrice);
-    const market = this.store.marketsBySymbol[o.symbol];
-    if (market?.isInverse) {
-      remaining = adjust(remaining / price, 0.0000001);
-    }
+    const isInverse = isBybitInverseSymbol(o.symbol);
 
     const orders: Order[] = [
       {
@@ -3551,10 +3627,8 @@ export class BybitExchange extends BaseExchange {
         symbol: o.symbol,
         type,
         side,
-        remaining,
-        extra: {
-          remainingNative,
-        },
+        ...this.remainingInStoreUnits(o.symbol, remainingNative, price),
+        extra: { remainingNative },
         price,
         amount: (oType === 'StopLoss' || oType === 'TakeProfit') && tpslMode === 'Full' ? 0 : parseFloat(o.qty ?? 0),
         filled: parseFloat(v(o, 'cumExecQty') ?? 0),
@@ -3582,7 +3656,7 @@ export class BybitExchange extends BaseExchange {
         side: inverseSide,
         price: sl,
         filled: 0,
-        remaining: orders[0].amount,
+        ...(isInverse ? this.remainingInStoreUnits(o.symbol, remainingNative, sl) : { remaining: orders[0].amount }),
         lastUpdate: virtualClock.getCurrentTimeMs(),
         slTriggerType: ORDER_TRIGGER_TYPE[v(o, 'slTriggerBy')],
       });
@@ -3596,7 +3670,7 @@ export class BybitExchange extends BaseExchange {
         side: inverseSide,
         price: tp,
         filled: 0,
-        remaining: orders[0].amount,
+        ...(isInverse ? this.remainingInStoreUnits(o.symbol, remainingNative, tp) : { remaining: orders[0].amount }),
         lastUpdate: virtualClock.getCurrentTimeMs(),
         tpTriggerType: ORDER_TRIGGER_TYPE[v(o, 'tpTriggerBy')],
       });

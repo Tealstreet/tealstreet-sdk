@@ -68,7 +68,9 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
   connectAndSubscribe = (_isReconnect = false) => {
     if (!this.isDisposed) {
       const network = this.parent.options.testnet ? 'testnet' : 'livenet';
-      const route = resolveTransportRouting(this.parent.name, this.parent.options).wsPublic;
+      // The inverse stream has its own proxy hosts, which `bybitinverse` names.
+      const routeName = this.category === 'inverse' ? 'bybitinverse' : this.parent.name;
+      const route = resolveTransportRouting(routeName, this.parent.options).wsPublic;
       const directUrl =
         this.parent.getBybitPublicWsUrl?.(this.category, network) ?? BASE_WS_URL.public[this.category][network];
       const baseUrl = this.directFallback.resolveUrl(route.tunnelled && route.host ? route.host : directUrl, route.fallback);
@@ -336,12 +338,16 @@ export class BybitPublicWebsocket extends BaseWebSocket<BybitExchange> {
       update.fundingTime = parseFloat(d.nextFundingTime);
     }
 
-    if (d.volume24h) {
-      update.volume = parseFloat(d.volume24h);
+    // Inverse frames carry volume24h in USD contracts and turnover24h in the coin, the reverse of linear.
+    const [baseVolume, quoteVolume] =
+      this.category === 'inverse' ? [d.turnover24h, d.volume24h] : [d.volume24h, d.turnover24h];
+
+    if (baseVolume) {
+      update.volume = parseFloat(baseVolume);
     }
 
-    if (d.turnover24h) {
-      update.quoteVolume = parseFloat(d.turnover24h);
+    if (quoteVolume) {
+      update.quoteVolume = parseFloat(quoteVolume);
     }
 
     this.parent.store.updateTicker(ticker, update);

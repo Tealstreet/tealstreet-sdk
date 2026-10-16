@@ -458,6 +458,10 @@ export class HyrotraderExchange extends BybitExchange {
     return false;
   }
 
+  protected inverseEnabled() {
+    return false;
+  }
+
   protected requiresOrderLinkId() {
     return true;
   }

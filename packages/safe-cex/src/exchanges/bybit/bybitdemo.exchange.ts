@@ -10,4 +10,8 @@ export class BybitDemoExchange extends BybitExchange {
   protected optionsEnabled() {
     return false;
   }
+
+  protected inverseEnabled() {
+    return false;
+  }
 }

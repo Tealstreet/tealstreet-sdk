@@ -45,6 +45,11 @@ describe('readConfig', () => {
     expect(readConfig(signerEnv).options.enableOptionMarkets).toBe(false);
   });
 
+  it('turns inverse on only when asked', () => {
+    expect(readConfig({ ...signerEnv, EXCHANGE_INVERSE: 'true' }).options.enableInverseMarkets).toBe(true);
+    expect(readConfig(signerEnv).options.enableInverseMarkets).toBe(false);
+  });
+
   it('turns polling off', () => {
     expect(readConfig(signerEnv).options.extra?.tickInterval).toBe(Number.POSITIVE_INFINITY);
   });
@@ -56,6 +61,10 @@ describe('readConfig', () => {
     [{ EXCHANGE: 'bybit', EXCHANGE_TESTNET: 'yes' }, 'EXCHANGE_TESTNET'],
     [{ EXCHANGE: 'bybit', EXCHANGE_OPTIONS: 'yes' }, 'EXCHANGE_OPTIONS must be true or false'],
     [{ EXCHANGE: 'bybitspot', EXCHANGE_OPTIONS: 'true' }, 'EXCHANGE_OPTIONS is not available on bybitspot'],
+    [{ EXCHANGE: 'bybit', EXCHANGE_INVERSE: '1' }, 'EXCHANGE_INVERSE must be true or false'],
+    [{ EXCHANGE: 'bybitinverse', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on bybitinverse'],
+    [{ EXCHANGE: 'bybitdemo', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on bybitdemo'],
+    [{ EXCHANGE: 'hyrotrader', EXCHANGE_INVERSE: 'true' }, 'EXCHANGE_INVERSE is not available on hyrotrader'],
   ])('refuses %j', (env, message) => {
     expect(() => readConfig(env)).toThrow(message);
   });

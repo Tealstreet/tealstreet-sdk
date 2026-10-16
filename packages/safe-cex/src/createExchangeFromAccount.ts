@@ -139,6 +139,7 @@ export function accountToExchangeOptions(
     // so a stale flag on an unrelated account can't turn anything on.
     ...(metadata.supportsSpotToggle && account.enableSpotMarkets ? { enableSpotMarkets: true } : {}),
     ...(metadata.supportsOptionsToggle && account.enableOptionMarkets ? { enableOptionMarkets: true } : {}),
+    ...(metadata.supportsInverseToggle && account.enableInverseMarkets ? { enableInverseMarkets: true } : {}),
 
     // Exchange-specific fields based on metadata
     ...(shouldForwardApplicationId && account.applicationId ? { applicationId: account.applicationId } : {}),

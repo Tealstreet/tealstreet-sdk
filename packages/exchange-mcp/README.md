@@ -13,6 +13,7 @@ EXCHANGE=bybit EXCHANGE_API_KEY=... EXCHANGE_API_SECRET=... npx @tealstreet/exch
 | `EXCHANGE` | safe-cex exchange name, such as `bybit` or `bybitdemo`. Required |
 | `EXCHANGE_TESTNET` | `true` for the exchange's testnet |
 | `EXCHANGE_OPTIONS` | `true` to trade the exchange's options, where it offers them on the same account (`bybit` today) |
+| `EXCHANGE_INVERSE` | `true` to trade the exchange's inverse contracts, where it offers them on the same account (`bybit` today) |
 | `EXCHANGE_API_KEY` | API key |
 | `EXCHANGE_API_SECRET` | API secret, to sign in this process |
 | `EXCHANGE_API_PASSPHRASE` | passphrase, on exchanges that use one |
@@ -26,6 +27,8 @@ Set `EXCHANGE_API_SECRET` or the two signer variables. Signer mode needs an adap
 `get_markets`, `get_tickers`, `get_candles`, `get_balance`, `get_positions`, `get_open_orders`, `get_order_history`, `get_fills`, `get_closed_pnl`, `get_income`, `place_order`, `amend_order`, `cancel_orders`, `cancel_all_orders`, `set_leverage`, `set_position_mode`, `set_margin_type`.
 
 With `EXCHANGE_OPTIONS=true`: `get_option_expiries`, `get_option_chain` and `get_account_greeks`. `place_order` takes option symbols and an optional `impliedVolatility`. `get_markets` leaves options out unless they are named.
+
+With `EXCHANGE_INVERSE=true`: the inverse markets join every tool. They carry `isInverse`, and their order amounts are USD contracts.
 
 Results with times also carry `<field>Utc` ISO dates, because safe-cex keeps fill and candle times in seconds and the rest in milliseconds.
 
