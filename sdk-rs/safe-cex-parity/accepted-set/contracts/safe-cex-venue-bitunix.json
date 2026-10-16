@@ -14116,5 +14116,304 @@
         "where_predicates": []
       }
     }
+  },
+  "safe_cex_venue_bitunix::api::RetryCondition": {
+    "category": "non-decoder",
+    "evidence": "Exact inline createAPI retry condition capability: network-read failure OR signature rejection, with independent callback borrows. The reviewed finite pointer policy authenticates the complete compiler target and native invariant type equality. Ordinary native alias Serde/conversion probes execute; this classification does not claim callback execution.",
+    "reason": "The alias is an executable host predicate accepting two fallible zero-argument callbacks; JSON cannot construct its code or callback environments. Concrete retry_condition behavior has its own executed function contract.",
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "function_pointer": {
+        "sig": {
+          "inputs": [
+            [
+              "_",
+              {
+                "borrowed_ref": {
+                  "lifetime": null,
+                  "is_mutable": true,
+                  "type": {
+                    "dyn_trait": {
+                      "traits": [
+                        {
+                          "trait": {
+                            "path": "core::ops::function::FnMut",
+                            "args": {
+                              "parenthesized": {
+                                "inputs": [],
+                                "output": {
+                                  "resolved_path": {
+                                    "path": "core::result::Result",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "primitive": "bool"
+                                            }
+                                          },
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "alloc::string::String",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "generic_params": []
+                        }
+                      ],
+                      "lifetime": "'_"
+                    }
+                  }
+                }
+              }
+            ],
+            [
+              "_",
+              {
+                "borrowed_ref": {
+                  "lifetime": null,
+                  "is_mutable": true,
+                  "type": {
+                    "dyn_trait": {
+                      "traits": [
+                        {
+                          "trait": {
+                            "path": "core::ops::function::FnMut",
+                            "args": {
+                              "parenthesized": {
+                                "inputs": [],
+                                "output": {
+                                  "resolved_path": {
+                                    "path": "core::result::Result",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "primitive": "bool"
+                                            }
+                                          },
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "alloc::string::String",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "generic_params": []
+                        }
+                      ],
+                      "lifetime": "'_"
+                    }
+                  }
+                }
+              }
+            ]
+          ],
+          "output": {
+            "resolved_path": {
+              "path": "core::result::Result",
+              "args": {
+                "angle_bracketed": {
+                  "args": [
+                    {
+                      "type": {
+                        "primitive": "bool"
+                      }
+                    },
+                    {
+                      "type": {
+                        "resolved_path": {
+                          "path": "alloc::string::String",
+                          "args": null
+                        }
+                      }
+                    }
+                  ],
+                  "constraints": []
+                }
+              }
+            }
+          },
+          "is_c_variadic": false
+        },
+        "generic_params": [],
+        "header": {
+          "is_const": false,
+          "is_unsafe": false,
+          "is_async": false,
+          "abi": "Rust"
+        }
+      }
+    },
+    "target": {
+      "function_pointer": {
+        "sig": {
+          "inputs": [
+            [
+              "_",
+              {
+                "borrowed_ref": {
+                  "lifetime": null,
+                  "is_mutable": true,
+                  "type": {
+                    "dyn_trait": {
+                      "traits": [
+                        {
+                          "trait": {
+                            "path": "core::ops::function::FnMut",
+                            "args": {
+                              "parenthesized": {
+                                "inputs": [],
+                                "output": {
+                                  "resolved_path": {
+                                    "path": "core::result::Result",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "primitive": "bool"
+                                            }
+                                          },
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "alloc::string::String",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "generic_params": []
+                        }
+                      ],
+                      "lifetime": "'_"
+                    }
+                  }
+                }
+              }
+            ],
+            [
+              "_",
+              {
+                "borrowed_ref": {
+                  "lifetime": null,
+                  "is_mutable": true,
+                  "type": {
+                    "dyn_trait": {
+                      "traits": [
+                        {
+                          "trait": {
+                            "path": "core::ops::function::FnMut",
+                            "args": {
+                              "parenthesized": {
+                                "inputs": [],
+                                "output": {
+                                  "resolved_path": {
+                                    "path": "core::result::Result",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "primitive": "bool"
+                                            }
+                                          },
+                                          {
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "alloc::string::String",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          },
+                          "generic_params": []
+                        }
+                      ],
+                      "lifetime": "'_"
+                    }
+                  }
+                }
+              }
+            ]
+          ],
+          "output": {
+            "resolved_path": {
+              "path": "core::result::Result",
+              "args": {
+                "angle_bracketed": {
+                  "args": [
+                    {
+                      "type": {
+                        "primitive": "bool"
+                      }
+                    },
+                    {
+                      "type": {
+                        "resolved_path": {
+                          "path": "alloc::string::String",
+                          "args": null
+                        }
+                      }
+                    }
+                  ],
+                  "constraints": []
+                }
+              }
+            }
+          },
+          "is_c_variadic": false
+        },
+        "generic_params": [],
+        "header": {
+          "is_const": false,
+          "is_unsafe": false,
+          "is_async": false,
+          "abi": "Rust"
+        }
+      }
+    }
   }
 }
