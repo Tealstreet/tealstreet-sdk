@@ -319,3 +319,9 @@ See STRING_CONTRACT_REVIEW.md and scripts/string-contracts.mjs. Scope is these
 seven original native/default census owners; the other owners, aliases,
 construction records, locals, features and target execution remain separate
 obligations. No decoder behavior or manifest classification is changed.
+
+The nested wire accepted-contract slice covers seven remaining concrete wire
+records and two private presence decoders. See NESTED_WIRE_CONTRACT_REVIEW.md and
+scripts/nested-wire-contracts.mjs for scope, native observations, exact selected
+construction reviews and compiling mutation controls. Other owners, aliases,
+locals, features and WASM contract execution remain separate obligations.
