@@ -71,10 +71,11 @@ impl StartupHost for Rt {
     }
     fn init_external_public_data(&self) -> Result<ExchangeFuture<'static, bool>, ExchangeError> {
         let base = self.base().clone();
+        let owner = base.clone();
         let factory = self.shared.extra.external_public_data.clone();
         Ok(Box::pin(async move {
             base.init_external_public_data(|options| match &factory {
-                Some(create) => create(options),
+                Some(create) => create(options, owner),
                 None => unreachable!("construction refuses externalPublicData without a provider"),
             })
             .await

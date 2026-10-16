@@ -27,9 +27,10 @@ use std::{
     sync::Arc,
 };
 
-/// Builds the `options.externalPublicData` provider; the host supplies it.
+/// Builds the `options.externalPublicData` provider for the exchange whose base it
+/// is given (the provider writes that exchange's Store); the host supplies it.
 pub type ExternalPublicDataFactory =
-    Rc<dyn Fn(&ExchangeOptionsExternalPublicData) -> Rc<dyn ExternalPublicData>>;
+    Rc<dyn Fn(&ExchangeOptionsExternalPublicData, Rc<BaseExchange>) -> Rc<dyn ExternalPublicData>>;
 
 /// Typed inputs of the Rust core, distinct from the JS-shaped constructor arguments.
 pub struct BaseExchangeParts {
@@ -421,13 +422,14 @@ pub fn create(
             "initExternalPublicData",
             Js::function("initExternalPublicData", move |_, _| {
                 let base = base.clone();
+                let owner = base.clone();
                 let factory = external_public_data.clone();
                 Ok(Js::Promise(Promise::spawn(
                     &runtime,
                     Box::pin(async move {
                         let used = base
                             .init_external_public_data(move |config| match factory {
-                                Some(factory) => factory(config),
+                                Some(factory) => factory(config, owner),
                                 None => unreachable!(
                                     "create() refuses externalPublicData without a provider"
                                 ),

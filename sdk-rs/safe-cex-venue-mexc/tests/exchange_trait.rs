@@ -117,6 +117,32 @@ fn script_venue(wire: &support::Wire) {
 }
 
 #[test]
+fn regular_order_id_uses_nanoid_entropy_and_filters_url_separators() {
+    let (o, rt, _, wire) = support::fixture();
+    script_venue(&wire);
+    drive(&rt, o.start()).unwrap();
+    calls(&wire);
+    // nanoid's alphabet has '-' at 8 and '_' at 44. uuid removes both after
+    // generating 21 characters, leaving these 19 fixed-entropy 'J' characters.
+    rt.random_values
+        .borrow_mut()
+        .extend([8.0 / 64.0, 44.0 / 64.0]);
+    let opts: PlaceOrderOpts = serde_json::from_value(json!({
+        "symbol":"BTCUSDT","type":"limit","side":"buy","amount":3,"price":59500
+    }))
+    .unwrap();
+    drive(&rt, o.base().place_order(o.as_ref(), opts)).unwrap();
+    let submitted = bodies(&calls(&wire), "POST", SUBMIT);
+    assert_eq!(submitted.len(), 1);
+    assert_eq!(
+        submitted[0]["externalOid"],
+        json!("ts_JJJJJJJJJJJJJJJJJJJ"),
+        "MEXC externalOid uses the source uuid helper, independent of host unique_id"
+    );
+    assert!(rt.random_values.borrow().is_empty());
+}
+
+#[test]
 fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
     let (o, rt, store, wire) = support::fixture();
     let venue: Rc<dyn Exchange> = o.clone();
@@ -235,7 +261,7 @@ fn all_sixteen_not_implemented_defaults_are_bound_on_the_constructed_venue() {
         submitted,
         [
             json!({"symbol":"BTC_USDT","price":"59500","vol":3,"side":1,"type":1,"openType":2,
-            "leverage":10,"externalOid":"ts_fixtureid"})
+            "leverage":10,"externalOid":"ts_JJJJJJJJJJJJJJJJJJJJJ"})
         ],
         "place_order payload"
     );
