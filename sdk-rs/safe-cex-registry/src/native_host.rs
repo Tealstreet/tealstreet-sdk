@@ -119,6 +119,68 @@ fn kraken_spot_ids() -> Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>> {
 }
 
 impl RustVenueHost for NativeVenueHost {
+    fn kucoin_external_public_data(&self) -> Option<ExternalPublicDataFactory> {
+        Some(gateway_factory(self.runtime.clone()))
+    }
+    fn kucoin(
+        &self,
+        name: safe_cex_types::ExchangeName,
+        options: &safe_cex_types::ExchangeOptions,
+    ) -> Result<safe_cex_venue_kucoin::kucoin_exchange::KucoinDependencies, ExchangeError> {
+        if self.remote.is_some() || options.remote_signer.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for kucoin on the native host",
+            ));
+        }
+        let runtime = self.runtime.clone();
+        let adapter = (self.adapter)()?;
+        Ok(safe_cex_venue_kucoin::kucoin_exchange::KucoinDependencies {
+            runtime: self.runtime.clone(),
+            http: Rc::new(move |options| {
+                native_http_options(
+                    &runtime,
+                    adapter.clone(),
+                    name.clone(),
+                    options,
+                    safe_cex_transport::RestRequest::default(),
+                    None,
+                )
+            }),
+            registry: Rc::new(safe_cex_transport::TransportRegistry::default()),
+            clock: safe_cex_store::virtual_clock::VIRTUAL_CLOCK.clone(),
+            retry_clock: Rc::new(NativeRetryClock(self.runtime.clone())),
+        })
+    }
+    fn mexc(
+        &self,
+        options: &safe_cex_types::ExchangeOptions,
+    ) -> Result<crate::rust_venues::MexcDependencies, ExchangeError> {
+        if self.remote.is_some() || options.remote_signer.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for mexc on the native host",
+            ));
+        }
+        let http = safe_cex_venue_mexc::client::create_api(
+            native_http_options(
+                &self.runtime,
+                (self.adapter)()?,
+                safe_cex_types::ExchangeName::Mexc,
+                options,
+                safe_cex_transport::RestRequest::default(),
+                None,
+            ),
+            &safe_cex_transport::TransportRegistry::default(),
+            Rc::new(NativeRetryClock(self.runtime.clone())),
+        )
+        .map_err(|e| ExchangeError::new(e.to_string()))?;
+        Ok(crate::rust_venues::MexcDependencies {
+            runtime: self.runtime.clone(),
+            http: Rc::new(http),
+            local_to_utc: Rc::new(|local| local),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
+
     #[allow(clippy::arc_with_non_send_sync)]
     fn hyperliquid(
         &self,
@@ -472,33 +534,61 @@ fn native_client(
     remote: Option<HostedSigner>,
     params_serializer: Option<safe_cex_exchange::http::ParamsSerializer>,
 ) -> Result<safe_cex_exchange::http::HttpClient, ExchangeError> {
-    let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
+    let mut input = native_http_options(runtime, adapter()?, exchange, options, request, remote);
+    input.params_serializer = params_serializer;
     safe_cex_exchange::http::safe_cex_axios_create(
-        safe_cex_exchange::http::HttpClientOptions {
-            params_serializer,
-            response_transform: None,
-            exchange,
-            options: options.clone(),
-            request,
-            provider: Some(runtime.transport()),
-            signer: remote.as_ref().map(|(signer, _)| {
-                safe_cex_exchange::js_runtime::client::transport_signer(signer.clone())
-            }),
-            account_name: remote.and_then(|(_, name)| name),
-            adapter: adapter()?,
-            host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
-            runtime: exchange_runtime,
-            store: None,
-            stats: None,
-            logs: None,
-            every: vec![],
-            periodic: vec![],
-            next_id: Arc::new(safe_cex_exchange::native::nanoid),
-            signing_now: Arc::new(|| safe_cex_transport::native::wall_clock_ms() as u64),
-        },
+        input,
         &safe_cex_transport::TransportRegistry::default(),
     )
     .map_err(|e| ExchangeError::new(e.to_string()))
+}
+
+fn native_http_options(
+    runtime: &Rc<dyn WsRuntime>,
+    adapter: Arc<dyn RestAdapter>,
+    exchange: safe_cex_types::ExchangeName,
+    options: &safe_cex_types::ExchangeOptions,
+    request: safe_cex_transport::RestRequest,
+    remote: Option<HostedSigner>,
+) -> safe_cex_exchange::http::HttpClientOptions {
+    let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
+    safe_cex_exchange::http::HttpClientOptions {
+        params_serializer: None,
+        response_transform: None,
+        exchange,
+        options: options.clone(),
+        request,
+        provider: Some(runtime.transport()),
+        signer: remote.as_ref().map(|(signer, _)| {
+            safe_cex_exchange::js_runtime::client::transport_signer(signer.clone())
+        }),
+        account_name: remote.and_then(|(_, name)| name),
+        adapter,
+        host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
+        runtime: exchange_runtime,
+        store: None,
+        stats: None,
+        logs: None,
+        every: vec![],
+        periodic: vec![],
+        next_id: Arc::new(safe_cex_exchange::native::nanoid),
+        signing_now: Arc::new(|| safe_cex_transport::native::wall_clock_ms() as u64),
+    }
+}
+
+struct NativeRetryClock(Rc<dyn WsRuntime>);
+impl safe_cex_transport::rate_limit::RateLimitClock for NativeRetryClock {
+    fn now_ms(&self) -> u64 {
+        self.0.now_ms() as u64
+    }
+    fn sleep_ms(&self, milliseconds: u64) -> safe_cex_transport::TransportFuture<'_, ()> {
+        Box::pin(async move {
+            self.0
+                .sleep(milliseconds)
+                .await
+                .map_err(|e| safe_cex_transport::TransportError::Host(e.message))
+        })
+    }
 }
 
 /// BloFin's common HTTP builder: (options, baseURL, timeout budget) -> adapter.
