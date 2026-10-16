@@ -3,6 +3,8 @@
 Implementation foundation: `0c95c79ff1`. Native waiter repair: `9041a2f57a`.
 Supplied-account regressions: `7ce9221719` and fixture correction `2d171832bf`.
 Latest master/Balance integration measured at `a799d01d06`.
+Final facade/socket/worker integration: `8a015b33ed` (including #171 facade fix
+`3a63e1bd28` and independently reviewed #152 `231609b464`).
 Shared dependencies: socket registration #152, data descriptors #169, account carrier #171.
 
 The full configured venue suite passed **198 tests across 29 targets** after the
@@ -10,6 +12,9 @@ account carrier integration. Its single native signing test executes **96** case
 against the maintained TypeScript signing helper and installed official V2 SDK:
 six tick sizes, four signature types, both sides, and both contract families.
 It compares signatures, native order fields, own-key order, and exact wire bytes.
+The final facade integration also passes three SDK construction/patch tests,
+54 shared-runtime regressions, and six enabled cancellation inventory tests
+(one pre-existing export test is intentionally ignored).
 
 After merging the source currency Balance model from master, all **15 concrete
 E2Es**, **13 registry tests**, and **two real native HTTP tests** passed. The latter
@@ -19,9 +24,10 @@ signer types 0–3, and supplied-secret HMAC over exact transmitted order bytes 
 checked through the concrete constructor. No production code invokes Node.
 
 Scoped parity passed with **141 rows / 439 public Rust items**, no exemptions.
-Global parity passed with **7,459 rows / 17,058 public Rust items**, zero findings.
+Global parity passed with **7,459 rows / 17,082 public Rust items**, zero findings.
 Host all-target clippy, wasm library clippy, registry-test clippy, and formatting
-are the compilation gates; see the PR for their final integration results.
+passed. Final integration also passes public SDK host all-target and wasm library
+clippy, covering the facade initializer/patch forwarding required by #171.
 
 ## Controls
 
