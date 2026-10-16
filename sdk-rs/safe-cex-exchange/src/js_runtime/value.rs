@@ -453,6 +453,11 @@ impl Js {
                 {
                     return proto.get_key(key);
                 }
+                if let Js::Function(f) = self
+                    && key == utf16("name").as_ref()
+                {
+                    return Ok(Js::String(f.name.clone()));
+                }
                 Ok(Js::Undefined)
             }
         }

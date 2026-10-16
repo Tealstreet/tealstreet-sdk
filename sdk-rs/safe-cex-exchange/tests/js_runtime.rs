@@ -1754,3 +1754,149 @@ fn create_xhr_with_secondary_key_proxy_precedence() {
     // Direct transport has no public CORS proxy: the key is set to undefined.
     assert_eq!(overrides(keys, Js::Undefined), (Value::Null, json!(true)));
 }
+
+#[test]
+fn store_facade_update_positions_patches_each_pair_by_position_id() {
+    use safe_cex_store::store::DefaultStore;
+    let store = Rc::new(DefaultStore::new());
+    let position = |id: &str| {
+        serde_json::from_value(json!({"id":id,"symbol":id,"side":"long","entryPrice":1,
+            "notional":1,"leverage":1,"unrealizedPnl":0,"contracts":1,"liquidationPrice":0}))
+        .unwrap()
+    };
+    store
+        .add_or_update_positions(vec![position("BTC"), position("ETH")])
+        .unwrap();
+    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone());
+    // ts: updatePositions(updates: Array<[Pick<Position, 'id'>, Partial<Position>]>)
+    let pair = |id: &str, pnl: f64| {
+        Js::array(vec![
+            Js::object(vec![("id", Js::str(id))]),
+            Js::object(vec![("unrealizedPnl", Js::Number(pnl))]),
+        ])
+    };
+    facade
+        .call_method(
+            "updatePositions",
+            vec![Js::array(vec![pair("ETH", 7.0), pair("BTC", 3.0)])],
+        )
+        .unwrap();
+    let pnl: Vec<f64> = store.positions().iter().map(|p| p.unrealized_pnl).collect();
+    assert_eq!(pnl, [3.0, 7.0]);
+}
+
+#[test]
+fn number_converts_bigint_like_ecmascript() {
+    let g = library();
+    let number = |args: Vec<Js>| run(&g, "Number", args).as_f64().unwrap();
+    let big = |text: &str| Js::BigInt(Rc::new(text.parse().unwrap()));
+    assert_eq!(number(vec![big("5")]), 5.0, "Number(5n) === 5");
+    assert_eq!(number(vec![big("-42")]), -42.0);
+    // 2^53 + 1 is not a double; the nearest-even double is 2^53.
+    assert_eq!(
+        number(vec![big("9007199254740993")]),
+        9_007_199_254_740_992.0
+    );
+    assert_eq!(number(vec![]), 0.0, "Number() is 0");
+    assert_eq!(number(vec![Js::str(" 12 ")]), 12.0);
+}
+
+#[test]
+fn function_name_reads_its_function_data_name() {
+    let f = Js::function("handleTickers", |_, _| Ok(Js::Undefined));
+    assert_eq!(f.get("name").unwrap().to_display(), "handleTickers");
+    f.define("name", Js::str("renamed")).unwrap();
+    assert_eq!(f.get("name").unwrap().to_display(), "renamed");
+}
+
+#[test]
+fn client_rejection_handlers_follow_the_axios_promise_chain() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    let interceptors = xhr.get("interceptors").unwrap();
+    let order = Rc::new(RefCell::new(Vec::<String>::new()));
+    let log = |tag: &'static str, result: fn(Js) -> Result<Js, Thrown>| {
+        let order = order.clone();
+        Js::function("", move |_, a| {
+            order.borrow_mut().push(tag.into());
+            result(arg(&a, 0))
+        })
+    };
+    let throws: fn(Js) -> Result<Js, Thrown> = |_| Err(Thrown::error("Error", "boom"));
+    let passes: fn(Js) -> Result<Js, Thrown> = Ok;
+    let recovers: fn(Js) -> Result<Js, Thrown> =
+        |error| Ok(Js::object(vec![("recovered", error.get("message")?)]));
+    let rethrows: fn(Js) -> Result<Js, Thrown> = |error| Err(Thrown::new(error));
+    let request = interceptors.get("request").unwrap();
+    let response = interceptors.get("response").unwrap();
+    // LIFO: "outer" runs first and throws, so "inner"'s onRejected sees it.
+    request
+        .call_method(
+            "use",
+            vec![log("inner ok", passes), log("inner rejected", rethrows)],
+        )
+        .unwrap();
+    request
+        .call_method(
+            "use",
+            vec![log("outer ok", throws), log("outer rejected", rethrows)],
+        )
+        .unwrap();
+    response
+        .call_method(
+            "use",
+            vec![log("first ok", passes), log("first rejected", rethrows)],
+        )
+        .unwrap();
+    response
+        .call_method(
+            "use",
+            vec![log("second ok", passes), log("second rejected", recovers)],
+        )
+        .unwrap();
+    response
+        .call_method("use", vec![log("third ok", passes), Js::Undefined])
+        .unwrap();
+    let result = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/ok")]).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        *order.borrow(),
+        [
+            "outer ok",
+            "inner rejected",
+            "first rejected",
+            "second rejected",
+            "third ok"
+        ]
+    );
+    assert_eq!(result.get("recovered").unwrap().to_display(), "boom");
+    assert!(
+        http.sent.borrow().is_empty(),
+        "a rejected request is never sent"
+    );
+
+    // An adapter-side failure (non-2xx) reaches the response rejection handlers.
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    let response = xhr.get("interceptors").unwrap().get("response").unwrap();
+    response
+        .call_method("use", vec![Js::Undefined, log("status rejected", recovers)])
+        .unwrap();
+    order.borrow_mut().clear();
+    let result = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/fail")]).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(*order.borrow(), ["status rejected"]);
+    assert_eq!(
+        result.get("recovered").unwrap().to_display(),
+        "Request failed with status code 500"
+    );
+}
