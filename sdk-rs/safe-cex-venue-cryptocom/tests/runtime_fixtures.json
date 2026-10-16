@@ -735,7 +735,7 @@
     "mode": "retry",
     "network": 0,
     "errorInput": {},
-    "expectedRetry": 0,
+    "expectedRetry": false,
     "expectedCounts": [
       0,
       0,
@@ -749,6 +749,73 @@
     "network": true,
     "errorInput": {},
     "expectedRetry": true,
+    "expectedCounts": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "op": "api",
+    "name": "retry-signature-write",
+    "mode": "retry",
+    "network": true,
+    "signature": true,
+    "errorInput": {
+      "config": {
+        "url": "/private/create-order"
+      }
+    },
+    "expectedRetry": true,
+    "expectedCounts": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "op": "api",
+    "name": "replayed-envelope-string",
+    "mode": "request",
+    "config": {
+      "url": "/private/create-order",
+      "data": "{\"method\":\"private/create-order\",\"api_key\":\"KEY\",\"params\":{\"quantity\":\"2\"},\"sig\":\"stale\",\"nonce\":9}"
+    },
+    "expectedCounts": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "op": "api",
+    "name": "response-signature-resend",
+    "mode": "response",
+    "resend": true,
+    "response": {
+      "data": {
+        "code": 40101
+      }
+    },
+    "expectedCounts": [
+      0,
+      0,
+      0
+    ]
+  },
+  {
+    "op": "api",
+    "name": "response-second-pass",
+    "mode": "response",
+    "repeat": true,
+    "response": {
+      "data": {
+        "code": 0,
+        "result": {
+          "value": 7
+        }
+      }
+    },
     "expectedCounts": [
       0,
       0,

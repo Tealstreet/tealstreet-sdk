@@ -586,6 +586,7 @@ impl RustVenueHost for Venues {
             }),
             install: Rc::new(|_| Ok(())),
             external_public_data: None,
+            remote_signer_account_name: None,
         })
     }
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError> {

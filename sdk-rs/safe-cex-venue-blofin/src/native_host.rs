@@ -284,6 +284,7 @@ impl BlofinExchangeHost for NativeHost {
         parent.private_socket.set(socket.id);
         let host = Rc::new(PrivateHost {
             socket,
+            stream,
             base: Rc::downgrade(base.get()),
             parent,
             context: context.clone(),
@@ -312,13 +313,14 @@ impl BlofinExchangeHost for NativeHost {
     fn assign_private_socket(
         &self,
         base: &NativeBase,
-        _: Rc<PrivateSocket>,
+        socket: Rc<PrivateSocket>,
     ) -> Result<(), ExchangeError> {
         let host = self
             .private
             .borrow()
             .clone()
             .ok_or_else(|| ExchangeError::new("BloFin private host was not created"))?;
+        *host.stream.borrow_mut() = Rc::downgrade(&socket);
         base.get()
             .set_socket(SocketSlot::Private, Some(host.socket.clone()));
         Ok(())
@@ -854,6 +856,7 @@ impl PublicDataHost for PublicHost {
 
 pub(crate) struct PrivateHost {
     socket: Rc<BaseWebSocket>,
+    stream: Rc<RefCell<Weak<PrivateSocket>>>,
     base: Weak<BaseExchange>,
     parent: Rc<Parent>,
     context: Rc<ExchangeContext>,
