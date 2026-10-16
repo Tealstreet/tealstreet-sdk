@@ -32,6 +32,21 @@ pub trait ApiHost: ErrorHost {
         exchange: Handle<Self>,
     ) -> ReadResult<Self, Handle<Self>>;
     fn retry_condition(&self, posted: Option<Vec<&'static str>>) -> ReadResult<Self, Handle<Self>>;
+    /// Spot binds the lazy arrow `(error) => networkErrorOnRead(readsAndPosted(...posted))(error)
+    /// || signatureRejectedResponse(isKrakenSpotSignatureRejection)(error)`.
+    fn signature_retry_condition(
+        &self,
+        posted: Vec<&'static str>,
+    ) -> ReadResult<Self, Handle<Self>>;
+    /// Binds `resendOnSignatureRejection(xhr, response, isKrakenSpotSignatureRejection)`:
+    /// the resend promise or undefined; hosts decide through
+    /// `safe_cex_transport::signature_rejection`.
+    fn resend_on_signature_rejection(
+        &self,
+        client: Handle<Self>,
+        response: Handle<Self>,
+    ) -> ReadResult<Self, Handle<Self>>;
+    fn qs_parse(&self, value: Handle<Self>) -> ReadResult<Self, Handle<Self>>;
     fn retry(&self, client: Handle<Self>, config: Handle<Self>) -> ReadResult<Self, ()>;
     fn install_transport(
         &self,
@@ -58,6 +73,20 @@ pub trait ApiHost: ErrorHost {
     ) -> ReadResult<Self, Handle<Self>>;
     fn join(&self, value: &Self::Value, separator: &str) -> ReadResult<Self, Handle<Self>>;
     fn mark_skip(&self, config: Handle<Self>) -> ReadResult<Self, ()>;
+}
+// ts: isKrakenSpotSignatureRejection
+pub fn is_kraken_spot_signature_rejection(
+    data: &serde_json::Value,
+) -> Result<bool, safe_cex_num::JsCoercionError> {
+    let Some(errors) = data.get("error").and_then(serde_json::Value::as_array) else {
+        return Ok(false);
+    };
+    for error in errors {
+        if safe_cex_num::js_string(Some(error))?.contains("EAPI:Invalid signature") {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 pub struct Api<H: ApiHost> {
     pub client: Handle<H>,
@@ -124,7 +153,10 @@ fn create<H: ApiHost>(
     } else {
         None
     };
-    let condition = h.retry_condition(posted)?;
+    let condition = match posted {
+        Some(posted) => h.signature_retry_condition(posted)?,
+        None => h.retry_condition(None)?,
+    };
     h.retry(
         client.clone(),
         obj(
@@ -264,8 +296,18 @@ impl<H: ApiHost> Api<H> {
         counter.set(previous + 1.0);
         let nonce = h.text(&h.string(&*h.number(timestamp * 1000.0 + previous % 1000.0))?);
         if self.spot {
+            // ts: unsignedFormParams. A replayed config carries the form body it
+            // sent: re-sign its params under a new nonce.
             let data = field(h, &config, "data")?;
-            let data = if h.truthy(&data) && h.is_object(&*field(h, &config, "data")?) {
+            let data = if h.is_string(&data) {
+                let parsed = h.qs_parse(data)?;
+                let rest = h
+                    .entries(&parsed)?
+                    .into_iter()
+                    .filter(|(key, _)| key != &units("nonce"))
+                    .collect();
+                h.object(rest)?
+            } else if h.truthy(&data) && h.is_object(&*field(h, &config, "data")?) {
                 field(h, &config, "data")?
             } else {
                 obj(h, vec![])?
@@ -347,6 +389,12 @@ impl<H: ApiHost> Api<H> {
     }
     pub async fn success(&self, response: Handle<H>) -> ReadResult<H, Handle<H>> {
         let h = &*self.host;
+        if self.spot {
+            let resend = h.resend_on_signature_rejection(self.client.clone(), response.clone())?;
+            if h.truthy(&resend) {
+                return Ok(resend);
+            }
+        }
         if h.truthy(&*field(h, &response, "data")?) {
             let data = field(h, &response, "data")?;
             if self.spot {

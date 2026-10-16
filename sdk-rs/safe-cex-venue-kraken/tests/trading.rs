@@ -288,6 +288,7 @@ impl TradingHost for Host {
         }
     }
 }
+const LAZY_CONDITION: &str = "\u{0}lazy retryCondition";
 impl ApiHost for Host {
     fn create_client(
         &self,
@@ -325,7 +326,48 @@ impl ApiHost for Host {
         ]);
         Ok(text("condition"))
     }
+    fn signature_retry_condition(&self, _posted: Vec<&'static str>) -> Result<Rc<Raw>, E> {
+        // The lazy arrow evaluates nothing here; JSON capture drops a function field.
+        Ok(text(LAZY_CONDITION))
+    }
+    fn resend_on_signature_rejection(
+        &self,
+        _client: Rc<Raw>,
+        _response: Rc<Raw>,
+    ) -> Result<Rc<Raw>, E> {
+        self.event(vec![
+            ("kind", text("resend")),
+            ("predicate", text("isKrakenSpotSignatureRejection")),
+        ]);
+        Ok(if flag(&self.cfg, "resend") {
+            text("RESENT")
+        } else {
+            Rc::new(Raw::Undefined)
+        })
+    }
+    fn qs_parse(&self, v: Rc<Raw>) -> Result<Rc<Raw>, E> {
+        self.event(vec![("kind", text("qsParse")), ("value", v.clone())]);
+        let Raw::Text(body) = &*v else {
+            panic!("qs.parse fixture input is a string")
+        };
+        let body = String::from_utf16(body).unwrap();
+        let mut entries: Vec<(Vec<u16>, Rc<Raw>)> = vec![];
+        for pair in body.split('&').filter(|pair| !pair.is_empty()) {
+            let (key, value) = pair.split_once('=').unwrap_or((pair, ""));
+            assert!(
+                !key.contains(['%', '+', '[']) && !value.contains(['%', '+']),
+                "fixture form bodies stay plain"
+            );
+            entries.push((units(key), text(value)));
+        }
+        Ok(Rc::new(Raw::Object(RefCell::new(entries))))
+    }
     fn retry(&self, _client: Rc<Raw>, config: Rc<Raw>) -> Result<(), E> {
+        if let Raw::Object(fields) = &*config {
+            fields.borrow_mut().retain(
+                |(_, value)| !matches!(&**value, Raw::Text(t) if *t == units(LAZY_CONDITION)),
+            );
+        }
         self.event(vec![("kind", text("retry")), ("config", config)]);
         if flag(&self.cfg, "retryFail") {
             Err(self.original.clone())
@@ -692,10 +734,14 @@ fn api_family(spot: bool, floor: usize) {
             let api = &clients[selected];
             let (result, original) = match step["kind"].as_str().unwrap() {
                 "request" => (api.request(cfg.clone()), Some(cfg.clone())),
-                "success" => (
-                    complete(api.success(cfg.clone()), &h, h.events.borrow().len()),
-                    Some(cfg.clone()),
-                ),
+                "success" => {
+                    // Spot's resend check records its event before the source's first await.
+                    let prefix = h.events.borrow().len() + usize::from(spot);
+                    (
+                        complete(api.success(cfg.clone()), &h, prefix),
+                        Some(cfg.clone()),
+                    )
+                }
                 "rejected" => {
                     let response = h.original.response.clone().unwrap_or(cfg.clone());
                     (
@@ -768,5 +814,28 @@ fn futures_api_native() {
 }
 #[test]
 fn spot_api_native() {
-    api_family(true, 34);
+    api_family(true, 35);
+}
+#[test]
+fn spot_signature_predicate_matches_actual_typescript() {
+    let corpus = &oracle()["signature"];
+    let expected = [true, true, false, false, false, false, false, false, false];
+    let inputs = corpus["corpus"].as_array().unwrap();
+    assert_eq!(inputs.len(), expected.len(), "spot signature corpus floor");
+    for ((data, rejected), source) in inputs
+        .iter()
+        .zip(expected)
+        .zip(corpus["results"].as_array().unwrap())
+    {
+        assert_eq!(
+            safe_cex_venue_kraken::api::is_kraken_spot_signature_rejection(data).unwrap(),
+            rejected,
+            "native spot signature predicate {data}"
+        );
+        assert_eq!(
+            *source,
+            serde_json::json!(rejected),
+            "source spot signature predicate {data}"
+        );
+    }
 }

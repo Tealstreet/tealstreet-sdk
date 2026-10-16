@@ -121,5 +121,6 @@ api.spotApi.push(
  ...['EAPI:Invalid key','EAPI:Invalid nonce','EAPI:Invalid signature','EGeneral:Permission denied','EOrder:Rate limit exceeded','EOrder:Insufficient funds','other'].map(error=>({options,exchange,clients:1,steps:[success({data:{error:[error,'secondary']}})]})),
  {options,exchange,clients:1,steps:[success({data:{error:'ignored'}})]},
  {options,exchange,clients:1,errorResponse:{status:500,data:{error:'not-array'}},steps:[rejected()]},
+ {options,exchange,clients:1,resend:true,steps:[success({data:{error:['EAPI:Invalid signature']}})]},
 );
 module.exports={trading,api};
