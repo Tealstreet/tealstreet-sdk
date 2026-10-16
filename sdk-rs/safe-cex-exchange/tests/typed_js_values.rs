@@ -142,3 +142,73 @@ fn typed_projection_keeps_enum_and_optional_object_shapes() {
     );
     assert!(to_typed::<String>(&Js::String(vec![0xd800].into())).is_err());
 }
+
+#[test]
+fn currency_rows_keep_source_shapes_through_typed_store_updates() {
+    use safe_cex_exchange::js_runtime::{store, value::from_json};
+    use safe_cex_store::store::DefaultStore;
+    use safe_cex_types::CurrencyBalance;
+    use serde_json::json;
+    use std::rc::Rc;
+    let source = json!({"used":6.0,"free":9.0,"total":15.0,"upnl":0.0,"currencies":{
+        "USD":{"available":9.0,"locked":6.0},
+        "BTC":{"used":1.0,"free":2.0,"total":3.0,"upnl":4.0}
+    }});
+    let native = Rc::new(DefaultStore::new());
+    let facade = store::facade(native.clone());
+    facade
+        .call_method("update", vec![from_json(&json!({"balance":source}))])
+        .unwrap();
+    let actual = native.balance();
+    assert_eq!(
+        serde_json::to_value(&*actual).unwrap(),
+        source,
+        "Store preserves currency field names without normalization"
+    );
+    let currencies = actual.currencies.as_ref().unwrap();
+    assert!(matches!(
+        currencies.get("USD").unwrap(),
+        CurrencyBalance::AvailableLocked {
+            available: 9.0,
+            locked: 6.0
+        }
+    ));
+    assert_eq!(
+        currencies.get("BTC").unwrap().as_balance().unwrap().total,
+        3.0
+    );
+    let js = facade.get("balance").unwrap();
+    assert_eq!(to_json(&js).unwrap(), source);
+    let usd = js.get("currencies").unwrap().get("USD").unwrap();
+    usd.set("available", Js::Number(f64::INFINITY)).unwrap();
+    usd.set("locked", Js::Number(-0.0)).unwrap();
+    let native: safe_cex_types::Balance = to_typed(&js).unwrap();
+    match native.currencies.as_ref().unwrap().get("USD").unwrap() {
+        CurrencyBalance::AvailableLocked { available, locked } => {
+            assert_eq!(*available, f64::INFINITY);
+            assert_eq!(locked.to_bits(), (-0.0_f64).to_bits());
+        }
+        _ => panic!("source currency shape was normalized"),
+    }
+    let projected = from_typed(&native)
+        .unwrap()
+        .get("currencies")
+        .unwrap()
+        .get("USD")
+        .unwrap();
+    assert_eq!(
+        projected.get("available").unwrap().as_f64().unwrap(),
+        f64::INFINITY
+    );
+    assert_eq!(
+        projected.get("locked").unwrap().as_f64().unwrap().to_bits(),
+        (-0.0_f64).to_bits()
+    );
+    for invalid in [
+        json!([1, 2]),
+        json!({"available":1}),
+        json!({"available":null,"locked":2}),
+    ] {
+        assert!(serde_json::from_value::<CurrencyBalance>(invalid).is_err());
+    }
+}
