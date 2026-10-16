@@ -32,6 +32,43 @@ remaining alias families, runtime decoder owners, local helpers, dependency and
 feature/target obligations retain their separate reviews. No package acceptance is
 claimed by these six contracts.
 
+# Two waiting-status owner reviews
+
+`OrderResponseStatusCase3` admits only `waitingForFill`; `OrderResponseStatusCase4`
+admits only `waitingForTrigger`. Each concrete native variant, private wire rename
+and String admission was reviewed against the separate maintained TS union branch
+at hyperliquid.types.ts lines 190–191. Production source is unchanged. The outer
+status union and each private companion retain their own review obligations.
+
+The existing literal fixture now also checks both status variants, their exact wire
+tags, JSON whitespace, rejection of the other status, every valid tagged-unit object
+and seven other invalid values through six native ingress routes. With merged #359,
+**14/14 integrated literal tests pass**. The two direct contract expressions pass
+**22 independently authored cases / 132 native route observations**, comparing
+variants and fixed ordinals before serialization. The original four-owner adapter
+runner still passes its unchanged 50 cases / 300 observations.
+
+Run `scripts/accepted-literal-native.py --cohort=statuses` for the two contract
+adapters and `scripts/accepted-literal-controls.py --cohort=statuses` for the two
+String admission controls. The default cohort remains the original four order
+literals. Both controls **compile and fail their named tagged-object assertions**;
+exact source restoration passes each test and the complete six-test fixture.
+No compiler failure is counted as a control; temporary adapter files are removed.
+
+The master merge retained all 49 existing contract rows and appended only these
+two rows. Every row from both merge stages was verified with deep equality,
+including signed zero. Fresh compiler API/eligibility checks pass for both owners
+and retain every original census key. Current scope is **51 owner contracts plus
+two Clone reviews: 53 reviewed of 572 entries, 519 unreviewed**. This includes the
+534 actual owners, 36 aliases and two construction obligations; the two additional
+owners absent from the old 570 census remain unreviewed.
+
+Strict native all-targets clippy, formatting and parity pass (7459 rows, 17206
+public items, zero findings). The ordinary accepted-set gate still refuses the
+actual `private_class::PrivateValue` associated projection before native package
+receipts. Its finite mechanism and six-alias consumer are separate PRs. No package,
+dependency, local-helper, feature or Wasm acceptance is claimed by this two-row batch.
+
 # Eight account, market and ledger string-enum reviews
 
 Individually reviewed contracts cover `HyperliquidUserAbstractionMode`, both

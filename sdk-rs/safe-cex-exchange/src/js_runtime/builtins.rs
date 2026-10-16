@@ -484,11 +484,52 @@ fn flatten_into(source: &[Option<Js>], depth: f64, out: &mut Vec<Js>) {
     }
 }
 
-fn map_entries(this: &Js) -> Rc<RefCell<Vec<(Js, Js)>>> {
+fn map_entries(this: &Js) -> Rc<RefCell<super::collections::Collection<(Js, Js)>>> {
     match this {
         Js::Map(m) => m.clone(),
         _ => Rc::default(),
     }
+}
+
+fn cached_iterator_member(this: &Js, key: &'static str, member: Js) -> Js {
+    let cached = match this {
+        Js::Map(entries) => entries
+            .borrow()
+            .iterator_methods
+            .borrow()
+            .get(key)
+            .and_then(std::rc::Weak::upgrade),
+        Js::Set(entries) => entries
+            .borrow()
+            .iterator_methods
+            .borrow()
+            .get(key)
+            .and_then(std::rc::Weak::upgrade),
+        _ => None,
+    };
+    if let Some(function) = cached {
+        return Js::Function(function);
+    }
+    if let Js::Function(function) = &member {
+        match this {
+            Js::Map(entries) => {
+                entries
+                    .borrow()
+                    .iterator_methods
+                    .borrow_mut()
+                    .insert(key, Rc::downgrade(function));
+            }
+            Js::Set(entries) => {
+                entries
+                    .borrow()
+                    .iterator_methods
+                    .borrow_mut()
+                    .insert(key, Rc::downgrade(function));
+            }
+            _ => {}
+        }
+    }
+    member
 }
 
 fn map_member(this: Js, name: &str) -> Option<Js> {
@@ -510,6 +551,11 @@ fn map_member(this: Js, name: &str) -> Option<Js> {
         }),
         "set" => method(name, move |a| {
             let k = arg(&a, 0);
+            let k = if k.as_f64() == Some(0.0) {
+                Js::Number(0.0)
+            } else {
+                k
+            };
             let v = arg(&a, 1);
             let mut entries = m.borrow_mut();
             match entries.iter_mut().find(|(x, _)| x.same_value_zero(&k)) {
@@ -530,24 +576,30 @@ fn map_member(this: Js, name: &str) -> Option<Js> {
             m.borrow_mut().clear();
             Ok(Js::Undefined)
         }),
-        "keys" => method(name, move |_| {
-            Ok(Js::array(
-                m.borrow().iter().map(|(k, _)| k.clone()).collect(),
-            ))
-        }),
-        "values" => method(name, move |_| {
-            Ok(Js::array(
-                m.borrow().iter().map(|(_, v)| v.clone()).collect(),
-            ))
-        }),
-        "entries" => method(name, move |_| {
-            Ok(Js::array(
-                m.borrow()
-                    .iter()
-                    .map(|(k, v)| Js::array(vec![k.clone(), v.clone()]))
-                    .collect(),
-            ))
-        }),
+        "keys" | "values" | "entries" => {
+            let kind = match name {
+                "keys" => super::collections::Kind::Key,
+                "values" => super::collections::Kind::Value,
+                _ => super::collections::Kind::Entry,
+            };
+            let key = match name {
+                "keys" => "keys",
+                "values" => "values",
+                _ => "entries",
+            };
+            cached_iterator_member(
+                &this,
+                key,
+                Js::function(name, move |receiver, _| {
+                    if !matches!(receiver, Js::Map(_)) {
+                        return Err(Thrown::type_error(
+                            "Map iterator method called on incompatible receiver",
+                        ));
+                    }
+                    Ok(super::collections::collection_iterator(receiver, kind))
+                }),
+            )
+        }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
             let snapshot = m.borrow().clone();
@@ -570,6 +622,11 @@ fn set_member(this: Js, name: &str) -> Option<Js> {
         }),
         "add" => method(name, move |a| {
             let k = arg(&a, 0);
+            let k = if k.as_f64() == Some(0.0) {
+                Js::Number(0.0)
+            } else {
+                k
+            };
             if !s.borrow().iter().any(|x| x.same_value_zero(&k)) {
                 s.borrow_mut().push(k);
             }
@@ -586,7 +643,33 @@ fn set_member(this: Js, name: &str) -> Option<Js> {
             s.borrow_mut().clear();
             Ok(Js::Undefined)
         }),
-        "values" | "keys" => method(name, move |_| Ok(Js::array(s.borrow().clone()))),
+        "values" | "keys" | "entries" => {
+            let kind = if name == "entries" {
+                super::collections::Kind::Entry
+            } else {
+                super::collections::Kind::Value
+            };
+            let key = if name == "entries" {
+                "entries"
+            } else {
+                "values"
+            };
+            cached_iterator_member(
+                &this,
+                key,
+                Js::function(
+                    if name == "keys" { "values" } else { name },
+                    move |receiver, _| {
+                        if !matches!(receiver, Js::Set(_)) {
+                            return Err(Thrown::type_error(
+                                "Set iterator method called on incompatible receiver",
+                            ));
+                        }
+                        Ok(super::collections::collection_iterator(receiver, kind))
+                    },
+                ),
+            )
+        }
         "forEach" => method(name, move |a| {
             let f = arg(&a, 0);
             for v in s.borrow().clone() {

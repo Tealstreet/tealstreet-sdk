@@ -163,6 +163,22 @@ fn items(v: &Js) -> Result<Vec<Js>, Thrown> {
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", v.to_display())))
 }
 
+/// Source for-of advances the shared iterator between body callbacks.
+fn for_of(value: &Js, mut body: impl FnMut(Js) -> Result<(), Thrown>) -> Result<(), Thrown> {
+    let iterator = value.iterator()?;
+    let next = iterator.get("next")?;
+    loop {
+        let step = next.call(iterator.clone(), vec![])?;
+        if !step.is_object() {
+            return Err(Thrown::type_error("Iterator result is not an object"));
+        }
+        if step.get("done")?.truthy() {
+            return Ok(());
+        }
+        body(step.get("value")?)?;
+    }
+}
+
 /// Resolve a capture name against the scope.
 pub(crate) fn capture(scope: &OkxScope, name: &str) -> Result<Js, Thrown> {
     // Constructor bodies run before the receiver exists; super() assembles it.
@@ -276,7 +292,7 @@ pub(crate) fn market_ops(scope: &OkxScope) -> Rc<MarketAccountOps<Js, Thrown>> {
             Ok(Js::array(out))
         }),
         reduce: Rc::new(|v, init, f| items(&v)?.into_iter().try_fold(init, |acc, x| f(acc, x))),
-        for_of: Rc::new(|v, f| items(&v)?.into_iter().try_for_each(|x| f(x))),
+        for_of: Rc::new(|v, f| for_of(&v, |x| f(x))),
         sum_by: Rc::new(|sum, values, mapper| {
             let mut args = vec![values];
             if let Some(m) = mapper {
@@ -409,7 +425,7 @@ pub(crate) fn read_ops(scope: &OkxScope) -> OrderReadOps<'static, Js, Thrown> {
         invoke: inv,
         await_value: Rc::new(|v| Box::pin(await_js(v))),
         intrinsic: intr,
-        for_of: Rc::new(|v, f| items(&v)?.into_iter().try_for_each(|x| f(x))),
+        for_of: Rc::new(|v, f| for_of(&v, |x| f(x))),
         truthy: m.truthy.clone(),
         nullish: m.nullish.clone(),
         equal: m.equal.clone(),

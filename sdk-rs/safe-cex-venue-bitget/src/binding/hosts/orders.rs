@@ -672,7 +672,10 @@ fn map_inverse_order(rt: &Rt, args: Vec<Js>) -> Result<Js, Thrown> {
 /// (`terminalOrderTombstones.get`), so each call loads them, runs the body and
 /// writes the result back into the same Map objects.
 fn with_lifecycle(rt: &Rt, body: impl FnOnce(&mut OrderLifecycleCaches)) -> Result<(), Thrown> {
-    let map = |name: &str| -> Result<Rc<RefCell<Vec<(Js, Js)>>>, Thrown> {
+    let map = |name: &str| -> Result<
+        Rc<RefCell<safe_cex_exchange::js_runtime::collections::Collection<(Js, Js)>>>,
+        Thrown,
+    > {
         match rt.this.get(name)? {
             Js::Map(m) => Ok(m),
             nullish @ (Js::Undefined | Js::Null) => Err(Thrown::type_error(&format!(
@@ -686,7 +689,10 @@ fn with_lifecycle(rt: &Rt, body: impl FnOnce(&mut OrderLifecycleCaches)) -> Resu
     };
     let tombstones = map("terminalOrderTombstones")?;
     let open = map("recentWsOpenOrders")?;
-    let load = |m: &Rc<RefCell<Vec<(Js, Js)>>>| -> Result<IndexMap<String, f64>, Thrown> {
+    let load = |m: &Rc<
+        RefCell<safe_cex_exchange::js_runtime::collections::Collection<(Js, Js)>>,
+    >|
+     -> Result<IndexMap<String, f64>, Thrown> {
         let entries = m.borrow().clone();
         entries
             .iter()
@@ -699,7 +705,9 @@ fn with_lifecycle(rt: &Rt, body: impl FnOnce(&mut OrderLifecycleCaches)) -> Resu
     };
     body(&mut caches);
     let store =
-        |m: &Rc<RefCell<Vec<(Js, Js)>>>, next: &IndexMap<String, f64>| -> Result<(), Thrown> {
+        |m: &Rc<RefCell<safe_cex_exchange::js_runtime::collections::Collection<(Js, Js)>>>,
+         next: &IndexMap<String, f64>|
+         -> Result<(), Thrown> {
             let previous = m.borrow().clone();
             let mut out = Vec::with_capacity(next.len());
             for (key, expires) in next {
@@ -714,7 +722,18 @@ fn with_lifecycle(rt: &Rt, body: impl FnOnce(&mut OrderLifecycleCaches)) -> Resu
                         .unwrap_or_else(|| (Js::str(key), Js::Number(*expires))),
                 );
             }
-            *m.borrow_mut() = out;
+            let mut slots = m.borrow_mut();
+            slots.retain(|(key, _)| out.iter().any(|(next, _)| next.same_value_zero(key)));
+            for (key, value) in out {
+                if let Some(slot) = slots
+                    .iter_mut()
+                    .find(|(existing, _)| existing.same_value_zero(&key))
+                {
+                    slot.1 = value;
+                } else {
+                    slots.push((key, value));
+                }
+            }
             Ok(())
         };
     store(&tombstones, &caches.terminal_order_tombstones)?;

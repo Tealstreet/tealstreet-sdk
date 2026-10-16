@@ -93,8 +93,7 @@ fn strings(value: Js) -> Result<Vec<Vec<u16>>, Thrown> {
     } else {
         value
             .call_method("values", std::vec![])?
-            .array_values()
-            .ok_or_else(|| Thrown::type_error("topics is not iterable"))?
+            .iterable_values()?
     };
     values.iter().map(v::units).collect()
 }
