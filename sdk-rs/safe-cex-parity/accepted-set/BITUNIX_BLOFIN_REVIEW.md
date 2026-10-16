@@ -402,3 +402,35 @@ classify the OrderFrame receiver itself or infer arbitrary caller IDs/hosts.
 This leaves 12 original Bitunix owners and the previously measured 49 Blofin
 owners. Complete-package, local-owner and feature/WASM matrices remain separate
 obligations.
+
+## Position read and concrete amendment orchestration
+
+Three native helpers cover position fetching, standalone TP/SL amendments and
+regular/attached amendments. The position probe reads every native Position
+field, numeric bits and optional presence. Two live rows distinguish qty from
+maxQty and live from cached leverage; complete output contains five ordered
+live/default positions. Separate one-way defaults deduplicate to two positions.
+Transport failure reports before returning two distinct cached native positions.
+Hex inputs reconstruct cached negative-zero fields after JSON transport.
+
+Amendments execute on the real OrderFrame, venue, Store and HTTP transport.
+Complete bodies distinguish quantity, main LIMIT price, both TP/SL triggers and
+both LIMIT execution prices. Attached amendments retain the parent quantity and
+main price, change the selected trigger and suffix the acknowledged ID. Explicit
+acknowledgment and fallback IDs, standalone routing, identity and already-filled
+quantity refusals remain separate outcomes. Truthy response messages retain both
+actual interceptor and amendment-catch error events.
+
+All three actual native owners pass. Fifteen compiling copied-production edits
+fail intended output assertions: five position controls cover consuming empty
+and partial output loss, contracts value, ID dedup and fallback ordering; ten
+amendment controls cover the six independent precision fields, acknowledgment ID,
+attached suffix and complete loss of each single-result ID vector after request
+and response consumption. Full restored native cases pass. Real production
+source remains unchanged. Independent review corrected the cached signed-zero
+fixture; no contract findings remain.
+
+This leaves nine original Bitunix owners and the previously measured 49 Blofin
+owners. OrderFrame itself, complete-package/local-owner and feature/WASM matrices
+remain separate obligations. These finite selected runtime profiles make no
+arbitrary callback, source-object or complete lifecycle claim.

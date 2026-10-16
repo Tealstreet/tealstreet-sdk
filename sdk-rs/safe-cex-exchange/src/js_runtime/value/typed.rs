@@ -43,6 +43,7 @@ fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<Input, Thro
         return Err(Thrown::type_error("callable cannot enter a declared DTO"));
     }
     Ok(match value {
+        Js::SymbolIterator => return Err(fault("Cannot decode a Symbol as typed data")),
         Js::Undefined | Js::Null | Js::Function(_) | Js::Promise(_) => Input::Null,
         Js::Bool(value) => Input::Bool(*value),
         Js::Number(value) => Input::Float(*value),

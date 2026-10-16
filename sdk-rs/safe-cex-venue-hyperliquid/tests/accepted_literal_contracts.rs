@@ -1,5 +1,8 @@
 use safe_cex_num::numeric_ingress::JsNumberOutput;
-use safe_cex_venue_hyperliquid::types::{Grouping, ScheduleCancelActionType, Tif, Tpsl};
+use safe_cex_venue_hyperliquid::types::{
+    Grouping, OrderResponseStatusCase3, OrderResponseStatusCase4, ScheduleCancelActionType, Tif,
+    Tpsl,
+};
 use serde::{Serialize, de::DeserializeOwned};
 use serde_json::{Value, json};
 use std::fmt::Debug;
@@ -74,4 +77,25 @@ fn grouping_variants_and_string_only_ingress() {
 fn schedule_cancel_variants_and_string_only_ingress() {
     literal("scheduleCancel", ScheduleCancelActionType::ScheduleCancel);
     forbidden::<ScheduleCancelActionType>();
+}
+
+#[test]
+fn waiting_for_fill_variant_and_string_only_ingress() {
+    literal("waitingForFill", OrderResponseStatusCase3::WaitingForFill);
+    forbidden::<OrderResponseStatusCase3>();
+    for result in routes::<OrderResponseStatusCase3>("\"waitingForTrigger\"") {
+        assert!(result.is_err(), "trigger status admitted as fill status");
+    }
+}
+
+#[test]
+fn waiting_for_trigger_variant_and_string_only_ingress() {
+    literal(
+        "waitingForTrigger",
+        OrderResponseStatusCase4::WaitingForTrigger,
+    );
+    forbidden::<OrderResponseStatusCase4>();
+    for result in routes::<OrderResponseStatusCase4>("\"waitingForFill\"") {
+        assert!(result.is_err(), "fill status admitted as trigger status");
+    }
 }

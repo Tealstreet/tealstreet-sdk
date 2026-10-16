@@ -22,20 +22,22 @@ pub enum KucoinAccountMode {
     Classic,
     Unified,
 }
+// Private Serde companion; the public entry retains its admission checks.
+#[allow(dead_code)]
+#[derive(Deserialize)]
+#[serde(remote = "KucoinAccountMode")]
+#[serde(rename_all = "SCREAMING_SNAKE_CASE")]
+enum KucoinAccountModeWire {
+    Classic,
+    Unified,
+}
+
 impl<'de> Deserialize<'de> for KucoinAccountMode {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "SCREAMING_SNAKE_CASE")]
-        enum Wire {
-            Classic,
-            Unified,
-        }
         let text = String::deserialize(d)?;
-        let wire = Wire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(text))?;
-        Ok(match wire {
-            Wire::Classic => Self::Classic,
-            Wire::Unified => Self::Unified,
-        })
+        KucoinAccountModeWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+            text,
+        ))
     }
 }
 
@@ -96,30 +98,35 @@ impl safe_cex_num::numeric_ingress::JsNumberOutput for KucoinAccountModeDetectio
         });
     }
 }
+// Private Serde companion; the public entry retains its admission checks.
+#[derive(Deserialize)]
+#[serde(remote = "KucoinAccountModeDetectionWire")]
+#[serde(tag = "status")]
+enum KucoinAccountModeDetectionWire {
+    #[serde(rename = "identified")]
+    Identified {
+        #[serde(rename = "accountMode")]
+        account_mode: KucoinAccountMode,
+        #[serde(rename = "classicSubAccount")]
+        classic_sub_account: Vec<f64>,
+        #[serde(rename = "unifiedSubAccount")]
+        unified_sub_account: Vec<f64>,
+    },
+    #[serde(rename = "unknown")]
+    Unknown { reason: String },
+    #[serde(rename = "malformed")]
+    Malformed { reason: String },
+}
+
 impl<'de> Deserialize<'de> for KucoinAccountModeDetection {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(tag = "status")]
-        enum Wire {
-            #[serde(rename = "identified")]
-            Identified {
-                #[serde(rename = "accountMode")]
-                account_mode: KucoinAccountMode,
-                #[serde(rename = "classicSubAccount")]
-                classic_sub_account: Vec<f64>,
-                #[serde(rename = "unifiedSubAccount")]
-                unified_sub_account: Vec<f64>,
-            },
-            #[serde(rename = "unknown")]
-            Unknown { reason: String },
-            #[serde(rename = "malformed")]
-            Malformed { reason: String },
-        }
         let input = safe_cex_num::numeric_ingress::JsNumberInput::deserialize(d)?;
         input
             .decode_with(|decoder| {
-                match Wire::deserialize(safe_cex_types::strict_decode::object(decoder))? {
-                    Wire::Identified {
+                match KucoinAccountModeDetectionWire::deserialize(
+                    safe_cex_types::strict_decode::object(decoder),
+                )? {
+                    KucoinAccountModeDetectionWire::Identified {
                         account_mode,
                         classic_sub_account,
                         unified_sub_account,
@@ -128,10 +135,12 @@ impl<'de> Deserialize<'de> for KucoinAccountModeDetection {
                         classic_sub_account,
                         unified_sub_account,
                     }),
-                    Wire::Unknown { reason } if reason == "unknown-self-account-mode" => {
+                    KucoinAccountModeDetectionWire::Unknown { reason }
+                        if reason == "unknown-self-account-mode" =>
+                    {
                         Ok(Self::Unknown)
                     }
-                    Wire::Malformed { reason } => match reason.as_str() {
+                    KucoinAccountModeDetectionWire::Malformed { reason } => match reason.as_str() {
                         "invalid-envelope" => Ok(Self::InvalidEnvelope),
                         "invalid-success-code" => Ok(Self::InvalidSuccessCode),
                         "invalid-data" => Ok(Self::InvalidData),
@@ -168,17 +177,22 @@ impl Serialize for KucoinClassicRuntimeDecision {
         json!({"eligible":eligible,"reason":reason,"route":route,"utaRuntimeActivationEnabled":KUCOIN_UTA_RUNTIME_ACTIVATION_ENABLED}).serialize(s)
     }
 }
+// Private Serde companion; the public entry retains its admission checks.
+#[derive(Deserialize)]
+#[serde(remote = "KucoinClassicRuntimeDecisionWire")]
+#[serde(rename_all = "camelCase")]
+struct KucoinClassicRuntimeDecisionWire {
+    eligible: bool,
+    reason: String,
+    route: String,
+    uta_runtime_activation_enabled: bool,
+}
+
 impl<'de> Deserialize<'de> for KucoinClassicRuntimeDecision {
     fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
-        #[derive(Deserialize)]
-        #[serde(rename_all = "camelCase")]
-        struct Wire {
-            eligible: bool,
-            reason: String,
-            route: String,
-            uta_runtime_activation_enabled: bool,
-        }
-        let wire = Wire::deserialize(safe_cex_types::strict_decode::object(d))?;
+        let wire = KucoinClassicRuntimeDecisionWire::deserialize(
+            safe_cex_types::strict_decode::object(d),
+        )?;
         if !wire.uta_runtime_activation_enabled {
             match (wire.eligible, wire.reason.as_str(), wire.route.as_str()) {
                 (true, "classic-account-mode-confirmed", "existing-classic-runtime") => {

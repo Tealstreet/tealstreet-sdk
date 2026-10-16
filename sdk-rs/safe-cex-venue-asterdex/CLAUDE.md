@@ -61,6 +61,9 @@ retain the separate obligations of lexical ordinary `Wire` decoders.
 `ENUM_CONTRACT_REVIEW.md` records eleven string/position-mode enum contracts,
 their 173 raw-text/native observations and grouped String-frontdoor control.
 
+`DECISION_CONTRACT_REVIEW.md` records eight account/exchange decision contracts,
+their 98 fixed TS/native observations and five isolated compiled controls.
+
 `native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
 Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,
 AccountFetch/OrderExecution and public/private stream bodies; it never evaluates

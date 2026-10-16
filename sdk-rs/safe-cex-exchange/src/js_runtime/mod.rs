@@ -14,3 +14,5 @@ pub mod sockets;
 pub mod store;
 mod throttle;
 pub mod value;
+
+pub mod collections;

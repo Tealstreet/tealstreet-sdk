@@ -2,6 +2,7 @@
 //! constructed KucoinExchange and KucoinSpotExchange through `dyn Exchange`
 //! against a scripted REST transport.
 #[path = "support/exchange_runtime.rs"]
+#[allow(dead_code)]
 mod support;
 use safe_cex_exchange::exchange::Exchange;
 use safe_cex_types::{Order, PlaceOrderOpts, UpdateOrderOpts};

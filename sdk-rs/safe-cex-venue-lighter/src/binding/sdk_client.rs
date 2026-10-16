@@ -269,7 +269,7 @@ impl ClientHost for SdkHost {
     fn iterator(&self, value: Js) -> Result<Js, Thrown> {
         let iterator = JsIterator::open(&value)?;
         Ok(Js::function("next", move |_, _| {
-            Ok(match iterator.step() {
+            Ok(match iterator.step()? {
                 Some(value) => Js::object(vec![("done", Js::Bool(false)), ("value", value)]),
                 None => Js::object(vec![("done", Js::Bool(true))]),
             })

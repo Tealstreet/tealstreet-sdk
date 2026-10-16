@@ -1,5 +1,6 @@
 //! Host family on Bound; see the trait docs for each JS operation.
 use super::order_mapping::{account, js};
+use crate::binding::value::to_signing;
 use crate::{
     binding::{
         ops::{
@@ -57,9 +58,15 @@ impl OhlcvHost for Bound {
     fn interval_binding(&self, value: AccountValue) -> SigningResult<(AccountValue, AccountValue)> {
         let iterator = js(JsIterator::open(&to_js(&value)))?;
         // `[, amount, unit]`: the elision still steps; built-ins have no `return`.
-        iterator.step();
-        let amount = iterator.step().unwrap_or(Js::Undefined);
-        let unit = iterator.step().unwrap_or(Js::Undefined);
+        iterator.step().map_err(to_signing)?;
+        let amount = iterator
+            .step()
+            .map_err(to_signing)?
+            .unwrap_or(Js::Undefined);
+        let unit = iterator
+            .step()
+            .map_err(to_signing)?
+            .unwrap_or(Js::Undefined);
         Ok((to_account(&amount), to_account(&unit)))
     }
     fn spread_override(
