@@ -1,0 +1,179 @@
+[file]
+ts = "packages/lighter-sdk/src/client/account-api.ts"
+rust_files = [ "safe-cex-venue-lighter/src/sdk_account_api.rs" ]
+
+[[symbol]]
+ts = "AccountInfo"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountInfo"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "AccountLimits"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountLimits"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "AccountMetadata"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountMetadata"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "SubAccount"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::SubAccount"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "AccountsByL1Address"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountsByL1Address"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "ApiKeyInfo"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::ApiKeyInfo"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "AccountApiKeys"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApiKeys"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "Liquidation"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::Liquidation"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "Liquidations"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::Liquidations"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "PnLDataPoint"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::PnLDataPoint"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "PnL"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::PnL"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "GetLiquidationsOptions"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::GetLiquidationsOptions"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "GetPnlOptions"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::GetPnlOptions"
+status = "ported"
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+
+[[symbol]]
+ts = "AccountApi"
+kind = "class"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApi"
+status = "divergent"
+note = "CHOSEN: native host class carries explicit client, FIFO runtime and ECMAScript getter/coercion/async-return-resolution boundaries instead of JS ambient context and mutable/reflected prototype surface. All seven source method bodies and constructor handle retention have native targets; class JS reflection and engine interoperability are not claimed."
+
+[[symbol]]
+ts = "AccountApi.constructor"
+kind = "constructor"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApi::new"
+status = "ported"
+note = "Constructor retains the original shared client handle without validation or client calls. Native runtime/semantics are explicit ambient-host dependencies; live constructor/callee receiver witnesses and native Rc identity/count assertions. Class reflection is separately CHOSEN divergent."
+
+[[symbol]]
+ts = "AccountApi.getAccount"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApi::get_account"
+status = "ported"
+note = "Source-ordered eager asynchronous method body via request/params: exact URL and UTF16 arguments, repeated option/response getter reads, short-circuit error fallback, original host exception identity, and second data value unchanged. Required host contracts supply FIFO microtasks, ECMAScript property/coercion operations and async-return Promise Resolve, including thenables. Live source/native floor179 scenarios includes returned thenable jobs/rejections, undefined second reads and detached work. This maps the method body; no standalone JS engine, HTTP transport or exhaustive thenable-resolution implementation/proof claim."
+
+[[symbol]]
+ts = "AccountApi.getAccountLimits"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApi::get_account_limits"
+status = "ported"
+note = "Source-ordered eager asynchronous method body via request/params: exact URL and UTF16 arguments, repeated option/response getter reads, short-circuit error fallback, original host exception identity, and second data value unchanged. Required host contracts supply FIFO microtasks, ECMAScript property/coercion operations and async-return Promise Resolve, including thenables. Live source/native floor179 scenarios includes returned thenable jobs/rejections, undefined second reads and detached work. This maps the method body; no standalone JS engine, HTTP transport or exhaustive thenable-resolution implementation/proof claim."
+
+[[symbol]]
+ts = "AccountApi.getAccountMetadata"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApi::get_account_metadata"
+status = "ported"
+note = "Source-ordered eager asynchronous method body via request/params: exact URL and UTF16 arguments, repeated option/response getter reads, short-circuit error fallback, original host exception identity, and second data value unchanged. Required host contracts supply FIFO microtasks, ECMAScript property/coercion operations and async-return Promise Resolve, including thenables. Live source/native floor179 scenarios includes returned thenable jobs/rejections, undefined second reads and detached work. This maps the method body; no standalone JS engine, HTTP transport or exhaustive thenable-resolution implementation/proof claim."
+
+[[symbol]]
+ts = "AccountApi.getAccountsByL1Address"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApi::get_accounts_by_l1_address"
+status = "ported"
+note = "Source-ordered eager asynchronous method body via request/params: exact URL and UTF16 arguments, repeated option/response getter reads, short-circuit error fallback, original host exception identity, and second data value unchanged. Required host contracts supply FIFO microtasks, ECMAScript property/coercion operations and async-return Promise Resolve, including thenables. Live source/native floor179 scenarios includes returned thenable jobs/rejections, undefined second reads and detached work. This maps the method body; no standalone JS engine, HTTP transport or exhaustive thenable-resolution implementation/proof claim."
+
+[[symbol]]
+ts = "AccountApi.getApiKeys"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApi::get_api_keys"
+status = "ported"
+note = "Source-ordered eager asynchronous method body via request/params: exact URL and UTF16 arguments, repeated option/response getter reads, short-circuit error fallback, original host exception identity, and second data value unchanged. Required host contracts supply FIFO microtasks, ECMAScript property/coercion operations and async-return Promise Resolve, including thenables. Live source/native floor179 scenarios includes returned thenable jobs/rejections, undefined second reads and detached work. This maps the method body; no standalone JS engine, HTTP transport or exhaustive thenable-resolution implementation/proof claim."
+
+[[symbol]]
+ts = "AccountApi.getLiquidations"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApi::get_liquidations"
+status = "ported"
+note = "Source-ordered eager asynchronous method body via request/params: exact URL and UTF16 arguments, repeated option/response getter reads, short-circuit error fallback, original host exception identity, and second data value unchanged. Required host contracts supply FIFO microtasks, ECMAScript property/coercion operations and async-return Promise Resolve, including thenables. Live source/native floor179 scenarios includes returned thenable jobs/rejections, undefined second reads and detached work. This maps the method body; no standalone JS engine, HTTP transport or exhaustive thenable-resolution implementation/proof claim."
+
+[[symbol]]
+ts = "AccountApi.getPnl"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountApi::get_pnl"
+status = "ported"
+note = "Source-ordered eager asynchronous method body via request/params: exact URL and UTF16 arguments, repeated option/response getter reads, short-circuit error fallback, original host exception identity, and second data value unchanged. Required host contracts supply FIFO microtasks, ECMAScript property/coercion operations and async-return Promise Resolve, including thenables. Live source/native floor179 scenarios includes returned thenable jobs/rejections, undefined second reads and detached work. This maps the method body; no standalone JS engine, HTTP transport or exhaustive thenable-resolution implementation/proof claim."

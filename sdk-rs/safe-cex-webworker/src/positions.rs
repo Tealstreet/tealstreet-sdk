@@ -1,0 +1,223 @@
+use crate::payload::{StoreWorkerOp, StoreWorkerPayload};
+use safe_cex_exchange::exchange::Exchange;
+use serde_json::{Value, json};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashSet,
+    rc::Rc,
+};
+
+pub struct UpdatePositionsHandler {
+    exchange: Rc<dyn Exchange>,
+    post: Rc<dyn Fn(StoreWorkerPayload)>,
+    last_failed_request: Cell<f64>,
+    requests_in_progress: RefCell<HashSet<Option<String>>>,
+}
+struct RequestGuard<'a> {
+    handler: &'a UpdatePositionsHandler,
+    symbols: Option<Vec<String>>,
+    request_id: String,
+    settled: bool,
+}
+impl Drop for RequestGuard<'_> {
+    fn drop(&mut self) {
+        let mut pending = self.handler.requests_in_progress.borrow_mut();
+        match &self.symbols {
+            Some(symbols) => {
+                for symbol in symbols {
+                    pending.remove(&Some(symbol.clone()));
+                }
+            }
+            None => {
+                pending.remove(&None);
+            }
+        }
+        drop(pending);
+        // Cancellation must release only this request's slots and settle its bridge waiter.
+        if !self.settled {
+            self.handler.done(
+                &self.request_id,
+                false,
+                Some("Worker request cancelled".into()),
+            );
+        }
+    }
+}
+impl UpdatePositionsHandler {
+    pub fn new(exchange: Rc<dyn Exchange>, post: Rc<dyn Fn(StoreWorkerPayload)>) -> Rc<Self> {
+        Rc::new(Self {
+            exchange,
+            post,
+            last_failed_request: Cell::new(0.0),
+            requests_in_progress: RefCell::default(),
+        })
+    }
+    pub async fn handle_update_positions(&self, request_id: String, symbols: Option<Vec<String>>) {
+        let now = self.exchange.base().runtime.now_ms();
+        if now - self.last_failed_request.get() < 5000.0 {
+            self.done(&request_id, false, Some("retry_too_soon".into()));
+            return;
+        }
+        let valid = symbols.as_ref().map(|symbols| {
+            symbols
+                .iter()
+                .filter(|symbol| {
+                    !self
+                        .requests_in_progress
+                        .borrow()
+                        .contains(&Some((*symbol).clone()))
+                })
+                .cloned()
+                .collect::<Vec<_>>()
+        });
+        if valid.as_ref().is_some_and(Vec::is_empty)
+            || (valid.is_none() && self.requests_in_progress.borrow().contains(&None))
+        {
+            self.done(&request_id, true, None);
+            return;
+        }
+        {
+            let mut pending = self.requests_in_progress.borrow_mut();
+            match &valid {
+                Some(symbols) => pending.extend(symbols.iter().cloned().map(Some)),
+                None => {
+                    pending.insert(None);
+                }
+            }
+        }
+        let mut guard = RequestGuard {
+            handler: self,
+            symbols: valid,
+            request_id: request_id.clone(),
+            settled: false,
+        };
+        // ts-bug: locks use filtered symbols but the fetch receives the original list.
+        let result = self
+            .exchange
+            .fetch_positions(symbols)
+            .await
+            .and_then(|positions| {
+                if self.exchange.base().is_disposed() {
+                    return Ok(false);
+                }
+                if !positions_equal(&positions, &self.exchange.base().store.positions()) {
+                    if guard.symbols.is_none() {
+                        self.exchange
+                            .base()
+                            .store
+                            .add_or_update_positions_full(positions)?;
+                    } else if !positions.is_empty() {
+                        self.exchange
+                            .base()
+                            .store
+                            .add_or_update_positions(positions)?;
+                    }
+                }
+                Ok(true)
+            });
+        match result {
+            Ok(true) => self.done(&request_id, true, None),
+            Ok(false) => {}
+            Err(error) => {
+                self.last_failed_request.set(now);
+                self.done(
+                    &request_id,
+                    false,
+                    Some(format!("{}: {}", error.name, error.message)),
+                );
+            }
+        }
+        guard.settled = true;
+    }
+    pub fn handle(self: &Rc<Self>, payload: StoreWorkerPayload) {
+        if payload.op != StoreWorkerOp::UpdatePositions {
+            return;
+        }
+        let data = payload.data.unwrap_or(Value::Null);
+        let request_id = data["requestId"].as_str().unwrap_or("").to_owned();
+        let symbols = data.get("symbols").and_then(Value::as_array).map(|values| {
+            values
+                .iter()
+                .filter_map(Value::as_str)
+                .map(str::to_owned)
+                .collect()
+        });
+        let handler = self.clone();
+        self.exchange
+            .base()
+            .runtime
+            .spawn_local(Box::pin(async move {
+                handler.handle_update_positions(request_id, symbols).await;
+            }));
+    }
+    fn done(&self, request_id: &str, success: bool, reason: Option<String>) {
+        let mut data = json!({"requestId":request_id,"success":success});
+        if let Some(reason) = reason {
+            data["reason"] = json!(reason);
+        }
+        (self.post)(StoreWorkerPayload {
+            op: StoreWorkerOp::UpdatePositionsDone,
+            instance_id: None,
+            data: Some(data),
+        });
+    }
+}
+
+fn positions_equal(left: &[safe_cex_types::Position], right: &[safe_cex_types::Position]) -> bool {
+    fn number(a: f64, b: f64) -> bool {
+        a == b || (a.is_nan() && b.is_nan())
+    }
+    fn optional(a: Option<f64>, b: Option<f64>) -> bool {
+        match (a, b) {
+            (Some(a), Some(b)) => number(a, b),
+            (None, None) => true,
+            _ => false,
+        }
+    }
+    left.len() == right.len()
+        && left.iter().zip(right).all(|(a, b)| {
+            a.id == b.id
+                && a.symbol == b.symbol
+                && a.side == b.side
+                && number(a.entry_price, b.entry_price)
+                && number(a.notional, b.notional)
+                && number(a.leverage, b.leverage)
+                && a.margin_type == b.margin_type
+                && a.position_mode == b.position_mode
+                && number(a.unrealized_pnl, b.unrealized_pnl)
+                && optional(a.realized_pnl, b.realized_pnl)
+                && number(a.contracts, b.contracts)
+                && number(a.liquidation_price, b.liquidation_price)
+                && optional(a.margin_size, b.margin_size)
+                && optional(a.last_update, b.last_update)
+                && match (&a.info, &b.info) {
+                    (Some(a), Some(b)) => json_equal(a, b),
+                    (None, None) => true,
+                    _ => false,
+                }
+                && match (&a.extra, &b.extra) {
+                    (None, None) => true,
+                    (Some(a), Some(b)) => {
+                        optional(a.contracts_native, b.contracts_native)
+                            && optional(a.unrealized_pnl_native, b.unrealized_pnl_native)
+                    }
+                    _ => false,
+                }
+        })
+}
+fn json_equal(a: &Value, b: &Value) -> bool {
+    match (a, b) {
+        (Value::Number(a), Value::Number(b)) => {
+            a.to_string().parse::<f64>().ok() == b.to_string().parse::<f64>().ok()
+        }
+        (Value::Array(a), Value::Array(b)) => {
+            a.len() == b.len() && a.iter().zip(b).all(|(a, b)| json_equal(a, b))
+        }
+        (Value::Object(a), Value::Object(b)) => {
+            a.len() == b.len()
+                && a.iter()
+                    .all(|(key, a)| b.get(key).is_some_and(|b| json_equal(a, b)))
+        }
+        _ => a == b,
+    }
+}

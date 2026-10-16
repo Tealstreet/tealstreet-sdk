@@ -1,0 +1,71 @@
+{
+  "oracle": "ethers 6.17.0",
+  "cases": [
+    {
+      "name": "base",
+      "privateKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "typedData": "{\"types\":{\"Message\":[{\"name\":\"payload\",\"type\":\"string\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"domain\":{\"name\":\"PrimitiveVector\",\"version\":\"1\",\"chainId\":\"0x539\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"primaryType\":\"Message\",\"message\":{\"payload\":\"雪\\u0000payload\",\"nonce\":\"7\"}}",
+      "hash": "0x23c518833b28715969aac54bb2bd6a201b6406613bc8a7ed0d1510c6a7791426",
+      "signature": "0xf7ad4247b94fbb9183331161f13b323255c0cffcc28a1f92fda6eb4b39a9efb91f9da5935c6c5543b66970349783ed08e83639e60923853913c4cdc39ae5b4351b",
+      "r": "0xf7ad4247b94fbb9183331161f13b323255c0cffcc28a1f92fda6eb4b39a9efb9",
+      "s": "0x1f9da5935c6c5543b66970349783ed08e83639e60923853913c4cdc39ae5b435",
+      "v": 27,
+      "address": "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a"
+    },
+    {
+      "name": "key",
+      "privateKey": "0x2222222222222222222222222222222222222222222222222222222222222222",
+      "typedData": "{\"types\":{\"Message\":[{\"name\":\"payload\",\"type\":\"string\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"domain\":{\"name\":\"PrimitiveVector\",\"version\":\"1\",\"chainId\":\"0x539\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"primaryType\":\"Message\",\"message\":{\"payload\":\"雪\\u0000payload\",\"nonce\":\"7\"}}",
+      "hash": "0x23c518833b28715969aac54bb2bd6a201b6406613bc8a7ed0d1510c6a7791426",
+      "signature": "0xca3f1e987213c491ab0bea2652c710c2a04b61da7f1334d2e793fa0fdc943b7740cd3c362a63c5f6dd1dd9acfd4087fcb5028e04e38aa73b489faf9a7ce719dd1b",
+      "r": "0xca3f1e987213c491ab0bea2652c710c2a04b61da7f1334d2e793fa0fdc943b77",
+      "s": "0x40cd3c362a63c5f6dd1dd9acfd4087fcb5028e04e38aa73b489faf9a7ce719dd",
+      "v": 27,
+      "address": "0x1563915e194d8cfba1943570603f7606a3115508"
+    },
+    {
+      "name": "payload",
+      "privateKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "typedData": "{\"types\":{\"Message\":[{\"name\":\"payload\",\"type\":\"string\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"domain\":{\"name\":\"PrimitiveVector\",\"version\":\"1\",\"chainId\":\"0x539\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"primaryType\":\"Message\",\"message\":{\"payload\":\"雪\\u0000changed\",\"nonce\":\"7\"}}",
+      "hash": "0x28cb305afd3ba82cfe1c349b07e569e1f362949a678fa13533d2dad99da219f1",
+      "signature": "0x8e52fa5023a17f52a18200c202cc7ba29b3ed7590b7dd263c98211dbc9a25e22088402ac7680a605e6a1b573885d43ed57753da957fa5443b77cc99c84bb25901c",
+      "r": "0x8e52fa5023a17f52a18200c202cc7ba29b3ed7590b7dd263c98211dbc9a25e22",
+      "s": "0x088402ac7680a605e6a1b573885d43ed57753da957fa5443b77cc99c84bb2590",
+      "v": 28,
+      "address": "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a"
+    },
+    {
+      "name": "nonce",
+      "privateKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "typedData": "{\"types\":{\"Message\":[{\"name\":\"payload\",\"type\":\"string\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"domain\":{\"name\":\"PrimitiveVector\",\"version\":\"1\",\"chainId\":\"0x539\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"primaryType\":\"Message\",\"message\":{\"payload\":\"雪\\u0000payload\",\"nonce\":\"8\"}}",
+      "hash": "0x3564a75d559698f3fcca4d6e70884636c2fb51d38d391b80b072fb5ef6c0826d",
+      "signature": "0x53afb23aaa0d476187c41ca24d093dece62aea85ed84c3316116c7d268fc688b78b01c623f0573a47af9c4932bcaf303b6ffcf104d5b1c1b765894372f60aae81c",
+      "r": "0x53afb23aaa0d476187c41ca24d093dece62aea85ed84c3316116c7d268fc688b",
+      "s": "0x78b01c623f0573a47af9c4932bcaf303b6ffcf104d5b1c1b765894372f60aae8",
+      "v": 28,
+      "address": "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a"
+    },
+    {
+      "name": "empty",
+      "privateKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "typedData": "{\"types\":{\"Message\":[{\"name\":\"payload\",\"type\":\"string\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"domain\":{\"name\":\"PrimitiveVector\",\"version\":\"1\",\"chainId\":\"0x539\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"primaryType\":\"Message\",\"message\":{\"payload\":\"\",\"nonce\":\"0\"}}",
+      "hash": "0x9a477b9975c8f128c06f35b6297438aa2898fb007977cdce166c25af9a73f986",
+      "signature": "0xee3ab07bc90846b24240254802057080590d767b6092e564aae8ddfcd82ab561437a2332a116397f2a5009171c67ad79e7cd8274842b7934f86e1b8ee3391eec1b",
+      "r": "0xee3ab07bc90846b24240254802057080590d767b6092e564aae8ddfcd82ab561",
+      "s": "0x437a2332a116397f2a5009171c67ad79e7cd8274842b7934f86e1b8ee3391eec",
+      "v": 27,
+      "address": "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a"
+    },
+    {
+      "name": "uint64-max",
+      "privateKey": "0x1111111111111111111111111111111111111111111111111111111111111111",
+      "typedData": "{\"types\":{\"Message\":[{\"name\":\"payload\",\"type\":\"string\"},{\"name\":\"nonce\",\"type\":\"uint64\"}],\"EIP712Domain\":[{\"name\":\"name\",\"type\":\"string\"},{\"name\":\"version\",\"type\":\"string\"},{\"name\":\"chainId\",\"type\":\"uint256\"},{\"name\":\"verifyingContract\",\"type\":\"address\"}]},\"domain\":{\"name\":\"PrimitiveVector\",\"version\":\"1\",\"chainId\":\"0x539\",\"verifyingContract\":\"0x0000000000000000000000000000000000000000\"},\"primaryType\":\"Message\",\"message\":{\"payload\":\"maximum\",\"nonce\":\"18446744073709551615\"}}",
+      "hash": "0xfaab06061258686c64e90967616239e3eec488473518d284b641dc37fd9055ad",
+      "signature": "0xd15b6331e6ad7ea5f6513425c3f7a9aa3f4ef5ce6f781bd69518903d351394462612cc888b9fc5b34ff38027adef931b9f6c53a3f8581be8881f073947d7bc781c",
+      "r": "0xd15b6331e6ad7ea5f6513425c3f7a9aa3f4ef5ce6f781bd69518903d35139446",
+      "s": "0x2612cc888b9fc5b34ff38027adef931b9f6c53a3f8581be8881f073947d7bc78",
+      "v": 28,
+      "address": "0x19e7e376e7c213b7e7e7e46cc70a5dd086daff2a"
+    }
+  ]
+}

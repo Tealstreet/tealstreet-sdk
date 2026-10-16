@@ -1,0 +1,254 @@
+# ApexOmni port
+
+Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/apexomni/CLAUDE.md).
+
+Protocol constants are ordered own-property tables; consumer lookup behavior is
+not implied by the representation. Shared normalized order enums retain shared
+identity. Venue wire enums use String-first deserializers and have no permissive
+inherent decoder or conversion API. The live oracle executes the current TS
+module and its shared enum imports, comparing every exported table value and
+wire spelling; strict trait and concrete qualified probes reject extra shapes.
+
+Run `yarn venue-oracle:apexomni`. Tests are also discovered by native Cargo CI;
+`SAFE_CEX_TYPESCRIPT_PATH` is mandatory and selects its isolated compiler. The oracle executes only
+Node builtins and repository source, requiring no extra npm runtime selectors.
+Its in-memory TS mutation must fail the named Rust comparison at exit 101;
+missing dependencies cannot satisfy that control. CI wiring is mandatory and
+pinned in the workflow audit. The public records (TickerObject, DepthObject, TradeObject, KlineObject,
+HistoryFundingObject, CurrencyObject, GlobalObject, PerpetualContractObject,
+GetHistoryFundingOptions, KeyPair, ApiKeyCredentials and PerpetualCurrencyObject) have live compiler-derived field schemas and concrete
+production decoder/serializer witnesses. Both the full positional sequence and
+malformed nested fields must reject. The shared UTF-8 boundary is declared with
+a double-escaped lone-surrogate witness; ordinary Unicode and astral pairs remain
+positive. Remaining records, signing, mappers and exchange/socket operations stay
+pending until their separate comparisons exist.
+
+Record review independently found that fixed two-element arrays passed the first
+corpus. Empty, singleton, longer and ragged recursive samples now reject that
+narrowing at a named assertion. Numeric ingress now captures at every public record's Deserialize entry through
+`JsNumberInput::decode_with`, then uses the shared map shape guard. Every record
+has an explicit exhaustive `JsNumberOutput` registration. Serialize retains f64
+native events; callers project to JavaScript JSON with shared `js_json_stringify`
+when they need wire bytes. A field serializer that normalizes signed zero or
+nonfinite values before ingress validation would hide a loss and must not return.
+The live Node oracle captures typeof and binary64 bits before JSON serialization;
+all 16 numeric fields are checked on raw, owned, borrowed and native Value entries.
+Rust and TypeScript field-type mutations independently fail
+at exit 101; compile failures are not accepted as controls.
+
+Required boolean fields retain false and reject omission. Independent review
+controls defaulting enableTrade or omitting its false output both compiled and
+failed named assertions; live TypeScript boolean-to-string mutation also fails.
+
+Optional record fields distinguish absence from present null. Omitted fields remain
+omitted on serialization; independent Rust output-omission and TypeScript
+optionality mutations each fail named assertions.
+
+The inherited-field mutation adds a required parent field to TickerObject and must
+fail the schema comparison. Native decoded field assertions use distinct values
+and one-false-at-a-time boolean cases, independently of serialization roundtrips.
+
+All six venue enums have native-variant assertions keyed by the actual executed
+TypeScript member names; a symmetric decode/encode swap must fail those checks.
+
+The interface now includes private-wire TimeInForce (GTT/FOK/IOC) and OrderStatus,
+distinct from shared normalized enums. `Market` aliases `ApexMarket`; the type
+alias preserves identity, while the value namespace deliberately excludes the
+mutable JavaScript enum-object surface (the const row records this CHOSEN cost).
+The protocol oracle executes the actual module and captures Market identity and
+all members. Its successful corpus is cached once per test process. Per-row
+comparisons continue after each panic so production mutations cannot mask a later
+row. `scripts/mutate_protocol.py` mutates 21 rows in one compilation, requires
+every named assertion, restores sources in finally, and verifies the restored
+corpus in a second sequential --jobs 1 Cargo invocation. It is a mutation gate,
+not a per-case oracle-spawning loop.
+
+Market's erased type declaration is checked with the actual TypeScript compiler,
+separately from its runtime value identity. Changing only the type alias target
+must fail `ApexOmni protocol row Market type: TypeScript declared alias identity`;
+transpilation and runtime object equality alone cannot witness this row.
+
+Eight private records now correspond directly to the actual private interface:
+WalletObject, OpenPositionObject, AccountsItem, AccountObject, WorstPriceObject,
+FundingRateObject, HistoricalPNLObject, and AccountBalanceObject. AccountObject
+retains optional accounts absence; a present null is rejected. All eight use
+capture-before-decode numeric ingress and explicit exhaustive output checks.
+The live compiler resolves the complete inherited field set. Native assertions
+use distinct strings/numbers and one-false boolean supplements. The production
+mutation runner swaps each row's first two string serde names symmetrically:
+structural roundtrip assertions pass before all eight named native assertions
+fail. Exact JSON property-order checks can additionally detect these mutations.
+The record oracle is cached once per process for the entire normal corpus;
+source-mutated corpora run once each. Oracle metadata records Node version,
+major version and architecture. Raw JSON numeric cases do not include NaN;
+signed zero is compared by exact bits.
+
+Local continuation after 5d8164c530 adds MultiChainObject, SymbolObject,
+PerpetualObject, SymbolInfoObject, UserObject and OrderObject. SymbolInfoObject
+lists its own fields followed by the inherited PerpetualContractObject fields;
+the live compiler census includes both and an inherited-base mutation must fail.
+Opaque chains/userData/openTpParam/openSlParam are named passthrough fields;
+shared retained input captures numeric events before constructing JSON Values.
+Chains requires an array of arrays; userData distinguishes absent from present
+null. JSON-only opaque payloads deliberately exclude JavaScript heap objects.
+Four opaque paths have raw, owned, borrowed and shared ingress bit witnesses.
+
+The six-row production corpus uses independent native paths: SymbolObject reads
+its global feeAccountId, whereas PerpetualObject reads its usdc currency id.
+This prevents a simultaneous nested-row mutation from substituting for proof of
+the parent mutation. All other row axes touch independent record fields. Full
+native field witnesses and one-false boolean supplements remain in the suite.
+Origin is frozen at 5d8164c530 pending explicit release; subsequent work stays local.
+
+Each config TypeScript mutation requires the precise affected row assertion.
+The SymbolInfoObject heritage counter-control deliberately omits only a newly
+introduced base field from that row's schema; unrelated nested-record failures
+must not satisfy the inherited-field witness.
+
+The remaining five interface rows are now mapped: ISO8601, WithPrice,
+OrderWithClientId, CreateOrderOptionsObject and OrderResponseObject. Timestamp
+strings remain unvalidated strings, matching the source union. The numeric
+variant captures before decoding and supports integral visitor paths as well
+as floating-point events. All three response timestamp fields have numeric-bit
+witnesses. Native NaN comparison canonicalizes NaN only, records Node version
+and both Node/Rust architectures, and keeps signed zero exact. Native-event
+tests implement the transparent-newtype hook used by the shared capture layer.
+
+Undefined-only optional properties use Option<()>: None represents absence,
+Some(()) represents native present undefined, and both serialize without the
+property. Present JSON null is rejected. WithPrice and OrderWithClientId each
+have native-present omission assertions; a compiled wrong-serializer mutation
+must fail the WithPrice assertion. Nullable response fields instead retain
+absence versus present null through Option<Option<T>>. Actual TypeScript source
+mutations cover all five rows and require the specific affected row assertion.
+Create-order literal unions have native enum-variant comparisons, independently
+of roundtrips. Earlier protocol and record witnesses remain in the scoped gates.
+
+The utility corpus executes the actual apexomni.utils.ts module for getPrecision,
+generateApeXRandomClientId and dropPrefix. The HMAC row stays pending; fail-on-access
+crypto import placeholders make any accidental cryptographic execution fail.
+Precision reuses the existing string-or-number union and shared coercion/formatting.
+Randomness is host-injected through FnOnce, consumed exactly once; zero, subnormal
+and exponent-spelled draws retain JavaScript slicing behavior. Prefix removal is
+anchored and lowercase only. One Node invocation returns the complete corpus;
+actual-source mutations each have their own corpus and exact assertion check.
+The three production mutations compile together, fail three independent named
+assertions, restore in finally, and pass. The runner uses two sequential Cargo
+invocations and one Node process per complete corpus, never one per case.
+
+Reviewed remote feat/rust-venue-apexomni-next is pinned at
+10afdcdb2b938a64b2860d3247763089be87db01. Later utilities are isolated on
+feat/rust-venue-apexomni-utils. Counts at the pinned head are 21 ported,
+35 divergent, 112 pending. The fetched integration subscriber identity field is
+retained by both shared notification conversion branches; this venue currently
+has no Store writes or boxed errors, established by reading its production modules.
+
+Local signer utilities now include timestamp, assert, four type assertions and
+assertSubAccountId. Clock injection consumes one draw; floor and division retain
+native f64 behavior. Type assertions consume shared JsJsonValue prepared data,
+including undefined, BigInt, NaN and infinities. This is not a JS heap model:
+foreign array realms, prototypes, executable values and symbols remain outside
+the boundary. The live oracle demonstrates the foreign-array mismatch and the
+UTF-8 message limitation. Result errors retain source messages, not Error object
+identity or stack; assert.address is still outside the function port.
+
+The subaccount assertion remains the source no-op. Production controls mutate
+all seven rows in one compilation/corpus and require seven named failures. The
+four type helpers first check independent successful cases, so a simultaneous
+base assert error-message mutation cannot masquerade as a predicate mutation.
+Every actual-source control checks its exact affected assertion. Normal captures
+use one cached Node process for the entire corpus; each source-mutated corpus
+uses one further process. NaN alone is canonicalized; signed zero stays exact.
+PR 7256 pins the utility branch at 3c5cbc19a050905c35dddf484e39ecd4ccceacdc;
+signer continuation stays local on feat/rust-venue-apexomni-signer-utils.
+
+The bracket-only precision-swap audit at d50b9f8441 found zero implemented
+price/amount formatter sites, not immunity. See [PRECISION_SWAP_AUDIT.md](PRECISION_SWAP_AUDIT.md)
+for the inspected module closure and the distinct-step, direct-native-payload
+mutation obligations on pending placement, update and TP/SL formatter rows.
+
+`calculate_tp_sl_price` applies the source side multiplier before shared `adjust`.
+Its actual-source corpus uses distinct fractional price steps; direct binary64
+assertions precede any wire conversion. This does not cover placement bindings.
+
+Eight range/string validators now mirror source guards and messages. Numeric
+strings remain non-numbers, fractional values remain permitted where source
+permits them, and the timestamp assertion compares against the constant epoch
+threshold rather than validating the input's decimal digit count. Pubkey hashes
+check only lowercase prefix and UTF-16 length; nonhex/astral values are preserved.
+Display projection delegates to shared String(any); it does not coerce predicate
+inputs. Nested arrays retain nullish empty slots and BigInt/nonfinite spelling.
+Own noncallable toString errors retain their message, while Result<(), String>
+deliberately projects away Error versus TypeError class, identity and stack.
+The validator supplement leaves prior type/clock corpus values unchanged. Eight
+compiled production guards each fail their own named direct-result assertion,
+then restore and pass, with one Node invocation for each complete corpus.
+
+Cardinality audit: record/protocol witnesses use whole-Value comparisons, but the
+original utility and signer-validator loops accepted empty source subcorpora.
+Source totals are now assertions, and scalar loops separately assert the number
+of comparisons executed. Native record field inventories include inherited and
+undefined-only properties; numeric subcorpora have independent execution counts.
+The collection supplement covers 13 native record fields, including nonempty
+nested arrays in chains, userData, openTpParam and openSlParam. It checks source
+per-case size, decoded native length, a fixed native comparison total, and exact
+values. Each axis catches its own failure so sibling mutations cannot mask it.
+Protocol tables retain exact whole-value comparisons, with fixed source totals,
+independent native length equality, and a fixed 19-row comparison census.
+
+Run scripts/mutate_cardinality.py and scripts/mutate_protocol_cardinality.py
+with SAFE_CEX_TYPESCRIPT_PATH set. They batch production empty/subset/extra
+mutations, require named runtime assertion failures (compilation failure does
+not count), restore all source files in finally, and run restored targets.
+Source omission controls also bypass source guards and require independent
+native/execution-count failures. Every invocation consumes one complete Node
+corpus, not a subprocess per case. Original oracle script/fixture bytes remain
+unchanged; the native collection supplement lives only in the Rust tests.
+
+The decoder mutations consume input: Fields::deserialize finishes before the
+production assignment drops decoded rows. scripts/mutate_consuming_cardinality.py
+keeps an empty-wallet mutant installed while removing both source and native
+length-guard functions. The expected remaining failure is the exact whole-native-
+value assertion: this suite has redundant detection, not length-only protection.
+Protocol controls additionally empty both source and native tables while bypassing
+the source total; fixed native totals must still reject len == len == 0.
+
+The signer wire `TxEthSignature` record now retains its two signature-kind
+literals through a String-first native enum. The separate signer-record oracle
+uses the actual TypeScript compiler and resolves inherited properties; it does
+not add samples to any earlier record corpus. Ten samples cover both variants
+and five signature strings through raw, owned and borrowed decoding, with sixty
+fixed native field comparisons. The symmetric production enum control preserves
+roundtrip output and fails the subsequent decoded-kind assertion. Transaction
+signing adapters and the separate TxSignature packed/wire conversion remain
+named pending work; this record does not claim to implement them.
+
+Transaction declarations live in `transaction_records`: numeric flags retain
+f64 (including -0) and validate 0|1; feeRates is exactly a two-number tuple.
+The wire TxSignature is separate from the packed crypto primitive. Optional
+properties reject present null, and all records capture numeric ingress before
+decoding. The declaration oracle compiles the actual TS interface/type closure
+without loading wallet/WASM imports; native field checks precede wire checks.
+`mutate_transaction_records.py` uses one compiled control per declaration;
+numeric controls compensate serialization so shared ingress checks cannot mask
+the direct native assertions. Wrapper controls use independent child fields.
+Transaction signing, packing and wallet/provider calls remain separate work.
+
+Runtime bodies use shared BaseExchange/Store and explicit HTTP, socket and zkLink
+host capabilities. The host owns imported SDK handles and polling; callbacks
+must propagate shared ExchangeError metadata. Date-parser failures are forwarded,
+not flattened into strings. Keep one SdkInitialization per host SDK module.
+Hash/HMAC helpers take UTF-16 units only at TextEncoder input and preserve its
+unpaired-surrogate replacement; this does not introduce a second Store model.
+
+Native mapper gates inspect every returned field and enum variant before wire
+serialization. Their object-field comparison does not claim property insertion
+order or mutable JS alias preservation. Required shared enum/string/bool fields
+refuse wider runtime source values visibly; retained info refuses native NaN.
+Cancellation mirrors the source duplicate-base request when a regular order and
+its composite brackets appear together. Blacklisting and Store removal precede
+network calls, with ten-request lots and a one-second delay between lots.
+
+`pure.cjs`, `signing.cjs` and `exchange.cjs` execute actual source declarations.
+Their compiled controls are scoped to those new bodies; caller and helper
+mutations run separately to prevent a helper failure masking caller evidence.

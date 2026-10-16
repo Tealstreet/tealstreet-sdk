@@ -1,0 +1,10 @@
+const {root,load}=require('../../safe-cex-types/scripts/accounts-source.cjs');
+const prep=load(root+'/packages/script-api-core/src/order/prepareOrder.ts');
+const pricing=load(root+'/packages/script-api-core/src/order/orderPricing.ts');
+const metadata=load(root+'/packages/safe-cex/src/exchangeMetadata.ts');
+const market={precision:{amount:0.1,price:0.01}};
+const sparse=prep.prepareOrder({symbol:'BTC',type:'limit',amount:1},{market,exchangeName:'bybit'});
+const before=pricing.venueSupportsInfinityStops('bybit');
+metadata.exchangeMetadata.bybit.supportsInfinityStops=false;
+const after=pricing.venueSupportsInfinityStops('bybit');
+process.stdout.write(JSON.stringify({sparse:{symbol:sparse.symbol,type:sparse.type,amount:sparse.amount,hasSide:Object.hasOwn(sparse,'side')},metadata:{before,after}}));

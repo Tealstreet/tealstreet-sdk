@@ -1,0 +1,27 @@
+[file]
+ts = "packages/safe-cex/src/webworker/workerErrorSerialization.ts"
+rust_files = [ "safe-cex-webworker/src/error.rs" ]
+
+[[symbol]]
+ts = "SerializableWorkerError"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-webworker/src/error.rs::SerializableWorkerError"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "readStringProperty"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-webworker/src/error.rs::read_string_property"
+status = "divergent"
+note = "FINDING owner: safe-cex-webworker audit. Annotation-only: describes own-JSON Error/DOMException property omission as accepted but gives no why-mirroring-would-be-worse reason or reason anchor. No new diagnostic-unit behavior is inferred. packages/safe-cex/src/webworker/workerErrorSerialization.ts:7 :: Private helper reads ordinary property from any non-null object, including inherited/nonenumerable Error fields; callers read only message/name/stack. sdk-rs/safe-cex-webworker/src/error.rs:35 read_string_property uses Value.get/as_str/nonempty filter; inherited and hidden properties are omitted. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): CHOSEN: the worker API currently receives serde_json::Value, matching StoreWorkerPayload data. It reads own JSON string fields but cannot materialize inherited or non-enumerable Error/DOMException properties; a host property-extraction adapter remains an accepted omission, pinned by the live TypeScript witness test."
+
+[[symbol]]
+ts = "serializeWorkerErrorForSentry"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-webworker/src/error.rs::serialize_worker_error_for_sentry"
+status = "divergent"
+note = "FINDING owner: safe-cex-webworker audit. Annotation-only, same reason defect as readStringProperty9: own-JSON Error field omission is enumerated and called accepted, with no why for retaining it. packages/safe-cex/src/webworker/workerErrorSerialization.ts:13 :: Exported serializer reads actual message/name/stack including inherited/nonenumerable fields through private helper; no new diagnostic-only surrogate claim. sdk-rs/safe-cex-webworker/src/error.rs:40 serializer uses own string getter helper and supplied fallbacks, preserving optional stack. sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy Inspection only; no runtime execution. Original annotation (historical): CHOSEN: the worker API currently receives serde_json::Value, matching StoreWorkerPayload data. It reads own JSON string fields but cannot materialize inherited or non-enumerable Error/DOMException properties; a host property-extraction adapter remains an accepted omission, pinned by the live TypeScript witness test."

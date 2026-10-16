@@ -1,0 +1,29 @@
+{
+  "oracle": "Node crypto/OpenSSL Ed25519, PKCS8 32-byte seeds; deterministic signing has no caller nonce. noncePayload changes application bytes.",
+  "cases": [
+    {
+      "seed": "0101010101010101010101010101010101010101010101010101010101010101",
+      "publicKey": "8a88e3dd7409f195fd52db2d3cba5d72ca6709bf1d94121bf3748801b40f6f5c",
+      "payload": "",
+      "signature": "778cda0634c021fae8b1a9fa655ba13230f6fcfc5c5d519afb0872ec9bf1d64241cc3eed8ad47270d86d30e762ad17677c6fb1797e35bca7eba30388257e020f",
+      "changedPayload": " ",
+      "noncePayload": "nonce=9"
+    },
+    {
+      "seed": "0202020202020202020202020202020202020202020202020202020202020202",
+      "publicKey": "8139770ea87d175f56a35466c34c7ecccb8d8a91b4ee37a25df60f5b8fc9b394",
+      "payload": "{\"zeta\":\"雪\\u0000\",\"alpha\":1,\"nonce\":\"7\"}",
+      "signature": "3ace572b046b5c70a93eb3ac68ef954cd3423c9b9f7bd5118e760ec685bb220b509cf1140ca044d28b58f9e32a52e804fa2dbfa5641b9e7fc1f023432967ae09",
+      "changedPayload": "{\"zeta\":\"雪\\u0000\",\"alpha\":1,\"nonce\":\"7\"} ",
+      "noncePayload": "{\"zeta\":\"雪\\u0000\",\"alpha\":1,\"nonce\":\"9\"}"
+    },
+    {
+      "seed": "0303030303030303030303030303030303030303030303030303030303030303",
+      "publicKey": "ed4928c628d1c2c6eae90338905995612959273a5c63f93636c14614ac8737d1",
+      "payload": "{\"zeta\":\"transfer\",\"alpha\":2,\"nonce\":\"8\"}",
+      "signature": "7f00b730ac917363760227109cc270f854dc4c3dc61965bc962136457eac4ca6382a83cba1bc7b0bf45410d23f7f2de1ddfb6fca4f2e06a4fb9adb8af7b60003",
+      "changedPayload": "{\"zeta\":\"transfer\",\"alpha\":2,\"nonce\":\"8\"} ",
+      "noncePayload": "{\"zeta\":\"transfer\",\"alpha\":2,\"nonce\":\"9\"}"
+    }
+  ]
+}

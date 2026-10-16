@@ -1,0 +1,19 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/fillEventUnits.ts"
+rust_files = [ "safe-cex-exchange/src/fill_event_units.rs" ]
+
+[[symbol]]
+ts = "fillEventUnits"
+kind = "const-fn"
+layer = ""
+rs = "safe_cex_exchange::fill_event_units::fill_event_units"
+status = "divergent"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#shared-handler-and-ledger-choice. Fixed table values and builtin prototype identity/arity are covered by the22-key native/source witness. Symbolic inherited values exclude executable/custom prototype behavior. The fixed source table yields undefined for D800; no retained-unit or mutated-table witness is claimed, and its old FORCED subclaim is withdrawn. Targets: safe_cex_exchange::fill_event_units::fill_event_units"
+
+[[symbol]]
+ts = "FILL_EVENT_UNIT_VENUES"
+kind = "const"
+layer = ""
+rs = "safe_cex_exchange::fill_event_units::FILL_EVENT_UNIT_VENUES"
+status = "divergent"
+note = "CHOSEN: expose the exact22 source Object.keys entries in source insertion order as an immutable static slice instead of the exported mutable JavaScript array; immutability prevents native consumers from changing the canonical table enumeration. It is a real independently spelled key enumeration rather than deriving expected count from the artifact. Direct native ordered keys are checked before the actual full TypeScript module keys; stops after all22 explicitly expected source-owned keys and makes no mutable-array alias claim."

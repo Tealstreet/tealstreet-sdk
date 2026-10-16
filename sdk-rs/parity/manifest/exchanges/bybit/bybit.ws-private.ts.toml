@@ -1,0 +1,91 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/bybit/bybit.ws-private.ts"
+rust_files = [ "safe-cex-venue-bybit/src/ws_private.rs", "safe-cex-venue-bybit/src/ws_private/protocol.rs", "safe-cex-venue-bybit/src/ws_private/local_auth.rs" ]
+
+[[symbol]]
+ts = "BybitPrivateWebsocket"
+kind = "class"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPrivateWebsocket#incrementalFills"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPrivateWebsocket.connectAndSubscribe"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/ws_private.rs::connect_and_subscribe"
+status = "ported"
+note = "Extracted connection operation to safe-cex-venue-bybit/src/ws_private.rs::connect_and_subscribe; parent variant URL, demo mode and runtime-only flags are explicit inputs. Uses core-owned start_websocket with protocol callbacks registered on BaseWebSocket before entry; no venue-owned task. Live source compares six repeated attempts through fallback selection, route URL, site headers and diagnostics, with deferred and inline hosts and disposal. Full constructor composition remains pending; onOpen authentication/subscription orchestration is claimed separately."
+
+[[symbol]]
+ts = "BybitPrivateWebsocket.onOpen"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::open"
+status = "divergent"
+note = "CHOSEN onOpen is implemented by safe-cex-venue-bybit/src/ws_private/protocol.rs::PrivateProtocol::open. Invokes the reconnect operation synchronously and returns a ready callback future without awaiting authentication. Uses the same declared core-owned cancellation boundary as sendReconnectSequence; mirroring its unowned promise would retain the disposed venue/socket and permit account work outside disposal. Concrete BybitExchange private-socket construction is tested through BaseWebSocket::on_open against the actual source onOpen, sendReconnectSequence, auth, subscribe and ping methods: full local/remote auth frames and envelopes, refusal diagnostics, disposal and weak ownership. Clock sync/time and signer account name remain explicit constructor dependencies; this row does not claim the source clock implementation, the full socket class, auth malformed-input parity, or onMessage."
+
+[[symbol]]
+ts = "BybitPrivateWebsocket.sendReconnectSequence"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/ws_private.rs::send_reconnect_sequence"
+status = "divergent"
+note = "CHOSEN extracted sendReconnectSequence to safe-cex-venue-bybit/src/ws_private.rs::send_reconnect_sequence. Clock sync and auth dependencies are explicit; disposal check and clock invocation run synchronously, then core owns the awaited sync/sleep/auth tail. The source has no auth latch in this method; none is added. Retains ignored syncTime, 25ms delay, failed-auth diagnostic, disregardSilence plus reconnect without subscribe/ping, and successful subscribe then ping plus unawaited snapshot only in reconnecting mode. Core cancellation intentionally stops the tail on disposal where the source promise still invokes auth; mirroring would retain a disposed socket and permit further account work outside core disposal. Unawaited tail/snapshot rejection is reported through the core host exception path. Live source reconnect-fixtures.mjs records auth after disposal; deferred and inline Rust tests compare branches, actual frames, native reconnect and snapshot effects, and pin synchronous clock invocation. A venue-owned spawn mutation compiles and fails the socket-release assertion. Concrete protocol onOpen binding is claimed separately; full constructor and onMessage remain pending."
+
+[[symbol]]
+ts = "BybitPrivateWebsocket.onMessage"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPrivateWebsocket.ping"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/ws_private.rs::ping"
+status = "ported"
+note = "Extracted protocol operation to safe-cex-venue-bybit/src/ws_private.rs::ping; uses the core BaseWebSocket entrypoints with socket state explicit. Live-source oracle covers emitted frames, subscription delays and dispatch outcomes. Constructor, dialing and reconnect/auth sequencing remain pending."
+
+[[symbol]]
+ts = "BybitPrivateWebsocket.handleOrderTopic"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPrivateWebsocket.handlePositionTopic"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPrivateWebsocket#auth"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_private/local_auth.rs::auth"
+status = "divergent"
+note = "MIXED: extracted auth to safe-cex-venue-bybit/src/ws_private/local_auth.rs::auth; local HMAC and remote exhaustive WsAuth signer dispatch are implemented, with original expiry signing spelling distinct from toFixed(0) frame spelling, remote error diagnostics and wrong-kind refusal. Production PrivateProtocol::open composes this method through the real BaseExchange signer; its CHOSEN owned cancellation follows sendReconnectSequence because mirroring an unowned promise would retain a disposed socket and permit account work outside disposal. 690 local and 1150 remote source cases plus deferred/inline composed onOpen tests pin frames, diagnostics and envelopes. FINDING shared WsAuthResponse narrows error/signature to optional strings and requires an object: source consumes numeric/boolean/array/object replies where Rust refuses the whole signer reply before transmission (15 boundary cases include null and scalar-Unicode positive controls). FINDING native nonfinite extraData.expires reaches the TS signer as Infinity/-Infinity/NaN but Rust RawValue holds null; pre-serialization host observations on both sides pin this independently of equal serialized null. CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary: a lone-surrogate signature reaches the TS auth frame but Rust rejects the signer reply; double-escaped witness retained. FINDING notification rejection timing remains on no-socket auth send: core propagates reconnect failure synchronously while source rejects an unawaited promise. Fallible reporting now propagates before returning false. Subscriber-ID finding closed by canonical shared From<StoreMutationError>: original cause metadata and Store-local IDs survive in inner-to-outer order, pinned by the actual Store reconnect witness. See safe-cex-venue-bybit/STORE_NOTIFICATION_AUDIT.md. Constructor, private message handlers and factory response lifecycle are not claimed by this method row."
+
+[[symbol]]
+ts = "BybitPrivateWebsocket#subscribe"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_private.rs::subscribe"
+status = "divergent"
+note = "FINDING Extracted protocol operation to safe-cex-venue-bybit/src/ws_private.rs::subscribe; uses the core BaseWebSocket entrypoints with socket state explicit. Live-source oracle covers emitted frames, subscription delays and dispatch outcomes. Constructor, dialing and reconnect/auth sequencing remain pending. FINDING notification rejection timing: the shared fallible Store contract now commits health and skips later subscribers on failure, and the venue propagates core ExchangeError unchanged. However core send calls reconnect synchronously with Result: Rust subscribe/send rejects immediately while TypeScript only rejects the unawaited reconnect promise and continues its caller. notification_no_socket_send_retains_synchronous_rejection_finding and check-store-notification.mjs pin both sides. Subscriber-ID finding closed by canonical shared From<StoreMutationError>: original cause metadata and Store-local IDs survive in inner-to-outer order, pinned by the actual Store reconnect witness. See STORE_NOTIFICATION_AUDIT.md; no promotion follows from the ABI alone."

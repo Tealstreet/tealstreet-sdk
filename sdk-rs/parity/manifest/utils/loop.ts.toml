@@ -1,0 +1,19 @@
+[file]
+ts = "packages/safe-cex/src/utils/loop.ts"
+rust_files = [ "safe-cex-exchange/src/loop_util.rs" ]
+
+[[symbol]]
+ts = "warnMissingInterval"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/loop_util.rs::warn_missing_interval"
+status = "divergent"
+note = "CHOSEN: caller supplies exact UTF-16 function source; warning keys slice200 units and dedupe before callbacks. Display-only lone units become U+FFFD in the host warning (MANIFEST-SPEC.md#shared-utf8-string-boundary); no Function.prototype.toString host magic is inferred. Explicit rename: `safe-cex-exchange/src/loop_util.rs::warn_missing_interval` mirrors warnMissingInterval."
+
+[[symbol]]
+ts = "loop"
+kind = "const-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/loop_util.rs::loop_once", "safe-cex-exchange/src/loop_util.rs::LoopHost" ]
+status = "divergent"
+note = "FINDING owner: shared core divergence audit. actual loop(fn,100) calls sleep100 during invocation; native loop_once performs no host sleep until first poll. The explicit scheduler/global replacement note does not price this own eager-prefix timing difference. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit sleep, visibility, RAF and zero-timeout host capabilities replace JS globals. Original positive interval (including infinity) reaches sleep; falsey/nonpositive/NaN uses5000 and one source-key warning. Visibility is evaluated after sleep; callbacks are enqueued by the selected host scheduler, not invoked inline. Explicit rename: `safe-cex-exchange/src/loop_util.rs::loop_once` mirrors loop. Explicit rename: `safe-cex-exchange/src/loop_util.rs::LoopHost` mirrors loop. Split targets retain the adapter and its concrete behavior."
