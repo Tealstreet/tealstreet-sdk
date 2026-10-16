@@ -84,8 +84,9 @@ Selected validation passed: all 17 direct native field tests (618 cases), plus 1
 complete-array tests, the existing 310-scenario source-declaration/native witness,
 the direct 20-case private-field test, all 62 compiled named runtime
 corruption/restoration controls, and 18 fresh actual native decoder probes with
-zero classification-only receipts or failed owners. Integrated readiness checks
-remain pending. Scope is eighteen original
+zero classification-only receipts or failed owners. Integrated readiness results
+are recorded in the [PR validation record](https://github.com/Tealstreet/tealstreet-sdk/pull/369).
+Scope is eighteen original
 native/default owners, separate from other owners, aliases, construction,
 newer discovery, local scopes, feature configurations and WASM contract
 execution. Full-package completion is not claimed.
