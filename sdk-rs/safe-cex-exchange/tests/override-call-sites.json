@@ -3564,12 +3564,6 @@
     "file": "safe-cex-venue-bybit/src/binding/members/account.rs"
   },
   {
-    "function": "set_leverage",
-    "body": "444f3b058e699912",
-    "reference": "controls :: set_leverage",
-    "file": "safe-cex-venue-bybit/src/binding/members/controls.rs"
-  },
-  {
     "function": "change_margin_type",
     "body": "e4a0ccc327366bd8",
     "reference": "controls :: change_margin_type",
