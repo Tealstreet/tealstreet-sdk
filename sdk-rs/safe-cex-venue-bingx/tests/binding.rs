@@ -582,3 +582,5 @@ fn account_http_error_keeps_status_and_request() {
     assert_eq!(error.config.as_ref().unwrap()["url"], BALANCE);
     done(&h);
 }
+
+include!("support/binding_factory.rs");
