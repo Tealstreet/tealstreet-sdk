@@ -1065,3 +1065,10 @@ passed after reviewing21 new Phemex call/reference records; its sole base cleanu
 call is the source-super adapter with explicit source/native evidence.
 The original23 method/helper control checkpoint remains valid; the added skip-super
 control makes24 and the registry factory control is separate.
+
+Final integrated static gates passed for Phemex plus registry: strict host
+all-target and wasm library Clippy; canonical parity7459 rows /17114 public
+items; layers88/88; live source registry48 ordered names. Read-only extractor
+freshness reports0 changed manifests,0 added and0 orphaned symbols after taking
+the author's formatting-only #190. Five shared typed-edge findings stay marked
+under ddi2il-10; these gates do not reclassify them as ported.
