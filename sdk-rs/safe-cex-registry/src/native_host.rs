@@ -219,6 +219,7 @@ impl RustVenueHost for NativeVenueHost {
     #[allow(clippy::arc_with_non_send_sync)]
     fn hyperliquid(
         &self,
+        name: safe_cex_types::ExchangeName,
         options: &safe_cex_types::ExchangeOptions,
     ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError> {
         let base_url = if options.testnet.unwrap_or(false) {
@@ -229,7 +230,7 @@ impl RustVenueHost for NativeVenueHost {
         let client = native_client(
             &self.runtime,
             &self.adapter,
-            safe_cex_types::ExchangeName::Hyperliquid,
+            name,
             options,
             safe_cex_transport::RestRequest {
                 base_url: Some(base_url.into()),

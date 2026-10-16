@@ -1591,31 +1591,31 @@
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . fetch_markets ()",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . fetch_tickers ()",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . fetch_ohlcv (arg (0))",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . validate_account ()",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . set_leverage (arg (0) . text () ? , arg (1) . number () ?)",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
@@ -1627,8 +1627,8 @@
   },
   {
     "function": "capture_store",
-    "body": "8263f22d1eb3da94",
-    "call": "owner . base . store . update_order (& arg (0) . get (\"id\") ? . text () ? , & patch (& arg (1)) ?)",
+    "body": "afa7a6dd7df55092",
+    "call": "owner . base . store . update_order (& arg (0) . read (\"id\") ? . text () ? , & patch (& arg (1)) ?)",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
@@ -1771,13 +1771,13 @@
   },
   {
     "function": "start_fetch_throttled",
-    "body": "facdc5e46a2b7abc",
+    "body": "5c89d8e2e902ba2c",
     "reference": "class_jobs :: start",
     "file": "safe-cex-venue-binance/src/private_classes.rs"
   },
   {
     "function": "start_fetch_throttled",
-    "body": "facdc5e46a2b7abc",
+    "body": "5c89d8e2e902ba2c",
     "call": "retained . parent . fetch_orders ()",
     "file": "safe-cex-venue-binance/src/private_classes.rs"
   },
@@ -4044,6 +4044,144 @@
     "file": "safe-cex-venue-grvt/src/api_runtime.rs"
   },
   {
+    "function": "capabilities",
+    "body": "f1784f0ab105e573",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-grvt/src/binding/exchange.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "account_runtime :: start",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "account_runtime :: validate_account",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "account_runtime :: fetch_positions",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: snapshots :: fetch_tickers",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: markets :: fetch_markets",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: snapshots :: get_account",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: markets :: refresh_markets",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: data_reads :: fetch_ohlcv",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: order_controls :: update_order",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "leverage",
+    "body": "23354b8fe9f1bb22",
+    "reference": "crate :: data_reads :: fetch_leverage_for_symbol",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "leverage",
+    "body": "23354b8fe9f1bb22",
+    "reference": "crate :: data_reads :: set_leverage",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "cancel",
+    "body": "df492b2c349de2fa",
+    "reference": "crate :: order_controls :: cancel_all_orders",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "cancel",
+    "body": "df492b2c349de2fa",
+    "reference": "crate :: order_controls :: cancel_symbol_orders",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "cancel",
+    "body": "df492b2c349de2fa",
+    "reference": "crate :: order_controls :: cancel_orders",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "base_dispose",
+    "body": "b2aa969d67d9f790",
+    "call": "base . dispose ()",
+    "file": "safe-cex-venue-grvt/src/binding/private.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "410c8dd347199725",
+    "call": "self . state . dispose (Js :: truthy , | timer | { self . host () . map_err (| e | e . to_exchange_error ()) ? . 0 . clear_timeout (timer) ; Ok (()) } , | | self . base_dispose () . map_err (| e | e . to_exchange_error ()) ,)",
+    "file": "safe-cex-venue-grvt/src/binding/private.rs"
+  },
+  {
+    "function": "start",
+    "body": "8a137f7d83260a76",
+    "reference": "SessionHost :: start",
+    "file": "safe-cex-venue-grvt/src/binding/private.rs"
+  },
+  {
+    "function": "start",
+    "body": "5d4187128ebb297c",
+    "reference": "SessionHost :: start",
+    "file": "safe-cex-venue-grvt/src/binding/private.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "7556ca4f8a627410",
+    "reference": "public_feeds :: listen_ohlcv",
+    "file": "safe-cex-venue-grvt/src/binding/public.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "7556ca4f8a627410",
+    "reference": "public_feeds :: listen_order_book",
+    "file": "safe-cex-venue-grvt/src/binding/public.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "7556ca4f8a627410",
+    "reference": "public_lifecycle :: dispose",
+    "file": "safe-cex-venue-grvt/src/binding/public.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "7556ca4f8a627410",
+    "call": "base . dispose ()",
+    "file": "safe-cex-venue-grvt/src/binding/public.rs"
+  },
+  {
     "function": "get_connected_wallet_address",
     "body": "92c2f8c3a7e70fb8",
     "call": "host . start (Box :: pin (async move { let ethereum = get_ethereum_provider (h . as_ref ()) ? ; if ! h . truthy (& ethereum) { return Ok (h . null ()) ; } let result : JsResult < H :: Value > = async { let provider = h . browser_provider (& ethereum) ? ; let accounts = h . provider_send (& provider , \"eth_accounts\" , h . array (vec ! [])) ? . await ? ; let first = h . property (& accounts , \"0\") ? ; Ok (if h . truthy (& first) { first } else { h . null () }) } . await ; match result { Ok (v) => Ok (v) , Err (_) => Ok (h . null ()) , } }))",
@@ -4141,7 +4279,7 @@
   },
   {
     "function": "dispose",
-    "body": "45a8a8dba45efd57",
+    "body": "a57c48d8faa866ff",
     "call": "self . base . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/binding.rs"
   },
@@ -4477,13 +4615,19 @@
   },
   {
     "function": "base_exchange_class",
-    "body": "f16535160061e222",
+    "body": "d0b3260d4e9cb7dc",
     "call": "b . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
   {
     "function": "base_exchange_class",
-    "body": "f16535160061e222",
+    "body": "d0b3260d4e9cb7dc",
+    "call": "b . can_sign ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
+  },
+  {
+    "function": "base_exchange_class",
+    "body": "d0b3260d4e9cb7dc",
     "call": "b . name ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
@@ -4495,7 +4639,7 @@
   },
   {
     "function": "store_object",
-    "body": "48f2b1686705ce57",
+    "body": "13a244caa990fb9f",
     "call": "s . update_order (& id , & changes)",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_store.rs"
   },
@@ -4606,6 +4750,12 @@
     "body": "2d287c9ee82edad0",
     "reference": "helper_tasks :: start",
     "file": "safe-cex-venue-hyperliquid/src/spot_account_reads.rs"
+  },
+  {
+    "function": "new",
+    "body": "15c83f5cece8b548",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/spot_binding.rs"
   },
   {
     "function": "wait_for_token",

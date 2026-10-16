@@ -1822,12 +1822,13 @@ impl Host {
             }
             "omitUndefined" => {
                 let N::A(a) = first else { panic!("ids") };
-                return Ok(arr(a
-                    .borrow()
-                    .iter()
-                    .filter(|v| !matches!(v, N::U))
-                    .cloned()
-                    .collect()));
+                let result = object(vec![]);
+                for (index, value) in a.borrow().iter().enumerate() {
+                    if !matches!(value, N::U) {
+                        self.set(&result, &index.to_string(), value)?;
+                    }
+                }
+                return Ok(result);
             }
             "price-precision" => return Ok(N::Num(cache::num(&args[1]))),
             "v" => return self.get(&first, &String::from_utf16_lossy(&string(&args[1]).0)),

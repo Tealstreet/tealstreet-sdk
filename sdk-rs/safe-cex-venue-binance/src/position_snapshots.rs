@@ -47,18 +47,18 @@ fn endpoint(pm: bool, name: &str) -> &'static str {
         .1
 }
 fn array(v: Vec<EventValue>) -> EventValue {
-    EventValue::Array(Rc::new(RefCell::new(v)))
+    EventValue::array(v)
 }
 fn opt(v: EventValue, k: &str) -> Result<EventValue, Failure> {
     if v.nullish() {
         Ok(EventValue::Undefined)
     } else {
-        v.get(k)
+        v.read(k)
     }
 }
 fn sides(p: &EventValue, pm: bool) -> Result<(f64, EventValue, PositionMode), Failure> {
-    let raw = p.get("positionSide")?;
-    let contracts = p.get("positionAmt")?.float()?;
+    let raw = p.read("positionSide")?;
+    let contracts = p.read("positionAmt")?.float()?;
     let entries = if pm {
         crate::binancepm_types::POSITION_SIDE
     } else {
@@ -66,13 +66,13 @@ fn sides(p: &EventValue, pm: bool) -> Result<(f64, EventValue, PositionMode), Fa
     };
     let side = fallback(
         table(entries, raw, PrivateEnum::PositionSide)?,
-        EventValue::Enum(PrivateEnum::PositionSide(if contracts > 0.0 {
+        EventValue::enum_value(PrivateEnum::PositionSide(if contracts > 0.0 {
             PositionSide::Long
         } else {
             PositionSide::Short
         })),
     );
-    let mode = if p.get("positionSide")?.same(&string("BOTH")) {
+    let mode = if p.read("positionSide")?.same(&string("BOTH")) {
         PositionMode::OneWay
     } else {
         PositionMode::Hedged
@@ -83,7 +83,7 @@ fn leverage(config: EventValue) -> Result<f64, Failure> {
     fallback(opt(config, "leverage")?, string("0")).float()
 }
 fn margin(config: EventValue) -> Result<EventValue, Failure> {
-    Ok(EventValue::Enum(PrivateEnum::Margin(
+    Ok(EventValue::enum_value(PrivateEnum::Margin(
         if opt(config, "marginType")?.same(&string("ISOLATED")) {
             MarginType::Isolated
         } else {
@@ -107,7 +107,7 @@ fn unique(rows: Vec<EventValue>) -> Result<EventValue, Failure> {
     let mut seen = HashSet::new();
     let mut result = vec![];
     for row in rows {
-        if seen.insert(row.get("id")?.text()?) {
+        if seen.insert(row.read("id")?.text()?) {
             result.push(row)
         }
     }
@@ -125,16 +125,16 @@ pub async fn fetch_futures_positions(
         let a = b.get(SnapshotClient::Private, endpoint(false, "POSITION_RISK"))?;
         let c = b.get(SnapshotClient::Private, endpoint(false, "SYMBOL_CONFIG"))?;
         let (data, configs) = pair(a, c).await?;
-        let by_symbol = EventValue::object(Default::default());
+        let by_symbol = EventValue::record_object(Default::default());
         map(configs, "symbolConfigs", |c| {
-            by_symbol.define(&c.get("symbol")?.text()?, c);
+            by_symbol.write(&c.read("symbol")?.text()?, c);
             Ok(EventValue::Undefined)
         })?;
         let formatted = map(data, "data", |p| {
             let (contracts, side, mode) = sides(&p, false)?;
-            let config = by_symbol.get(&p.get("symbol")?.text()?)?;
+            let config = by_symbol.get(&p.read("symbol")?.text()?)?;
             let margin_type = margin(config.clone())?;
-            let notional = p.get("notional")?.float()?.abs();
+            let notional = p.read("notional")?.float()?.abs();
             let lev = leverage(config)?;
             let isolated = fallback(keyed(&p, "isolatedMargin")?, string("0")).float()?;
             let size = if isolated > 0.0 {
@@ -144,25 +144,28 @@ pub async fn fetch_futures_positions(
             } else {
                 EventValue::Undefined
             };
-            let id = b.id(p.get("symbol")?.text()?, side.clone(), mode)?;
+            let id = b.id(p.read("symbol")?.text()?, side.clone(), mode)?;
             Ok(record([
                 ("id", string(id)),
-                ("symbol", p.get("symbol")?),
+                ("symbol", p.read("symbol")?),
                 ("side", side),
-                ("entryPrice", number(p.get("entryPrice")?.float()?)),
+                ("entryPrice", number(p.read("entryPrice")?.float()?)),
                 ("notional", number(notional)),
                 ("leverage", number(lev)),
-                ("unrealizedPnl", number(p.get("unRealizedProfit")?.float()?)),
+                (
+                    "unrealizedPnl",
+                    number(p.read("unRealizedProfit")?.float()?),
+                ),
                 ("contracts", number(contracts.abs())),
                 (
                     "liquidationPrice",
-                    number(p.get("liquidationPrice")?.float()?),
+                    number(p.read("liquidationPrice")?.float()?),
                 ),
                 ("marginSize", size),
                 ("marginType", margin_type),
                 (
                     "positionMode",
-                    EventValue::Enum(PrivateEnum::PositionMode(mode)),
+                    EventValue::enum_value(PrivateEnum::PositionMode(mode)),
                 ),
                 ("info", p),
             ]))
@@ -177,17 +180,17 @@ pub async fn fetch_futures_positions(
         let EventValue::Array(formatted) = formatted else {
             unreachable!()
         };
-        let mut rows = formatted.borrow().clone();
+        let mut rows = array_values(&formatted);
         for i in 0..n {
             let market = markets.get(&i.to_string())?;
             for side in [PositionSide::Long, PositionSide::Short] {
-                let config = by_symbol.get(&market.get("symbol")?.text()?)?;
+                let config = by_symbol.get(&market.read("symbol")?.text()?)?;
                 let lev = leverage(config.clone())?;
-                let side = EventValue::Enum(PrivateEnum::PositionSide(side));
-                let id = b.id(market.get("symbol")?.text()?, side.clone(), mode)?;
+                let side = EventValue::enum_value(PrivateEnum::PositionSide(side));
+                let id = b.id(market.read("symbol")?.text()?, side.clone(), mode)?;
                 rows.push(record([
                     ("id", string(id)),
-                    ("symbol", market.get("symbol")?),
+                    ("symbol", market.read("symbol")?),
                     ("side", side),
                     ("entryPrice", number(0.0)),
                     ("notional", number(0.0)),
@@ -199,7 +202,7 @@ pub async fn fetch_futures_positions(
                     ("marginType", margin(config.clone())?),
                     (
                         "positionMode",
-                        EventValue::Enum(PrivateEnum::PositionMode(mode)),
+                        EventValue::enum_value(PrivateEnum::PositionMode(mode)),
                     ),
                     (
                         "info",
@@ -234,21 +237,24 @@ pub async fn fetch_pm_positions(
         let rows = pm_rows(data, endpoint(true, "POSITION_RISK"))?;
         let formatted = map(rows, "rows", |p| {
             let (contracts, side, mode) = sides(&p, true)?;
-            let notional = p.get("notional")?.float()?.abs();
-            let lev = p.get("leverage")?.float()?;
-            let id = b.id(p.get("symbol")?.text()?, side.clone(), mode)?;
+            let notional = p.read("notional")?.float()?.abs();
+            let lev = p.read("leverage")?.float()?;
+            let id = b.id(p.read("symbol")?.text()?, side.clone(), mode)?;
             Ok(record([
                 ("id", string(id)),
-                ("symbol", p.get("symbol")?),
+                ("symbol", p.read("symbol")?),
                 ("side", side),
-                ("entryPrice", number(p.get("entryPrice")?.float()?)),
+                ("entryPrice", number(p.read("entryPrice")?.float()?)),
                 ("notional", number(notional)),
                 ("leverage", number(lev)),
-                ("unrealizedPnl", number(p.get("unRealizedProfit")?.float()?)),
+                (
+                    "unrealizedPnl",
+                    number(p.read("unRealizedProfit")?.float()?),
+                ),
                 ("contracts", number(contracts.abs())),
                 (
                     "liquidationPrice",
-                    number(p.get("liquidationPrice")?.float()?),
+                    number(p.read("liquidationPrice")?.float()?),
                 ),
                 (
                     "marginSize",
@@ -260,11 +266,11 @@ pub async fn fetch_pm_positions(
                 ),
                 (
                     "marginType",
-                    EventValue::Enum(PrivateEnum::Margin(MarginType::Cross)),
+                    EventValue::enum_value(PrivateEnum::Margin(MarginType::Cross)),
                 ),
                 (
                     "positionMode",
-                    EventValue::Enum(PrivateEnum::PositionMode(mode)),
+                    EventValue::enum_value(PrivateEnum::PositionMode(mode)),
                 ),
                 ("info", p),
             ]))
@@ -279,15 +285,15 @@ pub async fn fetch_pm_positions(
         let EventValue::Array(formatted) = formatted else {
             unreachable!()
         };
-        let mut rows = formatted.borrow().clone();
+        let mut rows = array_values(&formatted);
         for i in 0..n {
             let market = markets.get(&i.to_string())?;
             for side in [PositionSide::Long, PositionSide::Short] {
-                let side = EventValue::Enum(PrivateEnum::PositionSide(side));
-                let id = b.id(market.get("symbol")?.text()?, side.clone(), mode)?;
+                let side = EventValue::enum_value(PrivateEnum::PositionSide(side));
+                let id = b.id(market.read("symbol")?.text()?, side.clone(), mode)?;
                 rows.push(record([
                     ("id", string(id)),
-                    ("symbol", market.get("symbol")?),
+                    ("symbol", market.read("symbol")?),
                     ("side", side),
                     ("entryPrice", number(0.0)),
                     ("notional", number(0.0)),
@@ -297,11 +303,11 @@ pub async fn fetch_pm_positions(
                     ("liquidationPrice", number(0.0)),
                     (
                         "positionMode",
-                        EventValue::Enum(PrivateEnum::PositionMode(mode)),
+                        EventValue::enum_value(PrivateEnum::PositionMode(mode)),
                     ),
                     (
                         "marginType",
-                        EventValue::Enum(PrivateEnum::Margin(MarginType::Cross)),
+                        EventValue::enum_value(PrivateEnum::Margin(MarginType::Cross)),
                     ),
                 ]));
             }
@@ -339,8 +345,8 @@ fn find_market(
     let n = dense(&markets, "find", "this.store.markets")?;
     for i in 0..n {
         let m = markets.get(&i.to_string())?;
-        if m.get("base")?.same(&asset.get("asset")?) {
-            let q = m.get("quote")?;
+        if m.read("base")?.same(&asset.read("asset")?) {
+            let q = m.read("quote")?;
             if if btc {
                 q.same(&string("BTC"))
             } else {
@@ -387,7 +393,7 @@ pub async fn fetch_futures_positions_and_balance(
             let assets = fallback(opt(data.clone(), "assets")?, array(vec![]));
             let a = match assets {
                 EventValue::Array(a)=>a,
-                EventValue::String(s)=>Rc::new(RefCell::new(s.chars().map(|c|string(c.to_string())).collect())),
+                EventValue::String(s)=>Rc::new(RefCell::new(EventValue::String(s.clone()).text()?.chars().map(|c|Some(string(c.to_string()))).collect())),
                 v=>return Err(type_error(match &v {
                     EventValue::Bool(x)=>format!("boolean {x} is not iterable (cannot read property Symbol(Symbol.iterator))"),
                     EventValue::Number(x)=>format!("number {} is not iterable (cannot read property Symbol(Symbol.iterator))",safe_cex_num::js_number_string(*x)),
@@ -396,22 +402,22 @@ pub async fn fetch_futures_positions_and_balance(
             };
             let mut i = 0;
             while i < a.borrow().len() {
-                let asset = a.borrow()[i].clone();
+                let asset = a.borrow()[i].clone().unwrap_or(EventValue::Undefined);
                 i += 1;
-                let wallet = fallback(asset.get("walletBalance")?, string("0")).float()?;
-                let available = fallback(asset.get("availableBalance")?, string("0")).float()?;
-                let initial = fallback(asset.get("initialMargin")?, string("0")).float()?;
-                let unrealized = fallback(asset.get("unrealizedProfit")?, string("0")).float()?;
+                let wallet = fallback(asset.read("walletBalance")?, string("0")).float()?;
+                let available = fallback(asset.read("availableBalance")?, string("0")).float()?;
+                let initial = fallback(asset.read("initialMargin")?, string("0")).float()?;
+                let unrealized = fallback(asset.read("unrealizedProfit")?, string("0")).float()?;
                 if wallet == 0.0 && available == 0.0 && initial == 0.0 && unrealized.abs() == 0.0 {
                     continue;
                 }
-                if stable(&asset.get("asset")?) {
+                if stable(&asset.read("asset")?) {
                     total += wallet;
                     free += available;
                     used += initial;
                     upnl += unrealized;
                     details.push(Detail {
-                        asset: asset.get("asset")?,
+                        asset: asset.read("asset")?,
                         wallet,
                         usd: wallet,
                         price: None,
@@ -421,33 +427,33 @@ pub async fn fetch_futures_positions_and_balance(
                     if positive(wallet, available, initial, unrealized) {
                         let direct = find_market(b.as_ref(), &asset, false)?;
                         if direct.truthy() {
-                            let symbol = direct.get("symbol")?;
+                            let symbol = direct.read("symbol")?;
                             let ticker = b.tickers()?.get(&symbol.text()?)?;
-                            if ticker.truthy() && ticker.get("last")?.number()? > 0.0 {
-                                price = ticker.get("last")?;
+                            if ticker.truthy() && ticker.read("last")?.number()? > 0.0 {
+                                price = ticker.read("last")?;
                             }
                         }
-                        if price.same(&number(0.0)) && !asset.get("asset")?.same(&string("BTC")) {
+                        if price.same(&number(0.0)) && !asset.read("asset")?.same(&string("BTC")) {
                             let market = find_market(b.as_ref(), &asset, true)?;
                             if market.truthy() {
-                                let btc = b.tickers()?.get(&market.get("symbol")?.text()?)?;
+                                let btc = b.tickers()?.get(&market.read("symbol")?.text()?)?;
                                 let tickers = b.tickers()?;
-                                let first = tickers.get("BTCUSDT")?;
+                                let first = tickers.read("BTCUSDT")?;
                                 let quote = if first.truthy() {
                                     first
                                 } else {
-                                    b.tickers()?.get("BTCUSDC")?
+                                    b.tickers()?.read("BTCUSDC")?
                                 };
                                 if btc.truthy()
-                                    && btc.get("last")?.number()? > 0.0
+                                    && btc.read("last")?.number()? > 0.0
                                     && quote.truthy()
-                                    && quote.get("last")?.number()? > 0.0
+                                    && quote.read("last")?.number()? > 0.0
                                 {
-                                    price = number(btc.get("last")?.number()? * quote.get("last")?.number()?);
+                                    price = number(btc.read("last")?.number()? * quote.read("last")?.number()?);
                                     let _symbol = format!(
                                         "{} -> {}",
-                                        market.get("symbol")?.text()?,
-                                        quote.get("symbol")?.text()?
+                                        market.read("symbol")?.text()?,
+                                        quote.read("symbol")?.text()?
                                     );
                                 }
                             }
@@ -461,14 +467,14 @@ pub async fn fetch_futures_positions_and_balance(
                         used += initial * numeric_price;
                         upnl += unrealized * numeric_price;
                         details.push(Detail {
-                            asset: asset.get("asset")?,
+                            asset: asset.read("asset")?,
                             wallet,
                             usd,
                             price: Some(price),
                         });
                     } else if positive(wallet, available, initial, unrealized) {
                         details.push(Detail {
-                            asset: asset.get("asset")?,
+                            asset: asset.read("asset")?,
                             wallet,
                             usd: 0.0,
                             price: Some(number(0.0)),
@@ -534,10 +540,10 @@ pub async fn fetch_futures_positions_and_balance(
                 format!("Error aggregating balances: {}", error_text(&e)),
                 LogSeverity::Error,
             )?;
-            total = fallback(data.get("totalWalletBalance")?, string("0")).float()?;
-            free = fallback(data.get("availableBalance")?, string("0")).float()?;
-            upnl = fallback(data.get("totalUnrealizedProfit")?, string("0")).float()?;
-            used = fallback(data.get("totalInitialMargin")?, string("0")).float()?;
+            total = fallback(data.read("totalWalletBalance")?, string("0")).float()?;
+            free = fallback(data.read("availableBalance")?, string("0")).float()?;
+            upnl = fallback(data.read("totalUnrealizedProfit")?, string("0")).float()?;
+            used = fallback(data.read("totalInitialMargin")?, string("0")).float()?;
         }
         if data.nullish() {
             return Err(type_error(format!(
@@ -545,7 +551,7 @@ pub async fn fetch_futures_positions_and_balance(
                 data.text()?
             )));
         }
-        let _positions = data.get("positions")?;
+        let _positions = data.read("positions")?;
         let mut rest = data.spread();
         rest.remove("positions");
         let balance = record([
@@ -553,7 +559,7 @@ pub async fn fetch_futures_positions_and_balance(
             ("free", number(free)),
             ("used", number(used)),
             ("upnl", number(upnl)),
-            ("info", EventValue::object(rest)),
+            ("info", EventValue::record_object(rest)),
         ]);
         Ok(record([
             ("balance", balance),

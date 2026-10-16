@@ -1,7 +1,8 @@
-//! Native private-event data: f64, typed enums and shallow/reference identity.
+//! Decoded private-event operations over the canonical shared runtime graph.
 //! JSON data is decoded once. Own undefined and stock inherited table members
 //! remain distinct; executable getters/custom callables/iterators are not data.
 use crate::request_weight::{Failure, type_error};
+pub use safe_cex_exchange::js_runtime::value::Js as EventValue;
 use safe_cex_num::{ProtoMember, TableHit, js_number_string, js_table_lookup, parse_float};
 use safe_cex_types::object_map::JsObjectMap;
 use safe_cex_types::{
@@ -43,304 +44,174 @@ impl PrivateEnum {
         .expect("native enum string")
     }
 }
-pub type EventArray = Rc<RefCell<Vec<EventValue>>>;
-pub type EventObject = Rc<RefCell<EventRecord>>;
-#[derive(Clone, Debug)]
-pub enum EventValue {
-    Undefined,
-    Null,
-    Bool(bool),
-    Number(f64),
-    String(String),
-    Array(EventArray),
-    Object(EventObject),
-    Enum(PrivateEnum),
-    Inherited(ProtoMember),
-    Builtin(safe_cex_num::BuiltinReference),
+pub type EventArray = Rc<RefCell<Vec<Option<EventValue>>>>;
+
+/// Legacy decoded-data profile over the canonical runtime graph. No second heap.
+pub trait EventOps: Sized {
+    fn from_json(value: Value) -> Self;
+    fn record_object(fields: JsObjectMap<Self>) -> Self;
+    fn object_in_realm(realm: Rc<safe_cex_num::PrototypeRealm>, fields: JsObjectMap<Self>) -> Self;
+    fn text_value(value: String) -> Self;
+    fn enum_value(value: PrivateEnum) -> Self;
+    fn inherited(member: ProtoMember) -> Self;
+    fn nullish(&self) -> bool;
+    fn same(&self, other: &Self) -> bool;
+    fn read(&self, key: &str) -> Result<Self, Failure>;
+    fn write(&self, key: &str, value: Self);
+    fn assign(&self, key: &str, value: Self);
+    fn spread(&self) -> JsObjectMap<Self>;
+    fn text(&self) -> Result<String, Failure>;
+    fn number(&self) -> Result<f64, Failure>;
+    fn float(&self) -> Result<f64, Failure>;
+    fn optional_id(&self, expression: &str) -> Result<Self, Failure>;
 }
-#[derive(Clone, Debug)]
-pub struct EventRecord {
-    pub fields: JsObjectMap<EventValue>,
-    pub prototype: Option<EventValue>,
-    pub realm: Rc<safe_cex_num::PrototypeRealm>,
-}
-impl Default for EventRecord {
-    fn default() -> Self {
-        Self {
-            fields: Default::default(),
-            prototype: None,
-            realm: safe_cex_num::PrototypeRealm::current(),
-        }
+impl EventOps for EventValue {
+    fn from_json(value: Value) -> Self {
+        in_current_realm(safe_cex_exchange::js_runtime::value::from_json(&value))
     }
-}
-impl EventValue {
-    pub fn from_prototype(value: safe_cex_num::PrototypeValue) -> Self {
-        use safe_cex_num::PrototypeValue as P;
-        match value {
-            P::Undefined => Self::Undefined,
-            P::Null => Self::Null,
-            P::String(v) => Self::String(v),
-            P::Number(v) => Self::Number(v),
-            P::Boolean(v) => Self::Bool(v),
-            P::Reference(v) => Self::Builtin(v),
-        }
-    }
-    pub fn from_json(v: Value) -> Self {
-        match v {
-            Value::Null => Self::Null,
-            Value::Bool(v) => Self::Bool(v),
-            Value::Number(v) => Self::Number(v.as_f64().expect("JS number")),
-            Value::String(v) => Self::String(v),
-            Value::Array(v) => Self::Array(Rc::new(RefCell::new(
-                v.into_iter().map(Self::from_json).collect(),
-            ))),
-            Value::Object(v) => Self::object(
-                v.into_iter()
-                    .map(|(k, v)| (k, Self::from_json(v)))
-                    .collect(),
-            ),
-        }
-    }
-    pub fn object(fields: JsObjectMap<Self>) -> Self {
+    fn record_object(fields: JsObjectMap<Self>) -> Self {
         Self::object_in_realm(safe_cex_num::PrototypeRealm::current(), fields)
     }
-    pub fn object_in_realm(
-        realm: Rc<safe_cex_num::PrototypeRealm>,
-        fields: JsObjectMap<Self>,
-    ) -> Self {
-        Self::Object(Rc::new(RefCell::new(EventRecord {
-            fields,
-            prototype: None,
-            realm,
-        })))
-    }
-    pub fn truthy(&self) -> bool {
-        match self {
-            Self::Undefined | Self::Null => false,
-            Self::Bool(v) => *v,
-            Self::Number(v) => *v != 0.0 && !v.is_nan(),
-            Self::String(v) => !v.is_empty(),
-            _ => true,
+    fn object_in_realm(realm: Rc<safe_cex_num::PrototypeRealm>, fields: JsObjectMap<Self>) -> Self {
+        let value = Self::object(vec![]);
+        let Self::Object(object) = &value else {
+            unreachable!()
+        };
+        *object.proto.borrow_mut() = Some(Self::Builtin(realm.reference(ProtoMember::Prototype)));
+        for (key, item) in fields {
+            value.define(&key, item).expect("fresh object");
         }
+        value
     }
-    pub fn nullish(&self) -> bool {
-        matches!(self, Self::Undefined | Self::Null)
+    fn text_value(value: String) -> Self {
+        Self::str(&value)
     }
-    pub fn same(&self, other: &Self) -> bool {
-        match (self, other) {
-            (Self::Undefined, Self::Undefined) | (Self::Null, Self::Null) => true,
-            (Self::Bool(a), Self::Bool(b)) => a == b,
-            (Self::Number(a), Self::Number(b)) => a == b,
-            (Self::String(a), Self::String(b)) => a == b,
-            (Self::Array(a), Self::Array(b)) => Rc::ptr_eq(a, b),
-            (Self::Object(a), Self::Object(b)) => Rc::ptr_eq(a, b),
-            (Self::Enum(a), Self::Enum(b)) => a == b,
-            (Self::Enum(a), Self::String(b)) | (Self::String(b), Self::Enum(a)) => {
-                a.wire().as_str() == Some(b)
-            }
-            (Self::Inherited(a), Self::Inherited(b)) => a == b,
-            (Self::Builtin(a), Self::Builtin(b)) => a == b,
-            _ => false,
-        }
+    fn enum_value(value: PrivateEnum) -> Self {
+        Self::str(value.wire().as_str().expect("categorical enum"))
     }
-    pub fn get(&self, key: &str) -> Result<Self, Failure> {
+    fn inherited(member: ProtoMember) -> Self {
+        Self::Builtin(safe_cex_num::PrototypeRealm::current().reference(member))
+    }
+    fn nullish(&self) -> bool {
+        self.is_nullish()
+    }
+    fn same(&self, other: &Self) -> bool {
+        self.strict_equals(other)
+    }
+    fn read(&self, key: &str) -> Result<Self, Failure> {
+        // Dense JSON-era primitives observe the existing current native realm.
+        // Objects retain their captured realm through their canonical prototype.
         match self {
-            Self::Undefined | Self::Null => Err(type_error(format!(
-                "Cannot read properties of {} (reading '{key}')",
-                if matches!(self, Self::Undefined) {
-                    "undefined"
-                } else {
-                    "null"
-                }
-            ))),
-            Self::Object(o) => {
-                let o = o.borrow();
-                if let Some(v) = o.fields.get(key) {
-                    return Ok(v.clone());
-                }
-                if key == "__proto__" {
-                    return Ok(match &o.prototype {
-                        Some(Self::Null) => Self::Undefined,
-                        Some(v) => v.clone(),
-                        None => Self::Builtin(o.realm.reference(ProtoMember::Prototype)),
-                    });
-                }
-                if let Some(proto) = &o.prototype {
-                    if matches!(proto, Self::Null) {
-                        return Ok(Self::Undefined);
-                    }
-                    return proto.get(key);
-                }
-                Ok(Self::from_prototype(o.realm.inherited(key)))
-            }
-            Self::Array(a) => {
-                if key == "length" {
-                    return Ok(Self::Number(a.borrow().len() as f64));
-                }
-                if let Ok(i) = key.parse::<usize>() {
-                    if i.to_string() == key {
-                        return Ok(a.borrow().get(i).cloned().unwrap_or(Self::Undefined));
-                    }
-                }
+            Self::Array(_)
+                if key != "length"
+                    && key
+                        .parse::<usize>()
+                        .ok()
+                        .is_none_or(|i| i.to_string() != key) =>
+            {
                 Ok(stock(key))
             }
-            Self::Builtin(reference) => Ok(Self::from_prototype(reference.get(key))),
-            Self::String(s) => {
-                if key == "length" {
-                    return Ok(Self::Number(s.encode_utf16().count() as f64));
-                }
-                Ok(stock(key))
-            }
-            Self::Enum(value) if key == "length" => Ok(Self::Number(
-                value
-                    .wire()
-                    .as_str()
-                    .expect("enum string")
-                    .encode_utf16()
-                    .count() as f64,
-            )),
-            Self::Number(_) | Self::Bool(_) | Self::Enum(_) => Ok(stock(key)),
-            Self::Inherited(member) => Ok(Self::from_prototype(
-                safe_cex_num::PrototypeRealm::current()
-                    .reference(*member)
-                    .get(key),
-            )),
+            Self::String(_) if key != "length" => Ok(stock(key)),
+            Self::Number(_) | Self::Bool(_) => Ok(stock(key)),
+            _ => self.get(key).map_err(Into::into),
         }
     }
-    /// Data property definition (object spread/object literal), without invoking setters.
-    pub fn define(&self, key: &str, v: Self) {
-        let Self::Object(o) = self else {
-            panic!("native object definition")
-        };
-        o.borrow_mut().fields.insert(key.into(), v);
+    fn write(&self, key: &str, value: Self) {
+        self.define(key, value).expect("native data property");
     }
-    /// Source assignment into the fresh Spot currency/coin dictionaries. Preserve
-    /// the stock __proto__ setter unless an own data property shadows it.
-    pub fn assign(&self, key: &str, v: Self) {
-        let Self::Object(o) = self else {
-            panic!("native dictionary")
-        };
-        let mut o = o.borrow_mut();
-        if key == "__proto__" && !o.fields.contains_key(key) {
-            if matches!(
-                v,
-                Self::Null
-                    | Self::Object(_)
-                    | Self::Array(_)
-                    | Self::Builtin(_)
-                    | Self::Inherited(_)
-            ) {
-                o.prototype = Some(v)
-            }
-        } else {
-            o.fields.insert(key.into(), v);
-        }
+    fn assign(&self, key: &str, value: Self) {
+        self.set(key, value).expect("native dictionary assignment");
     }
-    pub fn spread(&self) -> JsObjectMap<Self> {
-        match self {
-            Self::Object(o) => o.borrow().fields.clone(),
-            Self::Builtin(reference) => reference
-                .own_fields()
-                .into_iter()
-                .map(|(key, value)| (key, Self::from_prototype(value.into())))
-                .collect(),
-            Self::Array(a) => a
-                .borrow()
-                .iter()
-                .enumerate()
-                .map(|(i, v)| (i.to_string(), v.clone()))
-                .collect(),
-            Self::String(s) => s
-                .chars()
-                .enumerate()
-                .map(|(i, c)| (i.to_string(), Self::String(c.to_string())))
-                .collect(),
-            _ => JsObjectMap::new(),
-        }
+    fn spread(&self) -> JsObjectMap<Self> {
+        self.own_entries()
+            .expect("decoded own data entries")
+            .into_iter()
+            .map(|(key, value)| {
+                (
+                    String::from_utf16(&key).expect("native UTF-8 object key boundary"),
+                    value,
+                )
+            })
+            .collect()
     }
-    pub fn text(&self) -> Result<String, Failure> {
-        self.text_in(&mut Vec::new())
-    }
-    fn text_in(&self, active: &mut Vec<usize>) -> Result<String, Failure> {
-        Ok(match self {
-            Self::Undefined => "undefined".into(),
-            Self::Null => "null".into(),
-            Self::Bool(v) => v.to_string(),
-            Self::Number(v) => js_number_string(*v),
-            Self::String(v) => v.clone(),
-            Self::Enum(v) => v.wire().as_str().expect("enum string").into(),
-            Self::Inherited(v) => v.js_string().into(),
-            Self::Builtin(v) => v.js_string(),
-            Self::Array(a) => {
-                let identity = Rc::as_ptr(a) as usize;
-                if active.contains(&identity) {
-                    return Ok(String::new());
+    fn text(&self) -> Result<String, Failure> {
+        fn text_in(value: &EventValue, active: &mut Vec<usize>) -> Result<String, Failure> {
+            Ok(match value {
+                EventValue::Array(items) => {
+                    let identity = Rc::as_ptr(items) as usize;
+                    if active.contains(&identity) {
+                        return Ok(String::new());
+                    }
+                    active.push(identity);
+                    let values = items.borrow().clone();
+                    let text = values
+                        .iter()
+                        .map(|value| match value {
+                            None | Some(EventValue::Undefined | EventValue::Null) => {
+                                Ok(String::new())
+                            }
+                            Some(value) => text_in(value, active),
+                        })
+                        .collect::<Result<Vec<_>, _>>();
+                    active.pop();
+                    text?.join(",")
                 }
-                active.push(identity);
-                let values = a
-                    .borrow()
-                    .iter()
-                    .map(|v| {
-                        if v.nullish() {
-                            Ok(String::new())
-                        } else {
-                            v.text_in(active)
-                        }
-                    })
-                    .collect::<Result<Vec<_>, _>>();
-                active.pop();
-                values?.join(",")
-            }
-            Self::Object(o) => {
-                if o.borrow().fields.contains_key("toString") {
-                    return Err(type_error("Cannot convert object to primitive value"));
+                EventValue::Object(_) => {
+                    if value.has_own("toString") {
+                        return Err(type_error("Cannot convert object to primitive value"));
+                    }
+                    "[object Object]".into()
                 }
-                "[object Object]".into()
-            }
-        })
+                EventValue::Undefined => "undefined".into(),
+                EventValue::Null => "null".into(),
+                EventValue::Bool(value) => value.to_string(),
+                EventValue::Number(value) => js_number_string(*value),
+                EventValue::String(value) => String::from_utf16(value)
+                    .map_err(|error| type_error(format!("Native UTF-8 boundary: {error}")))?,
+                EventValue::Builtin(value) => value.js_string(),
+                _ => return Err(type_error("Value is outside the decoded-data boundary")),
+            })
+        }
+        text_in(self, &mut vec![])
     }
-    pub fn number(&self) -> Result<f64, Failure> {
+    fn number(&self) -> Result<f64, Failure> {
         match self {
             Self::Undefined => Ok(f64::NAN),
             Self::Null => Ok(0.0),
-            Self::Bool(v) => Ok(if *v { 1.0 } else { 0.0 }),
-            Self::Number(v) => Ok(*v),
+            Self::Bool(value) => Ok(f64::from(u8::from(*value))),
+            Self::Number(value) => Ok(*value),
             _ => safe_cex_num::js_number(Some(&Value::String(self.text()?)))
-                .map_err(|e| type_error(e.message)),
+                .map_err(|error| type_error(error.message)),
         }
     }
-    pub fn float(&self) -> Result<f64, Failure> {
+    fn float(&self) -> Result<f64, Failure> {
         Ok(parse_float(&self.text()?))
     }
-    /// Optional explicit .toString() call, not String(value) coercion. Data-property
-    /// overrides on decoded JSON objects are non-callable and throw at this site.
-    pub fn optional_id(&self, expression: &str) -> Result<Self, Failure> {
+    fn optional_id(&self, expression: &str) -> Result<Self, Failure> {
         if self.nullish() {
             return Ok(Self::Undefined);
         }
-        if let Self::Object(o) = self {
-            if o.borrow().fields.contains_key("toString") {
-                return Err(type_error(format!(
-                    "{expression}?.toString is not a function"
-                )));
-            }
-            return Ok(Self::String("[object Object]".into()));
+        if matches!(self, Self::Object(_)) && self.has_own("toString") {
+            return Err(type_error(format!(
+                "{expression}?.toString is not a function"
+            )));
         }
-        Ok(Self::String(self.text()?))
+        Ok(Self::str(&self.text()?))
     }
 }
+
 fn stock(key: &str) -> EventValue {
     EventValue::from_prototype(safe_cex_num::PrototypeRealm::current().inherited(key))
 }
 
 pub fn record(fields: impl IntoIterator<Item = (&'static str, EventValue)>) -> EventValue {
-    EventValue::object(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
+    EventValue::record_object(fields.into_iter().map(|(k, v)| (k.into(), v)).collect())
 }
 pub fn number(v: f64) -> EventValue {
     EventValue::Number(v)
 }
 pub fn string(v: impl Into<String>) -> EventValue {
-    EventValue::String(v.into())
+    EventValue::str(&v.into())
 }
 pub fn fallback(v: EventValue, default: EventValue) -> EventValue {
     if v.truthy() { v } else { default }
@@ -355,7 +226,7 @@ pub fn table<T: Copy>(
 ) -> Result<EventValue, Failure> {
     let key = key.text()?;
     Ok(match js_table_lookup(entries, &key) {
-        TableHit::Mapped(v) => EventValue::Enum(wrap(*v)),
+        TableHit::Mapped(v) => EventValue::enum_value(wrap(*v)),
         TableHit::Inherited(_) | TableHit::Missing => {
             EventValue::from_prototype(safe_cex_num::PrototypeRealm::current().inherited(&key))
         }
@@ -368,7 +239,7 @@ pub fn for_each(
 ) -> Result<(), Failure> {
     let len = array.borrow().len();
     for i in 0..len {
-        let value = array.borrow().get(i).cloned();
+        let value = array.borrow().get(i).cloned().flatten();
         if let Some(value) = value {
             visit(value)?
         }
@@ -399,6 +270,7 @@ pub fn find(
             .borrow()
             .get(i)
             .cloned()
+            .flatten()
             .unwrap_or(EventValue::Undefined);
         if predicate(&value)? {
             return Ok(value);
@@ -408,39 +280,36 @@ pub fn find(
 }
 
 /// Source JSON.stringify input over the native value graph.
-pub fn native_json(v: &EventValue) -> safe_cex_num::JsJsonValue {
-    use safe_cex_num::JsJsonValue as J;
-    match v {
-        EventValue::Undefined => J::Undefined,
-        EventValue::Null => J::Null,
-        EventValue::Bool(v) => J::Bool(*v),
-        EventValue::String(v) => J::String(v.clone()),
-        EventValue::Number(v) => J::Number(*v),
-        EventValue::Enum(v) => J::String(v.wire().as_str().expect("categorical enum").into()),
-        EventValue::Array(v) => J::Array(v.borrow().iter().map(native_json).collect()),
-        EventValue::Object(v) => J::Object(
-            v.borrow()
-                .fields
-                .iter()
-                .map(|(k, v)| (k.clone(), native_json(v)))
-                .collect(),
-        ),
-        EventValue::Inherited(safe_cex_num::ProtoMember::Prototype) => J::Object(vec![]),
-        EventValue::Inherited(_) => J::Undefined,
-        EventValue::Builtin(reference) => {
-            if reference.is_callable() {
-                J::Undefined
-            } else {
-                J::Object(
-                    reference
-                        .own_fields()
-                        .into_iter()
-                        .map(|(key, value)| {
-                            (key, native_json(&EventValue::from_prototype(value.into())))
-                        })
-                        .collect(),
-                )
+pub fn native_json(value: &EventValue) -> safe_cex_num::JsJsonValue {
+    safe_cex_exchange::js_runtime::value::to_js_json(value).expect("decoded JSON graph")
+}
+
+/// Values yielded by a source array iterator; holes yield undefined.
+pub fn array_values(array: &EventArray) -> Vec<EventValue> {
+    EventValue::Array(array.clone())
+        .array_values()
+        .expect("native array")
+}
+
+/// Attach the existing captured native prototype realm to a freshly decoded graph.
+pub(crate) fn in_current_realm(value: EventValue) -> EventValue {
+    fn attach(value: &EventValue, realm: &Rc<safe_cex_num::PrototypeRealm>) {
+        match value {
+            EventValue::Object(object) => {
+                *object.proto.borrow_mut() =
+                    Some(EventValue::Builtin(realm.reference(ProtoMember::Prototype)));
+                for (_, value) in value.own_entries().expect("decoded data properties") {
+                    attach(&value, realm);
+                }
             }
+            EventValue::Array(values) => {
+                for value in values.borrow().iter().flatten() {
+                    attach(value, realm);
+                }
+            }
+            _ => {}
         }
     }
+    attach(&value, &safe_cex_num::PrototypeRealm::current());
+    value
 }
