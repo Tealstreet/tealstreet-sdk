@@ -5,7 +5,14 @@ import assert from 'node:assert/strict';
 import { readFileSync, mkdtempSync, rmSync } from 'node:fs';
 import test from 'node:test';
 
-const workflow = readFileSync(new URL('../../../.github/workflows/rust.yml', import.meta.url), 'utf8');
+// See sdk-rs/scripts/rust-ci-wiring.test.mjs: the tier lives on the mirror.
+const candidates = [
+  '../../../mirrors/tealstreet-sdk/.github/workflows/rust.yml',
+  '../../../.github/workflows/rust.yml',
+];
+const found = candidates.map((rel) => new URL(rel, import.meta.url)).find((url) => existsSync(url));
+if (!found) throw new Error('no mirror workflow found');
+const workflow = readFileSync(found, 'utf8');
 const nativeCommands = [
   'node safe-cex-exchange/scripts/ci-deps.cjs "$RUNNER_TEMP/exchange-typescript-deps"',
   'corepack yarn --cwd "$RUNNER_TEMP/exchange-typescript-deps" install --frozen-lockfile --ignore-scripts --non-interactive',
@@ -71,7 +78,7 @@ function audit(source) {
     const matches = [...source.matchAll(new RegExp(`^  ${event}:\\n([\\s\\S]*?)(?=^  [\\w-]+:|^permissions:)`, 'gm'))];
     assert.equal(matches.length, 1, `${event} trigger required`);
     const block = matches[0][1];
-    for (const path of ['sdk-rs/**', 'packages/safe-cex/**', 'thirdparty/reconnecting-websocket/**', '.github/workflows/rust.yml']) {
+    for (const path of ['sdk-rs/**', 'packages/safe-cex/**', 'thirdparty/reconnecting-websocket/**', 'mirrors/tealstreet-sdk/.github/workflows/rust.yml']) {
       assert.ok(block.split('\n').includes(`      - '${path}'`), `${event} trigger missing ${path}`);
     }
     if (event === 'push') {
