@@ -233,3 +233,20 @@ It proves Bybit mainnet selects `api.bybit.com`, Demo mainnet selects
 `api-demo.bybit.com`, and both testnet variants select `api-testnet.bybit.com`.
 The old constructor failed specifically on Demo mainnet. Demo's source receiver
 and socket connection options derive the same subclass flag by name.
+
+KuCoin futures, KuCoin Spot and MEXC use their existing concrete venue bindings.
+The native host supplies KuCoin's per-options HTTP inputs, shared virtual clock
+and runtime-backed retry clock. MEXC receives its existing configured API stack
+and native sockets; private fills forward to the constructed venue's emitter
+through a weak reference. Native date conversion retains the shared UTC-host
+assumption. Hosted remoteSigner is visibly refused until those venue signing
+capabilities are connected. `tests/native_host_kucoin_mexc.rs` constructs all
+three entries and verifies actual signed account reads server-side, including
+KuCoin's signed passphrase and MEXC's stable account identity.
+
+
+KuCoin/MEXC construction validation measured fourteen scoped tests, zero parity
+findings, live-source registry equivalence and all 88 layer assertions. Strict
+host all-target and wasm library clippy passed. Independently removing each of
+the three production table entries compiled and failed its native construction
+test with exit 101; exact source restoration passed both native test functions.
