@@ -1,0 +1,133 @@
+{
+  "safe_cex_registry::public_data::get_candle_subscription_key": {
+    "api": {
+      "kind": "function",
+      "name": "get_candle_subscription_key",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "interval",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "safe-cex-registry/src/public_data.rs: reviewed function boundary; classification is not a runtime shape receipt.",
+    "reason": "Encodes a symbol and interval into a subscription key; inverse parser is separately classified."
+  },
+  "safe_cex_registry::public_data::parse_candle_subscription_key": {
+    "api": {
+      "kind": "function",
+      "name": "parse_candle_subscription_key",
+      "signature": {
+        "inputs": [
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "tuple": [
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            },
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ]
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "decoder",
+    "evidence": "Subscription key splits at the final colon and preserves current missing-delimiter behavior.",
+    "call": "serde_json::json!($type($value.as_str().expect(\"text witness\")))",
+    "cases": [
+      {
+        "input": "BTC:1m",
+        "output": [
+          "BTC",
+          "1m"
+        ]
+      },
+      {
+        "input": "A:B:1h",
+        "output": [
+          "A:B",
+          "1h"
+        ]
+      },
+      {
+        "input": ":",
+        "output": [
+          "",
+          ""
+        ]
+      },
+      {
+        "input": "ABC",
+        "output": [
+          "AB",
+          "ABC"
+        ]
+      },
+      {
+        "input": "",
+        "output": [
+          "",
+          ""
+        ]
+      }
+    ]
+  }
+}
