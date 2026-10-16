@@ -40,8 +40,10 @@ it does not pretend a syntax walk resolves arbitrary Rust aliases or macro bodie
 All 41 non-option construction sites set None, matching omission by their source
 market/position mapper. The remaining shared literal is
 `safe-cex-venue-bybit/src/options.rs::map_bybit_option_instrument`, which already
-sets all eight OptionTerms fields. The Backpack raw `option: false` flag belongs
-to its local record, and its shared model bridge correctly omits OptionTerms.
+sets all eight OptionTerms fields. The Backpack shared model bridge correctly
+omits OptionTerms. Its unused local raw `option: false` flag was subsequently
+removed during the shared-Js cutover because source fetchMarkets omits it; the
+actual-source REST oracle now pins that absence.
 
 A source scan of exchange modules finds only two producers of these shared
 properties: `bybit.options.ts::mapBybitOptionInstrument` and

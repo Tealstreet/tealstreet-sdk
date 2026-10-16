@@ -39,3 +39,9 @@ The initial full run exposed the local `option` mismatch above; the final full
 run passes after its repair. Extractor checking at the initial master base reports
 only the incoming Polymarket exchange/registry formatting updates owned by #190.
 Final integration evidence belongs in the PR; no extractor writer is used.
+
+After merging current master (including #190 and #191), the complete 107-test
+suite passes again. Host and wasm strict clippy pass; global parity passes
+(7459 rows, 17105 public Rust items), and the extractor reports zero updates,
+added or orphaned symbols. The shared option audit now notes removal of the local
+raw flag. CI remains the merge gate.
