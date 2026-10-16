@@ -551,6 +551,7 @@ impl<H: BlofinExchangeHost> BlofinExchange<H> {
         order_rest::change_margin_type(
             isolated,
             symbol,
+            &self.fields.account_modes,
             self.context.store.as_ref(),
             self.xhr.as_ref(),
             &host,

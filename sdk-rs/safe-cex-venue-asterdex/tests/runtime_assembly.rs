@@ -884,33 +884,6 @@ impl RuntimeHost for Host {
                     .map(|v| self.text(&v))
                     .map_err(|e| error(&e.message))
             }
-            "withoutSigningFields" => {
-                let result = self.object(vec![]);
-                if let Value::Object(entries) = a[0].wire() {
-                    for (key, _) in entries {
-                        if ![
-                            "signature",
-                            "timestamp",
-                            "recvWindow",
-                            "user",
-                            "signer",
-                            "nonce",
-                        ]
-                        .contains(&key.as_str())
-                        {
-                            result.set(&key, a[0].get(&key));
-                        }
-                    }
-                }
-                Ok(result)
-            }
-            "isBinanceStyleSignatureRejection" => {
-                safe_cex_transport::signature_rejection::is_binance_style_signature_rejection(
-                    &a[0].wire(),
-                )
-                .map(|v| self.boolean(v))
-                .map_err(|e| error(&e.message))
-            }
             "generateV1Signature" => ready(ah::generate_v1_signature(&a[0].text(), &a[1].text()))
                 .map(|v| self.text(&v))
                 .map_err(err),
@@ -995,6 +968,48 @@ impl RuntimeHost for Host {
                 *self.loop_callback.borrow_mut() = Some(a[0].clone());
                 self.event("loop", vec![a[1].clone()]);
                 Ok(N::U)
+            }
+            "withoutSigningFields" => {
+                let kept = ah::without_signing_fields(&a[0].wire());
+                let entries: Vec<(String, N)> = match &a[0] {
+                    N::O(fields) => fields
+                        .borrow()
+                        .iter()
+                        .filter(|(key, _)| kept.contains_key(key))
+                        .cloned()
+                        .collect(),
+                    N::A(items) => kept
+                        .keys()
+                        .map(|key| {
+                            (
+                                key.clone(),
+                                items.borrow()[key.parse::<usize>().unwrap()].clone(),
+                            )
+                        })
+                        .collect(),
+                    _ => vec![],
+                };
+                assert_eq!(
+                    entries.len(),
+                    kept.len(),
+                    "native withoutSigningFields keys"
+                );
+                Ok(N::O(Rc::new(RefCell::new(entries))))
+            }
+            "hasRetriedSignature" => {
+                Ok(self.boolean(
+                    matches!(a[0], N::O(_))
+                        && self.truthy(&a[0].get(
+                            safe_cex_transport::signature_rejection::SIGNATURE_RETRY_CONFIG_KEY,
+                        )),
+                ))
+            }
+            "isBinanceStyleSignatureRejection" => {
+                safe_cex_transport::signature_rejection::is_binance_style_signature_rejection(
+                    &a[0].wire(),
+                )
+                .map(|v| self.boolean(v))
+                .map_err(|e| error(&e.message))
             }
             _ => panic!("unbound primitive import {name}"),
         }
@@ -1238,7 +1253,11 @@ fn run_case(h: Rc<Host>, case: &Value) -> R {
                 N::U,
                 vec![response.clone()],
             )?))?;
-            assert!(result.same(&response), "native original response identity");
+            if case["name"] == "signature-v1" {
+                assert!(!result.same(&response), "native signature resend result");
+            } else {
+                assert!(result.same(&response), "native original response identity");
+            }
             Ok(result)
         }
         "rejection" => {
@@ -1255,6 +1274,8 @@ fn run_case(h: Rc<Host>, case: &Value) -> R {
                     N::from(
                         json!({"code":-1021,"msg":if h.truthy(&c.get("lowercase")){"timestamp"}else{"Timestamp outside window"}}),
                     )
+                } else if h.truthy(&c.get("signature")) {
+                    N::from(json!({"code":-1022,"msg":"Signature for this request is not valid."}))
                 } else if h.truthy(&c.get("suppressed")) {
                     N::from(json!({"code":-2011,"msg":"Unknown order"}))
                 } else if h.truthy(&c.get("errorField")) {
@@ -1358,7 +1379,7 @@ fn runtime_bodies_match_source() {
         );
     }
     let cases = data["cases"].as_array().unwrap();
-    assert_eq!(cases.len(), 70, "independent runtime case floor");
+    assert_eq!(cases.len(), 75, "independent runtime case floor");
     let mut groups = std::collections::BTreeMap::new();
     for (iteration, case) in cases.iter().enumerate() {
         let h = Host::new(N::from(case["config"].clone()));
@@ -1389,12 +1410,12 @@ fn runtime_bodies_match_source() {
             ("dispose", 4),
             ("constructor", 3),
             ("public", 3),
-            ("request", 12),
-            ("response", 4),
-            ("rejection", 12),
+            ("request", 13),
+            ("response", 7),
+            ("rejection", 13),
             ("retry", 5)
         ]),
-        "independent family floors; last iteration 69"
+        "independent family floors; last iteration 74"
     );
 }
 #[test]

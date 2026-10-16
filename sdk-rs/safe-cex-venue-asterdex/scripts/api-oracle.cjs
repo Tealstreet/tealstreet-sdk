@@ -18,4 +18,5 @@ for(const query of ['', 'symbol=ETHUSDT&time=1780000000000', 'q=☃&space=\ufeff
 for(const key of ['0x'+'0'.repeat(64),'not-a-private-key','0x1','g'.repeat(64),'f'.repeat(64),'0X'+'1'.padStart(64,'0'),' '+ '1'.padStart(64,'0'),'','0x0x'+'1'.padStart(64,'0')]){
  messageSignatures.push({query:'signed-error-shape',testnet:false,key,signature:result(()=>api.generateAsterDEXCodeMessageSignature('signed-error-shape',key,false))});
 }
-process.stdout.write(JSON.stringify({chains,queries,paths,errors,signatures,messageSignatures}));
+const unsigned=[{symbol:'BTC',signature:'s',timestamp:1,recvWindow:2,user:'u',signer:'v',nonce:'n',keep:0},{2:'b',1:'a',z:1,nonce:null},['x','y'],null,'text',0,{},{Signature:'case'}].map(input=>({input,output:api.withoutSigningFields(input),keys:Object.keys(api.withoutSigningFields(input))}));
+process.stdout.write(JSON.stringify({chains,queries,paths,errors,signatures,messageSignatures,unsigned}));

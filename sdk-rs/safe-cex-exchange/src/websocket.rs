@@ -5015,7 +5015,13 @@ mod tests {
             *parent.snapshot_error.borrow_mut() = Some(error);
             socket.track_connected();
             socket.track_connected();
-            runtime.pump();
+            // Match the source oracle's catch/finally microtask drain. Resync
+            // deliberately yields a host turn before reporting the rejection.
+            for _ in 0..8 {
+                runtime.pump();
+            }
+            assert_eq!(parent.snapshots.get(), 1, "one re-open starts one snapshot");
+            assert_eq!(parent.logs.borrow().len(), 1, "one catch reports one error");
             assert_eq!(
                 parent.logs.borrow().last().unwrap().0,
                 case["expected"].as_str().unwrap(),

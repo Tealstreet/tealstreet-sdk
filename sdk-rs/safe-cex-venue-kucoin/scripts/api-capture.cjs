@@ -24,7 +24,7 @@ function capture(venue,opts,config) {
    };
    if(specifier==='axios-retry')return Object.assign((xhr,options)=>{retries=options.retries;},{isNetworkError:()=>false});
    if(specifier.endsWith('/safeCexAxiosCreate'))return {
-    safeCexAxiosCreate(options){defaults=options;return {interceptors:{request:{use(fn){interceptor=fn;}}}};},
+    safeCexAxiosCreate(options){defaults=options;return {interceptors:{request:{use(fn){interceptor=fn;}},response:{use(){}}}};},
     installTransportAdapter(){installed=true;},
    };
    if(specifier.endsWith('/virtualClock'))return {virtualClock:{getCurrentTimeMs:()=>1700000000123}};
