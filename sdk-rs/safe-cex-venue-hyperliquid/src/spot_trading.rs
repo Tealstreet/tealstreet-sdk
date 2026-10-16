@@ -267,6 +267,7 @@ fn order_input<H: SpotTradingHost>(
     reverse: bool,
     trigger: Option<&str>,
     market_ticker: Option<&H::Value>,
+    cloid: Option<&H::Value>,
 ) -> Result<H::Value, H::Error> {
     let wire = h.object()?;
     let coin = h.get(market, "symbol")?;
@@ -347,6 +348,12 @@ fn order_input<H: SpotTradingHost>(
     }
     field(h, &wire, "order_type", &order_type)?;
     field(h, &wire, "reduce_only", &h.boolean(false))?;
+    // The entry wire carries the placement cloid; each TP/SL leg mints its own here.
+    let cloid = match cloid {
+        Some(cloid) => cloid.clone(),
+        None => free(h, "mintHyperliquidCloid", |_| Ok(vec![]))?,
+    };
+    field(h, &wire, "cloid", &cloid)?;
     Ok(wire)
 }
 async fn signed_post<H: SpotTradingHost>(
@@ -384,9 +391,15 @@ async fn place_body<H: SpotTradingHost>(
     owner: H::Value,
     opts: H::Value,
 ) -> Result<H::Value, H::Error> {
-    method(&mut h, &owner, "resolveCallerClientOrderId", |_| {
+    // The caller's ID goes on the main wire verbatim; otherwise one is minted.
+    let caller = method(&mut h, &owner, "resolveCallerClientOrderId", |_| {
         Ok(vec![opts.clone()])
     })?;
+    let cloid = if h.is_nullish(&caller) {
+        free(&mut h, "mintHyperliquidCloid", |_| Ok(vec![]))?
+    } else {
+        caller
+    };
     let ty = h.get(&opts, "type")?;
     let trailing = enum_value(&mut h, "OrderType", "TrailingStopLoss")?;
     if h.strict_equal(&ty, &trailing) {
@@ -419,7 +432,16 @@ async fn place_body<H: SpotTradingHost>(
         }
         let wire = free(&mut h, "orderRequestToOrderWire", |h| {
             Ok(vec![
-                order_input(h, &owner, &market, &opts, false, None, Some(&ticker))?,
+                order_input(
+                    h,
+                    &owner,
+                    &market,
+                    &opts,
+                    false,
+                    None,
+                    Some(&ticker),
+                    Some(&cloid),
+                )?,
                 asset,
             ])
         })?;
@@ -433,7 +455,7 @@ async fn place_body<H: SpotTradingHost>(
             let asset = asset_id(&mut h, &market)?;
             let wire = free(&mut h, "orderRequestToOrderWire", |h| {
                 Ok(vec![
-                    order_input(h, &owner, &market, &opts, false, None, None)?,
+                    order_input(h, &owner, &market, &opts, false, None, None, Some(&cloid))?,
                     asset.clone(),
                 ])
             })?;
@@ -444,7 +466,16 @@ async fn place_body<H: SpotTradingHost>(
                     method(&mut h, &wires, "push", |h| {
                         Ok(vec![free(h, "orderRequestToOrderWire", |h| {
                             Ok(vec![
-                                order_input(h, &owner, &market, &opts, true, Some(kind), None)?,
+                                order_input(
+                                    h,
+                                    &owner,
+                                    &market,
+                                    &opts,
+                                    true,
+                                    Some(kind),
+                                    None,
+                                    None,
+                                )?,
                                 asset.clone(),
                             ])
                         })?])
