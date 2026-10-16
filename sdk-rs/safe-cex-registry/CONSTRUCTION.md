@@ -260,9 +260,13 @@ The native host supplies KuCoin's per-options HTTP inputs, shared virtual clock
 and runtime-backed retry clock. MEXC receives its existing configured API stack
 and native sockets; private fills forward to the constructed venue's emitter
 through a weak reference. Native date conversion retains the shared UTC-host
-assumption. Hosted remoteSigner is visibly refused until those venue signing
-capabilities are connected. `tests/native_host_kucoin_mexc.rs` constructs all
-three entries and verifies actual signed account reads server-side, including
+assumption. MEXC shares the hosted account between configured HTTP, typed
+availability and private WS login, including the socket account name. Public
+HTTP retains its source signing bypass. Signer errors and absent WS signatures
+retain the source error message and send no login or private filters. The native
+HTTP/WS witness is `tests/native_host_mexc_hosted.rs`. KuCoin hosted capability
+is tracked in its separate registry change.
+`tests/native_host_kucoin_mexc.rs` constructs all three entries and verifies actual signed account reads server-side, including
 KuCoin's signed passphrase and MEXC's stable account identity.
 
 

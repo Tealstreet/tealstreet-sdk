@@ -190,11 +190,6 @@ impl RustVenueHost for NativeVenueHost {
         &self,
         options: &safe_cex_types::ExchangeOptions,
     ) -> Result<crate::rust_venues::MexcDependencies, ExchangeError> {
-        if self.remote.is_some() || options.remote_signer.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for mexc on the native host",
-            ));
-        }
         let http = safe_cex_venue_mexc::client::create_api(
             native_http_options(
                 &self.runtime,
@@ -202,7 +197,7 @@ impl RustVenueHost for NativeVenueHost {
                 safe_cex_types::ExchangeName::Mexc,
                 options,
                 safe_cex_transport::RestRequest::default(),
-                None,
+                self.remote.clone(),
             ),
             &safe_cex_transport::TransportRegistry::default(),
             Rc::new(NativeRetryClock(self.runtime.clone())),
