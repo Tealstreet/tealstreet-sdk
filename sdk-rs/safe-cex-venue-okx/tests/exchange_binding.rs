@@ -257,9 +257,23 @@ fn change_position_mode_posts_long_short_mode() {
 fn change_margin_type_reports_cross_only_without_a_request() {
     let h = harness(ExchangeName::Okx, options(), okx);
     loaded(&h);
+    let errors = std::rc::Rc::new(std::cell::RefCell::new(vec![]));
+    let sink = errors.clone();
+    h.venue().base().on(
+        "error",
+        std::rc::Rc::new(move |_, data| {
+            sink.borrow_mut().push(data.to_string());
+            Ok(())
+        }),
+    );
     let before = h.http.requests.borrow().len();
-    let _ = h.drive(h.venue().change_margin_type(true, None));
+    h.drive(h.venue().change_margin_type(true, None))
+        .expect("changeMarginType resolves");
     assert_eq!(h.http.requests.borrow().len(), before);
+    assert!(
+        errors.borrow().iter().any(|e| e.contains("Only cross mode is supported")),
+        "{errors:?}"
+    );
 }
 
 #[test]

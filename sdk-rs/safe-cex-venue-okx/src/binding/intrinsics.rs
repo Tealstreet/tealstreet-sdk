@@ -8,8 +8,6 @@ use safe_cex_exchange::js_runtime::{
 /// What an intrinsic needs from the running receiver; implemented by the scope.
 pub(crate) trait IntrinsicHost {
     fn this(&self) -> Js;
-    fn global(&self, name: &str) -> Result<Js, Thrown>;
-    fn now_ms(&self) -> f64;
     fn initialize_okx_fields(&self, receiver: &Js) -> Result<(), Thrown>;
 }
 

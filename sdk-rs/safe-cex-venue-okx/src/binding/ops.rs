@@ -124,12 +124,6 @@ impl IntrinsicHost for OkxScope {
     fn this(&self) -> Js {
         self.this.clone()
     }
-    fn global(&self, name: &str) -> Result<Js, Thrown> {
-        Scope::global(self, name)
-    }
-    fn now_ms(&self) -> f64 {
-        self.now()
-    }
     // Class fields (arrow members included) initialize right after super().
     fn initialize_okx_fields(&self, receiver: &Js) -> Result<(), Thrown> {
         let scope = self.with_this(receiver.clone());
