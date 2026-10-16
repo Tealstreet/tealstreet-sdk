@@ -88,7 +88,7 @@ kind = "constructor"
 layer = "adapted"
 rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::new", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
 status = "ported"
-note = "Retains original options/API/BigInt/account-key handles, undefined transaction client and a fulfilled initial submission predecessor. Native class aggregate remains pending until its auth-token and callable/prototype assembly are covered. Split targets beyond the direct correspondence: `safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter`, `safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime`."
+note = "Retains original options/API/BigInt/account-key handles, undefined transaction client and a fulfilled initial submission predecessor. The class is assembled in signer_adapter.rs (TealstreetLighterSignerAdapter::define); see the class row. Split targets beyond the direct correspondence: `safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter`, `safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime`."
 
 [[symbol]]
 ts = "TealstreetLighterSignerAdapter#runWithSubmissionLock"
@@ -96,7 +96,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::run_with_submission_lock", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
 status = "ported"
-note = "Replaces the predecessor eagerly before awaiting it; invokes callback FIFO and releases in both successful and throwing/rejected callback paths before settling the result. Explicit Rc receiver adapts source bound-arrow invocation; raw JavaScript arrow/prototype identity is not claimed, and the whole-class row remains pending. Dropping an observer does not cancel queued submissions. Split targets beyond the direct correspondence: `safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter`, `safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime`."
+note = "Replaces the predecessor eagerly before awaiting it; invokes callback FIFO and releases in both successful and throwing/rejected callback paths before settling the result. Explicit Rc receiver adapts source bound-arrow invocation; raw JavaScript arrow/prototype identity is not claimed; the class assembly is in signer_adapter.rs (see the class row). Dropping an observer does not cancel queued submissions. Split targets beyond the direct correspondence: `safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter`, `safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime`."
 
 [[symbol]]
 ts = "TealstreetLighterSignerAdapter.initialize"
