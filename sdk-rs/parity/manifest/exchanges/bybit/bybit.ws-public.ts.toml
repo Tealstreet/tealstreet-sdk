@@ -1,0 +1,163 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/bybit/bybit.ws-public.ts"
+rust_files = [ "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/ws_public.rs" ]
+
+[[symbol]]
+ts = "BybitPublicWebsocket"
+kind = "class"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPublicWebsocket.constructor"
+kind = "constructor"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPublicWebsocket.connectAndSubscribe"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/ws_public.rs::connect_and_subscribe"
+status = "ported"
+note = "Extracted connection operation to safe-cex-venue-bybit/src/ws_public.rs::connect_and_subscribe; parent variant URL, demo mode and runtime-only flags are explicit inputs. Uses core-owned start_websocket with protocol callbacks registered on BaseWebSocket before entry; no venue-owned task. Live source compares six repeated attempts through fallback selection, route URL, site headers and diagnostics, with deferred and inline hosts and disposal. Constructor and onOpen authentication/subscription orchestration remain separate pending rows."
+
+[[symbol]]
+ts = "BybitPublicWebsocket.onOpen"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::on_open"
+status = "ported"
+note = "Body port: disposal guard, category/quote filter and fresh ticker topics; subscribe/ping/timer arming precede off/on markets:changed and optional reconnect event. Deferred assignment and emitter-operation factories preserve receiver capture before reentrant category/handler getters. Source oracle asserts sequence, allocation contents and old/new receiver effects. Subscription starter owns eager work; async subscription settlement and full constructor composition remain separate rows."
+
+[[symbol]]
+ts = "BybitPublicWebsocket#clearOhlcvNoDataTimeout"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::clear_ohlcv_no_data_timeout"
+status = "ported"
+note = "Body port with explicit cancellable timer host: skip falsy timer IDs, otherwise clear the exact native handle before deleting the current map entry. Oracle covers absent/null/zero/false/empty IDs and clear/delete throws. This is the method body, not core task cancellation wiring; no generation-guarded sleeper substitute is claimed."
+
+[[symbol]]
+ts = "BybitPublicWebsocket#armOhlcvNoDataTimeout"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::arm_ohlcv_no_data_timeout"
+status = "ported"
+note = "Body port with explicit timer host: clear first, require handlers, capture assignment receiver before setTimeout(25000), then store handle. Callback deletes current entry before disposal/handler guards, recovery reason and recursive rearm. Source oracle fires retained callbacks, checks reentrant timer-map replacement and stopping on recovery failure; runtime timer registration/cancellation composition remains separate."
+
+[[symbol]]
+ts = "BybitPublicWebsocket#armExistingOhlcvNoDataTimeouts"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::arm_existing_ohlcv_no_data_timeouts"
+status = "ported"
+note = "Body port: iterate supplied Object.keys snapshot, require kline prefix and live nonempty handlers, derive publicTrade suffix after last dot, arm in source key order. Source oracle includes dotted symbols, empty handlers, callback removal of a later handler and arm failure. Host supplies ordinary object-key iteration order."
+
+[[symbol]]
+ts = "BybitPublicWebsocket.maybeRecoverOhlcvStream"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::maybe_recover_ohlcv_stream"
+status = "ported"
+note = "Body port: maintained interval mapping and primary topic, deferred recovery method resolution, secondary topic from reread mutable symbol, default reason only when absent. Source oracle includes empty/custom reasons, unmapped interval and a method getter mutating the symbol after primary-topic construction."
+
+[[symbol]]
+ts = "BybitPublicWebsocket#maybeRecoverOhlcvStreamFromTopics"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::maybe_recover_ohlcv_stream_from_topics"
+status = "ported"
+note = "Body port: handler guard, clock/last-or-zero and strict 10000ms cooldown, timestamp write before secondary inspection, active-topic assignments before connection branch. Warning/reconnect or unsubscribe then subscribe use distinct native payload objects sharing the same mutable args allocation. Source oracle asserts 9999/10000 boundaries, NaN, failures and first-send argument mutation. Diagnostic serialization/transport remains the explicit host dependency."
+
+[[symbol]]
+ts = "BybitPublicWebsocket#sendOhlcvDiagnosticPayload"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_public.rs::send_ohlcv_diagnostic_payload"
+status = "divergent"
+note = "FINDING Extracted protocol operation to safe-cex-venue-bybit/src/ws_public.rs::send_ohlcv_diagnostic_payload; uses the core BaseWebSocket entrypoints with socket state explicit. Live-source oracle covers emitted frames, subscription delays and dispatch outcomes. Constructor, dialing and reconnect/auth sequencing remain pending. FINDING notification rejection timing: the shared fallible Store contract now commits health and skips later subscribers on failure, and the venue propagates core ExchangeError unchanged. However core send calls reconnect synchronously with Result: Rust subscribe/send rejects immediately while TypeScript only rejects the unawaited reconnect promise and continues its caller. notification_no_socket_send_retains_synchronous_rejection_finding and check-store-notification.mjs pin both sides. Subscriber-ID finding closed by canonical shared From<StoreMutationError>: original cause metadata and Store-local IDs survive in inner-to-outer order, pinned by the actual Store reconnect witness. See STORE_NOTIFICATION_AUDIT.md; no promotion follows from the ABI alone."
+
+[[symbol]]
+ts = "BybitPublicWebsocket#emitOhlcvDiagnosticReceive"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/ws_public.rs::emit_ohlcv_diagnostic_receive"
+status = "ported"
+note = "Extracted protocol operation to safe-cex-venue-bybit/src/ws_public.rs::emit_ohlcv_diagnostic_receive; uses the core BaseWebSocket entrypoints with socket state explicit. Live-source oracle covers emitted frames, subscription delays and dispatch outcomes. Constructor, dialing and reconnect/auth sequencing remain pending."
+
+[[symbol]]
+ts = "BybitPublicWebsocket#onMarketsChanged"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/public_data_recovery.rs::on_markets_changed"
+status = "ported"
+note = "Body port: empty/ws/disposal guards, category filter, fresh spread ticker array and snapshot chunks of 10; first send and sleep(5) factory execute before future polling, subsequent chunks await in sequence without disposal recheck. Deferred setter preserves receiver before ticker getter replacement. Source oracle covers Unicode string spread, 21 topics, failure and mid-send disposal; decoded native frame fields precede wire assertions."
+
+[[symbol]]
+ts = "BybitPublicWebsocket.ping"
+kind = "field-fn"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/ws_public.rs::ping"
+status = "ported"
+note = "Extracted protocol operation to safe-cex-venue-bybit/src/ws_public.rs::ping; uses the core BaseWebSocket entrypoints with socket state explicit. Live-source oracle covers emitted frames, subscription delays and dispatch outcomes. Constructor, dialing and reconnect/auth sequencing remain pending."
+
+[[symbol]]
+ts = "BybitPublicWebsocket.subscribe"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_public.rs::subscribe"
+status = "divergent"
+note = "FINDING Extracted protocol operation to safe-cex-venue-bybit/src/ws_public.rs::subscribe; uses the core BaseWebSocket entrypoints with socket state explicit. Live-source oracle covers emitted frames, subscription delays and dispatch outcomes. Constructor, dialing and reconnect/auth sequencing remain pending. FINDING notification rejection timing: the shared fallible Store contract now commits health and skips later subscribers on failure, and the venue propagates core ExchangeError unchanged. However core send calls reconnect synchronously with Result: Rust subscribe/send rejects immediately while TypeScript only rejects the unawaited reconnect promise and continues its caller. notification_no_socket_send_retains_synchronous_rejection_finding and check-store-notification.mjs pin both sides. Subscriber-ID finding closed by canonical shared From<StoreMutationError>: original cause metadata and Store-local IDs survive in inner-to-outer order, pinned by the actual Store reconnect witness. See STORE_NOTIFICATION_AUDIT.md; no promotion follows from the ABI alone."
+
+[[symbol]]
+ts = "BybitPublicWebsocket.onMessage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_public.rs::on_message"
+status = "divergent"
+note = "MIXED Extracted protocol operation to safe-cex-venue-bybit/src/ws_public.rs::on_message; uses the core BaseWebSocket entrypoints with socket state explicit. Live-source oracle covers emitted frames, subscription delays and dispatch outcomes. Constructor, dialing and reconnect/auth sequencing remain pending. MIXED: CHOSEN owned-map and JSON callback representations; the lone-surrogate boundary cites sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. The independently retained restrictions are: FINDING ts-bug: unregistered topics naming constructor or the other seven positive-arity Object.prototype functions record handler stats and then throw TypeError at indexed invocation in TS; Rust currently skips them without handler stats or an error. The three zero-arity functions and __proto__ return at the source length guard and are skipped in Rust too. All twelve names are witnessed before serialization through both exact and prefix dispatch, including receive/fallback/diagnostic side effects. This dispatch-branch/error-path difference is not covered by the closed typed output declaration. A raw JSON frame containing a lone UTF-16 surrogate reaches the TS handler but serde rejects it after recording matching stats in Rust. Nonfinite numeric tokens such as 1e400 become Infinity in TS but the selected serde Value callback boundary cannot represent nonfinite binary64 values: Rust drops that frame after stats, while finite numeric leaves round once to JS binary64 (including signed zero). These boundaries are pinned from both sides. Explicit prototype emulation is possible but absent here; the shared string declaration does not cover inherited handlers or nonfinite numbers."
+
+[[symbol]]
+ts = "BybitPublicWebsocket.handleTickersEvent"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/ws_public.rs::handle_tickers_event"
+status = "divergent"
+note = "MIXED Shared ticker patch operation extracted to safe-cex-venue-bybit/src/ws_public.rs::handle_tickers_event for linear, inverse and spot; spot preserves its zero funding-rate and omitted funding-time behavior. Native ModelPatch::set_number now preserves non-finite overwrites and field absence; a live-source witness checks NaN, both infinities and negative zero through DefaultStore without JSON projection. CHOSEN owned-map boundary differs in key MEMBERSHIP, not order: inherited constructor, __proto__ and toString properties can reach parsing in TypeScript while Rust skips unowned symbols. Explicit prototype emulation is possible but not implemented. Both sides are pinned, including fallible String coercion before any update. The notification contract is now consumed: TickerEventError::Store retains the complete StoreMutationError, including subscriber id and original cause. ticker_notification_retains_subscriber_identity_after_committed_patch pins committed state and skipped later subscribers through DefaultStore for linear/inverse and spot; the independent inherited-symbol membership divergence remains. See STORE_NOTIFICATION_AUDIT.md."
+
+[[symbol]]
+ts = "BybitPublicWebsocket.listenOHLCVs"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPublicWebsocket.listenOHLCV"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPublicWebsocket.listenOHLCVOld"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitPublicWebsocket.listenOrderBook"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

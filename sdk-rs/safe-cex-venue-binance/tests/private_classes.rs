@@ -1,0 +1,2638 @@
+use safe_cex_exchange::runtime::*;
+use safe_cex_venue_binance::{
+    api_factory::RemoteSignCall, class_jobs::NativeFuture, listen_key::*, private_classes::*,
+    private_event_value::*, private_events::*, private_session::Venue, request_weight::Failure,
+};
+use serde_json::{Value, json};
+use std::{
+    cell::{Cell, RefCell},
+    future::Future,
+    pin::Pin,
+    rc::Rc,
+    task::{Context, Poll, Waker},
+};
+fn run<T>(runtime: &Runtime, future: impl Future<Output = T>) -> T {
+    let mut f = Box::pin(future);
+    for _ in 0..16 {
+        if let Poll::Ready(result) = f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+            return result;
+        }
+        runtime.pump();
+    }
+    panic!("fixture exceeded independent 16-poll bound")
+}
+
+struct Task;
+impl ExchangeTask for Task {
+    fn cancel(&self) {}
+}
+#[derive(Default)]
+struct Runtime {
+    now: Cell<f64>,
+    sleep_clock: Rc<Cell<f64>>,
+    sleeps: RefCell<Vec<u64>>,
+    reported: RefCell<Vec<String>>,
+    jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
+}
+impl Runtime {
+    fn pump(&self) {
+        let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
+        for mut job in jobs {
+            if job
+                .as_mut()
+                .poll(&mut Context::from_waker(Waker::noop()))
+                .is_pending()
+            {
+                self.jobs.borrow_mut().push(job);
+            }
+        }
+    }
+}
+impl ExchangeRuntime for Runtime {
+    fn now_ms(&self) -> f64 {
+        self.now.get()
+    }
+    fn monotonic_now_ms(&self) -> f64 {
+        22000.0
+    }
+    fn sleep(&self, delay: u64) -> ExchangeFuture<'static, ()> {
+        self.sleeps.borrow_mut().push(delay);
+        let clock = self.sleep_clock.clone();
+        let deadline = self.now.get() + delay as f64;
+        Box::pin(std::future::poll_fn(move |_| {
+            if clock.get() >= deadline {
+                Poll::Ready(Ok(()))
+            } else {
+                Poll::Pending
+            }
+        }))
+    }
+    fn spawn_local(&self, f: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn ExchangeTask> {
+        self.jobs.borrow_mut().push(f);
+        Box::new(Task)
+    }
+    fn console(&self, _: &str, _: &str) {}
+    fn unique_id(&self) -> String {
+        "fixture".into()
+    }
+    fn is_worker(&self) -> bool {
+        false
+    }
+    fn random(&self) -> f64 {
+        0.5
+    }
+    fn report_raw_exception(&self, _: &serde_json::Value, _: &serde_json::Value) {
+        panic!("unexpected raw exception report in this test runtime");
+    }
+    fn report_exception(&self, error: &ExchangeError, _: &Value) {
+        self.reported.borrow_mut().push(error.name.clone());
+    }
+    fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
+        panic!("unexpected worker")
+    }
+}
+#[derive(Default)]
+struct Socket {
+    listeners: RefCell<Vec<(&'static str, PrivateCallback)>>,
+    removed: RefCell<Vec<&'static str>>,
+    closed: Cell<usize>,
+}
+impl NativePrivateSocket for Socket {
+    fn remove_listener(
+        &self,
+        event: &'static str,
+        callback: &PrivateCallback,
+    ) -> Result<(), Failure> {
+        self.removed.borrow_mut().push(event);
+        self.listeners
+            .borrow_mut()
+            .retain(|(name, action)| *name != event || !action.same(callback));
+        Ok(())
+    }
+    fn ready_state(&self) -> Result<f64, Failure> {
+        Ok(1.0)
+    }
+    fn close(&self) -> Result<(), Failure> {
+        self.closed.set(self.closed.get() + 1);
+        Ok(())
+    }
+    fn add_listener(&self, event: &'static str, action: PrivateCallback) -> Result<(), Failure> {
+        self.listeners.borrow_mut().push((event, action));
+        Ok(())
+    }
+}
+#[derive(Default)]
+struct Base {
+    disposed: Cell<bool>,
+    forced: Cell<bool>,
+    received: Cell<usize>,
+    stats: RefCell<Vec<String>>,
+    frames: RefCell<Vec<String>>,
+    urls: RefCell<Vec<String>>,
+    socket: Rc<Socket>,
+    errors: RefCell<Vec<String>>,
+    pong: Cell<usize>,
+    ping_at: Cell<f64>,
+    diagnostic_sends: Cell<usize>,
+    send_failure: RefCell<Option<Failure>>,
+}
+impl PrivateBase for Base {
+    fn disposed(&self) -> bool {
+        self.disposed.get()
+    }
+    fn force_closed(&self) -> bool {
+        self.forced.get()
+    }
+    fn connected(&self) -> bool {
+        !self.urls.borrow().is_empty() && !self.disposed.get() && !self.forced.get()
+    }
+    fn track(&self) -> Result<(), Failure> {
+        self.received.set(self.received.get() + 1);
+        Ok(())
+    }
+    fn diagnostic(&self, _: EventValue) -> Result<(), Failure> {
+        Ok(())
+    }
+    fn stats(&self, topic: &str) -> Result<(), Failure> {
+        self.stats.borrow_mut().push(topic.into());
+        Ok(())
+    }
+    fn set_ping_at(&self, time: f64) -> Result<(), Failure> {
+        self.ping_at.set(time);
+        Ok(())
+    }
+    fn diagnostic_send(&self, _: &str) -> Result<(), Failure> {
+        self.diagnostic_sends.set(self.diagnostic_sends.get() + 1);
+        Ok(())
+    }
+    fn pong(&self) -> Result<(), Failure> {
+        self.pong.set(self.pong.get() + 1);
+        Ok(())
+    }
+    fn send(&self, payload: String) -> Result<(), Failure> {
+        if let Some(error) = self.send_failure.borrow().clone() {
+            return Err(error);
+        }
+        self.frames.borrow_mut().push(payload);
+        Ok(())
+    }
+    fn create(&self, url: String) -> Result<Rc<dyn NativePrivateSocket>, Failure> {
+        self.urls.borrow_mut().push(url);
+        Ok(self.socket.clone())
+    }
+    fn on_close(&self) -> Result<(), Failure> {
+        Ok(())
+    }
+    fn force_close(&self) -> Result<(), Failure> {
+        self.forced.set(true);
+        Ok(())
+    }
+    fn reconnect(&self) -> Result<(), Failure> {
+        Ok(())
+    }
+    fn dispose(&self) -> Result<(), Failure> {
+        self.disposed.set(true);
+        self.socket.listeners.borrow_mut().clear();
+        Ok(())
+    }
+    fn emit_error(&self, message: String) -> Result<(), Failure> {
+        self.errors.borrow_mut().push(message);
+        Ok(())
+    }
+}
+#[derive(Default)]
+struct Timers {
+    callbacks: RefCell<Vec<(EventValue, CapturedAction, f64)>>,
+    cleared: RefCell<Vec<EventValue>>,
+}
+impl PrivateTimers for Timers {
+    fn set(&self, action: CapturedAction, delay: f64) -> Result<EventValue, Failure> {
+        let ticket = record([("id", number(self.callbacks.borrow().len() as f64 + 1.0))]);
+        self.callbacks
+            .borrow_mut()
+            .push((ticket.clone(), action, delay));
+        Ok(ticket)
+    }
+    fn clear(&self, ticket: EventValue) -> Result<(), Failure> {
+        self.cleared.borrow_mut().push(ticket);
+        Ok(())
+    }
+}
+struct Parent {
+    remote_sign_call: RefCell<Option<RemoteSignCall>>,
+    options: EventValue,
+    orders: EventArray,
+    positions: EventArray,
+    balance: EventValue,
+    loaded: EventValue,
+    effects: Rc<RefCell<Vec<(PrivateOperation, Vec<EventValue>)>>>,
+    version: Cell<f64>,
+    stale: Cell<bool>,
+    fetched_orders: Cell<usize>,
+    fetched_positions: Cell<usize>,
+    key_ready: Rc<Cell<bool>>,
+    key_value: Rc<RefCell<Option<EventValue>>>,
+    keys: RefCell<Vec<&'static str>>,
+    applied: RefCell<Vec<EventValue>>,
+}
+impl PrivateParent for Parent {
+    fn options(&self) -> Result<EventValue, Failure> {
+        Ok(self.options.clone())
+    }
+    fn orders(&self) -> Result<EventArray, Failure> {
+        Ok(self.orders.clone())
+    }
+    fn positions(&self) -> Result<EventArray, Failure> {
+        Ok(self.positions.clone())
+    }
+    fn balance(&self) -> Result<EventValue, Failure> {
+        Ok(self.balance.clone())
+    }
+    fn loaded(&self) -> Result<EventValue, Failure> {
+        Ok(self.loaded.clone())
+    }
+    fn capture_store(&self, operation: PrivateOperation) -> Result<PrivateHandler, Failure> {
+        let effects = self.effects.clone();
+        Ok(Rc::new(move |args| {
+            effects.borrow_mut().push((operation, args));
+            Ok(())
+        }))
+    }
+    fn fill(&self, payload: EventValue) -> Result<(), Failure> {
+        self.effects
+            .borrow_mut()
+            .push((PrivateOperation::Fill, vec![payload]));
+        Ok(())
+    }
+    fn asset_price(&self, _: &EventValue) -> Result<f64, Failure> {
+        Ok(1.0)
+    }
+    fn mark_position(&self) -> Result<(), Failure> {
+        self.version.set(self.version.get() + 1.0);
+        Ok(())
+    }
+    fn position_version(&self) -> Result<f64, Failure> {
+        Ok(self.version.get())
+    }
+    fn paused(&self) -> Result<bool, Failure> {
+        Ok(false)
+    }
+    fn orders_stale(&self) -> Result<bool, Failure> {
+        Ok(self.stale.get())
+    }
+    fn fetch_positions(&self) -> Result<NativeFuture<EventValue>, Failure> {
+        self.fetched_positions.set(self.fetched_positions.get() + 1);
+        let rows = EventValue::Array(self.positions.clone());
+        Ok(Box::pin(async move { Ok(rows) }))
+    }
+    fn fetch_orders(&self) -> Result<NativeFuture<EventValue>, Failure> {
+        self.fetched_orders.set(self.fetched_orders.get() + 1);
+        let rows = EventValue::Array(self.orders.clone());
+        Ok(Box::pin(async move { Ok(rows) }))
+    }
+    fn replace_positions(&self, positions: EventValue) -> Result<(), Failure> {
+        self.applied.borrow_mut().push(positions);
+        Ok(())
+    }
+    fn post_key(&self, endpoint: &'static str) -> Result<PinKey, Failure> {
+        self.keys.borrow_mut().push(endpoint);
+        let ready = self.key_ready.clone();
+        let value = self.key_value.clone();
+        Ok(Box::pin(async move {
+            std::future::poll_fn(move |_| {
+                if ready.get() {
+                    Poll::Ready(())
+                } else {
+                    Poll::Pending
+                }
+            })
+            .await;
+            Ok(ListenKeyResponse::Data(ListenKeyData::Present(value)))
+        }))
+    }
+    fn put_key(&self, endpoint: &'static str) -> Result<NativeFuture<()>, Failure> {
+        self.keys.borrow_mut().push(endpoint);
+        Ok(Box::pin(async { Ok(()) }))
+    }
+    fn remote_sign(&self, _: EventValue) -> Result<RemoteSignCall, Failure> {
+        Ok(self
+            .remote_sign_call
+            .borrow()
+            .as_ref()
+            .expect("unexpected signer")
+            .clone())
+    }
+    fn log(&self, _: String, _: LogSeverity) -> Result<(), Failure> {
+        Ok(())
+    }
+}
+fn fixture(
+    venue: Venue,
+) -> (
+    Rc<PrivateSocket>,
+    Rc<Parent>,
+    Rc<Base>,
+    Rc<Timers>,
+    Rc<Runtime>,
+) {
+    let parent = Rc::new(Parent {
+        remote_sign_call: Default::default(),
+        options: record([("key", string("key")), ("secret", string("secret"))]),
+        orders: Default::default(),
+        positions: Default::default(),
+        balance: record([]),
+        loaded: record([("tickers", EventValue::Bool(true))]),
+        effects: Default::default(),
+        version: Cell::new(0.0),
+        stale: Cell::new(false),
+        fetched_orders: Cell::new(0),
+        fetched_positions: Cell::new(0),
+        key_ready: Rc::new(Cell::new(true)),
+        key_value: Rc::new(RefCell::new(Some(string("key /+")))),
+        keys: Default::default(),
+        applied: Default::default(),
+    });
+    let base = Rc::new(Base::default());
+    let timers = Rc::new(Timers::default());
+    let runtime = Rc::new(Runtime {
+        now: Cell::new(20000.0),
+        ..Default::default()
+    });
+    let owner = PrivateSocket::new(
+        venue,
+        PrivateDependencies {
+            parent: parent.clone(),
+            base_factory: {
+                let base = base.clone();
+                let expected = parent.clone();
+                Rc::new(move |parent| {
+                    assert!(
+                        Rc::ptr_eq(&parent, &(expected.clone() as Rc<dyn PrivateParent>)),
+                        "native implicit Base constructor receives original parent"
+                    );
+                    Ok(base.clone())
+                })
+            },
+            timers: timers.clone(),
+            runtime: runtime.clone(),
+            virtual_now: Rc::new(|| 21000.0),
+        },
+    )
+    .unwrap();
+    (owner, parent, base, timers, runtime)
+}
+#[test]
+fn private_classes_bind_defaults_connection_auth_and_reopen() {
+    let mut wire = vec![];
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let (owner, parent, base, timers, runtime) = fixture(venue);
+        assert!(
+            Rc::ptr_eq(&owner.parent, &(parent.clone() as Rc<dyn PrivateParent>)),
+            "native private same parent receiver"
+        );
+        assert_eq!(
+            owner.connect.retry_delay.get(),
+            5000.0,
+            "native private initial retry delay"
+        );
+        assert_eq!(
+            owner.position.throttle_ms.get(),
+            if venue == Venue::PM { 500.0 } else { 10000.0 },
+            "native private venue position throttle"
+        );
+        assert!(!owner.position.pending_events.get());
+        assert!(!owner.position.scheduled.get());
+        assert!(!owner.position.in_flight.get());
+        assert_eq!(owner.position.last_fetch_time.get(), 0.0);
+        assert!(!owner.connect.connecting.get());
+        assert!(!owner.connect.resync_orders.get());
+        assert!(!owner.has_opened.get());
+        assert_eq!(owner.subscription_attempt.get(), 0.0);
+        assert!(!owner.keepalive_failing.keepalive_failing.get());
+        run(&runtime, owner.connect_and_subscribe()).unwrap();
+        assert_eq!(
+            base.urls.borrow().len(),
+            1,
+            "independent private dial count"
+        );
+        assert_eq!(
+            base.socket
+                .listeners
+                .borrow()
+                .iter()
+                .map(|(name, _)| *name)
+                .collect::<Vec<_>>(),
+            ["message", "close", "open"],
+            "native private own bound listeners"
+        );
+        if venue == Venue::Spot {
+            assert_eq!(
+                parent.keys.borrow().len(),
+                0,
+                "independent Spot has no listen-key request"
+            );
+            assert_eq!(
+                timers.callbacks.borrow().len(),
+                0,
+                "native Spot no listen-key refresh"
+            );
+        } else {
+            assert_eq!(
+                *parent.keys.borrow(),
+                [if venue == Venue::PM {
+                    "/papi/v1/listenKey"
+                } else {
+                    "/fapi/v1/listenKey"
+                }],
+                "native parent client endpoint"
+            );
+            assert_eq!(
+                timers.callbacks.borrow()[0].2,
+                1800000.0,
+                "native connected key refresh delay"
+            );
+        }
+        run(&runtime, owner.on_open()).unwrap();
+        let first: Value = serde_json::from_str(&base.frames.borrow()[0]).unwrap();
+        if venue == Venue::Spot {
+            assert_eq!(
+                owner.subscription_attempt.get(),
+                1.0,
+                "native Spot subscription attempt"
+            );
+            assert_eq!(first["id"].as_str(), Some("tealstreet-user-data"));
+            assert_eq!(
+                first["method"].as_str(),
+                Some("userDataStream.subscribe.signature")
+            );
+            assert_eq!(first["params"]["apiKey"].as_str(), Some("key"));
+            assert_eq!(first["params"]["timestamp"].as_f64(), Some(21000.0));
+            assert_eq!(first["params"]["recvWindow"].as_f64(), Some(5000.0));
+            assert_eq!(
+                first["params"]["signature"].as_str(),
+                Some(
+                    safe_cex_crypto::hmac_sha256(
+                        b"secret",
+                        b"apiKey=key&recvWindow=5000&timestamp=21000",
+                        safe_cex_crypto::Encoding::Hex
+                    )
+                    .as_str()
+                ),
+                "native Spot signed exact payload"
+            );
+        } else {
+            assert!(owner.has_opened.get());
+            assert_eq!(
+                base.ping_at.get(),
+                22000.0,
+                "native private ping uses performance clock"
+            );
+            assert_eq!(
+                base.diagnostic_sends.get(),
+                1,
+                "native private ping logs after send"
+            );
+            assert_eq!(first["id"].as_f64(), Some(42.0));
+            assert_eq!(first["method"].as_str(), Some("LIST_SUBSCRIPTIONS"));
+            run(&runtime, owner.on_open()).unwrap();
+            assert_eq!(
+                timers.callbacks.borrow().last().unwrap().2,
+                10000.0,
+                "native reopen binds orders debounce"
+            );
+        }
+        owner.dispose().unwrap();
+        assert!(base.disposed.get());
+        assert_eq!(
+            base.socket.listeners.borrow().len(),
+            0,
+            "native imported Base disposal removes listeners"
+        );
+        wire.push((venue, base.urls.borrow()[0].clone()));
+    }
+    for (venue, url) in wire {
+        match venue {
+            Venue::Futures => assert!(url.ends_with("?listenKey=key%20%2F%2B")),
+            Venue::PM => assert!(url.ends_with("/key /+")),
+            Venue::Spot => assert_eq!(url, "wss://ws-api.binance.com:443/ws-api/v3"),
+        }
+    }
+}
+#[test]
+fn private_classes_route_events_to_native_bodies_and_eager_refresh() {
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let (owner, parent, base, timers, runtime) = fixture(venue);
+        let data = json!({"e":if venue==Venue::Spot{"executionReport"}else{"ORDER_TRADE_UPDATE"},"c":"client","i":42,"X":"NEW","ot":"LIMIT","o":"LIMIT","s":"BTC","S":"BUY","p":"12.3","sp":"1.2","q":"3.6","z":"1.1","R":false});
+        let event = if venue == Venue::Spot {
+            data.clone()
+        } else {
+            json!({"e":"ORDER_TRADE_UPDATE","o":data})
+        };
+        owner.on_message(string(event.to_string())).unwrap();
+        assert_eq!(base.received.get(), 1, "independent private received count");
+        assert_eq!(
+            *base.stats.borrow(),
+            ["order"],
+            "native private event statistics routing"
+        );
+        let effects = parent.effects.borrow();
+        let adds = effects
+            .iter()
+            .filter(|(op, _)| *op == PrivateOperation::AddOrder)
+            .collect::<Vec<_>>();
+        assert_eq!(adds.len(), 1, "independent native new-order call count");
+        let row = &adds[0].1[0];
+        assert!(
+            matches!(row.get("price").unwrap(),EventValue::Number(n)if n==12.3),
+            "native bound private order price"
+        );
+        assert!(
+            matches!(row.get("amount").unwrap(),EventValue::Number(n)if n==3.6),
+            "native bound private order amount"
+        );
+        assert!(matches!(row.get("filled").unwrap(),EventValue::Number(n)if n==1.1));
+        assert!(matches!(row.get("remaining").unwrap(),EventValue::Number(n)if n==3.6-1.1));
+        assert!(matches!(
+            row.get("type").unwrap(),
+            EventValue::Enum(PrivateEnum::Type(safe_cex_types::OrderType::Limit))
+        ));
+        assert!(matches!(row.get("lastUpdate").unwrap(),EventValue::Number(n)if n==21000.0));
+        drop(effects);
+        if venue != Venue::Spot {
+            assert_eq!(
+                timers.callbacks.borrow().len(),
+                1,
+                "independent orders timer count"
+            );
+            let action = timers.callbacks.borrow()[0].1.clone();
+            action.call().unwrap();
+            assert_eq!(
+                parent.fetched_orders.get(),
+                1,
+                "native timer eagerly starts parent fetch before returning"
+            );
+            assert!(matches!(
+                *owner.orders_timer.borrow(),
+                EventValue::Undefined
+            ));
+            assert!(
+                !parent
+                    .effects
+                    .borrow()
+                    .iter()
+                    .any(|(op, _)| *op == PrivateOperation::UpdateStore),
+                "native Ready order fetch defers post-await Store update"
+            );
+            runtime.pump();
+            assert!(
+                parent.effects.borrow().iter().any(|(op, args)| *op
+                    == PrivateOperation::UpdateStore
+                    && args[0]
+                        .get("loaded")
+                        .unwrap()
+                        .get("orders")
+                        .unwrap()
+                        .same(&EventValue::Bool(true))),
+                "native repaired orders mark loaded"
+            );
+            owner.position.pending_events.set(true);
+            owner.throttled_positions().unwrap();
+            assert_eq!(
+                parent.fetched_positions.get(),
+                1,
+                "native position body starts parent fetch immediately"
+            );
+            assert_eq!(
+                parent.applied.borrow().len(),
+                0,
+                "native Ready position fetch defers full replacement"
+            );
+            assert!(
+                owner.position.in_flight.get() == (venue == Venue::Futures),
+                "native Futures in-flight remains set until queued continuation"
+            );
+            runtime.pump();
+            assert_eq!(
+                parent.applied.borrow().len(),
+                1,
+                "independent position replacement count"
+            );
+            assert!(
+                parent.applied.borrow()[0].same(&EventValue::Array(parent.positions.clone())),
+                "native parent position result retains identity"
+            );
+            assert!(!owner.position.in_flight.get());
+            assert_eq!(owner.position.last_fetch_time.get(), 20000.0);
+            runtime.pump();
+        }
+    }
+}
+
+#[test]
+fn private_class_native_stages_before_actual_source() {
+    let mut native = vec![];
+    let mut inputs = vec![];
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let (owner, parent, base, timers, runtime) = fixture(venue);
+        let initial = if venue == Venue::Spot {
+            json!({"retry":null,"throttle":null,"attempt":0})
+        } else {
+            json!({"retry":owner.connect.retry_delay.get(),"throttle":owner.position.throttle_ms.get(),"attempt":null})
+        };
+        assert_eq!(
+            owner.connect.retry_delay.get(),
+            5000.0,
+            "native source-floor retry initial"
+        );
+        assert_eq!(
+            owner.position.throttle_ms.get(),
+            if venue == Venue::PM { 500.0 } else { 10000.0 },
+            "native source-floor throttle"
+        );
+        assert_eq!(owner.subscription_attempt.get(), 0.0);
+        let task = owner.connect_and_subscribe();
+        assert_eq!(
+            parent.keys.borrow().len(),
+            if venue == Venue::Spot { 0 } else { 1 },
+            "native constructor/callee synchronous POST prefix"
+        );
+        if venue != Venue::Spot {
+            assert!(
+                owner.connect.connecting.get(),
+                "native connecting remains true before listen-key reaction"
+            );
+            assert_eq!(
+                base.urls.borrow().len(),
+                0,
+                "native no dial before queued key continuation"
+            );
+        }
+        run(&runtime, task).unwrap();
+        assert_eq!(
+            base.urls.borrow().len(),
+            1,
+            "independent native source-floor dial count"
+        );
+        let keys = parent.keys.borrow().clone();
+        let refresh = timers
+            .callbacks
+            .borrow()
+            .iter()
+            .map(|(_, _, delay)| *delay)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            refresh,
+            if venue == Venue::Spot {
+                vec![]
+            } else {
+                vec![1800000.0]
+            },
+            "native source-floor refresh delays"
+        );
+        let listeners = base
+            .socket
+            .listeners
+            .borrow()
+            .iter()
+            .map(|(name, _)| *name)
+            .collect::<Vec<_>>();
+        assert_eq!(
+            listeners,
+            ["message", "close", "open"],
+            "native source-floor bound listener order"
+        );
+        run(&runtime, owner.on_open()).unwrap();
+        let first: Value = serde_json::from_str(&base.frames.borrow()[0]).unwrap();
+        if venue == Venue::Spot {
+            assert_eq!(
+                first["params"]["timestamp"].as_f64(),
+                Some(21000.0),
+                "native source-floor virtual auth timestamp"
+            );
+            assert_eq!(first["params"]["apiKey"].as_str(), Some("key"));
+            assert_eq!(first["params"]["recvWindow"].as_f64(), Some(5000.0));
+            assert_eq!(
+                first["params"]["signature"].as_str(),
+                Some("8f7a6626e42b033449cae63460d349375b5b06dbb640912c4ea9b342c86c07c1"),
+                "native independently fixed HMAC signature"
+            );
+        } else {
+            assert_eq!(first["id"].as_f64(), Some(42.0));
+            assert_eq!(first["method"].as_str(), Some("LIST_SUBSCRIPTIONS"));
+            assert_eq!(
+                base.ping_at.get(),
+                22000.0,
+                "native source-floor monotonic ping timestamp"
+            );
+            run(&runtime, owner.on_open()).unwrap();
+        }
+        let data = json!({"e":if venue==Venue::Spot{"executionReport"}else{"ORDER_TRADE_UPDATE"},"c":"client","i":42,"X":"NEW","ot":"LIMIT","o":"LIMIT","s":"BTC","S":"BUY","p":"12.3","sp":"1.2","q":"3.6","z":"1.1","R":false});
+        let event = if venue == Venue::Spot {
+            data
+        } else {
+            json!({"e":"ORDER_TRADE_UPDATE","o":data})
+        };
+        owner.on_message(string(event.to_string())).unwrap();
+        let effects = parent.effects.borrow();
+        let rows = effects
+            .iter()
+            .filter(|(op, _)| *op == PrivateOperation::AddOrder)
+            .collect::<Vec<_>>();
+        assert_eq!(rows.len(), 1, "independent source-floor add-order count");
+        let row = rows[0].1[0].clone();
+        drop(effects);
+        let id = row.get("id").unwrap().text().unwrap();
+        assert_eq!(
+            id,
+            if venue == Venue::Futures {
+                "42"
+            } else {
+                "client"
+            },
+            "native source-floor order identifier"
+        );
+        let read = |field: &str| {
+            let EventValue::Number(value) = row.get(field).unwrap() else {
+                panic!("native numeric order field {field}")
+            };
+            value
+        };
+        let (price, amount, filled, remaining, last) = (
+            read("price"),
+            read("amount"),
+            read("filled"),
+            read("remaining"),
+            read("lastUpdate"),
+        );
+        assert_eq!(price, 12.3, "native source-floor price");
+        assert_eq!(amount, 3.6, "native source-floor amount");
+        assert_eq!(filled, 1.1);
+        assert_eq!(remaining, 2.5);
+        assert_eq!(last, 21000.0, "native source-floor virtual fill clock");
+        assert!(matches!(
+            row.get("type").unwrap(),
+            EventValue::Enum(PrivateEnum::Type(safe_cex_types::OrderType::Limit))
+        ));
+        assert_eq!(
+            base.received.get(),
+            1,
+            "independent source-floor receive count"
+        );
+        assert_eq!(*base.stats.borrow(), ["order"]);
+        let (before, after) = if venue == Venue::Spot {
+            (Value::Null, Value::Null)
+        } else {
+            let action = timers.callbacks.borrow().last().unwrap().1.clone();
+            assert!(
+                action.same(&owner.capture_fetch_throttled()),
+                "native orders timer captures exact current arrow identity"
+            );
+            action.call().unwrap();
+            let count = || {
+                parent
+                    .effects
+                    .borrow()
+                    .iter()
+                    .filter(|(op, _)| *op == PrivateOperation::UpdateStore)
+                    .count()
+            };
+            assert_eq!(
+                parent.fetched_orders.get(),
+                1,
+                "native source-floor eager fetch prefix"
+            );
+            assert_eq!(
+                count(),
+                0,
+                "native source-floor no Store write before ready-await reaction"
+            );
+            let before = json!({"fetches":1,"updates":0});
+            runtime.pump();
+            assert_eq!(
+                count(),
+                1,
+                "independent source-floor queued Store write count"
+            );
+            let loaded = parent
+                .effects
+                .borrow()
+                .iter()
+                .find(|(op, _)| *op == PrivateOperation::UpdateStore)
+                .unwrap()
+                .1[0]
+                .get("loaded")
+                .unwrap()
+                .get("orders")
+                .unwrap();
+            assert!(
+                loaded.same(&EventValue::Bool(true)),
+                "native source-floor loaded flag"
+            );
+            (before, json!({"fetches":1,"updates":1,"loaded":true}))
+        };
+        inputs.push(json!({"venue":format!("{venue:?}")}));
+        native.push(json!({"venue":format!("{venue:?}"),"sameParent":Rc::ptr_eq(&owner.parent,&(parent.clone()as Rc<dyn PrivateParent>)),"initial":initial,"urls":*base.urls.borrow(),"listeners":listeners,"keys":keys,"refresh":refresh,"first":first,"pingAt":if venue==Venue::Spot{None}else{Some(base.ping_at.get())},"diagnosticSends":base.diagnostic_sends.get(),"row":{"id":id,"price":price,"amount":amount,"filled":filled,"remaining":remaining,"lastUpdate":last,"type":"limit"},"received":base.received.get(),"stats":*base.stats.borrow(),"before":before,"after":after}));
+    }
+    assert_eq!(
+        inputs.len(),
+        3,
+        "independent private class source floor through case2"
+    );
+    use std::io::Write;
+    let mut child = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/private-classes.mjs"
+        ))
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .unwrap();
+    child
+        .stdin
+        .take()
+        .unwrap()
+        .write_all(serde_json::to_string(&inputs).unwrap().as_bytes())
+        .unwrap();
+    let output = child.wait_with_output().unwrap();
+    assert!(
+        output.status.success(),
+        "actual private class oracle {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let source: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(
+        source.len(),
+        3,
+        "independent actual private class source count"
+    );
+    fn numeric(v: Value) -> Value {
+        match v {
+            Value::Number(n) => json!(n.as_f64().unwrap()),
+            Value::Array(v) => Value::Array(v.into_iter().map(numeric).collect()),
+            Value::Object(v) => {
+                Value::Object(v.into_iter().map(|(k, v)| (k, numeric(v))).collect())
+            }
+            v => v,
+        }
+    }
+    assert_eq!(
+        numeric(json!(native)),
+        numeric(json!(source)),
+        "actual private class bodies after all native field/stage assertions"
+    );
+}
+
+#[test]
+fn private_live_disposal_and_raw_key_coercion_at_named_await_stage() {
+    for venue in [Venue::Futures, Venue::PM] {
+        for forced in [false, true] {
+            let (owner, parent, base, _, runtime) = fixture(venue);
+            parent.key_ready.set(false);
+            *parent.key_value.borrow_mut() = Some(record([
+                ("toString", number(7.0)),
+                ("valueOf", number(8.0)),
+            ]));
+            let task = owner.connect_and_subscribe();
+            assert!(
+                owner.connect.connecting.get(),
+                "native suspended key connection prefix"
+            );
+            if forced {
+                base.forced.set(true)
+            } else {
+                base.disposed.set(true)
+            }
+            parent.key_ready.set(true);
+            run(&runtime, task).unwrap();
+            assert_eq!(
+                base.urls.borrow().len(),
+                0,
+                "native live post-await disposal/force-close guard skips malformed-key coercion and dial"
+            );
+            assert_eq!(
+                base.errors.borrow().len(),
+                0,
+                "independent guarded malformed key emits no listen-key failure"
+            );
+            assert!(!owner.connect.connecting.get());
+            assert_eq!(owner.connect.retry_delay.get(), 5000.0);
+        }
+    }
+    for venue in [Venue::Futures, Venue::PM] {
+        let (owner, parent, base, timers, runtime) = fixture(venue);
+        *parent.key_value.borrow_mut() = Some(record([
+            ("toString", number(7.0)),
+            ("valueOf", number(8.0)),
+        ]));
+        let failure = run(&runtime, owner.connect_and_subscribe()).unwrap_err();
+        assert_eq!(
+            failure.name, "TypeError",
+            "native malformed key coercion fails outside fetch-key catch"
+        );
+        assert!(
+            !owner.connect.connecting.get(),
+            "native key finally clears connecting before URL coercion"
+        );
+        assert_eq!(
+            base.errors.borrow().len(),
+            0,
+            "independent late coercion emits no listen-key unavailable error"
+        );
+        assert_eq!(
+            timers.callbacks.borrow().len(),
+            1,
+            "independent only refresh timer, no retry after late key coercion"
+        );
+        assert_eq!(timers.callbacks.borrow()[0].2, 1800000.0);
+        assert_eq!(owner.connect.retry_delay.get(), 5000.0);
+        assert!(!owner.connect.resync_orders.get());
+    }
+}
+#[test]
+fn private_stable_callback_removal_preserves_unrelated_listener_and_releases_receiver() {
+    let (owner, _, base, _, runtime) = fixture(Venue::Spot);
+    let state = Rc::downgrade(&**owner);
+    let other = PrivateCallback::Message(Rc::new(|_| Ok(())));
+    base.socket.add_listener("message", other.clone()).unwrap();
+    run(&runtime, owner.connect_and_subscribe()).unwrap();
+    assert_eq!(
+        base.socket.listeners.borrow().len(),
+        4,
+        "independent three private and one unrelated callbacks"
+    );
+    let previous = base
+        .socket
+        .listeners
+        .borrow()
+        .iter()
+        .filter(|(_, f)| !f.same(&other))
+        .map(|(name, fn_)| (*name, fn_.clone()))
+        .collect::<Vec<_>>();
+    // Spot does not detach in its own connect body; test the actual Futures/PM
+    // detach adapter separately using a PM connection and a shared socket mock.
+    owner.dispose().unwrap();
+    drop(previous);
+    drop(owner);
+    assert!(
+        state.upgrade().is_none(),
+        "native private default callback cache has no receiver cycle after Base disposal"
+    );
+    let (owner, _, base, timers, runtime) = fixture(Venue::PM);
+    run(&runtime, owner.connect_and_subscribe()).unwrap();
+    let other = PrivateCallback::Message(Rc::new(|_| Ok(())));
+    base.socket.add_listener("message", other.clone()).unwrap();
+    let old = base
+        .socket
+        .listeners
+        .borrow()
+        .iter()
+        .filter(|(_, f)| !f.same(&other))
+        .map(|(name, fn_)| (*name, fn_.clone()))
+        .collect::<Vec<_>>();
+    run(&runtime, owner.connect_and_subscribe()).unwrap();
+    assert_eq!(
+        *base.socket.removed.borrow(),
+        ["message", "close", "open"],
+        "native detach removes own callbacks in source order"
+    );
+    assert_eq!(
+        base.socket.closed.get(),
+        1,
+        "independent prior-socket close count"
+    );
+    assert!(
+        base.socket
+            .listeners
+            .borrow()
+            .iter()
+            .any(|(_, f)| f.same(&other)),
+        "native detach preserves unrelated message listener"
+    );
+    for (name, callback) in old {
+        let current = base
+            .socket
+            .listeners
+            .borrow()
+            .iter()
+            .find(|(n, f)| *n == name && !f.same(&other))
+            .unwrap()
+            .1
+            .clone();
+        assert!(
+            callback.same(&current),
+            "native private arrows remain stable across reconnect"
+        );
+    }
+    assert!(
+        timers.callbacks.borrow().len() >= 2,
+        "native independent refresh chains started then cancelled by primitive"
+    );
+}
+#[test]
+fn private_exported_current_arrow_carries_receiver_and_base_lease() {
+    let (owner, parent, base, _, runtime) = fixture(Venue::Spot);
+    let state = Rc::downgrade(&**owner);
+    let first = owner.capture_connect();
+    let second = owner.capture_connect();
+    assert!(
+        first.same(&second),
+        "native captured current connect arrow identity"
+    );
+    drop(second);
+    drop(owner);
+    assert!(
+        state.upgrade().is_some(),
+        "native captured callable retains receiver"
+    );
+    first.call().unwrap();
+    assert_eq!(
+        base.urls.borrow().len(),
+        1,
+        "native saved current arrow operates after class handle drop"
+    );
+    assert!(Rc::strong_count(&parent) >= 2);
+    runtime.pump();
+    base.dispose().unwrap();
+    drop(first);
+    assert!(
+        state.upgrade().is_none(),
+        "native final callable/base cleanup releases private state"
+    );
+}
+
+#[test]
+fn private_registered_open_propagates_synchronous_original_error() {
+    for venue in [Venue::Futures, Venue::PM] {
+        let (owner, _, base, _, runtime) = fixture(venue);
+        run(&runtime, owner.connect_and_subscribe()).unwrap();
+        let marker = Rc::new(ExchangeError::new("open ping marker"));
+        *base.send_failure.borrow_mut() = Some(marker.clone());
+        let callback = base
+            .socket
+            .listeners
+            .borrow()
+            .iter()
+            .find(|(name, _)| *name == "open")
+            .unwrap()
+            .1
+            .clone();
+        let PrivateCallback::Action(callback) = callback else {
+            panic!("open action required")
+        };
+        let result = callback();
+        assert!(
+            result.is_err(),
+            "native synchronous open callback must propagate failure"
+        );
+        let actual = result.unwrap_err();
+        assert!(
+            Rc::ptr_eq(&actual, &marker),
+            "native synchronous open callback preserves original error identity"
+        );
+        assert!(
+            !owner.has_opened.get(),
+            "native failed ping leaves hasOpened false"
+        );
+        owner.dispose().unwrap();
+    }
+}
+
+#[test]
+fn private_saved_message_callback_retains_base_lease() {
+    let (owner, _, base, timers, runtime) = fixture(Venue::PM);
+    run(&runtime, owner.connect_and_subscribe()).unwrap();
+    let saved = base
+        .socket
+        .listeners
+        .borrow()
+        .iter()
+        .find(|(name, _)| *name == "message")
+        .unwrap()
+        .1
+        .clone();
+    owner.dispose().unwrap();
+    timers.callbacks.borrow_mut().clear();
+    base.disposed.set(false);
+    let weak = Rc::downgrade(&base);
+    drop(owner);
+    drop(base);
+    assert!(
+        weak.upgrade().is_some(),
+        "native saved socket callback retains Base"
+    );
+    let PrivateCallback::Message(callback) = saved else {
+        panic!("message callback required")
+    };
+    callback(string("bad frame")).unwrap();
+    assert_eq!(
+        weak.upgrade().unwrap().received.get(),
+        1,
+        "native retained callback still tracks frame"
+    );
+    drop(callback);
+    assert!(
+        weak.upgrade().is_none(),
+        "native callback release frees Base after disposal"
+    );
+}
+
+#[path = "support/class_listener_host.rs"]
+mod exchange_listener_host;
+use safe_cex_exchange::websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket};
+use safe_cex_venue_binance::{exchange_classes::*, private_session::Factory};
+impl WsRuntime for Runtime {
+    fn transport(&self) -> std::sync::Arc<dyn safe_cex_transport::TransportProvider> {
+        std::sync::Arc::new(safe_cex_transport::DirectTransport)
+    }
+    fn tunnel_host(&self) -> Rc<dyn safe_cex_transport::socket::TunnelHost> {
+        panic!("fixture has no tunnel")
+    }
+    fn dial(
+        &self,
+        _: String,
+        _: Vec<String>,
+        _: WebSocketConnectionOptions,
+        _: bool,
+    ) -> ExchangeFuture<'static, Rc<dyn WsSocket>> {
+        Box::pin(std::future::pending())
+    }
+    fn headers_capable(&self) -> bool {
+        false
+    }
+    fn enable_reconnecting(&self) -> bool {
+        false
+    }
+    fn min_reconnection_delay_ms(&self) -> f64 {
+        1000.0
+    }
+    fn library_min_reconnection_delay_ms(&self) -> f64 {
+        1000.0
+    }
+    fn diagnostics_enabled(&self) -> bool {
+        false
+    }
+    fn lifecycle_logs_enabled(&self) -> bool {
+        false
+    }
+}
+#[derive(Default)]
+struct Imports {
+    base: Rc<Base>,
+    timers: Rc<Timers>,
+    guards: RefCell<Vec<safe_cex_venue_binance::request_weight::Fulfilled<EventValue>>>,
+    rejected_guards:
+        RefCell<Vec<safe_cex_venue_binance::request_weight::Rejected<EventValue, Failure>>>,
+    requests: RefCell<Vec<String>>,
+    request_args: RefCell<Vec<Option<EventValue>>>,
+    suspend_requests: Rc<Cell<bool>>,
+    fail_private: Cell<bool>,
+    failed_parent: RefCell<Option<std::rc::Weak<dyn PrivateParent>>>,
+    header_mode: Cell<usize>,
+    header_reads: Rc<RefCell<Vec<String>>>,
+    header_failure: RefCell<Option<Failure>>,
+    rejected_response: RefCell<Option<Result<Option<EventValue>, Failure>>>,
+}
+fn client(label: &str) -> EventValue {
+    record([("label", string(label))])
+}
+impl ExchangeImports for Imports {
+    fn factory(
+        &self,
+        _: Venue,
+        kind: Factory,
+        opts: EventValue,
+        owner: EventValue,
+    ) -> Result<EventValue, Failure> {
+        assert!(
+            opts.same(&owner.get("options")?),
+            "native factory receives canonical options graph"
+        );
+        Ok(client(match kind {
+            Factory::API => "API",
+            Factory::PAPI => "PAPI",
+            Factory::FAPI => "FAPI",
+            Factory::PublicAPI => "PublicAPI",
+        }))
+    }
+    fn split(
+        &self,
+        venue: Venue,
+        opts: EventValue,
+        owner: EventValue,
+        _: Rc<dyn Fn(EventValue) -> Result<EventValue, Failure>>,
+        rate: Option<safe_cex_venue_binance::private_session::RateHook>,
+    ) -> Result<EventValue, Failure> {
+        assert!(
+            opts.same(&owner.get("options")?),
+            "native split receives canonical exchange options"
+        );
+        if let Some(rate) = rate {
+            assert_eq!(rate(client("primary"))?.get("label")?.text()?, "primary");
+        }
+        Ok(if venue == Venue::Spot {
+            client("route")
+        } else {
+            EventValue::Array(Rc::new(RefCell::new(vec![
+                client("route"),
+                client("primary"),
+                client("secondary"),
+            ])))
+        })
+    }
+    fn rate_limit(&self, client: EventValue, max: f64) -> Result<EventValue, Failure> {
+        assert_eq!(max, 3.0, "native rate limit three requests per second");
+        Ok(client)
+    }
+    fn request(
+        &self,
+        _: EventValue,
+        _: HttpMethod,
+        path: &'static str,
+        args: Option<EventValue>,
+    ) -> Result<safe_cex_venue_binance::private_rest::SnapshotRequestFuture, Failure> {
+        self.requests.borrow_mut().push(path.into());
+        self.request_args.borrow_mut().push(args);
+        let suspended = self.suspend_requests.clone();
+        Ok(Box::pin(std::future::poll_fn(move |_| {
+            if suspended.get() {
+                return Poll::Pending;
+            }
+            Poll::Ready(safe_cex_venue_binance::private_rest::SnapshotCompletion {
+                reaction_order: 0,
+                result: Ok(EventValue::Array(Default::default())),
+            })
+        })))
+    }
+    fn register_weight_guard(
+        &self,
+        _: EventValue,
+        good: safe_cex_venue_binance::request_weight::Fulfilled<EventValue>,
+        bad: safe_cex_venue_binance::request_weight::Rejected<EventValue, Failure>,
+    ) -> Result<(), Failure> {
+        self.guards.borrow_mut().push(good);
+        self.rejected_guards.borrow_mut().push(bad);
+        Ok(())
+    }
+    fn weight_response_property(
+        &self,
+        value: &EventValue,
+        key: &str,
+    ) -> Result<EventValue, Failure> {
+        if self.header_mode.get() == 4 && key == "status" {
+            return Err(self.header_failure.borrow().as_ref().unwrap().clone());
+        }
+        value.get(key)
+    }
+    fn weight_header_get_member(
+        &self,
+        headers: &EventValue,
+    ) -> Result<safe_cex_venue_binance::request_weight::HeaderGetMember, Failure> {
+        use safe_cex_venue_binance::request_weight::HeaderGetMember;
+        if self.header_mode.get() == 0 {
+            return Ok(HeaderGetMember::NotCallable);
+        }
+        let mut reads = self.header_reads.borrow_mut();
+        reads.push("get".into());
+        if self.header_mode.get() == 2 && reads.len() == 2 {
+            return Err(self.header_failure.borrow().as_ref().unwrap().clone());
+        }
+        if self.header_mode.get() == 3 && reads.len() == 2 {
+            return Ok(HeaderGetMember::NotCallable);
+        }
+        let headers = headers.clone();
+        let reads = self.header_reads.clone();
+        Ok(HeaderGetMember::Callable(Rc::new(move |key| {
+            reads.borrow_mut().push(format!("call:{key}"));
+            assert!(
+                matches!(headers.get("receiver")?, EventValue::String(v) if v == "native-header"),
+                "native imported header getter retains original receiver"
+            );
+            Ok(Some(json!(2.5)))
+        })))
+    }
+    fn weight_error_response(&self, error: &Failure) -> Result<Option<EventValue>, Failure> {
+        if let Some(response) = self.rejected_response.borrow().clone() {
+            return response;
+        }
+        Ok(error.response.clone().map(EventValue::from_json))
+    }
+    fn external_provider(
+        &self,
+        _: &safe_cex_types::ExchangeOptionsExternalPublicData,
+    ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData> {
+        panic!("fixture has no external provider")
+    }
+    fn private_base(&self, parent: Rc<dyn PrivateParent>) -> Result<Rc<dyn PrivateBase>, Failure> {
+        if self.fail_private.get() {
+            *self.failed_parent.borrow_mut() = Some(Rc::downgrade(&parent));
+            return Err(Rc::new(ExchangeError::new("private constructor control")));
+        }
+        Ok(self.base.clone())
+    }
+    fn listener_operations(
+        &self,
+    ) -> Rc<dyn safe_cex_venue_binance::public_listeners::ListenerHost> {
+        exchange_listener_host::Host::new("owner")
+    }
+    fn timers(&self) -> Rc<dyn PrivateTimers> {
+        self.timers.clone()
+    }
+    fn remote_sign(&self, _: EventValue) -> Result<RemoteSignCall, Failure> {
+        panic!("fixture has no remote signer")
+    }
+    fn virtual_now(&self) -> f64 {
+        21000.0
+    }
+    fn uuid(&self) -> String {
+        "fixture".into()
+    }
+    fn dayjs(&self, v: Option<f64>) -> Result<f64, Failure> {
+        Ok(v.unwrap_or(20000.0))
+    }
+    fn subtract(&self, _: f64, _: f64, _: char) -> Result<f64, Failure> {
+        panic!("fixture does not subtract calendar time")
+    }
+    fn paginate(
+        &self,
+        _: safe_cex_venue_binance::rest_history::PageCall,
+        _: EventValue,
+    ) -> Result<NativeFuture<EventValue>, Failure> {
+        panic!("fixture does not paginate")
+    }
+    fn iso(&self, _: EventValue) -> Result<String, Failure> {
+        panic!("fixture does not format time")
+    }
+    fn fold_closed_positions(
+        &self,
+        _: EventValue,
+        _: bool,
+    ) -> Result<NativeFuture<EventValue>, Failure> {
+        panic!("fixture does not fold")
+    }
+    fn loop_timer(
+        &self,
+        _: safe_cex_venue_binance::lifecycle::TickTimer,
+        _: EventValue,
+    ) -> Result<(), Failure> {
+        panic!("fixture does not schedule loop")
+    }
+}
+#[test]
+fn exchange_class_quiescent_ownership_releases_after_last_lease() {
+    use safe_cex_store::store::DefaultStore;
+    for (venue, stem) in [
+        (Venue::Futures, "binance"),
+        (Venue::PM, "binancepm"),
+        (Venue::Spot, "binancespot"),
+    ] {
+        for dispose in [false, true] {
+            let imports = Rc::new(Imports::default());
+            let owner = ExchangeOwner::new(
+                venue,
+                serde_json::from_value(json!(stem)).unwrap(),
+                serde_json::from_value(json!({"key":"key", "secret":"secret"})).unwrap(),
+                Rc::new(DefaultStore::new()),
+                ExchangeDependencies {
+                    runtime: Rc::new(Runtime::default()),
+                    imports: imports.clone(),
+                    signers: Default::default(),
+                    remote_signer_token: None,
+                    payload_signer_token: None,
+                },
+            )
+            .unwrap();
+            let state = Rc::downgrade(&owner.state);
+            let socket = Rc::downgrade(owner.public.base());
+            let public = Rc::downgrade(&owner.public);
+            let private = Rc::downgrade(&owner.private);
+            if dispose {
+                owner.dispose().unwrap();
+            }
+            drop(owner);
+            assert!(
+                state.upgrade().is_none(),
+                "native quiescent class state releases: {stem}, dispose={dispose}"
+            );
+            assert!(
+                socket.upgrade().is_none(),
+                "native quiescent public socket releases: {stem}, dispose={dispose}"
+            );
+            assert!(
+                public.upgrade().is_none(),
+                "native quiescent public owner releases: {stem}"
+            );
+            assert!(
+                private.upgrade().is_none(),
+                "native quiescent private owner releases: {stem}"
+            );
+            assert_eq!(
+                imports.guards.borrow().len(),
+                if venue == Venue::Futures { 4 } else { 0 },
+                "native external imports remain alive after class release"
+            );
+            if venue == Venue::Futures {
+                let guard = imports.guards.borrow()[0].clone();
+                let error = guard(record([])).unwrap_err();
+                assert_eq!(
+                    error.message, "exchange owner released",
+                    "native external interceptor alone does not lease class lifetime"
+                );
+            }
+        }
+    }
+}
+
+#[test]
+fn exchange_owners_bind_real_children_clients_and_native_state_before_source() {
+    use safe_cex_store::{Store, store::DefaultStore};
+    let mut native = vec![];
+    for (venue, stem) in [
+        (Venue::Futures, "binance"),
+        (Venue::PM, "binancepm"),
+        (Venue::Spot, "binancespot"),
+    ] {
+        let runtime = Rc::new(Runtime {
+            now: Cell::new(20000.0),
+            ..Default::default()
+        });
+        let imports = Rc::new(Imports::default());
+        let store = Rc::new(DefaultStore::new());
+        let opts = serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap();
+        let owner = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(stem)).unwrap(),
+            opts,
+            store.clone(),
+            ExchangeDependencies {
+                runtime: runtime.clone(),
+                imports: imports.clone(),
+                signers: Default::default(),
+                remote_signer_token: None,
+                payload_signer_token: None,
+            },
+        )
+        .unwrap();
+        let expected_parent: Rc<dyn safe_cex_exchange::websocket::WsParent> = owner.state.clone();
+        assert!(
+            Rc::ptr_eq(&owner.public.parent, &expected_parent),
+            "native public child retains actual exchange receiver"
+        );
+        let private_parent: Rc<dyn PrivateParent> = owner.state.clone();
+        assert!(
+            Rc::ptr_eq(&owner.private.parent, &private_parent),
+            "native private child retains actual exchange receiver"
+        );
+        assert!(
+            !owner.public_only(),
+            "native key and secret account can sign"
+        );
+        assert_eq!(
+            owner.position_state_version(),
+            0.0,
+            "native constructor initializes position generation"
+        );
+        owner.mark_position_state_updated();
+        assert_eq!(
+            owner.position_state_version(),
+            1.0,
+            "native websocket version method shares constructor state"
+        );
+        assert!(
+            !owner.closed_positions_share_ledger_source,
+            "native Futures closed axis uses separate source"
+        );
+        let fields: &[(&str, &str)] = match venue {
+            Venue::Futures => &[
+                ("xhr", "route"),
+                ("_primaryXhr", "primary"),
+                ("_secondaryXhr", "secondary"),
+                ("publicXhr", "PublicAPI"),
+                ("unlimitedXHR", "API"),
+            ],
+            Venue::PM => &[
+                ("papiXhr", "route"),
+                ("_primaryXhr", "primary"),
+                ("_secondaryXhr", "secondary"),
+                ("fapiXhr", "FAPI"),
+                ("unlimitedXHR", "PAPI"),
+                ("publicXhr", "PublicAPI"),
+            ],
+            Venue::Spot => &[("xhr", "route"), ("unlimitedXHR", "API")],
+        };
+        for (field, label) in fields {
+            assert_eq!(
+                owner
+                    .clients
+                    .get(field)
+                    .unwrap()
+                    .get("label")
+                    .unwrap()
+                    .text()
+                    .unwrap(),
+                *label,
+                "native exchange constructor client route {stem}.{field}"
+            );
+        }
+        assert_eq!(
+            imports.guards.borrow().len(),
+            if venue == Venue::Futures { 4 } else { 0 },
+            "independent native interceptor registration floor"
+        );
+        if venue == Venue::Futures {
+            let empty = record([]);
+            let fulfilled = imports.guards.borrow()[0](empty.clone())
+                .expect("native missing status fulfills unchanged without serialization");
+            assert!(
+                fulfilled.same(&empty),
+                "native fulfilled response keeps original identity"
+            );
+            let mut original = ExchangeError::new("original guard rejection");
+            original.response = Some(json!({}));
+            let original = Rc::new(original);
+            let rejected = imports.rejected_guards.borrow()[0](original.clone())
+                .expect("native missing rejection status returns original rejection future");
+            let caught = run(&runtime, rejected).unwrap_err();
+            assert!(
+                Rc::ptr_eq(&caught, &original),
+                "native missing rejection status preserves original error Rc"
+            );
+            imports.guards.borrow()[0](record([
+                ("status", string("429")),
+                ("headers", record([("RETRY-AFTER", number(2.5))])),
+            ]))
+            .unwrap();
+            assert_eq!(
+                owner.paused_until.get(),
+                0.0,
+                "native string 429 does not select numeric retry branch"
+            );
+            imports.guards.borrow()[0](record([(
+                "status",
+                EventValue::Builtin(
+                    safe_cex_num::PrototypeRealm::current()
+                        .reference(safe_cex_num::ProtoMember::Constructor),
+                ),
+            )]))
+            .expect("native callable status is compared without serialization");
+            assert_eq!(
+                owner.paused_until.get(),
+                0.0,
+                "native callable status leaves reconciliation pause unchanged"
+            );
+            imports.guards.borrow()[0](record([
+                ("status", number(429.0)),
+                ("headers", record([("RETRY-AFTER", number(2.5))])),
+            ]))
+            .unwrap();
+            assert_eq!(
+                owner.paused_until.get(),
+                22500.0,
+                "native uppercase header pauses reconciliation 2500ms"
+            );
+            imports.guards.borrow()[0](record([
+                ("status", string("429")),
+                (
+                    "headers",
+                    record([("x-mbx-used-weight-1m", number(1920.0))]),
+                ),
+            ]))
+            .unwrap();
+            assert_eq!(
+                owner.paused_until.get(),
+                80000.0,
+                "native nonnumeric status still observes used weight 1920"
+            );
+        }
+        let max = if venue == Venue::PM { 32 } else { 36 };
+        let rule = client_rule(venue);
+        assert!(
+            (rule.is_valid)(&"x".repeat(max)),
+            "native maximum legal client ID length"
+        );
+        assert!(
+            !(rule.is_valid)(&"x".repeat(max + 1)),
+            "native too-long client ID rejected"
+        );
+        let before = owner.base.options().key;
+        let mut balance = store.balance().clone();
+        balance.total = f64::INFINITY;
+        balance.free = f64::NAN;
+        balance.used = -0.0;
+        let mut nested = balance.clone();
+        nested.total = f64::NEG_INFINITY;
+        balance.currencies = Some([("witness".into(), nested)].into_iter().collect());
+        Store::update(
+            store.as_ref(),
+            safe_cex_store::StoreUpdate {
+                balance: Some(balance),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        assert!(
+            store.balance().total.is_infinite(),
+            "native Store keeps Infinity before owner projection"
+        );
+        let snapshot = PrivateParent::balance(owner.state.as_ref()).unwrap();
+        assert!(
+            matches!(snapshot.get("total").unwrap(), EventValue::Number(v) if v==f64::INFINITY),
+            "native owner Store projection retains positive Infinity"
+        );
+        assert!(
+            matches!(snapshot.get("free").unwrap(),EventValue::Number(v) if v.is_nan()),
+            "native Store balance projection retains NaN"
+        );
+        assert!(
+            matches!(snapshot.get("used").unwrap(),EventValue::Number(v) if v==0.0 && v.is_sign_negative()),
+            "native Store balance projection retains negative zero"
+        );
+        let nested = snapshot.get("currencies").unwrap().get("witness").unwrap();
+        assert!(
+            matches!(nested.get("total").unwrap(),EventValue::Number(v) if v==f64::NEG_INFINITY),
+            "native nested Store balance retains negative Infinity"
+        );
+        assert!(
+            matches!(nested.get("free").unwrap(),EventValue::Number(v) if v.is_nan()),
+            "native nested Store balance retains NaN"
+        );
+        assert!(
+            matches!(nested.get("used").unwrap(),EventValue::Number(v) if v==0.0 && v.is_sign_negative()),
+            "native nested Store balance retains negative zero"
+        );
+        let mut changed = store.balance().clone();
+        changed.total = 4.2;
+        Store::update(
+            store.as_ref(),
+            safe_cex_store::StoreUpdate {
+                balance: Some(changed),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+        assert!(
+            matches!(snapshot.get("total").unwrap(), EventValue::Number(v) if v==f64::INFINITY),
+            "native previously read balance retains earlier positive Infinity after Store mutation"
+        );
+        // Native assertions above precede all source/output projection.
+        native.push(json!({"stem":stem,"clients":fields.iter().map(|(k,v)|(k.to_string(),json!(v))).collect::<serde_json::Map<_,_>>(),"guards":imports.guards.borrow().len(),"limit":true,"tooLong":false,"sameParent":true,"optionsBefore":before}));
+        let leaked = Rc::downgrade(&owner.state);
+        drop(expected_parent);
+        drop(private_parent);
+        owner.dispose().unwrap();
+        drop(owner);
+        assert!(
+            leaked.upgrade().is_none(),
+            "native owner graph releases after explicit dispose"
+        );
+    }
+    assert_eq!(
+        native.len(),
+        3,
+        "independent native exchange constructor floor stops at case2"
+    );
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/exchange-classes.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "actual exchange source constructor assertions: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let mut source: Vec<Value> = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        source.len(),
+        3,
+        "independent source constructor floor stops at case2"
+    );
+    for row in &mut source {
+        let object = row.as_object_mut().unwrap();
+        assert_eq!(
+            object.remove("optionsAfter").unwrap(),
+            "changed",
+            "CHOSEN source retained caller options alias changes"
+        );
+        assert_eq!(
+            object.remove("balanceAfter").unwrap(),
+            4.2,
+            "CHOSEN source retained balance alias changes"
+        );
+    }
+    assert_eq!(
+        native, source,
+        "three actual class constructors after native state assertions"
+    );
+}
+
+#[test]
+fn private_escaped_surrogate_order_callback_loss_is_inventoried() {
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let (owner, _, base, _, _) = fixture(venue);
+        let ordinary = if venue == Venue::Spot {
+            r#"{"e":"executionReport","X":"ignored","x":"ok"}"#
+        } else {
+            r#"{"e":"ORDER_TRADE_UPDATE","o":{"X":"ignored"},"x":"ok"}"#
+        };
+        owner.on_message(string(ordinary)).unwrap();
+        assert_eq!(
+            *base.stats.borrow(),
+            ["order"],
+            "native ordinary frame reaches private order dispatch"
+        );
+        base.stats.borrow_mut().clear();
+        let escaped = ordinary.replace("\"ok\"", r#""\ud800""#);
+        owner.on_message(string(escaped)).unwrap();
+        assert!(
+            base.stats.borrow().is_empty(),
+            "FORCED native escaped surrogate suppresses private order callback"
+        );
+    }
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/class-boundary-findings.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "source private boundary assertions: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        source["private"].as_array().unwrap().len(),
+        3,
+        "independent source private boundary floor through case2"
+    );
+    for row in source["private"].as_array().unwrap() {
+        assert_eq!(row["callbacks"], 1, "FORCED source private callback runs");
+        assert_eq!(
+            row["unit"], 55296,
+            "FORCED source private callback observes lone code unit"
+        );
+    }
+}
+
+#[test]
+fn private_bare_dropped_connect_reports_raw_key_coercion_failure() {
+    let (owner, parent, _, _, runtime) = fixture(Venue::Futures);
+    *parent.key_value.borrow_mut() = Some(record([
+        ("toString", number(7.0)),
+        ("valueOf", number(8.0)),
+    ]));
+    drop(owner.connect_and_subscribe());
+    for _ in 0..4 {
+        runtime.pump();
+    }
+    assert!(
+        !owner.connect.connecting.get(),
+        "native bare failed connect still clears connecting finally"
+    );
+    assert_eq!(
+        *runtime.reported.borrow(),
+        ["TypeError"],
+        "native bare dropped connect reports original coercion rejection exactly once"
+    );
+    owner.dispose().unwrap();
+}
+
+#[test]
+#[ignore = "mandatory live source oracle: yarn venue-oracle:binance"]
+fn saved_spot_open_builds_signer_request_in_its_original_realm_before_source() {
+    saved_spot_open_case(false);
+}
+#[test]
+#[ignore = "mandatory live source oracle: yarn venue-oracle:binance"]
+fn saved_spot_open_preserves_native_prototype_signature_before_source() {
+    saved_spot_open_case(true);
+}
+fn saved_spot_open_case(prototype_signature: bool) {
+    use safe_cex_num::{ProtoMember, PrototypeRealm, PrototypeScalar};
+    let original = Rc::<PrototypeRealm>::default();
+    let _original_binding = original.bind();
+    original
+        .reference(ProtoMember::Prototype)
+        .set("lastMessageTimestamp", PrototypeScalar::Number(1000.0));
+    let (owner, parent, base, _, runtime) = fixture(Venue::Spot);
+    let requests: Rc<RefCell<Vec<EventValue>>> = Default::default();
+    let observed = requests.clone();
+    let signature = if prototype_signature {
+        let reference = original.reference(ProtoMember::Prototype);
+        assert!(
+            matches!(
+                reference.get("lastMessageTimestamp"),
+                safe_cex_num::PrototypeValue::Number(1000.0)
+            ),
+            "native original prototype signature owns inherited timestamp before encoding"
+        );
+        EventValue::Builtin(reference)
+    } else {
+        string("fixture-signature")
+    };
+    *parent.remote_sign_call.borrow_mut() = Some(Rc::new(move |request| {
+        observed.borrow_mut().push(request);
+        let response = record([("wsAuthSignature", signature.clone())]);
+        Ok(Box::pin(async move { Ok(response) }))
+    }));
+    parent
+        .options
+        .define("remoteSigner", record([("accountName", string("fixture"))]));
+    run(&runtime, owner.connect_and_subscribe()).unwrap();
+    assert_eq!(
+        requests.borrow().len(),
+        0,
+        "native connect does not sign before open"
+    );
+    let callbacks: Vec<_> = base
+        .socket
+        .listeners
+        .borrow()
+        .iter()
+        .filter(|(name, _)| *name == "open")
+        .map(|(_, callback)| callback.clone())
+        .collect();
+    assert_eq!(
+        callbacks.len(),
+        1,
+        "native independent saved open listener count"
+    );
+    let PrivateCallback::Action(saved) = &callbacks[0] else {
+        panic!("native saved open is an action")
+    };
+    let caller = Rc::<PrototypeRealm>::default();
+    let _caller_binding = caller.bind();
+    caller
+        .reference(ProtoMember::Prototype)
+        .set("lastMessageTimestamp", PrototypeScalar::Number(2000.0));
+    saved().unwrap();
+    assert_eq!(
+        requests.borrow().len(),
+        1,
+        "native saved open invokes one signer"
+    );
+    let request = requests.borrow()[0].clone();
+    let EventValue::Number(request_timestamp) = request.get("lastMessageTimestamp").unwrap() else {
+        panic!("native signer request inherited timestamp is numeric")
+    };
+    assert_eq!(
+        request_timestamp, 1000.0,
+        "native saved Spot open constructs signer request in original realm"
+    );
+    assert!(
+        matches!(request.get("type").unwrap(),EventValue::String(ref value) if value=="ws-auth"),
+        "native signer request type before source"
+    );
+    assert!(
+        Rc::ptr_eq(&PrototypeRealm::current(), &caller),
+        "native saved open restores caller realm after synchronous prefix"
+    );
+    for _ in 0..4 {
+        runtime.pump();
+    }
+    assert!(
+        Rc::ptr_eq(&PrototypeRealm::current(), &caller),
+        "native saved open restores caller realm after queued completion"
+    );
+    let EventValue::Number(caller_timestamp) = EventValue::object(Default::default())
+        .get("lastMessageTimestamp")
+        .unwrap()
+    else {
+        panic!("native caller timestamp remains numeric")
+    };
+    assert_eq!(
+        caller_timestamp, 2000.0,
+        "native callback preserves distinct caller realm data"
+    );
+    assert_eq!(
+        base.frames.borrow().len(),
+        1,
+        "native saved open sends one subscription"
+    );
+    assert_eq!(
+        base.errors.borrow().len(),
+        0,
+        "native saved open has no signing error"
+    );
+    assert!(!base.forced.get(), "native saved open does not force close");
+    assert!(
+        runtime.reported.borrow().is_empty(),
+        "native saved open produces no unobserved rejection"
+    );
+    let frame: Value = serde_json::from_str(&base.frames.borrow()[0]).unwrap();
+    assert_eq!(
+        frame["method"], "userDataStream.subscribe.signature",
+        "native decoded saved-open subscription method"
+    );
+    assert_eq!(
+        frame["params"]["signature"],
+        if prototype_signature {
+            json!({"lastMessageTimestamp":1000})
+        } else {
+            json!("fixture-signature")
+        },
+        "native decoded saved-open signature value"
+    );
+    let actual = json!({"requestTimestamp":request_timestamp,"currentRealmTimestamp":caller_timestamp,"sentCount":base.frames.borrow().len(),"requestType":request.get("type").unwrap().text().unwrap(),"method":frame["method"],"signature":frame["params"]["signature"],"errorCount":base.errors.borrow().len(),"forceClosed":base.forced.get()});
+    let mut command = std::process::Command::new("node");
+    command.arg(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/scripts/private-realm.mjs"
+    ));
+    if prototype_signature {
+        command.arg("--prototype-signature");
+    }
+    let output = command.output().unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let mut expected: Value = serde_json::from_slice(&output.stdout).unwrap();
+    for key in ["requestTimestamp", "currentRealmTimestamp"] {
+        expected[key] = json!(expected[key].as_f64().unwrap());
+    }
+    assert_eq!(
+        actual, expected,
+        "actual source saved Spot callback realm and subscription values"
+    );
+}
+
+fn class_owner(venue: Venue, imports: Rc<Imports>, runtime: Rc<Runtime>) -> Rc<ExchangeOwner> {
+    let stem = match venue {
+        Venue::Futures => "binance",
+        Venue::PM => "binancepm",
+        Venue::Spot => "binancespot",
+    };
+    ExchangeOwner::new(
+        venue,
+        serde_json::from_value(json!(stem)).unwrap(),
+        serde_json::from_value(json!({"key":"key", "secret":"secret"})).unwrap(),
+        Rc::new(safe_cex_store::store::DefaultStore::new()),
+        ExchangeDependencies {
+            runtime,
+            imports,
+            signers: Default::default(),
+            remote_signer_token: None,
+            payload_signer_token: None,
+        },
+    )
+    .unwrap()
+}
+#[test]
+fn exchange_class_ownership_keeps_child_and_running_operation_leases() {
+    use safe_cex_exchange::socket_lifecycle::SocketSlot;
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let imports = Rc::new(Imports::default());
+        let runtime = Rc::new(Runtime::default());
+        let owner = class_owner(venue, imports.clone(), runtime.clone());
+        let state = Rc::downgrade(&owner.state);
+        let child = owner.public.clone();
+        let private_sibling = Rc::downgrade(&owner.private);
+        drop(owner);
+        assert!(
+            private_sibling.upgrade().is_none(),
+            "native retained child does not lease root-owned private sibling: {venue:?}"
+        );
+        assert!(
+            state.upgrade().is_some(),
+            "native retained child keeps exchange parent alive: {venue:?}"
+        );
+        assert!(
+            Rc::ptr_eq(
+                &state
+                    .upgrade()
+                    .unwrap()
+                    .base
+                    .get_socket(SocketSlot::Public)
+                    .unwrap(),
+                child.base()
+            ),
+            "native retained child preserves canonical socket registry: {venue:?}"
+        );
+        drop(child);
+        assert!(
+            state.upgrade().is_none(),
+            "native last child release frees parent: {venue:?}"
+        );
+        let owner = class_owner(venue, imports.clone(), runtime.clone());
+        let state = Rc::downgrade(&owner.state);
+        imports.suspend_requests.set(true);
+        let operation = owner.invoke(Method::Orders, vec![]);
+        drop(owner);
+        assert!(
+            state.upgrade().is_some(),
+            "native running operation leases complete owner: {venue:?}"
+        );
+        imports.suspend_requests.set(false);
+        run(&runtime, operation).unwrap();
+        runtime.pump();
+        assert!(
+            state.upgrade().is_none(),
+            "native settled operation releases receiver: {venue:?}"
+        );
+        let owner = class_owner(venue, imports.clone(), runtime.clone());
+        let state = owner.state.clone();
+        let public = Rc::downgrade(&owner.public);
+        drop(owner);
+        assert!(
+            public.upgrade().is_none(),
+            "native isolated state view does not lease child owner: {venue:?}"
+        );
+        assert_eq!(
+            state.base.get_all_sockets().len(),
+            0,
+            "native isolated state registry contains zero live socket leases: {venue:?}"
+        );
+        drop(state);
+        imports.fail_private.set(true);
+        let result = ExchangeOwner::new(
+            venue,
+            serde_json::from_value(json!(match venue {
+                Venue::Futures => "binance",
+                Venue::PM => "binancepm",
+                Venue::Spot => "binancespot",
+            }))
+            .unwrap(),
+            serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
+            Rc::new(safe_cex_store::store::DefaultStore::new()),
+            ExchangeDependencies {
+                runtime: runtime.clone(),
+                imports: imports.clone(),
+                signers: Default::default(),
+                remote_signer_token: None,
+                payload_signer_token: None,
+            },
+        );
+        assert!(
+            matches!(result, Err(e) if e.message == "private constructor control"),
+            "native child construction failure propagates"
+        );
+        assert!(
+            imports
+                .failed_parent
+                .borrow()
+                .as_ref()
+                .unwrap()
+                .upgrade()
+                .is_none(),
+            "native failed constructor releases partial parent: {venue:?}"
+        );
+    }
+}
+#[test]
+fn exchange_class_weight_guards_bind_native_imported_accessors() {
+    let runtime = Rc::new(Runtime {
+        now: Cell::new(20000.0),
+        ..Default::default()
+    });
+    let imports = Rc::new(Imports::default());
+    let owner = class_owner(Venue::Futures, imports.clone(), runtime.clone());
+    let good = imports.guards.borrow()[0].clone();
+    let bad = imports.rejected_guards.borrow()[0].clone();
+    let response = record([
+        ("status", number(429.0)),
+        (
+            "headers",
+            record([
+                ("receiver", string("native-header")),
+                ("retry-after", number(9.0)),
+            ]),
+        ),
+    ]);
+    imports.header_mode.set(1);
+    assert!(
+        good(response.clone()).unwrap().same(&response),
+        "native callable header response keeps identity"
+    );
+    assert_eq!(
+        owner.paused_until.get(),
+        22500.0,
+        "native imported header getter selects 2.5 rather than own 9"
+    );
+    assert_eq!(
+        *imports.header_reads.borrow(),
+        ["get", "get", "call:retry-after"],
+        "native imported header member is read twice then called once"
+    );
+    let original = Rc::new(ExchangeError::new("original rejected identity"));
+    *imports.rejected_response.borrow_mut() = Some(Ok(Some(response.clone())));
+    imports.header_reads.borrow_mut().clear();
+    let rejection = bad(original.clone()).unwrap();
+    assert!(
+        Rc::ptr_eq(&run(&runtime, rejection).unwrap_err(), &original),
+        "native rejected accessor preserves original rejection Rc"
+    );
+    assert_eq!(
+        *imports.header_reads.borrow(),
+        ["get", "get", "call:retry-after"],
+        "native rejected response uses live callable headers"
+    );
+    let getter_error = Rc::new(ExchangeError::new("native getter failure identity"));
+    *imports.header_failure.borrow_mut() = Some(getter_error.clone());
+    imports.header_mode.set(2);
+    imports.header_reads.borrow_mut().clear();
+    assert!(
+        Rc::ptr_eq(&good(response.clone()).unwrap_err(), &getter_error),
+        "native second get-member failure retains original Rc"
+    );
+    assert_eq!(
+        *imports.header_reads.borrow(),
+        ["get", "get"],
+        "native throwing second member prevents invocation"
+    );
+    imports.header_mode.set(3);
+    imports.header_reads.borrow_mut().clear();
+    let flipped = good(response.clone()).unwrap_err();
+    assert_eq!(
+        flipped.name, "TypeError",
+        "native second member became noncallable TypeError"
+    );
+    assert_eq!(
+        flipped.message, "headers.get is not a function",
+        "native noncallable member source message"
+    );
+    imports.header_mode.set(4);
+    assert!(
+        Rc::ptr_eq(&good(response.clone()).unwrap_err(), &getter_error),
+        "native status getter failure escapes before header lookup"
+    );
+    *imports.rejected_response.borrow_mut() = Some(Err(getter_error.clone()));
+    assert!(
+        Rc::ptr_eq(&bad(original.clone()).err().unwrap(), &getter_error),
+        "native rejected response getter failure escapes synchronously"
+    );
+    // Native state and identities above precede source observations below.
+    let source = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/exchange-class-weight.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        source.status.success(),
+        "source native imported-accessor corpus succeeds: {}",
+        String::from_utf8_lossy(&source.stderr)
+    );
+    let source: Value = serde_json::from_slice(&source.stdout).unwrap();
+    assert_eq!(
+        source,
+        json!({"pause":22500,"reads":["get","get","call:retry-after"],"rejectedIdentity":true,"getterIdentity":true,"flip":"TypeError:headers.get is not a function","statusIdentity":true,"responseIdentity":true,"retainedGuardAfterOwnerBindingCleared":true,"cases":7}),
+        "source imported accessor witnesses agree after native assertions"
+    );
+}
+
+fn sdk_class(
+    venue: Venue,
+    owner: Rc<ExchangeOwner>,
+) -> Rc<dyn safe_cex_exchange::exchange::Exchange> {
+    use safe_cex_venue_binance::exchange_classes::{
+        BinanceExchange, BinancePMExchange, BinanceSpotExchange,
+    };
+    match venue {
+        Venue::Futures => Rc::new(BinanceExchange(owner)),
+        Venue::PM => Rc::new(BinancePMExchange(owner)),
+        Venue::Spot => Rc::new(BinanceSpotExchange(owner)),
+    }
+}
+#[test]
+fn exchange_class_sdk_dispatch_preserves_routes_defaults_and_capability_brands() {
+    use safe_cex_exchange::capabilities::{
+        BaseCapabilityMethod as B, is_base_capability_fallback as fallback,
+    };
+    use safe_cex_store::StoreUpdate;
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        let imports = Rc::new(Imports::default());
+        let runtime = Rc::new(Runtime::default());
+        let owner = class_owner(venue, imports.clone(), runtime.clone());
+        let exchange = sdk_class(venue, owner.clone());
+        assert!(
+            !fallback(&exchange.capabilities().start, B::Start),
+            "native SDK start capability is bound: {venue:?}"
+        );
+        assert!(
+            !fallback(&exchange.capabilities().place_order, B::PlaceOrder),
+            "native SDK single placement capability is bound: {venue:?}"
+        );
+        assert!(
+            !fallback(&exchange.capabilities().place_orders, B::PlaceOrders),
+            "native SDK batch placement capability is bound: {venue:?}"
+        );
+        assert_eq!(
+            fallback(
+                &exchange.capabilities().fetch_historical_fills,
+                B::FetchHistoricalFills
+            ),
+            venue != Venue::Futures,
+            "native SDK fills brand matches actual source override: {venue:?}"
+        );
+        assert_eq!(
+            fallback(
+                &exchange.capabilities().fetch_historical_orders,
+                B::FetchHistoricalOrders
+            ),
+            venue != Venue::Futures,
+            "native SDK order history brand matches actual source override: {venue:?}"
+        );
+        assert_eq!(
+            fallback(
+                &exchange.capabilities().fetch_income_history,
+                B::FetchIncomeHistory
+            ),
+            venue != Venue::Futures,
+            "native SDK income brand matches actual source override: {venue:?}"
+        );
+        assert_eq!(
+            fallback(
+                &exchange.capabilities().fetch_income_history_range,
+                B::FetchIncomeHistoryRange
+            ),
+            venue != Venue::Futures,
+            "native SDK income range brand matches actual source override: {venue:?}"
+        );
+        assert!(
+            fallback(&exchange.capabilities().fetch_closed_pnl, B::FetchClosedPnl),
+            "native SDK deriveClosedPositions is separate from inherited closed PnL: {venue:?}"
+        );
+        let orders = run(
+            &runtime,
+            exchange.fetch_orders(Some(vec!["source ignores this list".into()])),
+        )
+        .expect("native SDK fetchOrders reaches concrete body");
+        assert_eq!(
+            orders.len(),
+            0,
+            "native empty authored order response returns zero orders: {venue:?}"
+        );
+        let expected: &[&str] = match venue {
+            Venue::Futures => &["/fapi/v1/openOrders", "/fapi/v1/openAlgoOrders"],
+            Venue::PM => &[
+                "/papi/v1/um/openOrders",
+                "/papi/v1/um/conditional/openOrders",
+            ],
+            Venue::Spot => &["/api/v3/openOrders"],
+        };
+        assert_eq!(
+            *imports.requests.borrow(),
+            expected,
+            "native SDK fetchOrders request family: {venue:?}"
+        );
+        imports.requests.borrow_mut().clear();
+        imports.request_args.borrow_mut().clear();
+        let market = serde_json::from_value(json!({"id":"BTC/USDT:USDT", "symbol":"BTCUSDT", "base":"BTC", "quote":"USDT", "active":true, "precision":{"amount":0.1,"price":0.01},"limits":{"amount":{"min":0.1,"max":100},"leverage":{"min":1,"max":20}}})).unwrap();
+        let position = serde_json::from_value(json!({"id":"BTCUSDT:long", "symbol":"BTCUSDT", "side":"long", "entryPrice":10,"notional":10,"leverage":2,"unrealizedPnl":0,"contracts":1,"liquidationPrice":0})).unwrap();
+        owner
+            .base
+            .store
+            .update(
+                StoreUpdate {
+                    markets: Some(vec![market]),
+                    positions: Some(vec![position]),
+                    ..Default::default()
+                },
+                false,
+            )
+            .unwrap();
+        if venue == Venue::Spot {
+            let error = run(&runtime, exchange.get_account()).unwrap_err();
+            assert_eq!(
+                error.message, "Not implemented",
+                "native Spot retains inherited getAccount"
+            );
+            let error = run(
+                &runtime,
+                exchange.set_leverage("BTCUSDT".into(), 7.25, None),
+            )
+            .unwrap_err();
+            assert_eq!(
+                error.message, "Not implemented",
+                "native Spot retains inherited setLeverage"
+            );
+            assert_eq!(
+                run(&runtime, exchange.fetch_historical_orders(None))
+                    .unwrap()
+                    .len(),
+                0,
+                "native Spot inherits empty order history"
+            );
+            assert_eq!(
+                imports.requests.borrow().len(),
+                0,
+                "native Spot unsupported methods send zero Futures requests"
+            );
+        } else {
+            run(&runtime, exchange.set_all_leverage(7.25))
+                .expect("native inherited setAllLeverage dispatches concrete setter");
+            assert_eq!(
+                *imports.requests.borrow(),
+                [if venue == Venue::Futures {
+                    "/fapi/v1/leverage"
+                } else {
+                    "/papi/v1/um/leverage"
+                }],
+                "native SDK inherited leverage request route: {venue:?}"
+            );
+            let body = imports.request_args.borrow()[0].clone().unwrap();
+            assert!(
+                matches!(body.get("symbol").unwrap(), EventValue::String(v) if v == "BTCUSDT"),
+                "native SDK leverage request symbol"
+            );
+            assert!(
+                matches!(body.get("leverage").unwrap(), EventValue::Number(v) if v.to_bits() == 7.25_f64.to_bits()),
+                "native SDK leverage request retains exact native 7.25"
+            );
+            assert_eq!(
+                owner.base.store.positions()[0].leverage,
+                7.25,
+                "native SDK leverage updates canonical Store"
+            );
+        }
+        imports.requests.borrow_mut().clear();
+        if venue == Venue::Futures {
+            assert_eq!(
+                run(&runtime, exchange.fetch_historical_orders(None))
+                    .unwrap()
+                    .len(),
+                0,
+                "native missing history options return zero orders"
+            );
+            assert_eq!(
+                imports.requests.borrow().len(),
+                0,
+                "native missing history symbol sends zero requests"
+            );
+            let opts = serde_json::from_value(json!({"symbol":"BTCUSDT", "limit":37})).unwrap();
+            assert_eq!(
+                run(&runtime, exchange.fetch_historical_orders(Some(opts)))
+                    .unwrap()
+                    .len(),
+                0,
+                "native authored empty history response"
+            );
+            assert_eq!(
+                *imports.requests.borrow(),
+                ["/fapi/v1/allOrders"],
+                "native present history options dispatch to source endpoint"
+            );
+            let request = imports
+                .request_args
+                .borrow()
+                .last()
+                .cloned()
+                .unwrap()
+                .unwrap();
+            assert!(
+                matches!(request.get("limit").unwrap(), EventValue::Number(v) if v == 37.0),
+                "native optional history limit retains 37"
+            );
+            imports.requests.borrow_mut().clear();
+        }
+        // Source start reads markets before its disposed check; the real body must run.
+        exchange.dispose().unwrap();
+        run(&runtime, exchange.base().start(exchange.as_ref()))
+            .expect("native SDK branded start reaches concrete disposed body");
+        assert_eq!(
+            imports.requests.borrow().len(),
+            1,
+            "native SDK disposed startup performs one source-ordered read: {venue:?}"
+        );
+    }
+}
+struct ThrowingExternal {
+    error: ExchangeError,
+    setup_fails: Cell<bool>,
+}
+impl safe_cex_exchange::external::ExternalPublicData for ThrowingExternal {
+    fn connect(&self) {}
+    fn dispose(&self) {}
+    fn is_initialized(&self) -> bool {
+        true
+    }
+    fn is_healthy(&self) -> bool {
+        true
+    }
+    fn last_message_timestamp(&self) -> Option<f64> {
+        None
+    }
+    fn listen_ohlcv(
+        &self,
+        _: safe_cex_types::OHLCVOptions,
+        _: Rc<dyn Fn(safe_cex_types::Candle)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        if self.setup_fails.get() {
+            return Err(self.error.clone());
+        }
+        let error = self.error.clone();
+        Ok(Box::new(move || Err(error)))
+    }
+    fn listen_order_book(
+        &self,
+        _: String,
+        _: Rc<dyn Fn(safe_cex_types::OrderBook)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        if self.setup_fails.get() {
+            return Err(self.error.clone());
+        }
+        let error = self.error.clone();
+        Ok(Box::new(move || Err(error)))
+    }
+}
+#[test]
+fn exchange_class_sdk_external_listener_setup_and_cleanup_keep_errors() {
+    let runtime = Rc::new(Runtime::default());
+    let owner = class_owner(Venue::Futures, Rc::new(Imports::default()), runtime);
+    let exchange = sdk_class(Venue::Futures, owner.clone());
+    let mut error = ExchangeError::new("authored external listener error");
+    error.code = Some(json!(731));
+    let provider = Rc::new(ThrowingExternal {
+        error: error.clone(),
+        setup_fails: Cell::new(false),
+    });
+    *owner.base.external_public_data_provider.borrow_mut() = Some(provider.clone());
+    let book_cleanup = exchange
+        .listen_order_book("BTCUSDT".into(), Rc::new(|_| {}))
+        .unwrap();
+    assert_eq!(
+        book_cleanup().expect_err("native SDK depth cleanup returns provider error"),
+        error,
+        "native SDK depth cleanup preserves original provider error metadata"
+    );
+    let opts = || serde_json::from_value(json!({"symbol":"BTCUSDT", "interval":"1m"})).unwrap();
+    let candle_cleanup = exchange.listen_ohlcv(opts(), Rc::new(|_| {})).unwrap();
+    assert_eq!(
+        candle_cleanup().expect_err("native SDK candle cleanup returns provider error"),
+        error,
+        "native SDK candle cleanup preserves original provider error metadata"
+    );
+    provider.setup_fails.set(true);
+    assert_eq!(
+        exchange
+            .listen_order_book("BTCUSDT".into(), Rc::new(|_| {}))
+            .err()
+            .unwrap(),
+        error,
+        "native SDK depth setup preserves original provider error metadata"
+    );
+    assert_eq!(
+        exchange
+            .listen_ohlcv(opts(), Rc::new(|_| {}))
+            .err()
+            .unwrap(),
+        error,
+        "native SDK candle setup preserves original provider error metadata"
+    );
+}
+#[test]
+fn exchange_class_sdk_worker_confirmation_keeps_store_notification_errors() {
+    use safe_cex_exchange::worker::CallableMethodsInWorker;
+    let owner = class_owner(
+        Venue::Futures,
+        Rc::new(Imports::default()),
+        Rc::new(Runtime::default()),
+    );
+    let exchange = sdk_class(Venue::Futures, owner.clone());
+    let _subscription = owner.base.store.subscribe(Box::new(move |_, _| {
+        Err(safe_cex_types::StoreSubscriberError::new(
+            "authored mode notification cause",
+        ))
+    }));
+    let result = exchange.base().after_method_called_in_worker(
+        exchange.as_ref(),
+        &Value::Null,
+        CallableMethodsInWorker::ChangePositionMode,
+        &[json!(true)],
+    );
+    let error =
+        result.expect_err("native SDK worker confirmation propagates Store notification rejection");
+    assert!(
+        owner.base.store.options().is_hedged,
+        "native SDK worker mode setting commits before subscriber error"
+    );
+    assert!(
+        !error.store_subscriber_ids.is_empty(),
+        "native SDK worker confirmation preserves subscriber metadata"
+    );
+}
+
+#[test]
+fn exchange_class_actual_constructors_bind_watchdog_across_retained_child_lifetime() {
+    use safe_cex_exchange::exchange::Exchange;
+    use safe_cex_venue_binance::exchange_classes::{
+        BinanceExchange, BinancePMExchange, BinanceSpotExchange,
+    };
+    for venue in [Venue::Futures, Venue::PM, Venue::Spot] {
+        for retained_child in [false, true] {
+            let runtime = Rc::new(Runtime {
+                now: Cell::new(1000.0),
+                ..Default::default()
+            });
+            runtime.sleep_clock.set(1000.0);
+            let deps = ExchangeDependencies {
+                runtime: runtime.clone(),
+                imports: Rc::new(Imports::default()),
+                signers: Default::default(),
+                remote_signer_token: None,
+                payload_signer_token: None,
+            };
+            let stem = match venue {
+                Venue::Futures => "binance",
+                Venue::PM => "binancepm",
+                Venue::Spot => "binancespot",
+            };
+            let name = serde_json::from_value(json!(stem)).unwrap();
+            let options = serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap();
+            let store = Rc::new(safe_cex_store::store::DefaultStore::new());
+            let (exchange, owner): (Rc<dyn Exchange>, Rc<ExchangeOwner>) = match venue {
+                Venue::Futures => {
+                    let v = Rc::new(BinanceExchange::new(name, options, store, deps).unwrap());
+                    let owner = v.0.clone();
+                    (v, owner)
+                }
+                Venue::PM => {
+                    let v = Rc::new(BinancePMExchange::new(name, options, store, deps).unwrap());
+                    let owner = v.0.clone();
+                    (v, owner)
+                }
+                Venue::Spot => {
+                    let v = Rc::new(BinanceSpotExchange::new(name, options, store, deps).unwrap());
+                    let owner = v.0.clone();
+                    (v, owner)
+                }
+            };
+            let state = Rc::downgrade(&owner.state);
+            let child = owner.public.clone();
+            let root = if retained_child {
+                drop(exchange);
+                drop(owner);
+                None
+            } else {
+                Some((exchange, owner))
+            };
+            child.parent.sync_socket_health_to_store().unwrap();
+            assert_eq!(
+                runtime.jobs.borrow().len(),
+                1,
+                "native constructor health sync schedules one watchdog: {venue:?}, retained_child={retained_child}"
+            );
+            assert_eq!(
+                *runtime.sleeps.borrow(),
+                [10_000],
+                "native constructor watchdog awaits authored 10000ms"
+            );
+            state
+                .upgrade()
+                .unwrap()
+                .base
+                .store
+                .update(
+                    safe_cex_store::StoreUpdate {
+                        socket_health: Some(json!({"publicHealthy":false,"privateHealthy":false})),
+                        ..Default::default()
+                    },
+                    false,
+                )
+                .unwrap();
+            runtime.now.set(11000.0);
+            runtime.sleep_clock.set(11000.0);
+            runtime.pump();
+            assert_eq!(
+                state.upgrade().unwrap().base.store.socket_health().unwrap()["publicHealthy"],
+                json!(true),
+                "native watchdog performs real canonical health publication"
+            );
+            assert_eq!(
+                runtime.jobs.borrow().len(),
+                1,
+                "native watchdog settles and schedules exactly one successor"
+            );
+            assert_eq!(
+                *runtime.sleeps.borrow(),
+                [10_000, 10_000],
+                "native watchdog successor retains source interval"
+            );
+            state.upgrade().unwrap().base.dispose().unwrap();
+            runtime.now.set(21000.0);
+            runtime.sleep_clock.set(21000.0);
+            runtime.pump();
+            assert_eq!(
+                runtime.jobs.borrow().len(),
+                0,
+                "native disposed class schedules no watchdog successor"
+            );
+            drop(root);
+            drop(child);
+            assert!(
+                state.upgrade().is_none(),
+                "native watchdog never leases released class state"
+            );
+        }
+    }
+}

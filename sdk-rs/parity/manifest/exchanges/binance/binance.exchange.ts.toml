@@ -1,0 +1,483 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/binance/binance.exchange.ts"
+rust_files = [ "safe-cex-venue-binance/src/response_shape.rs", "safe-cex-venue-binance/src/response_message.rs", "safe-cex-venue-binance/src/exchange_error.rs", "safe-cex-venue-binance/src/order_logic.rs", "safe-cex-venue-binance/src/exchange_classes.rs", "safe-cex-venue-binance/src/private_rest.rs", "safe-cex-venue-binance/src/delegated_methods.rs", "safe-cex-venue-binance/src/reconciliation.rs", "safe-cex-venue-binance/src/private_session.rs", "safe-cex-venue-binance/src/request_weight.rs", "safe-cex-venue-binance/src/exchange_dispose.rs", "safe-cex-venue-binance/src/account_fetch.rs", "safe-cex-venue-binance/src/account_validation.rs", "safe-cex-venue-binance/src/account_leverage_overlay.rs", "safe-cex-venue-binance/src/lifecycle.rs", "safe-cex-venue-binance/src/orders_retry.rs", "safe-cex-venue-binance/src/public_start.rs", "safe-cex-venue-binance/src/public_rest.rs", "safe-cex-venue-binance/src/position_snapshots.rs", "safe-cex-venue-binance/src/rest_history.rs", "safe-cex-venue-binance/src/closed_position_reader.rs", "safe-cex-venue-binance/src/position_mode.rs", "safe-cex-venue-binance/src/futures_position_mode.rs", "safe-cex-venue-binance/src/margin_mode.rs", "safe-cex-venue-binance/src/leverage.rs", "safe-cex-venue-binance/src/order_operations.rs", "safe-cex-venue-binance/src/cancel_symbol_orders.rs", "safe-cex-venue-binance/src/order_batches.rs", "safe-cex-venue-binance/src/futures_orders.rs", "safe-cex-venue-binance/src/trailing_orders.rs" ]
+
+[[symbol]]
+ts = "describeBinanceResponseShape"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/response_shape.rs::describe_binance_response_shape"
+status = "ported"
+note = "Uses shared own-key ordering before taking six keys; preserves source type labels and array lengths."
+
+[[symbol]]
+ts = "getBinanceResponseMessage"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/response_message.rs::get_binance_response_message"
+status = "ported"
+note = "Preserves non-object/array guard, truthy msg/message/error priority, code presence including null and zero, fallible String conversion and filtering after conversion. Live differential covers empty arrays and throwing values."
+
+[[symbol]]
+ts = "requireBinanceArrayResponse"
+kind = "const-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-binance/src/response_shape.rs::require_binance_array_response", "safe-cex-venue-binance/src/response_shape.rs::BinanceResponseError" ]
+status = "ported"
+note = "safe-cex-venue-binance/src/response_shape.rs::require_binance_array_response returns the original array view or source malformed-response error; safe-cex-venue-binance/src/response_shape.rs::BinanceResponseError retains Error versus TypeError and message, shared with both family validators. No panic or coercion-error substitution."
+
+[[symbol]]
+ts = "emitBinanceExchangeError"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/exchange_error.rs::emit_binance_exchange_error"
+status = "ported"
+note = "Extracted helper preserves response.data.msg truthiness fallback, Error-instance branch, prefix String coercion and immediate emission errors. Error-instance discriminator and consistent decoded properties/original opaque error token are class-adapter inputs. Original Error token identity is retained; non-Error optional message output preserves decoded values only, with no object-message referent identity claim across the owned Value boundary. Executable property hooks/non-JSON own undefined fields and concrete emitter/class composition remain pending. Native decoded value/identity/count/error assertions precede actual-source checks; authored133-case floor."
+
+[[symbol]]
+ts = "isBinancePositionModeAlreadySetError"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_logic.rs::is_binance_position_mode_already_set_error"
+status = "ported"
+note = "safe-cex-venue-binance/src/order_logic.rs::is_binance_position_mode_already_set_error extracts the pure helper ahead of exchange-class integration. Strict nested numeric/string code equality."
+
+[[symbol]]
+ts = "BinanceExchange"
+kind = "class"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/exchange_classes.rs::BinanceExchange"
+status = "divergent"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#owned-exchange-lease-policy. The balance witness in tests/private_classes.rs::exchange_owners_bind_real_children_clients_and_native_state_before_source contrasts the native earlier Infinity snapshot with the actual source alias observing 4.2. The three former class-level omissions were behaviour defects: core Exchange dispatch now binds the existing body ports and real capability brands, and native owner graph cycles are repaired; Futures additionally forwards native imported response/get-member/rejection access through the actual registered weight guards. Source-absent Spot hooks and PM/Spot history bindings retain inherited defaults. Native lease cases stop at Spot/dispose=true (case5), retained-child/job/construction-failure cases at Spot (case2), and the getter/source corpus at retained-interceptor-after-cleared-binding (case6). tests/private_classes.rs and scripts/exchange-class-weight.mjs assert native values and errors before source comparison. See safe-cex-venue-binance/CLASS-CLOSURE-GATES.md for exact measured SHAs, source floors, controls and rationale classification; this class remains divergent and whole-venue equivalence is unclaimed. Mapped target: safe-cex-venue-binance/src/exchange_classes.rs::BinanceExchange. Classification: sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+
+[[symbol]]
+ts = "BinanceExchange.findOrderByClientOrderId"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/private_rest.rs::find_futures_order_by_client_id"
+status = "ported"
+note = "First current Store order strict symbol/client-ID helper match returns original order; unknown market skips HTTP. Nullish primary-client choice preserves placed symbol/origClientOrderId request; configured imported history helper output maps into native order with query-symbol override, clamped remaining and nullish price/reduce/update defaults. Original data info and helper/error referents retained; only strict numeric response.data.code=-2013 is definitive. Existing historical helper inherited-output divergence unchanged; caller-bound imported helper composition remains pending. Extracted native body at configured current HTTP/Store/notice/clock/price/helper bindings; concrete class/client/runtime/Store/imported-helper composition remains pending. Requests return already-decoded response.data; response object/data getter timing is caller-owned. Promise.all binding supplies unique reaction order for this aggregate attachment (not wall-clock settlement) and all settled reactions must poll Ready; owner retains background completion. Immutable Error Rc identity retained; nested error response/message referent identity and mutable exception metadata and non-Error rejection values are unclaimed. Dense JSON and observed row-property replacements/appends, own undefined outputs, NaN and stock table/dictionary behavior; deletion/truncation creating map holes, executable properties/custom callables/iterators/prototypes, symbol keys and lone UTF16 remain outside boundary. Native decoded variants/values/identities/authored counts precede source comparisons;152 venue-case floor, stopped order case23 earlier-algo-reject/combined case11 string-iterables/balance case13 proto-asset/lookup case15 orders-fail."
+
+[[symbol]]
+ts = "BinanceExchange.fetchHistoricalPositions"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/delegated_methods.rs::fetch_binance_historical_positions"
+status = "ported"
+note = "Forwards original options to configured foldClosedPositionRecords with symbolScoped=true; awaits and adopts its original result or error. Preserves returned cleanup/result and original error identity without catches or retries. Native values/identity/counts asserted before source comparisons; one compiling control per row. Typed decoded options and configured method/provider-presence boundaries; concrete class/provider/websocket/journal composition, property getters and arrow receiver binding remain pending."
+
+[[symbol]]
+ts = "BinanceExchange.markPositionStateUpdatedByWebsocket"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/reconciliation.rs::mark_position_state_updated_by_websocket"
+status = "ported"
+note = "safe-cex-venue-binance/src/reconciliation.rs::mark_position_state_updated_by_websocket Pure state operations with explicit f64 field and Date.now inputs ahead of exchange integration. Preserves JS counter precision, Math.max NaN/signed-zero behavior and strict pause boundary."
+
+[[symbol]]
+ts = "BinanceExchange.getPositionStateVersion"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/reconciliation.rs::get_position_state_version"
+status = "ported"
+note = "safe-cex-venue-binance/src/reconciliation.rs::get_position_state_version Pure state operations with explicit f64 field and Date.now inputs ahead of exchange integration. Preserves JS counter precision, Math.max NaN/signed-zero behavior and strict pause boundary."
+
+[[symbol]]
+ts = "BinanceExchange.detectBalanceIssue"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_logic.rs::detect_balance_issue"
+status = "ported"
+note = "safe-cex-venue-binance/src/order_logic.rs::detect_balance_issue extracts the pure helper ahead of exchange-class integration. Deprecated method remains unconditionally false."
+
+[[symbol]]
+ts = "BinanceExchange.constructor"
+kind = "constructor"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/private_session.rs::construct_futures"
+status = "ported"
+note = "Explicit constructor body at configured super-and-implicit-fields, split/API/rate-limit/guard and child-constructor operations. Retains original opts/owner/client Rc, captured primary/secondary locals across callbacks, rate maxRPS 3, PM factory roles/no rate callback, Spot direct split result, source order and original failure/partial effects. Dense client tuples, own data and immutable Error failures; concrete class/implicit fields/imported helper/socket composition and task/drop/unwind ownership remain pending. Native role/f64/error/reference/count assertions precede actual AST constructor comparisons."
+
+[[symbol]]
+ts = "BinanceExchange#getResponseHeader"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/request_weight.rs::get_response_header"
+status = "ported"
+note = "Extracted header body with normalized header truthiness, two separate get-member reads when callable, bound current get receiver, immediate accessor/call errors, and exact/lower/upper nullish fallback including falsy stops and last explicit null. Configured get-member/property access and bound receiver are adapter boundaries; names are ASCII HTTP header names. Unicode/non-HTTP name transforms and concrete AxiosHeaders/client wiring remain pending. Native decoded value/identity/count/error assertions precede actual-source checks; authored133-case floor."
+
+[[symbol]]
+ts = "BinanceExchange#pauseBackgroundReconciliation"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/reconciliation.rs::pause_background_reconciliation"
+status = "ported"
+note = "safe-cex-venue-binance/src/reconciliation.rs::pause_background_reconciliation Pure state operations with explicit f64 field and Date.now inputs ahead of exchange integration. Preserves JS counter precision, Math.max NaN/signed-zero behavior and strict pause boundary."
+
+[[symbol]]
+ts = "BinanceExchange#observeRequestWeight"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/request_weight.rs::observe_request_weight"
+status = "ported"
+note = "Extracted decoded optional status body: strict numeric429/418 branch, shared Number coercion, finite-positive retry seconds to milliseconds, default60000, strict used-weight threshold1920 and early return. Current header expression and pause method are configured class bindings; accessor/non-JSON response properties remain outside this decoded status/JSON header-value domain. No source timer/HTTP class ownership claim. Native decoded value/identity/count/error assertions precede actual-source checks; authored133-case floor."
+
+[[symbol]]
+ts = "BinanceExchange#installRequestWeightGuards"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/request_weight.rs::install_request_weight_guards"
+status = "ported"
+note = "Extracted dense typed client-object list: deduplicate original client identities before registration, bind fulfilled/rejected callbacks, resolve current observer before error.response access, preserve original response and native rejected-error handles, and distinguish immediate observe/registration throws from original error future rejection. Registration/current method/error-response access are configured class boundaries; concrete Axios wiring and Promise microtask/future cancellation ownership remain pending. Native decoded value/identity/count/error assertions precede actual-source checks; authored133-case floor."
+
+[[symbol]]
+ts = "BinanceExchange.isBackgroundReconciliationPaused"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/reconciliation.rs::is_background_reconciliation_paused"
+status = "ported"
+note = "safe-cex-venue-binance/src/reconciliation.rs::is_background_reconciliation_paused Pure state operations with explicit f64 field and Date.now inputs ahead of exchange integration. Preserves JS counter precision, Math.max NaN/signed-zero behavior and strict pause boundary."
+
+[[symbol]]
+ts = "BinanceExchange.dispose"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/exchange_dispose.rs::dispose_binance_exchange"
+status = "ported"
+note = "safe-cex-venue-binance/src/exchange_dispose.rs::dispose_binance_exchange extracts the synchronous source body with configured base/public/private disposal operations. Preserves base-before-public-before-private invocation, immediate propagation of original generic error identity, and skipping subsequent calls after a throw. Concrete exchange/socket binding and field-arrow receiver wiring remain separate class-composition work. Live actual-arrow-class oracle covers direct/detached source calls, each failure role, native committed flags/order/call counts and Rc error identity before source traces."
+
+[[symbol]]
+ts = "BinanceExchange.getAccount"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/account_fetch.rs::get_binance_account"
+status = "ported"
+note = "safe-cex-venue-binance/src/account_fetch.rs::get_binance_account Preserves configured xhr GET at /fapi/v3/balance, first iterable row accountAlias and unconditional own userId property; AccountIdentity.user_id distinguishes undefined from null. Strings retain JavaScript iterable admission, non-iterables/nullish rows retain native TypeError, and normalized request rejection escapes unchanged. Decoded JSON/undefined and normalized ExchangeError callbacks are explicit body-composition inputs; executable getters/custom iterators, primitive rejections and concrete class/client/fetch wiring are outside this boundary and remain separate pending work. Native-value live source tests precede trace assertions; generated TypeError wording is pinned to the measured Node/V8 environment."
+
+[[symbol]]
+ts = "BinanceExchange.validateAccount"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/account_validation.rs::validate_binance_account"
+status = "ported"
+note = "safe-cex-venue-binance/src/account_validation.rs::validate_binance_account extracts the async validation body. Configured decoded GET, normalized ExchangeError and fallible emitter are explicit class-composition inputs; arbitrary executable getters, synchronous callback throws and primitive rejections are outside these shared callback boundaries. Retains shared native Balance fields, finite-total gate, falsy free/upnl zero and source coercion catch. Reads secondary-key truthiness only after primary settles; secondary errors stringify without emitting. AccountValidation distinguishes error-only rejection from success with an own balance property whose value may be undefined; native tests precede trace views. Concrete class/client/fetch composition remains pending."
+
+[[symbol]]
+ts = "BinanceExchange#loadAccountMaxLeverage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/account_leverage_overlay.rs::load_futures_account_max_leverage"
+status = "ported"
+note = "Extracted loadAccountMarketOverlay forwarding plus delayed loader: GET starts at loader invocation, real Futures array validator, actual shared v/Number, positive-only filtering, last positive duplicate string-symbol max and retained overlay closure. Typed string-symbol dense markets: reference adapters supply source shallow copies; production Market adapter preserves declared DTO field values, with no nested referent topology claim for owned DTO fields. Source fixtures assert shallow topology through native reference adapter. Class/HTTP/cache/disposal/error-policy binding and future scheduling/drop ownership remain pending; executable hooks, own undefined/non-JSON fields, non-string market symbols and lone UTF16 code-unit error text from malformed string bracket containers are outside the typed domain. Native decoded value/identity/count/error assertions precede actual-source checks; authored133-case floor."
+
+[[symbol]]
+ts = "BinanceExchange.start"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/lifecycle.rs::start_futures"
+status = "ported"
+note = "Overlay read/await/disposal guard precede external-public initialization. External public data skips local fetch/update/connect but still selects current private/public-only route. Local markets/tickers awaited with source disposal guards, current update callee before shallow loaded argument, original payload references and source log Math.min reads both lengths before numeric coercion. No initial guard or post-connect disposal guard; original callback errors escape. Extracted native body at current bound getters/methods/Store/socket/fetch/clock/imported-loop operations. Async bindings are already-launched owner-retained jobs driven through settlement; concrete class/Store/socket/loop wiring, ignored async return rejection/drop/unwind/sleep/RAF ownership remain pending. Exceptions are immutable Error Rc/message values; mutable metadata and non-Error rejections unclaimed. Native shared graphs retain decoded f64, own undefined, shallow loaded copies and original payload/nested references; configured caller hooks may mutate flags/fields across await/capture. Arbitrary executable graph properties, custom prototypes/iterators/symbol keys, non-BMP string spreads/lone UTF16 and broad coercion/prototype completeness remain pending. Timer resolver retains same owner and reads current method/receiver only at fire; acquiring owner handle is non-observable. Native values/flags/references/authored counts/errors/arguments before source comparisons;228 venue-case floor from76inputs, stopped startcase21missing-length/privatecase17mode-missing/tickcase35degraded-before."
+
+[[symbol]]
+ts = "BinanceExchange#retryOrdersSnapshot"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/orders_retry.rs::retry_futures_orders_snapshot"
+status = "ported"
+note = "Extracted async retry body: two separately fallible Date.now reads, live typed last_retry_at assignment, strict15000 floor, configured fetch invocation/await, post-await disposal/stale guards, current update method/receiver capture before reading loaded, copied typed StoreDataLoaded flags with orders=true and original generic orders handle forwarding. Original configured errors/partial state retained; class/Store wiring, scheduler/drop ownership, executable state hooks and extra/non-boolean loaded properties remain pending. Native decoded value/identity/count/error assertions precede actual-source checks; authored133-case floor."
+
+[[symbol]]
+ts = "BinanceExchange._startPrivate"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/lifecycle.rs::start_private_futures"
+status = "ported"
+note = "Captures current Store.setSetting receiver before awaited mode, then sets isHedged with raw returned value; stale order guard after fetch/disposal. Connect before awaits, initial tick then disposal guard, ready log then orders await/disposal, loaded log then current update/shallow loaded orders=true. No initial guard or disposal check after ready/loaded logging. Original references/errors retained. Extracted native body at current bound getters/methods/Store/socket/fetch/clock/imported-loop operations. Async bindings are already-launched owner-retained jobs driven through settlement; concrete class/Store/socket/loop wiring, ignored async return rejection/drop/unwind/sleep/RAF ownership remain pending. Exceptions are immutable Error Rc/message values; mutable metadata and non-Error rejections unclaimed. Native shared graphs retain decoded f64, own undefined, shallow loaded copies and original payload/nested references; configured caller hooks may mutate flags/fields across await/capture. Arbitrary executable graph properties, custom prototypes/iterators/symbol keys, non-BMP string spreads/lone UTF16 and broad coercion/prototype completeness remain pending. Timer resolver retains same owner and reads current method/receiver only at fire; acquiring owner handle is non-observable. Native values/flags/references/authored counts/errors/arguments before source comparisons;228 venue-case floor from76inputs, stopped startcase21missing-length/privatecase17mode-missing/tickcase35degraded-before."
+
+[[symbol]]
+ts = "BinanceExchange._startPublicDataOnly"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/public_start.rs::start_binance_public_data_only"
+status = "ported"
+note = "Extracted to safe-cex-venue-binance/src/public_start.rs::start_binance_public_data_only. Extracted startup preserves disposed entry guard, log-before-update order and committed startup state. Fallible log returns original ExchangeError before mutation; Store.update returns boxed original StoreMutationError, retaining notification subscriber id and opaque cause, and skips later subscribers. public-start-store.mjs actual DefaultStore witness and native public_start assertions pin the notification cutover; compiled flattening and swallowed-log controls fail by name."
+
+[[symbol]]
+ts = "BinanceExchange.tick"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/lifecycle.rs::tick_futures"
+status = "ported"
+note = "Disposal/now/connected/pause/due calculations precede try. Exact risk75s/account25s or degraded3s thresholds, independent pause calls, stale retry, version snapshots/rereads, risk/account updates and Date.now writes at source sites. Risk update happens before post-fetch disposal; account update resolves Store callee before argument version/loaded reads. Emits message on caught error; returns suppress loop at source guards, else hands off callback at3s. Extracted native body at current bound getters/methods/Store/socket/fetch/clock/imported-loop operations. Async bindings are already-launched owner-retained jobs driven through settlement; concrete class/Store/socket/loop wiring, ignored async return rejection/drop/unwind/sleep/RAF ownership remain pending. Exceptions are immutable Error Rc/message values; mutable metadata and non-Error rejections unclaimed. Native shared graphs retain decoded f64, own undefined, shallow loaded copies and original payload/nested references; configured caller hooks may mutate flags/fields across await/capture. Arbitrary executable graph properties, custom prototypes/iterators/symbol keys, non-BMP string spreads/lone UTF16 and broad coercion/prototype completeness remain pending. Timer resolver retains same owner and reads current method/receiver only at fire; acquiring owner handle is non-observable. Native values/flags/references/authored counts/errors/arguments before source comparisons;228 venue-case floor from76inputs, stopped startcase21missing-length/privatecase17mode-missing/tickcase35degraded-before."
+
+[[symbol]]
+ts = "BinanceExchange.fetchMarkets"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/public_rest.rs::fetch_futures_markets"
+status = "ported"
+note = "Futures filter-before-map retains eligible rows with missing filters and native NaNs; includes PERPETUAL/TRADIFI_PERPETUAL and USDT/USDC, public-only branch before private bracket GET, first strict-symbol bracket match, native parseFloat amount extrema and uncoerced truthy initialLeverage or1. RestMarket preserves raw identity/base/quote/leverage values plus actual MarketPrecision/MarketLimitsAmount fields; fallback Rc retains Store array identity. Malformed string brackets supported for BMP leading characters; lone UTF16 error text remains outside UTF8 boundary. Dense decoded JSON/current HTTP and Store bindings; concrete class/client composition and executable property/custom-collection hooks remain pending. Error rejections use native reference-carrying Error handles; own undefined/non-Error rejection graphs are outside this adapter. Direct native values/identity/count/errors precede per-family actual-source assertions; authored150-case floor, stopped markets coercion-order/tickers map-null-order/OHLCV subtract-fail."
+
+[[symbol]]
+ts = "BinanceExchange.fetchTickers"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/public_rest.rs::fetch_futures_tickers"
+status = "ported"
+note = "Futures captures the market dictionary after three sequential validated GETs; first strict-symbol daily/price matches, falsy match skips, all native Ticker parseFloat fields and zero openInterest retained. Actual Ticker DTOs retain NaN/Infinity until wire boundary; current error emission precedes fallback array getter and Rc identity is preserved. Market dictionary adapter supplies string-keyed declared id/symbol records; inherited malformed entries and cross-response shared object symbols are outside scope. Dense decoded JSON/current HTTP and Store bindings; concrete class/client composition and executable property/custom-collection hooks remain pending. Error rejections use native reference-carrying Error handles; own undefined/non-Error rejection graphs are outside this adapter. Direct native values/identity/count/errors precede per-family actual-source assertions; authored150-case floor, stopped markets coercion-order/tickers map-null-order/OHLCV subtract-fail."
+
+[[symbol]]
+ts = "BinanceExchange.fetchPositions"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/position_snapshots.rs::fetch_futures_positions"
+status = "ported"
+note = "Risk/config GETs launch in source order and await the existing native Promise.all reaction-order adapter. Config Object.fromEntries defines own keys including __proto__, last duplicate wins; risk mapping retains first-ID-wins output, native typed side/mode/margin enums, config leverage/isolated-margin precedence, original row/config Rc and source cached-vs-live reads across imported ID callbacks. Current store mode/market snapshots follow real-row mapping; synthetic defaults and undefined-vs-missing properties remain distinct. Dense own-data arrays/records, String symbols/IDs, configured HTTP/Store/createPositionId/emission operations and immutable Error failures; concrete class/Store/helper assembly, response getters, sparse/executable/custom iterable properties, full coercion/non-BMP/lone UTF16 and detached async/drop/unwind ownership unclaimed. Native every-row enums, fields, IDs/order/counts and refs precede actual method/helpers comparison."
+
+[[symbol]]
+ts = "BinanceExchange.fetchPositionsAndBalance"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/position_snapshots.rs::fetch_futures_positions_and_balance"
+status = "ported"
+note = "Source account-only snapshot with seven stablecoins, live asset for-of iteration, positive-balance direct/BTC routing, truthy BTCUSDT fallback semantics, raw direct-price kind through logging, exact toFixed/log/error text, sticky aggregation flag before formatting/log failures, nested Error-log-before-top-level fallback and current original rich positions. Info is fresh shallow rest excluding compact positions. Dense own-data asset/market records and String symbols, configured current HTTP/Store/log/emission operations, typed flag and immutable Error failures. Native balance f64/NaN, log severity/text/counts, partial effects and original nested/assets/current-position Rc precede actual AST comparisons. Concrete class/Store/response-getter wiring, custom iterators/executable properties/arbitrary coercion/full UTF16/mutable or non-Error exceptions and detached async/drop/unwind ownership remain unclaimed."
+
+[[symbol]]
+ts = "BinanceExchange.fetchOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/private_rest.rs::fetch_futures_orders"
+status = "ported"
+note = "Captures and launches regular/algo GETs before awaiting the configured ordered Promise.all reactions; malformed regular arrays log but retain algo rows. Native order IDs, raw safe-math remaining, actual enum variants, algo info shallow copy/nested references, current clocks and type rereads retained. Success clears stale; catch current console/log calls precede stale=true and current Store orders fallback; callback failure retains partial state. Extracted native body at configured current HTTP/Store/notice/clock/price/helper bindings; concrete class/client/runtime/Store/imported-helper composition remains pending. Requests return already-decoded response.data; response object/data getter timing is caller-owned. Promise.all binding supplies unique reaction order for this aggregate attachment (not wall-clock settlement) and all settled reactions must poll Ready; owner retains background completion. Immutable Error Rc identity retained; nested error response/message referent identity and mutable exception metadata and non-Error rejection values are unclaimed. Dense JSON and observed row-property replacements/appends, own undefined outputs, NaN and stock table/dictionary behavior; deletion/truncation creating map holes, executable properties/custom callables/iterators/prototypes, symbol keys and lone UTF16 remain outside boundary. Native decoded variants/values/identities/authored counts precede source comparisons;152 venue-case floor, stopped order case23 earlier-algo-reject/combined case11 string-iterables/balance case13 proto-asset/lookup case15 orders-fail."
+
+[[symbol]]
+ts = "BinanceExchange.fetchHistoricalFills"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/rest_history.rs::historical_fills"
+status = "ported"
+note = "Public guard and outside-try destructure retained; sequential inclusive split reads accumulate original rows before native mapping, milliseconds floor to seconds, f64/enum/optional values and fallible current error log retained. Extracted body at configured decoded-data/helper/notice bindings. GET returns response.data; response envelope/data getter timing and nested Error response/message referent identity unclaimed. Native decoded values/enums/identities/errors and authored counts before source comparison. Dense data only; executable properties/custom iterators/prototypes/symbols, mutable Error/non-Error rejections and non-BMP/lone UTF16 coercion unclaimed. 91-case floor across eight target families; concrete class/client/helper runtime ownership remains caller-owned."
+
+[[symbol]]
+ts = "BinanceExchange.fetchHistoricalOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/rest_history.rs::historical_orders"
+status = "ported"
+note = "Symbol/public guard, current GET, truthy limit, configured mapper and null-only filtering with stable descending createdTime retained. Existing native historical-order mapper exercised without output roundtrip; broad helper refusal/completeness unchanged and unclaimed. Extracted body at configured decoded-data/helper/notice bindings. GET returns response.data; response envelope/data getter timing and nested Error response/message referent identity unclaimed. Native decoded values/enums/identities/errors and authored counts before source comparison. Dense data only; executable properties/custom iterators/prototypes/symbols, mutable Error/non-Error rejections and non-BMP/lone UTF16 coercion unclaimed. 91-case floor across eight target families; concrete class/client/helper runtime ownership remains caller-owned."
+
+[[symbol]]
+ts = "BinanceExchange.deriveClosedPositions"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/closed_position_reader.rs::derive_binance_closed_positions"
+status = "ported"
+note = "safe-cex-venue-binance/src/closed_position_reader.rs::derive_binance_closed_positions extracts the configured-GET reader using shared split_time_range and reviewed derive_binance_closed_positions mapper: sequential inclusive windows, all reads before mapping, stable descending time sort, truthy venue-message fallback and fallible emitter precedence. Configured decoded GET and emitter are explicit boundaries; concrete client/class composition remains pending. Actual-source oracle executes the method, shared splitter, omitUndefined with real lodash, and mapper; pending GET drop prevents later requests."
+
+[[symbol]]
+ts = "BinanceExchange#_fetchIncomeHistoryPage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/rest_history.rs::income_page"
+status = "ported"
+note = "Optional truthy parameters and native income/category/time/identifier values retained; this page method rethrows original Error Rc for pager rejection, unlike swallowing public reader. Extracted body at configured decoded-data/helper/notice bindings. GET returns response.data; response envelope/data getter timing and nested Error response/message referent identity unclaimed. Native decoded values/enums/identities/errors and authored counts before source comparison. Dense data only; executable properties/custom iterators/prototypes/symbols, mutable Error/non-Error rejections and non-BMP/lone UTF16 coercion unclaimed. 91-case floor across eight target families; concrete class/client/helper runtime ownership remains caller-owned."
+
+[[symbol]]
+ts = "BinanceExchange.fetchIncomeHistory"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/rest_history.rs::income_history"
+status = "ported"
+note = "Optional truthy parameters and native income/category/time/identifier values retained; catch captures current log before message and returns empty after successful Error-severity log. Extracted body at configured decoded-data/helper/notice bindings. GET returns response.data; response envelope/data getter timing and nested Error response/message referent identity unclaimed. Native decoded values/enums/identities/errors and authored counts before source comparison. Dense data only; executable properties/custom iterators/prototypes/symbols, mutable Error/non-Error rejections and non-BMP/lone UTF16 coercion unclaimed. 91-case floor across eight target families; concrete class/client/helper runtime ownership remains caller-owned."
+
+[[symbol]]
+ts = "BinanceExchange.fetchIncomeHistoryRange"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/rest_history.rs::income_range"
+status = "ported"
+note = "Configured same-owner pager callback destructures page parameters before resolving current rethrowing page method. Raw records Rc returned; source chunk/window/limit/delay constants and truncation warning log capture before ISO calls retained. Shared pager/date and concrete class composition pending. Extracted body at configured decoded-data/helper/notice bindings. GET returns response.data; response envelope/data getter timing and nested Error response/message referent identity unclaimed. Native decoded values/enums/identities/errors and authored counts before source comparison. Dense data only; executable properties/custom iterators/prototypes/symbols, mutable Error/non-Error rejections and non-BMP/lone UTF16 coercion unclaimed. 91-case floor across eight target families; concrete class/client/helper runtime ownership remains caller-owned."
+
+[[symbol]]
+ts = "BinanceExchange.fetchOHLCV"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/public_rest.rs::fetch_futures_ohlcv"
+status = "ported"
+note = "Futures returns [] for non-array KLINE data; typed OHLCVOptions preserve truthy default/capped/request-only limit, to/now, from only without truthy limit, interval amount/unit and Dayjs subtract call. Native Candle timestamp is divided by1000; parseFloat OHLCV values, short-array NaNs and string-row iterators retained. Configured stock Dayjs dependency owns time clipping/local-calendar subtraction; this body does not substitute fixed-day arithmetic in production. Calendar/DST library implementation, future scheduling/cancellation and class binding remain pending. Dense decoded JSON/current HTTP and Store bindings; concrete class/client composition and executable property/custom-collection hooks remain pending. Error rejections use native reference-carrying Error handles; own undefined/non-Error rejection graphs are outside this adapter. Direct native values/identity/count/errors precede per-family actual-source assertions; authored150-case floor, stopped markets coercion-order/tickers map-null-order/OHLCV subtract-fail."
+
+[[symbol]]
+ts = "BinanceExchange.listenOHLCV"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/rest_history.rs::listen_candle"
+status = "ported"
+note = "External provider delegates original options/callback; same-owner public subscription plus current fetch with shallow options/limit1, retained seed task, latest original candle reference, local-before-owner disposal guard, catch logging even after cleanup and repeated unsubscribe retained. Concrete class/socket/Promise attachment and dropped/unwind/ignored rejection ownership pending. Extracted body at configured decoded-data/helper/notice bindings. GET returns response.data; response envelope/data getter timing and nested Error response/message referent identity unclaimed. Native decoded values/enums/identities/errors and authored counts before source comparison. Dense data only; executable properties/custom iterators/prototypes/symbols, mutable Error/non-Error rejections and non-BMP/lone UTF16 coercion unclaimed. 91-case floor across eight target families; concrete class/client/helper runtime ownership remains caller-owned."
+
+[[symbol]]
+ts = "BinanceExchange.listenOrderBook"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/delegated_methods.rs::listen_binance_order_book"
+status = "ported"
+note = "Selects the configured external provider when present, otherwise the public websocket; provider failure never falls back. Preserves returned cleanup/result and original error identity without catches or retries. Native values/identity/counts asserted before source comparisons; one compiling control per row. Typed decoded options and configured method/provider-presence boundaries; concrete class/provider/websocket/journal composition, property getters and arrow receiver binding remain pending."
+
+[[symbol]]
+ts = "BinanceExchange.fetchPublicTrades"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/rest_history.rs::public_trades"
+status = "ported"
+note = "Current public GET, truthy capped limit, mandatory id.toString errors, native f64/raw timestamp and canonical buyer-maker side retained. No catch added. Extracted body at configured decoded-data/helper/notice bindings. GET returns response.data; response envelope/data getter timing and nested Error response/message referent identity unclaimed. Native decoded values/enums/identities/errors and authored counts before source comparison. Dense data only; executable properties/custom iterators/prototypes/symbols, mutable Error/non-Error rejections and non-BMP/lone UTF16 coercion unclaimed. 91-case floor across eight target families; concrete class/client/helper runtime ownership remains caller-owned."
+
+[[symbol]]
+ts = "BinanceExchange.fetchPositionMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/position_mode.rs::fetch_binance_position_mode"
+status = "ported"
+note = "Renamed to safe-cex-venue-binance/src/position_mode.rs::fetch_binance_position_mode. Extracted async reader takes its configured xhr/papiXhr GET operation returning decoded response data. Preserves the variant endpoint, one awaited GET, strict boolean true, null/undefined TypeError and unchanged request-error metadata. Concrete class/client composition remains pending; this callback boundary does not claim that wiring."
+
+[[symbol]]
+ts = "BinanceExchange.changePositionMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/futures_position_mode.rs::change_binance_position_mode"
+status = "ported"
+note = "Renamed to safe-cex-venue-binance/src/futures_position_mode.rs::change_binance_position_mode. Extracted async method reads production Store positions and takes configured POST, fallible confirmation and error-emission operations as explicit class-composition inputs. Preserves positive-contract guard, string-valued request, POST before confirmation, optional symbol including empty string, and the shared strict -4059 classifier. The first confirmation is inside the catch boundary; its -4059 error retries confirmation, whose second failure escapes without emission. Truthy response message fallback and emitter error identity are retained. Concrete applyConfirmedPositionMode Store writes and client/class composition remain separate pending rows; no subscriber-failure parity claim for that uncomposed path."
+
+[[symbol]]
+ts = "BinanceExchange.afterMethodCalledInWorker"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/position_mode.rs::after_binance_method_called_in_worker"
+status = "ported"
+note = "Renamed to safe-cex-venue-binance/src/position_mode.rs::after_binance_method_called_in_worker. Extracted worker reconciliation dispatch retains exact method guard, shared JS Boolean coercion, string-only optional symbol including empty string, and unchanged confirmation-callback failure. Worker result is unused in source. Concrete applyConfirmedPositionMode/store and worker registration remain separately pending."
+
+[[symbol]]
+ts = "BinanceExchange#applyConfirmedPositionMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/private_session.rs::apply_confirmed_mode"
+status = "ported"
+note = "Extracted confirmation body preserves optional truthy String symbol vs current market snapshot, shallow fetched leverage/metadata spread, nullish defaults retaining false/empty string, typed PositionMode, selected Number(contracts)===0 row copying, unchanged active/nonselected row Rc, shallow info identity, configured ID helper, then isHedged setting before update with unchanged Error identity/partial effects. Dense own-data arrays, String symbols and data metadata, configured current store reads/writes and imported createPositionId; concrete Store/class/worker/subscriber wiring, sparse/executable properties, malformed non-String symbols/metadata and mutable/non-Error failures remain pending. Native typed enums/f64/IDs/identity/error/counts precede actual AST method and actual createPositionId comparisons."
+
+[[symbol]]
+ts = "BinanceExchange.changeMarginType"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/margin_mode.rs::change_binance_margin_type"
+status = "ported"
+note = "safe-cex-venue-binance/src/margin_mode.rs::change_binance_margin_type extracts configured xhr.post and fallible emitAndLogError operations. Preserves missing/empty string symbol guard before POST, native symbol plus ISOLATED/CROSSED enum, awaited /fapi/v1/marginType, truthy response message fallback, uncoerced emission before fresh Error creation, loss of original POST error metadata and emitter/coercion precedence. Normalized ExchangeError, typed bool/string arguments and JSON messages are explicit callback boundaries; executable getters/coercions, synchronous callback throws and arbitrary emitter mutation of rejected objects remain outside these boundaries. Concrete class/client wiring remains pending. Native assertions precede trace views; pending POST prevents early emission."
+
+[[symbol]]
+ts = "BinanceExchange.setLeverage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/leverage.rs::set_binance_leverage"
+status = "ported"
+note = "safe-cex-venue-binance/src/leverage.rs::set_binance_leverage extracts the async source body using production Store and native ModelPatch numbers. Configured xhr.post and fallible emitAndLogError remain explicit concrete-class composition inputs. Preserves first matching position, shared Math.min/Math.max clamp, both canonical position IDs, post-await updates, notification failure catch and emitter rejection; BinanceLeverageRequest retains NaN and signed zero until the wire boundary."
+
+[[symbol]]
+ts = "BinanceExchange.cancelOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_operations.rs::cancel_futures"
+status = "ported"
+note = "Two separately captured filter passes, regular request ID snapshots, safe LIST<LONG> string joins/chunks10 before DELETE lookup, late status IDs, numeric-only -2011 status retry, regular-before-algo and double algo error emission/rethrow retained. Extracted body at configured current bound client/Store/helper/notice operations; concrete class/client/Store/imported-helper wiring, event-loop/forEachSeries scheduling and started request drop/unwind ownership remain caller-owned. Native decoded f64/enums/undefined, early/late IDs, original payload/option/result/Error Rc, full error metadata, exact generated TypeErrors and independently authored counts before source comparison. Dense order arrays and nullish collections, dense batch arrays (ASCII string spread only for Futures); executable properties/custom iterators, sparse arrays, arbitrary malformed helper outputs, mutable/non-Error exceptions, nested Error response/message referent identity and non-BMP/lone UTF16 coercion unclaimed. 120-case floor:17cancel/11update/12place per venue, stopped cancel16null-input/update10null-update/place11batch-capture-mutates; no exhaustive claim."
+
+[[symbol]]
+ts = "BinanceExchange.cancelSymbolOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/cancel_symbol_orders.rs::cancel_binance_symbol_orders"
+status = "ported"
+note = "Retains stable order handles before both configured DELETE calls; waits for both settlements, updates each fulfilled group with current IDs, and preserves regular-error precedence. Preserves original request/emitter Rc and full Store subscriber cause, truthy message fallback, and emitter-failure precedence. Native assertions precede source/wire assertions; one compiling status mutation per row. Configured started-request observation, normalized ExchangeError and decoded JSON message boundaries; concrete class/client and continuous handle-view wiring, executable getters, object-message identity and emitter mutation of rejected objects remain pending composition."
+
+[[symbol]]
+ts = "BinanceExchange.updateOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_operations.rs::update_futures"
+status = "ported"
+note = "Fresh native order copies original fields before cancellation, includes own undefined/null update overrides, truthy flags and venue-specific close/trigger fields. Original order handle passed to current cancel method; current place method resolved after await and original placed-result reference returned. Extracted body at configured current bound client/Store/helper/notice operations; concrete class/client/Store/imported-helper wiring, event-loop/forEachSeries scheduling and started request drop/unwind ownership remain caller-owned. Native decoded f64/enums/undefined, early/late IDs, original payload/option/result/Error Rc, full error metadata, exact generated TypeErrors and independently authored counts before source comparison. Dense order arrays and nullish collections, dense batch arrays (ASCII string spread only for Futures); executable properties/custom iterators, sparse arrays, arbitrary malformed helper outputs, mutable/non-Error exceptions, nested Error response/message referent identity and non-BMP/lone UTF16 coercion unclaimed. 120-case floor:17cancel/11update/12place per venue, stopped cancel16null-input/update10null-update/place11batch-capture-mutates; no exhaustive claim."
+
+[[symbol]]
+ts = "BinanceExchange.placeOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_operations.rs::place_futures"
+status = "ported"
+note = "Current formatter/batch operations retain original input/payload/result references. Resolve caller ID before awaited conflict cancellation, current formatter afterward, regular batch before rechecking algo length, fresh ID aggregation retained. Extracted body at configured current bound client/Store/helper/notice operations; concrete class/client/Store/imported-helper wiring, event-loop/forEachSeries scheduling and started request drop/unwind ownership remain caller-owned. Native decoded f64/enums/undefined, early/late IDs, original payload/option/result/Error Rc, full error metadata, exact generated TypeErrors and independently authored counts before source comparison. Dense order arrays and nullish collections, dense batch arrays (ASCII string spread only for Futures); executable properties/custom iterators, sparse arrays, arbitrary malformed helper outputs, mutable/non-Error exceptions, nested Error response/message referent identity and non-BMP/lone UTF16 coercion unclaimed. 120-case floor:17cancel/11update/12place per venue, stopped cancel16null-input/update10null-update/place11batch-capture-mutates; no exhaustive claim."
+
+[[symbol]]
+ts = "BinanceExchange#cancelExistingClosePositionOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_batches.rs::cancel_close"
+status = "ported"
+note = "Stop/TP guard before current market lookup, mandatory precision/adjust before close intent, current local orders with strict close===true/raw falsy amount and live opts symbol/type/side matches. Original matching rows retained; current Info log before current awaited cancel; no catch/disposal guard added. Extracted body at configured current bound client/Store/helper/notice operations; concrete class/client/Store/imported-helper composition, event-loop scheduling and started-request drop/unwind ownership remain caller-owned. POST yields decoded response.data; response/data getter timing unclaimed. Native f64/undefined/enums/IDs/own fields/refs/full Error metadata/exact generated errors and independent counts precede source comparison. Batch JSON decoded once and native authored contents asserted, never re-encoded proof. Dense order/payload arrays and documented nullish chunk inputs, prepared acyclic stock JSON; arbitrary executable properties/custom iterators/sparse or array-like objects/cyclic or toJSON graphs/malformed formatter or batch-helper outputs/mutable or non-Error exceptions/nested Error message or response identity/non-BMP/lone UTF16 coercion unclaimed. 106-case floor:19regular/10algo/16PM/10Spot/12many each venue/15conflict; stopped regular18stringify-reject/algo9emit-reject/PM15null-input/Spot9emit-reject/many11null-input/conflict14precision-string. No exhaustive claim."
+
+[[symbol]]
+ts = "BinanceExchange.placeOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_batches.rs::many_futures"
+status = "ported"
+note = "Caller-ID assertion before live for-of formatter iteration; both regular/algo fields captured before spread; fresh combined payload arrays retain child references; current regular then algo methods produce fresh ordered ID aggregate. Extracted body at configured current bound client/Store/helper/notice operations; concrete class/client/Store/imported-helper composition, event-loop scheduling and started-request drop/unwind ownership remain caller-owned. POST yields decoded response.data; response/data getter timing unclaimed. Native f64/undefined/enums/IDs/own fields/refs/full Error metadata/exact generated errors and independent counts precede source comparison. Batch JSON decoded once and native authored contents asserted, never re-encoded proof. Dense order/payload arrays and documented nullish chunk inputs, prepared acyclic stock JSON; arbitrary executable properties/custom iterators/sparse or array-like objects/cyclic or toJSON graphs/malformed formatter or batch-helper outputs/mutable or non-Error exceptions/nested Error message or response identity/non-BMP/lone UTF16 coercion unclaimed. 106-case floor:19regular/10algo/16PM/10Spot/12many each venue/15conflict; stopped regular18stringify-reject/algo9emit-reject/PM15null-input/Spot9emit-reject/many11null-input/conflict14precision-string. No exhaustive claim."
+
+[[symbol]]
+ts = "BinanceExchange#isAlgoOrderType"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_logic.rs::is_algo_order_type"
+status = "ported"
+note = "safe-cex-venue-binance/src/order_logic.rs::is_algo_order_type extracts the pure helper ahead of exchange-class integration. Exactly the three source algo order types; Conditional is not an algo type."
+
+[[symbol]]
+ts = "BinanceExchange#isPostOnlyRejectionError"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_logic.rs::is_post_only_rejection_error"
+status = "ported"
+note = "safe-cex-venue-binance/src/order_logic.rs::is_post_only_rejection_error Extracted pure classification over JSON wire values using shared truthiness and fallible String conversion. Preserves source nullish versus truthy fallback and strict numeric code checks; coercion throws remain Result errors. Class/socket integration remains pending."
+
+[[symbol]]
+ts = "BinanceExchange#formatCreateOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-binance/src/futures_orders.rs::format_futures_create_order", "safe-cex-venue-binance/src/futures_orders.rs::BinanceOrderPayloads" ]
+status = "ported"
+note = "Extracted as safe-cex-venue-binance/src/futures_orders.rs::format_futures_create_order with its regular/algo return record safe-cex-venue-binance/src/futures_orders.rs::BinanceOrderPayloads. Consumes production BaseExchange preflight and Store; preserves market-first and regular-only client-ID resolution, UUID before full-stop refusal, existing-position requirements, bracket hedge-side recomputation and algo/regular payload key order."
+
+[[symbol]]
+ts = "BinanceExchange#formatCreateTrailingStopLossOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/trailing_orders.rs::format_create_trailing_stop_loss_order"
+status = "ported"
+note = "safe-cex-venue-binance/src/trailing_orders.rs::format_create_trailing_stop_loss_order extracts the source formatter with typed store inputs and injected UUID provider. Preserves ordered missing-state errors, first matching position, shared adjust/Math.round, native nonfinite spelling and per-variant payload fields. Class integration remains pending."
+
+[[symbol]]
+ts = "BinanceExchange#getOrderPositionSide"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_logic.rs::get_order_position_side"
+status = "ported"
+note = "safe-cex-venue-binance/src/order_logic.rs::get_order_position_side extracts the pure helper ahead of exchange-class integration. Store isHedged is an explicit input; shared typed order options retain source side/type/reduceOnly decisions."
+
+[[symbol]]
+ts = "BinanceExchange#placeRegularOrderBatch"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_batches.rs::regular_futures"
+status = "ported"
+note = "Upfront chunk5 retains original payload handles, current POST lookup precedes JSON.stringify operation, single exchange orderId optional toString and nullable optional response forEach retained. Native response IDs, original Row/Error classifier arguments, truthy per-row codes, current raw-message emitter and nested catch/rethrow semantics retained. Extracted body at configured current bound client/Store/helper/notice operations; concrete class/client/Store/imported-helper composition, event-loop scheduling and started-request drop/unwind ownership remain caller-owned. POST yields decoded response.data; response/data getter timing unclaimed. Native f64/undefined/enums/IDs/own fields/refs/full Error metadata/exact generated errors and independent counts precede source comparison. Batch JSON decoded once and native authored contents asserted, never re-encoded proof. Dense order/payload arrays and documented nullish chunk inputs, prepared acyclic stock JSON; arbitrary executable properties/custom iterators/sparse or array-like objects/cyclic or toJSON graphs/malformed formatter or batch-helper outputs/mutable or non-Error exceptions/nested Error message or response identity/non-BMP/lone UTF16 coercion unclaimed. 106-case floor:19regular/10algo/16PM/10Spot/12many each venue/15conflict; stopped regular18stringify-reject/algo9emit-reject/PM15null-input/Spot9emit-reject/many11null-input/conflict14precision-string. No exhaustive claim."
+
+[[symbol]]
+ts = "BinanceExchange#placeAlgoOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-binance/src/order_batches.rs::algo_futures"
+status = "ported"
+note = "Live for-of sees appended input after await; current individual algo POST, decoded algoId optional toString, caught raw-message emission and original rethrow retained. Extracted body at configured current bound client/Store/helper/notice operations; concrete class/client/Store/imported-helper composition, event-loop scheduling and started-request drop/unwind ownership remain caller-owned. POST yields decoded response.data; response/data getter timing unclaimed. Native f64/undefined/enums/IDs/own fields/refs/full Error metadata/exact generated errors and independent counts precede source comparison. Batch JSON decoded once and native authored contents asserted, never re-encoded proof. Dense order/payload arrays and documented nullish chunk inputs, prepared acyclic stock JSON; arbitrary executable properties/custom iterators/sparse or array-like objects/cyclic or toJSON graphs/malformed formatter or batch-helper outputs/mutable or non-Error exceptions/nested Error message or response identity/non-BMP/lone UTF16 coercion unclaimed. 106-case floor:19regular/10algo/16PM/10Spot/12many each venue/15conflict; stopped regular18stringify-reject/algo9emit-reject/PM15null-input/Spot9emit-reject/many11null-input/conflict14precision-string. No exhaustive claim."

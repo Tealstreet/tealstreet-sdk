@@ -1,0 +1,11 @@
+[file]
+ts = "packages/safe-cex/src/utils/getBalanceSlice.ts"
+rust_files = [ "safe-cex-num/src/sizing.rs" ]
+
+[[symbol]]
+ts = "getBalanceSlice"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-num/src/sizing.rs::get_balance_slice"
+status = "ported"
+note = "Uses existing numeric layer and shared market model; preserves source floating-point operation order and defaults. Mapped `safe-cex-num/src/sizing.rs::get_balance_slice`."

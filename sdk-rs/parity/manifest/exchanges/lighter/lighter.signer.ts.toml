@@ -1,0 +1,171 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/lighter/lighter.signer.ts"
+rust_files = [ "safe-cex-venue-lighter/src/signer_types.rs", "safe-cex-venue-lighter/src/signer_helpers.rs", "safe-cex-venue-lighter/src/signer_runtime.rs" ]
+
+[[symbol]]
+ts = "LighterSignerProvider"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/signer_types.rs::LighterSignerProvider"
+status = "ported"
+note = "String-only public decoder delegates to private serde wire enum; accepted metadata and concrete-call rejection corpus prevent alias/object widening."
+
+[[symbol]]
+ts = "LighterCreateOrderRequest"
+kind = "type"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_types.rs::LighterCreateOrderRequest", "safe-cex-venue-lighter/src/signer_types.rs::LighterSignerOrderType", "safe-cex-venue-lighter/src/signer_types.rs::LighterSignerTimeInForce" ]
+status = "ported"
+note = "Domain fields preserve signed arbitrary BigInt, binary64 and optional non-null values; BigInt-bearing request records expose no JSON codec. Split request record and inline literal domains: safe-cex-venue-lighter/src/signer_types.rs::LighterCreateOrderRequest safe-cex-venue-lighter/src/signer_types.rs::LighterSignerOrderType safe-cex-venue-lighter/src/signer_types.rs::LighterSignerTimeInForce ."
+
+[[symbol]]
+ts = "LighterCreateGroupedOrdersRequest"
+kind = "type"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_types.rs::LighterCreateGroupedOrdersRequest", "safe-cex-venue-lighter/src/signer_types.rs::LighterSignerGroupingType" ]
+status = "ported"
+note = "Domain fields preserve signed arbitrary BigInt, binary64 and optional non-null values; BigInt-bearing request records expose no JSON codec. Split request record and inline literal domains: safe-cex-venue-lighter/src/signer_types.rs::LighterCreateGroupedOrdersRequest safe-cex-venue-lighter/src/signer_types.rs::LighterSignerGroupingType ."
+
+[[symbol]]
+ts = "LighterCancelOrderRequest"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/signer_types.rs::LighterCancelOrderRequest"
+status = "ported"
+note = "Domain fields preserve signed arbitrary BigInt, binary64 and optional non-null values; BigInt-bearing request records expose no JSON codec."
+
+[[symbol]]
+ts = "LighterUpdateLeverageRequest"
+kind = "type"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_types.rs::LighterUpdateLeverageRequest", "safe-cex-venue-lighter/src/signer_types.rs::LighterSignerMarginMode", "safe-cex-venue-lighter/src/signer_types.rs::LighterSignerMarginMode::CROSS", "safe-cex-venue-lighter/src/signer_types.rs::LighterSignerMarginMode::ISOLATED" ]
+status = "ported"
+note = "Domain fields preserve signed arbitrary BigInt, binary64 and optional non-null values; BigInt-bearing request records expose no JSON codec. Split request record and inline literal domains: safe-cex-venue-lighter/src/signer_types.rs::LighterUpdateLeverageRequest safe-cex-venue-lighter/src/signer_types.rs::LighterSignerMarginMode . MarginMode uses a private checked numeric newtype, preserving negative zero permitted by TS literal 0. Canonical literal constructors safe-cex-venue-lighter/src/signer_types.rs::LighterSignerMarginMode::CROSS and safe-cex-venue-lighter/src/signer_types.rs::LighterSignerMarginMode::ISOLATED provide positive zero and one for source helpers that explicitly return those constants."
+
+[[symbol]]
+ts = "LighterApproveIntegratorRequest"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/signer_types.rs::LighterApproveIntegratorRequest"
+status = "ported"
+note = "Domain fields preserve signed arbitrary BigInt, binary64 and optional non-null values; BigInt-bearing request records expose no JSON codec."
+
+[[symbol]]
+ts = "LighterSignerAdapter"
+kind = "type"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "getProvider"
+kind = "function"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/signer_helpers.rs::get_provider"
+status = "ported"
+note = "ts-bug: getProvider returns unchecked raw extra field despite its string-or-undefined assertion; preserves explicit null and non-string values for caller validation."
+
+[[symbol]]
+ts = "isLighterInvalidNonceError"
+kind = "function"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/signer_helpers.rs::is_lighter_invalid_nonce_error"
+status = "ported"
+note = "Shared fallible String coerces code and message before final OR; matching code does not suppress a throwing message coercion."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter"
+kind = "class"
+layer = ""
+rs = ""
+status = "pending"
+note = "Partial native state and nine constructor/method bodies exist in signer_runtime.rs, but getAuthToken and full class callable/prototype/arrow assembly remain pending. No aggregate completion claim."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter.constructor"
+kind = "constructor"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::new", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
+status = "ported"
+note = "Retains original options/API/BigInt/account-key handles, undefined transaction client and a fulfilled initial submission predecessor. Native class aggregate remains pending until its auth-token and callable/prototype assembly are covered."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter#runWithSubmissionLock"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::run_with_submission_lock", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
+status = "ported"
+note = "Replaces the predecessor eagerly before awaiting it; invokes callback FIFO and releases in both successful and throwing/rejected callback paths before settling the result. Explicit Rc receiver adapts source bound-arrow invocation; raw JavaScript arrow/prototype identity is not claimed, and the whole-class row remains pending. Dropping an observer does not cancel queued submissions."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter.initialize"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::initialize", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
+status = "ported"
+note = "Preserves existing-client and secret guards, conditional WASM load, original crypto/API handles and deployment/config read order. Only a lowercase String(error.message || error || empty) containing wasm not initialized triggers one additional init/build. Retry init/build errors escape unchanged; standalone initialization is not submission-locked. Imported loader/crypto/SDK construction and ECMAScript coercion are capability dependencies."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter.createOrder"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::create_order", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
+status = "ported"
+note = "Serialized native submission: initialize/check, imported SDK transaction method, original request/receiver forwarding, raw HTTP send, reset before nonce classification, one awaited 150ms delay and retry, reset on retry failure, and original error propagation. Imported SDK/crypto/promise primitives remain dependencies; no replacement signing implementation or live signing/network gate is claimed."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter.createOrders"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::create_orders", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
+status = "ported"
+note = "Serialized native submission: initialize/check, imported SDK transaction method, original request/receiver forwarding, raw HTTP send, reset before nonce classification, one awaited 150ms delay and retry, reset on retry failure, and original error propagation. Imported SDK/crypto/promise primitives remain dependencies; no replacement signing implementation or live signing/network gate is claimed. Empty-array length guard occurs after initialization and outside retry catch; batch send returns the original txHashes value."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter.createGroupedOrders"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::create_grouped_orders", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
+status = "ported"
+note = "Serialized native submission: initialize/check, imported SDK transaction method, original request/receiver forwarding, raw HTTP send, reset before nonce classification, one awaited 150ms delay and retry, reset on retry failure, and original error propagation. Imported SDK/crypto/promise primitives remain dependencies; no replacement signing implementation or live signing/network gate is claimed."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter.cancelOrder"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::cancel_order", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
+status = "ported"
+note = "Serialized native submission: initialize/check, imported SDK transaction method, original request/receiver forwarding, raw HTTP send, reset before nonce classification, one awaited 150ms delay and retry, reset on retry failure, and original error propagation. Imported SDK/crypto/promise primitives remain dependencies; no replacement signing implementation or live signing/network gate is claimed."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter.updateLeverage"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::update_leverage", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
+status = "ported"
+note = "Serialized native submission: initialize/check, imported SDK transaction method, original request/receiver forwarding, raw HTTP send, reset before nonce classification, one awaited 150ms delay and retry, reset on retry failure, and original error propagation. Imported SDK/crypto/promise primitives remain dependencies; no replacement signing implementation or live signing/network gate is claimed. Successful HTTP results are discarded to source undefined, including after retry."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter.approveIntegrator"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter::approve_integrator", "safe-cex-venue-lighter/src/signer_runtime.rs::TealstreetLighterSignerAdapter", "safe-cex-venue-lighter/src/signer_runtime.rs::LighterSignerRuntime" ]
+status = "ported"
+note = "Serialized native submission: initialize/check, imported SDK transaction method, original request/receiver forwarding, raw HTTP send, reset before nonce classification, one awaited 150ms delay and retry, reset on retry failure, and original error propagation. Imported SDK/crypto/promise primitives remain dependencies; no replacement signing implementation or live signing/network gate is claimed. Historical corpus note: Original signing-preimages.json SHA256 afe399cc424ff3e4e5393ef9c2f8f642b770530328f6cc70d6aefd830383679a is preserved: maxPerpsMakerFee, maxSpotTakerFee and maxSpotMakerFee are all 0 in approval cases; revoke has all fees 0. The actual source maxPerpsMakerFee/maxSpotTakerFee swap in SDK hash composition regenerated the original 92-case artifact byte-identically at cmp 0. This is a measured corpus limitation, not a signer defect. The later signing_field_identity venue gate discriminates all four fee dimensions; shared independent_lighter_field_identity adoption is published at 74aa2775f1, documented in safe-cex-crypto/LIGHTER_FIELD_IDENTITY_ADOPTION.md, consuming the byte-identical ab2aadb8f5 generator. Integration and live CI are unclaimed; no retroactive independence is claimed."
+
+[[symbol]]
+ts = "TealstreetLighterSignerAdapter.getAuthToken"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "createLighterSignerAdapter"
+kind = "function"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

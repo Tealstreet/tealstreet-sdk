@@ -1,0 +1,131 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/bybit/hyrotrader.order-recovery.ts"
+rust_files = [ "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/hyro_order_publication.rs" ]
+
+[[symbol]]
+ts = "hyroSubmissionKey"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyroOrderRejectedError"
+kind = "class"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/failure_diagnostics.rs::HyroOrderRejectedError"
+status = "divergent"
+note = "CHOSEN: native Rust Error and From<String> preserve source inherited Error name, message and String(error) rendering, excluding JavaScript prototype/stack and executable constructor inputs. Shared UTF-8 boundary applies; order recovery consumers remain pending."
+
+[[symbol]]
+ts = "isDuplicateIdentity"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-bybit/src/failure_diagnostics.rs::is_duplicate_identity"
+status = "divergent"
+note = "CHOSEN: native optional number code and retained JSON message preserve strict duplicate codes, lazy message coercion and ECMAScript non-dotAll line terminators. Executable/getter objects, malformed non-number code arguments and lone UTF-16 surrogates are excluded; shared UTF-8 boundary applies. Direct native source predicate assertions precede any wire checks; recovery consumers remain pending. Source synchronous coercion throws adapt to message-only Rust Result errors; JavaScript thrown-error name, stack and prototype identity are not carried by those results."
+
+[[symbol]]
+ts = "HyroOrderRecovery"
+kind = "class"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyroOrderRecovery.constructor"
+kind = "constructor"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyroOrderRecovery#getClient"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyroOrderRecovery#isDisposed"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyroOrderRecovery#assertCanCreate"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyroOrderRecovery#getPublicationBoundary"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyroOrderRecovery.observeOrders"
+kind = "method"
+layer = "mirror"
+rs = [ "safe-cex-venue-bybit/src/hyro_order_publication.rs::observe_orders", "safe-cex-venue-bybit/src/hyro_order_publication.rs::dispatch" ]
+status = "ported"
+note = "Renamed target safe-cex-venue-bybit/src/hyro_order_publication.rs::observe_orders. Original HyroTrader order observation/reconciliation/publication body over unchanged venue-local AccountRefreshHost/SessionHost raw-value, identity, error, property/call, operator, iterator and Promise capabilities. Native state, decoded fields, raw aliases, request/callback arguments and error outcomes precede all supplemental original-AST comparisons. Async entry is eagerly driven to its first suspension; original dependency and full class composition, complete scheduler and dropped-Future cancellation remain outside this body claim. Split: safe-cex-venue-bybit/src/hyro_order_publication.rs::dispatch expands this member's owned lexical predicates/callback; the shared dispatcher is also claimed by the other callback-owning members of this same eight-row unit."
+
+[[symbol]]
+ts = "HyroOrderRecovery.dispose"
+kind = "method"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/hyro_order_publication.rs::dispose"
+status = "ported"
+note = "Renamed target safe-cex-venue-bybit/src/hyro_order_publication.rs::dispose. Original HyroTrader order observation/reconciliation/publication body over unchanged venue-local AccountRefreshHost/SessionHost raw-value, identity, error, property/call, operator, iterator and Promise capabilities. Native state, decoded fields, raw aliases, request/callback arguments and error outcomes precede all supplemental original-AST comparisons. Async entry is eagerly driven to its first suspension; original dependency and full class composition, complete scheduler and dropped-Future cancellation remain outside this body claim."
+
+[[symbol]]
+ts = "HyroOrderRecovery.submit"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyroOrderRecovery#runGroup"
+kind = "method"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/hyro_order_publication.rs::run_group"
+status = "ported"
+note = "Renamed target safe-cex-venue-bybit/src/hyro_order_publication.rs::run_group. Original HyroTrader order observation/reconciliation/publication body over unchanged venue-local AccountRefreshHost/SessionHost raw-value, identity, error, property/call, operator, iterator and Promise capabilities. Native state, decoded fields, raw aliases, request/callback arguments and error outcomes precede all supplemental original-AST comparisons. Async entry is eagerly driven to its first suspension; original dependency and full class composition, complete scheduler and dropped-Future cancellation remain outside this body claim."
+
+[[symbol]]
+ts = "HyroOrderRecovery#unknown"
+kind = "method"
+layer = "mirror"
+rs = "safe-cex-venue-bybit/src/hyro_order_publication.rs::unknown"
+status = "ported"
+note = "Renamed target safe-cex-venue-bybit/src/hyro_order_publication.rs::unknown. Original HyroTrader order observation/reconciliation/publication body over unchanged venue-local AccountRefreshHost/SessionHost raw-value, identity, error, property/call, operator, iterator and Promise capabilities. Native state, decoded fields, raw aliases, request/callback arguments and error outcomes precede all supplemental original-AST comparisons. Async entry is eagerly driven to its first suspension; original dependency and full class composition, complete scheduler and dropped-Future cancellation remain outside this body claim."
+
+[[symbol]]
+ts = "HyroOrderRecovery#submitOne"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyroOrderRecovery#findOrder"
+kind = "method"
+layer = "mirror"
+rs = [ "safe-cex-venue-bybit/src/hyro_order_publication.rs::find_order", "safe-cex-venue-bybit/src/hyro_order_publication.rs::dispatch" ]
+status = "ported"
+note = "Renamed target safe-cex-venue-bybit/src/hyro_order_publication.rs::find_order. Original HyroTrader order observation/reconciliation/publication body over unchanged venue-local AccountRefreshHost/SessionHost raw-value, identity, error, property/call, operator, iterator and Promise capabilities. Native state, decoded fields, raw aliases, request/callback arguments and error outcomes precede all supplemental original-AST comparisons. Async entry is eagerly driven to its first suspension; original dependency and full class composition, complete scheduler and dropped-Future cancellation remain outside this body claim. Split: safe-cex-venue-bybit/src/hyro_order_publication.rs::dispatch expands this member's owned lexical predicates/callback; the shared dispatcher is also claimed by the other callback-owning members of this same eight-row unit."

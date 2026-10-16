@@ -1,0 +1,3 @@
+[file]
+ts = "control.ts"
+rust_files = []

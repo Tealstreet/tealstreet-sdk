@@ -1,0 +1,123 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/asterdex/asterdex.builder-approval.ts"
+rust_files = [ "safe-cex-venue-asterdex/src/builder.rs", "safe-cex-venue-asterdex/src/builder_approval.rs" ]
+
+[[symbol]]
+ts = "AsterBuilderApprovalStatus"
+kind = "type"
+layer = "mirror"
+rs = "safe-cex-venue-asterdex/src/builder.rs::AsterBuilderApprovalStatus"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "AsterBuilderApprovalCheckResult"
+kind = "type"
+layer = "mirror"
+rs = "safe-cex-venue-asterdex/src/builder.rs::AsterBuilderApprovalCheckResult"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "AsterBuilderApprovalResult"
+kind = "type"
+layer = "mirror"
+rs = "safe-cex-venue-asterdex/src/builder.rs::AsterBuilderApprovalResult"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "getBaseUrl"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-venue-asterdex/src/builder.rs::get_base_url"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "buildAsterApprovalRequest"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/builder.rs::build_aster_approval_request"
+status = "ported"
+note = "Shared TransportRegistry supplies the default private proxy; the headers/url record is returned as a tuple. Nonempty baseUrl bypasses the provider, empty resolved headers preserve direct URL, and header failures propagate before reading proxy URL. No venue state crosses the await."
+
+[[symbol]]
+ts = "normalizeAddress"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/builder_approval.rs::normalize_address"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Native reproduces source preguard/field-name/zero-address branches around checksum validation, but replaces ethers checksum text with compact shared diagnostics. Shorter diagnostics alone do not establish FORCED, a required surrogate unit, or Rust inability. State a chosen diagnostic/dependency policy or retain an owned error defect; do not infer program observation from the error label alone. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-5. Historical note follows: FORCED: normalize_address now implements the venue isAsterDEXAddress preguard, field-name error and zero-address rejection around shared EIP-55 validation. Valid outputs and malformed/zero diagnostics match; a mixed-case checksum failure remains the shared compact \"bad address checksum\" instead of ethers full value/version diagnostic. This supersedes the previous primitive-only mapping without claiming diagnostic parity."
+
+[[symbol]]
+ts = "extractBuilderRows"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-venue-asterdex/src/builder.rs::extract_builder_rows"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "parseFeeRate"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-venue-asterdex/src/builder.rs::parse_fee_rate"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "getProviderErrorCode"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-venue-asterdex/src/builder.rs::get_provider_error_code"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "getProviderErrorMessage"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/builder.rs::get_provider_error_message"
+status = "ported"
+note = "Host Error instances pass their message separately before JSON serialization erases it; JSON objects and strings retain the original fallbacks. Live oracle includes native Error objects with empty and nonempty messages."
+
+[[symbol]]
+ts = "switchToAsterSignatureChain"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/builder_approval.rs::switch_to_aster_signature_chain"
+status = "ported"
+note = "Runs actual EIP-1193 host requests: no-wallet result, switch 0x38, add BNB chain only on numeric 4902, user rejection on 4001, unsupported success on -32601/4200, and source error-message fallback order. String error codes do not match numeric cases; requests and decoded result are source-oracle pinned. Provider is resolved again after the rejected switch await before add-chain dispatch, preserving source wallet replacement."
+
+[[symbol]]
+ts = "buildAsterApproveBuilderTypedData"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-venue-asterdex/src/builder.rs::build_aster_approve_builder_typed_data"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "getAsterBuilderApprovalConfig"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/builder.rs::get_aster_builder_approval_config"
+status = "ported"
+note = "Composes the validated optional builder fee configuration with the highest maker/taker fee rate, preserving undefined when fees are disabled or the builder address is unavailable. The live builder oracle compares the complete output and errors across its configuration matrix. Renamed target: safe-cex-venue-asterdex/src/builder.rs::get_aster_builder_approval_config."
+
+[[symbol]]
+ts = "checkAsterBuilderApproved"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/builder_approval.rs::check_aster_builder_approved"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Compact checksum diagnostics and typed CheckParams are representable error/input policies, not FORCED limitations. Source catches original ethers messages into its returned result. The native signing-before-fetch-catch placement is real, but the note needs separate reasons/costs for its carrier restrictions and any caller-polled scheduling; no exact error or async equivalence is certified. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-4. Historical note follows: FORCED: check_aster_builder_approved implements validation, monotonic scoped nonce, EIP-712 code signing outside the fetch catch, proxy resolution, API-key fallback, first matching builder row, null-row TypeError catch and Number.EPSILON fee-cap comparison. Its shared get_address signer/input failures expose compact native crypto messages instead of ethers diagnostic metadata; typed CheckParams reject wrong-kind required strings at ingress."
+
+[[symbol]]
+ts = "approveAsterBuilderFeeWithBrowserWallet"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/builder_approval.rs::approve_aster_builder_fee_with_browser_wallet"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Source returns truthy payload.msg/error without narrowing its value; native converts a non-string into a named failure and eventually a String result. Calling this FORCED because result.message is String is unsupported: a broader result carrier is expressible. Price the chosen carrier, lost returned value and rationale; compact checksum diagnostics likewise do not prove impossibility. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-3. Historical note follows: FORCED: approve_aster_builder_fee_with_browser_wallet executes network switch, account validation, typed-data signature, ordered URLSearchParams-equivalent form encoding, proxy fetch and strict numeric response code 200. Native result.message is a String, so a truthy object/number response msg is returned as a named native failure instead of being forwarded as the source message; checksum failures also use shared compact crypto diagnostics."

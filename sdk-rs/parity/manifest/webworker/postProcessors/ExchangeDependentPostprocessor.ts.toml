@@ -1,0 +1,27 @@
+[file]
+ts = "packages/safe-cex/src/webworker/postProcessors/ExchangeDependentPostprocessor.ts"
+rust_files = [ "safe-cex-webworker/src/postprocessor_context.rs" ]
+
+[[symbol]]
+ts = "ExchangeDependentPostprocessor"
+kind = "class"
+layer = "adapted"
+rs = [ "safe_cex_webworker::postprocessor_context::ExchangeDependentPostprocessor", "safe_cex_webworker::postprocessor_context::ExchangeDependentPostprocessorContext" ]
+status = "ported"
+note = "Abstract class represented by a required process trait plus stored-input context. Generic opaque slots preserve constructor values and shared-reference identity without coercion or cloning; concrete implementors provide process. No abstract runtime body exists in the source."
+
+[[symbol]]
+ts = "ExchangeDependentPostprocessor.constructor"
+kind = "constructor"
+layer = "adapted"
+rs = "safe_cex_webworker::postprocessor_context::ExchangeDependentPostprocessorContext::new"
+status = "ported"
+note = "Stores each supplied account name, exchange name, options, and exchange directly in its corresponding context slot. Shared-reference carriers retain aliasing and opaque UTF-16 carriers require no string conversion."
+
+[[symbol]]
+ts = "ExchangeDependentPostprocessor.process"
+kind = "method"
+layer = "adapted"
+rs = "safe_cex_webworker::postprocessor_context::ExchangeDependentPostprocessor::process"
+status = "ported"
+note = "Required trait method mirrors the source abstract process signature: implementors supply the void store-mutating override; there is no fabricated default body. Compile-failure witness rejects a missing override."

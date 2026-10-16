@@ -1,0 +1,75 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/kraken/krakenspot.ws-private.ts"
+rust_files = [ "safe-cex-venue-kraken/src/classes.rs", "safe-cex-venue-kraken/src/lifecycle.rs", "safe-cex-venue-kraken/src/message_dispatch.rs", "safe-cex-venue-kraken/src/private_accounts.rs", "safe-cex-venue-kraken/src/private_auth.rs", "safe-cex-venue-kraken/src/private_control.rs", "safe-cex-venue-kraken/src/spot_dispatch.rs" ]
+
+[[symbol]]
+ts = "KrakenSpotPrivateWebsocket"
+kind = "class"
+layer = "adapted"
+rs = "safe-cex-venue-kraken/src/classes.rs::spot_private"
+status = "divergent"
+note = "CHOSEN: source KrakenSpotPrivateWebsocket fixes its own 8 arrow bodies and constructs with ordinary arguments; this executable native factory requires complete external callable member bindings (connectAndSubscribe is the first missing-binding rejection). Paired actual-source construction and native rejection/complete-instance behavior: tests/composition.rs::spot_private_class_native. Explicit assembly preserves field order, fresh receiver-bound arrows and containers while reusing separately mapped heterogeneous member interfaces; it does not ship fixed production body adapters. Canonical contract: sdk-rs/parity/MANIFEST-SPEC.md#kraken-externally-assembled-class-factories-constructors-and-ohlcv-polling. Existing member divergences remain in their own rows; scripts/composition-controls.py discriminates source-order construction."
+
+[[symbol]]
+ts = "KrakenSpotPrivateWebsocket.connectAndSubscribe"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-kraken/src/lifecycle.rs::spot_private_connect"
+status = "ported"
+note = "Host-bound source body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-lifecycle-hosts. tests/lifecycle.rs::spot_private_connect_live_source executes the actual TypeScript body and asserts native ordering, original identity and reentrant state. scripts/lifecycle-controls.py proves a named native failure and restoration. Concrete classes, socket factories, event-loop bindings and live Map storage remain separate rows."
+
+[[symbol]]
+ts = "KrakenSpotPrivateWebsocket.setToken"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-kraken/src/private_auth.rs::set_token"
+status = "ported"
+note = "Direct token assignment without changing authenticated state; shared JsJsonValue retains source primitives including nonfinite numbers and undefined. Actual TypeScript arrow-body oracle with decoded native state, callback ordering and error identity assertions in tests/private_auth.rs; full WebSocket class/runtime factory remains pending."
+
+[[symbol]]
+ts = "KrakenSpotPrivateWebsocket.onOpen"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-kraken/src/private_auth.rs::spot_on_open"
+status = "ported"
+note = "Reset before token fetch, post-await disposal guard, source truthiness, executions/balances frame ordering and reentrant token assignment between sends. Shared JsJsonValue defers undefined/nonfinite projection until JS serialization. Actual TypeScript arrow-body oracle with decoded native state, callback ordering and error identity assertions in tests/private_auth.rs; full WebSocket class/runtime factory remains pending."
+
+[[symbol]]
+ts = "KrakenSpotPrivateWebsocket.onMessage"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-kraken/src/message_dispatch.rs::spot_private", "safe-cex-venue-kraken/src/message_dispatch.rs::MessageHost::clear_token" ]
+status = "ported"
+note = "Host-bound websocket control body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-websocket-message-and-private-control-hosts. tests/message_control.rs::message_dispatch_live_source executes the actual TypeScript method and asserts native operations, values, identities and finite continuation timing. scripts/message-control-controls.py proves a named compiled failure and restored pass per method family (shared debounce delay covers both throttle rows). Concrete websocket classes, JavaScript parsing/coercion, signing engines, timers and Store bindings remain separate runtime contracts. API split: safe-cex-venue-kraken/src/message_dispatch.rs::spot_private retains the operation body; shared declarations safe-cex-venue-kraken/src/message_dispatch.rs::MessageHost::clear_token supply the token clear after the source subscription-token failure. These are consumed host capabilities, not a claim of completed runtime assembly."
+
+[[symbol]]
+ts = "KrakenSpotPrivateWebsocket#handleExecutions"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-kraken/src/private_accounts.rs::spot_executions"
+status = "ported"
+note = "Host-bound complete account body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-private-account-and-income-wrapper-hosts. Actual TypeScript/native witness tests/private_accounts.rs::executions_native; compiled production discrimination scripts/private-account-controls.py. Original values, Store/current-method effects and source error boundaries are preserved over explicit intrinsics; no concrete class or live runtime claim."
+
+[[symbol]]
+ts = "KrakenSpotPrivateWebsocket#parseOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-kraken/src/private_accounts.rs::spot_parse_order"
+status = "ported"
+note = "Host-bound complete account body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-private-account-and-income-wrapper-hosts. Actual TypeScript/native witness tests/private_accounts.rs::parse_order_native; compiled production discrimination scripts/private-account-controls.py. Original values, Store/current-method effects and source error boundaries are preserved over explicit intrinsics; no concrete class or live runtime claim."
+
+[[symbol]]
+ts = "KrakenSpotPrivateWebsocket#handleBalances"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-kraken/src/spot_dispatch.rs::handle_balances"
+status = "ported"
+note = "Host-bound method body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-public-subscription-and-spot-dispatch-hosts. tests/spot_dispatch.rs::handle_balances_live_source executes the actual TypeScript body and asserts native prepared fields, original identities and operation order. scripts/public-subscription-controls.py proves one compiled production mutation fails a named assertion and passes after restoration. Concrete classes, handler maps, JSON.stringify/send and parent fetch/parser bindings remain separately mapped."
+
+[[symbol]]
+ts = "KrakenSpotPrivateWebsocket#throttledFetchOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-kraken/src/private_control.rs::spot_throttled_fetch_orders"
+status = "ported"
+note = "Host-bound websocket control body: sdk-rs/parity/MANIFEST-SPEC.md#kraken-websocket-message-and-private-control-hosts. tests/message_control.rs::spot_throttle_live_source executes the actual TypeScript method and asserts native operations, values, identities and finite continuation timing. scripts/message-control-controls.py proves a named compiled failure and restored pass per method family (shared debounce delay covers both throttle rows). Concrete websocket classes, JavaScript parsing/coercion, signing engines, timers and Store bindings remain separate runtime contracts."

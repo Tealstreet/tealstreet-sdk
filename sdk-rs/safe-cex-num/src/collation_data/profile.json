@@ -1,0 +1,10 @@
+{
+  "generator": "icu4x-datagen 2.3.0",
+  "cldr": "48.2.1",
+  "icu": "release-78.1rc",
+  "han": "unihan",
+  "locale": "und",
+  "sha256": {
+    "provider.rs": "a27985bc923987f80a44eee5d29ca95a66edc9e1a3b3d2d60b9fdc3ddcd595e9"
+  }
+}

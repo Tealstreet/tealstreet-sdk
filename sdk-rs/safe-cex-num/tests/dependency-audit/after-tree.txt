@@ -1,0 +1,931 @@
+safe-cex v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex)|
+safe-cex-crypto feature "default" (command-line)
+safe-cex-crypto v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-crypto)|
+base64 feature "default"
+base64 v0.22.1|alloc,default,std
+base64 feature "std"
+base64 v0.22.1|alloc,default,std
+base64 feature "alloc"
+base64 v0.22.1|alloc,default,std
+hmac feature "default"
+hmac v0.12.1|
+digest feature "default"
+digest v0.10.7|alloc,block-buffer,core-api,default,mac,std,subtle
+subtle v2.6.1|
+block-buffer feature "default"
+block-buffer v0.10.4|
+generic-array feature "default"
+generic-array v0.14.7|more_lengths
+typenum feature "default"
+typenum v1.20.1|
+version_check feature "default"
+version_check v0.9.5|
+crypto-common feature "default"
+crypto-common v0.1.7|std
+generic-array feature "default" (*)
+generic-array feature "more_lengths"
+generic-array v0.14.7|more_lengths (*)
+typenum feature "default" (*)
+digest feature "core-api"
+digest v0.10.7|alloc,block-buffer,core-api,default,mac,std,subtle (*)
+digest feature "block-buffer"
+digest v0.10.7|alloc,block-buffer,core-api,default,mac,std,subtle (*)
+digest feature "mac"
+digest v0.10.7|alloc,block-buffer,core-api,default,mac,std,subtle (*)
+digest feature "subtle"
+digest v0.10.7|alloc,block-buffer,core-api,default,mac,std,subtle (*)
+ryu-js feature "default"
+ryu-js v1.0.3|
+safe-cex-types feature "default" (command-line)
+safe-cex-types v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-types)|
+ryu-js feature "default" (*)
+indexmap feature "default"
+indexmap v2.14.2|default,serde,std
+equivalent v1.0.2|
+hashbrown v0.17.1|
+serde_core v1.0.229|alloc,result,std
+indexmap feature "std"
+indexmap v2.14.2|default,serde,std (*)
+indexmap feature "serde"
+indexmap v2.14.2|default,serde,std (*)
+serde feature "default"
+serde v1.0.229|default,derive,serde_derive,std
+serde_core feature "result"
+serde_core v1.0.229|alloc,result,std
+serde_derive feature "default"
+serde_derive v1.0.229 (proc-macro)|default
+quote feature "proc-macro"
+quote v1.0.47|default,proc-macro
+proc-macro2 v1.0.107|proc-macro
+unicode-ident feature "default"
+unicode-ident v1.0.26|
+proc-macro2 feature "proc-macro"
+proc-macro2 v1.0.107|proc-macro (*)
+proc-macro2 feature "proc-macro"
+proc-macro2 v1.0.107|default,proc-macro
+unicode-ident feature "default" (*)
+syn feature "clone-impls"
+syn v3.0.7|clone-impls,default,derive,extra-traits,fold,parsing,printing,proc-macro,visit
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+unicode-ident feature "default" (*)
+syn feature "derive"
+syn v3.0.7|clone-impls,default,derive,extra-traits,fold,parsing,printing,proc-macro,visit (*)
+syn feature "parsing"
+syn v3.0.7|clone-impls,default,derive,extra-traits,fold,parsing,printing,proc-macro,visit (*)
+syn feature "printing"
+syn v3.0.7|clone-impls,default,derive,extra-traits,fold,parsing,printing,proc-macro,visit (*)
+syn feature "proc-macro"
+syn v3.0.7|clone-impls,default,derive,extra-traits,fold,parsing,printing,proc-macro,visit (*)
+quote feature "proc-macro" (*)
+proc-macro2 feature "proc-macro" (*)
+serde feature "std"
+serde v1.0.229|default,derive,serde_derive,std (*)
+serde_core feature "std"
+serde_core v1.0.229|alloc,result,std
+serde feature "derive"
+serde v1.0.229|default,derive,serde_derive,std (*)
+serde feature "serde_derive"
+serde v1.0.229|default,derive,serde_derive,std (*)
+serde_json feature "arbitrary_precision"
+serde_json v1.0.152|arbitrary_precision,default,float_roundtrip,indexmap,preserve_order,std
+memchr v2.8.3|alloc,default,std
+serde_core v1.0.229|alloc,result,std
+indexmap feature "default" (*)
+itoa feature "default"
+itoa v1.0.18|
+zmij feature "default"
+zmij v1.0.23|
+serde_json feature "default"
+serde_json v1.0.152|arbitrary_precision,default,float_roundtrip,indexmap,preserve_order,std (*)
+serde_json feature "std"
+serde_json v1.0.152|arbitrary_precision,default,float_roundtrip,indexmap,preserve_order,std (*)
+memchr feature "std"
+memchr v2.8.3|alloc,default,std
+memchr feature "alloc"
+memchr v2.8.3|alloc,default,std
+serde_core feature "std" (*)
+serde_json feature "float_roundtrip"
+serde_json v1.0.152|arbitrary_precision,default,float_roundtrip,indexmap,preserve_order,std (*)
+serde_json feature "preserve_order"
+serde_json v1.0.152|arbitrary_precision,default,float_roundtrip,indexmap,preserve_order,std (*)
+serde_json feature "indexmap"
+serde_json v1.0.152|arbitrary_precision,default,float_roundtrip,indexmap,preserve_order,std (*)
+serde_json feature "std" (*)
+ts-rs feature "default"
+ts-rs v12.0.1|default,no-serde-warnings,serde-compat
+thiserror feature "default"
+thiserror v2.0.21|default,std
+thiserror-impl feature "default"
+thiserror-impl v2.0.21 (proc-macro)|
+quote feature "default"
+quote v1.0.47|default,proc-macro (*)
+quote feature "proc-macro" (*)
+proc-macro2 feature "default"
+proc-macro2 v1.0.107|default,proc-macro (*)
+proc-macro2 feature "proc-macro" (*)
+syn feature "default"
+syn v3.0.7|clone-impls,default,derive,extra-traits,fold,parsing,printing,proc-macro,visit (*)
+syn feature "clone-impls" (*)
+syn feature "derive" (*)
+syn feature "parsing" (*)
+syn feature "printing" (*)
+syn feature "proc-macro" (*)
+thiserror feature "std"
+thiserror v2.0.21|default,std (*)
+ts-rs-macros feature "default"
+ts-rs-macros v12.0.1 (proc-macro)|no-serde-warnings,serde-compat,termcolor
+quote feature "default" (*)
+proc-macro2 feature "default" (*)
+syn feature "default"
+syn v2.0.119|clone-impls,default,derive,extra-traits,full,parsing,printing,proc-macro
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+unicode-ident feature "default" (*)
+syn feature "clone-impls"
+syn v2.0.119|clone-impls,default,derive,extra-traits,full,parsing,printing,proc-macro (*)
+syn feature "derive"
+syn v2.0.119|clone-impls,default,derive,extra-traits,full,parsing,printing,proc-macro (*)
+syn feature "parsing"
+syn v2.0.119|clone-impls,default,derive,extra-traits,full,parsing,printing,proc-macro (*)
+syn feature "printing"
+syn v2.0.119|clone-impls,default,derive,extra-traits,full,parsing,printing,proc-macro (*)
+syn feature "proc-macro"
+syn v2.0.119|clone-impls,default,derive,extra-traits,full,parsing,printing,proc-macro (*)
+quote feature "proc-macro" (*)
+proc-macro2 feature "proc-macro" (*)
+syn feature "extra-traits"
+syn v2.0.119|clone-impls,default,derive,extra-traits,full,parsing,printing,proc-macro (*)
+syn feature "full"
+syn v2.0.119|clone-impls,default,derive,extra-traits,full,parsing,printing,proc-macro (*)
+termcolor feature "default"
+termcolor v1.4.1|
+ts-rs feature "serde-compat"
+ts-rs v12.0.1|default,no-serde-warnings,serde-compat (*)
+ts-rs-macros feature "serde-compat"
+ts-rs-macros v12.0.1 (proc-macro)|no-serde-warnings,serde-compat,termcolor (*)
+ts-rs-macros feature "termcolor"
+ts-rs-macros v12.0.1 (proc-macro)|no-serde-warnings,serde-compat,termcolor (*)
+ts-rs feature "no-serde-warnings"
+ts-rs v12.0.1|default,no-serde-warnings,serde-compat (*)
+ts-rs-macros feature "no-serde-warnings"
+ts-rs-macros v12.0.1 (proc-macro)|no-serde-warnings,serde-compat,termcolor (*)
+quote feature "default" (*)
+syn feature "default"
+syn v3.0.7|clone-impls,default,derive,full,parsing,printing,proc-macro,visit
+proc-macro2 v1.0.107|proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+unicode-ident feature "default" (*)
+syn feature "clone-impls"
+syn v3.0.7|clone-impls,default,derive,full,parsing,printing,proc-macro,visit (*)
+syn feature "derive"
+syn v3.0.7|clone-impls,default,derive,full,parsing,printing,proc-macro,visit (*)
+syn feature "parsing"
+syn v3.0.7|clone-impls,default,derive,full,parsing,printing,proc-macro,visit (*)
+syn feature "printing"
+syn v3.0.7|clone-impls,default,derive,full,parsing,printing,proc-macro,visit (*)
+syn feature "proc-macro"
+syn v3.0.7|clone-impls,default,derive,full,parsing,printing,proc-macro,visit (*)
+quote feature "proc-macro" (*)
+proc-macro2 feature "proc-macro" (*)
+syn feature "full"
+syn v3.0.7|clone-impls,default,derive,full,parsing,printing,proc-macro,visit (*)
+syn feature "visit"
+syn v3.0.7|clone-impls,default,derive,full,parsing,printing,proc-macro,visit (*)
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "arbitrary_precision" (*)
+serde_json feature "default" (*)
+serde_json feature "float_roundtrip" (*)
+serde_json feature "preserve_order" (*)
+sha2 feature "default"
+sha2 v0.10.9|default,std
+digest feature "default" (*)
+cfg-if feature "default"
+cfg-if v1.0.5|
+cpufeatures feature "default"
+cpufeatures v0.2.17|
+libc v0.2.190|
+sha2 feature "std"
+sha2 v0.10.9|default,std (*)
+digest feature "std"
+digest v0.10.7|alloc,block-buffer,core-api,default,mac,std,subtle (*)
+digest feature "alloc"
+digest v0.10.7|alloc,block-buffer,core-api,default,mac,std,subtle (*)
+crypto-common feature "std"
+crypto-common v0.1.7|std (*)
+futures feature "executor"
+futures v0.3.34|alloc,executor,futures-executor,std
+futures-core v0.3.34|alloc,std
+futures-executor v0.3.34|std
+futures-core v0.3.34|alloc,std
+futures-task v0.3.34|alloc,std
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std
+futures-core v0.3.34|alloc,std
+futures-sink v0.3.34|alloc,std
+futures-task v0.3.34|alloc,std
+slab v0.4.12|std
+futures-channel feature "std"
+futures-channel v0.3.34|alloc,futures-sink,sink,std
+futures-core v0.3.34|alloc,std
+futures-sink v0.3.34|alloc,std
+futures-channel feature "alloc"
+futures-channel v0.3.34|alloc,futures-sink,sink,std (*)
+futures-core feature "alloc"
+futures-core v0.3.34|alloc,std
+futures-core feature "std"
+futures-core v0.3.34|alloc,std
+futures-core feature "alloc" (*)
+futures-io feature "std"
+futures-io v0.3.34|std
+memchr feature "default"
+memchr v2.8.3|alloc,default,std
+memchr feature "std" (*)
+pin-project-lite feature "default"
+pin-project-lite v0.2.17|
+futures-io v0.3.34|std
+futures-sink v0.3.34|alloc,std
+futures-task v0.3.34|alloc,std
+futures-channel feature "sink"
+futures-channel v0.3.34|alloc,futures-sink,sink,std (*)
+futures-channel feature "futures-sink"
+futures-channel v0.3.34|alloc,futures-sink,sink,std (*)
+futures-util feature "sink"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures-util feature "futures-sink"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures feature "futures-executor"
+futures v0.3.34|alloc,executor,futures-executor,std (*)
+futures feature "std"
+futures v0.3.34|alloc,executor,futures-executor,std (*)
+futures feature "alloc"
+futures v0.3.34|alloc,executor,futures-executor,std (*)
+futures-channel feature "alloc" (*)
+futures-core feature "alloc" (*)
+futures-sink feature "alloc"
+futures-sink v0.3.34|alloc,std
+futures-task feature "alloc"
+futures-task v0.3.34|alloc,std
+futures-util feature "alloc"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures-core feature "alloc" (*)
+futures-task feature "alloc" (*)
+futures-util feature "slab"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures-core feature "std" (*)
+futures-sink feature "std"
+futures-sink v0.3.34|alloc,std
+futures-sink feature "alloc" (*)
+futures-task feature "std"
+futures-task v0.3.34|alloc,std
+futures-task feature "alloc" (*)
+futures-util feature "channel"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures-util feature "futures-channel"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures-util feature "std"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures-core feature "std" (*)
+futures-task feature "std" (*)
+futures-util feature "alloc" (*)
+futures-util feature "slab" (*)
+slab feature "std"
+slab v0.4.12|std
+futures-util feature "io"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures-util feature "futures-io"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures-util feature "memchr"
+futures-util v0.3.34|alloc,channel,futures-channel,futures-io,futures-sink,io,memchr,sink,slab,std (*)
+futures-util feature "std" (*)
+futures-util feature "std" (*)
+futures-io feature "std" (*)
+futures-executor feature "std"
+futures-executor v0.3.34|std (*)
+futures-core feature "std" (*)
+futures-task feature "std" (*)
+futures-util feature "std" (*)
+safe-cex-types feature "default" (command-line) (*)
+safe-cex-exchange feature "health"
+safe-cex-exchange v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-exchange)|default,health
+safe-cex-crypto feature "default" (command-line) (*)
+base64 feature "default" (*)
+ryu-js feature "default" (*)
+safe-cex-types feature "default" (command-line) (*)
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "arbitrary_precision" (*)
+serde_json feature "default" (*)
+serde_json feature "float_roundtrip" (*)
+serde_json feature "preserve_order" (*)
+regex feature "default"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+aho-corasick v1.1.5|perf-literal,std
+memchr v2.8.3|alloc,default,std
+memchr v2.8.3|alloc,default,std
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-automata feature "alloc"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary
+aho-corasick v1.1.5|perf-literal,std (*)
+memchr v2.8.3|alloc,default,std
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-automata feature "meta"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "nfa-pikevm"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "nfa-thompson"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "alloc" (*)
+regex-automata feature "syntax"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "alloc" (*)
+regex-automata feature "nfa-pikevm" (*)
+regex-automata feature "syntax" (*)
+regex feature "perf"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex feature "perf-backtrack"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "nfa-backtrack"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "nfa-thompson" (*)
+regex feature "perf-cache"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex feature "perf-dfa"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "hybrid"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "alloc" (*)
+regex-automata feature "nfa-thompson" (*)
+regex feature "perf-inline"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "perf-inline"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex feature "perf-literal"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "perf-literal"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "perf-literal-multisubstring"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "perf-literal-substring"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+aho-corasick feature "perf-literal"
+aho-corasick v1.1.5|perf-literal,std (*)
+regex feature "perf-onepass"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "dfa-onepass"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "nfa-thompson" (*)
+regex feature "std"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+memchr feature "std" (*)
+aho-corasick feature "std"
+aho-corasick v1.1.5|perf-literal,std (*)
+memchr feature "std" (*)
+regex-automata feature "std"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+memchr feature "std" (*)
+aho-corasick feature "std" (*)
+regex-automata feature "alloc" (*)
+regex-syntax feature "std"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax feature "std" (*)
+regex feature "unicode"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex feature "unicode-age"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "unicode-age"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-syntax feature "unicode-age"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax feature "unicode-age" (*)
+regex feature "unicode-bool"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "unicode-bool"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-syntax feature "unicode-bool"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax feature "unicode-bool" (*)
+regex feature "unicode-case"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "unicode-case"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-syntax feature "unicode-case"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax feature "unicode-case" (*)
+regex feature "unicode-gencat"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "unicode-gencat"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-syntax feature "unicode-gencat"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax feature "unicode-gencat" (*)
+regex feature "unicode-perl"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "unicode-perl"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-syntax feature "unicode-perl"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-automata feature "unicode-word-boundary"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-syntax feature "unicode-perl" (*)
+regex feature "unicode-script"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "unicode-script"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-syntax feature "unicode-script"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax feature "unicode-script" (*)
+regex feature "unicode-segment"
+regex v1.13.1|default,perf,perf-backtrack,perf-cache,perf-dfa,perf-inline,perf-literal,perf-onepass,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment (*)
+regex-automata feature "unicode-segment"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-syntax feature "unicode-segment"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax feature "unicode-segment" (*)
+regex-automata feature "unicode"
+regex-automata v0.4.18|alloc,dfa-onepass,hybrid,meta,nfa-backtrack,nfa-pikevm,nfa-thompson,perf-inline,perf-literal,perf-literal-multisubstring,perf-literal-substring,std,syntax,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment,unicode-word-boundary (*)
+regex-automata feature "unicode-age" (*)
+regex-automata feature "unicode-bool" (*)
+regex-automata feature "unicode-case" (*)
+regex-automata feature "unicode-gencat" (*)
+regex-automata feature "unicode-perl" (*)
+regex-automata feature "unicode-script" (*)
+regex-automata feature "unicode-segment" (*)
+regex-automata feature "unicode-word-boundary" (*)
+regex-syntax feature "unicode"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax feature "unicode-age" (*)
+regex-syntax feature "unicode-bool" (*)
+regex-syntax feature "unicode-case" (*)
+regex-syntax feature "unicode-gencat" (*)
+regex-syntax feature "unicode-perl" (*)
+regex-syntax feature "unicode-script" (*)
+regex-syntax feature "unicode-segment" (*)
+regex-syntax feature "unicode" (*)
+regex-syntax feature "default"
+regex-syntax v0.8.11|default,std,unicode,unicode-age,unicode-bool,unicode-case,unicode-gencat,unicode-perl,unicode-script,unicode-segment
+regex-syntax feature "std" (*)
+regex-syntax feature "unicode" (*)
+safe-cex-candle-cache feature "default" (command-line)
+safe-cex-candle-cache v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-candle-cache)|
+safe-cex-types feature "default" (command-line) (*)
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "arbitrary_precision" (*)
+serde_json feature "default" (*)
+serde_json feature "float_roundtrip" (*)
+serde_json feature "preserve_order" (*)
+safe-cex-num feature "default" (command-line)
+safe-cex-num v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-num)|
+ryu-js feature "default" (*)
+safe-cex-types feature "default" (command-line) (*)
+serde_json feature "arbitrary_precision" (*)
+serde_json feature "default" (*)
+serde_json feature "float_roundtrip" (*)
+serde_json feature "preserve_order" (*)
+icu_collator feature "default"
+icu_collator v2.1.1|compiled_data,default
+icu_collator_data v2.1.1|
+icu_collections v2.1.1|
+displaydoc v0.2.7 (proc-macro)|
+quote feature "default" (*)
+proc-macro2 feature "default" (*)
+syn feature "default" (*)
+potential_utf feature "zerovec"
+potential_utf v0.1.6|alloc,writeable,zerovec
+writeable v0.6.4|alloc
+zerovec v0.11.8|alloc,derive,yoke
+yoke v0.8.3|alloc,derive,zerofrom
+stable_deref_trait v1.2.1|alloc
+yoke-derive v0.8.4 (proc-macro)|
+quote feature "default" (*)
+proc-macro2 feature "default" (*)
+syn feature "default" (*)
+syn feature "fold"
+syn v3.0.7|clone-impls,default,derive,extra-traits,fold,parsing,printing,proc-macro,visit (*)
+syn feature "visit"
+syn v3.0.7|clone-impls,default,derive,extra-traits,fold,parsing,printing,proc-macro,visit (*)
+synstructure feature "default"
+synstructure v0.14.0|default,proc-macro
+proc-macro2 v1.0.107|default,proc-macro (*)
+quote v1.0.47|default,proc-macro (*)
+syn feature "clone-impls" (*)
+syn feature "derive" (*)
+syn feature "extra-traits"
+syn v3.0.7|clone-impls,default,derive,extra-traits,fold,parsing,printing,proc-macro,visit (*)
+syn feature "parsing" (*)
+syn feature "printing" (*)
+syn feature "visit" (*)
+synstructure feature "proc-macro"
+synstructure v0.14.0|default,proc-macro (*)
+quote feature "proc-macro" (*)
+proc-macro2 feature "proc-macro" (*)
+syn feature "proc-macro" (*)
+zerofrom v0.1.8|alloc,derive
+zerofrom-derive v0.1.8 (proc-macro)|
+quote feature "default" (*)
+proc-macro2 feature "default" (*)
+syn feature "default" (*)
+syn feature "fold" (*)
+syn feature "visit" (*)
+synstructure feature "default" (*)
+zerofrom v0.1.8|alloc,derive (*)
+zerovec-derive v0.11.6 (proc-macro)|
+quote feature "default" (*)
+proc-macro2 feature "default" (*)
+syn feature "default" (*)
+syn feature "extra-traits" (*)
+zerovec feature "derive"
+zerovec v0.11.8|alloc,derive,yoke (*)
+zerovec feature "yoke"
+zerovec v0.11.8|alloc,derive,yoke (*)
+yoke feature "derive"
+yoke v0.8.3|alloc,derive,zerofrom (*)
+yoke feature "zerofrom"
+yoke v0.8.3|alloc,derive,zerofrom (*)
+zerofrom feature "derive"
+zerofrom v0.1.8|alloc,derive (*)
+zerofrom feature "derive" (*)
+icu_locale v2.1.1|compiled_data
+icu_collections v2.1.1| (*)
+icu_locale_data v2.1.1|
+potential_utf feature "alloc"
+potential_utf v0.1.6|alloc,writeable,zerovec (*)
+potential_utf feature "writeable"
+potential_utf v0.1.6|alloc,writeable,zerovec (*)
+writeable feature "alloc"
+writeable v0.6.4|alloc
+zerovec feature "alloc"
+zerovec v0.11.8|alloc,derive,yoke (*)
+potential_utf feature "zerovec" (*)
+zerovec feature "alloc" (*)
+zerovec feature "yoke" (*)
+icu_locale_core feature "alloc"
+icu_locale_core v2.3.0|alloc,zerovec
+displaydoc v0.2.7 (proc-macro)| (*)
+litemap v0.8.3|alloc
+tinystr v0.8.4|alloc,zerovec
+displaydoc v0.2.7 (proc-macro)| (*)
+zerovec v0.11.8|alloc,derive,yoke (*)
+writeable v0.6.4|alloc
+zerovec v0.11.8|alloc,derive,yoke (*)
+writeable feature "alloc" (*)
+litemap feature "alloc"
+litemap v0.8.3|alloc
+tinystr feature "alloc"
+tinystr v0.8.4|alloc,zerovec (*)
+zerovec feature "alloc" (*)
+icu_locale_core feature "zerovec"
+icu_locale_core v2.3.0|alloc,zerovec (*)
+tinystr feature "zerovec"
+tinystr v0.8.4|alloc,zerovec (*)
+tinystr feature "alloc" (*)
+tinystr feature "zerovec" (*)
+icu_provider feature "alloc"
+icu_provider v2.3.1|alloc,baked
+displaydoc v0.2.7 (proc-macro)| (*)
+icu_locale_core v2.3.0|alloc,zerovec (*)
+stable_deref_trait v1.2.1|alloc
+writeable v0.6.4|alloc
+zerotrie v0.2.5|alloc,yoke,zerofrom
+displaydoc v0.2.7 (proc-macro)| (*)
+zerofrom v0.1.8|alloc,derive (*)
+yoke feature "derive" (*)
+zerovec feature "derive" (*)
+yoke feature "derive" (*)
+zerofrom feature "derive" (*)
+zerovec feature "alloc" (*)
+yoke feature "alloc"
+yoke v0.8.3|alloc,derive,zerofrom (*)
+yoke feature "zerofrom" (*)
+stable_deref_trait feature "alloc"
+stable_deref_trait v1.2.1|alloc
+zerofrom feature "alloc"
+zerofrom v0.1.8|alloc,derive (*)
+zerofrom feature "alloc" (*)
+icu_locale_core feature "alloc" (*)
+zerotrie feature "alloc"
+zerotrie v0.2.5|alloc,yoke,zerofrom (*)
+icu_properties v2.1.2|compiled_data
+icu_collections v2.1.1| (*)
+icu_properties_data v2.1.2|
+icu_provider v2.3.1|alloc,baked (*)
+zerovec feature "derive" (*)
+zerovec feature "yoke" (*)
+icu_locale_core feature "zerovec" (*)
+zerotrie feature "yoke"
+zerotrie v0.2.5|alloc,yoke,zerofrom (*)
+zerotrie feature "zerofrom"
+zerotrie v0.2.5|alloc,yoke,zerofrom (*)
+icu_provider v2.3.1|alloc,baked (*)
+utf16_iter v1.0.5|
+utf8_iter v1.0.4|
+zerovec v0.11.8|alloc,derive,yoke (*)
+icu_locale_core feature "alloc" (*)
+icu_normalizer feature "utf16_iter"
+icu_normalizer v2.1.1|compiled_data,utf16_iter,utf8_iter
+icu_collections v2.1.1| (*)
+icu_normalizer_data v2.1.1|
+icu_provider v2.3.1|alloc,baked (*)
+smallvec v1.16.3|const_generics,const_new,union
+utf16_iter v1.0.5|
+utf8_iter v1.0.4|
+zerovec v0.11.8|alloc,derive,yoke (*)
+write16 feature "alloc"
+write16 v1.0.0|alloc
+icu_normalizer feature "utf8_iter"
+icu_normalizer v2.1.1|compiled_data,utf16_iter,utf8_iter (*)
+smallvec feature "const_generics"
+smallvec v1.16.3|const_generics,const_new,union
+smallvec feature "const_new"
+smallvec v1.16.3|const_generics,const_new,union
+smallvec feature "const_generics" (*)
+smallvec feature "union"
+smallvec v1.16.3|const_generics,const_new,union
+icu_collator feature "compiled_data"
+icu_collator v2.1.1|compiled_data,default (*)
+icu_locale feature "compiled_data"
+icu_locale v2.1.1|compiled_data (*)
+icu_provider feature "baked"
+icu_provider v2.3.1|alloc,baked (*)
+icu_provider feature "baked" (*)
+icu_normalizer feature "compiled_data"
+icu_normalizer v2.1.1|compiled_data,utf16_iter,utf8_iter (*)
+icu_provider feature "baked" (*)
+icu_collator_data feature "default"
+icu_collator_data v2.1.1|
+icu_locale_core feature "default"
+icu_locale_core v2.3.0|alloc,zerovec (*)
+icu_locale_data feature "default"
+icu_locale_data v2.1.1|
+icu_normalizer_data feature "default"
+icu_normalizer_data v2.1.1|
+num-bigint feature "default"
+num-bigint v0.4.6|default,std
+num-integer feature "i128"
+num-integer v0.1.47|i128,std
+num-traits feature "i128"
+num-traits v0.2.19|default,i128,std
+autocfg feature "default"
+autocfg v1.5.1|
+num-traits feature "i128" (*)
+num-bigint feature "std"
+num-bigint v0.4.6|default,std (*)
+num-integer feature "std"
+num-integer v0.1.47|i128,std (*)
+num-traits feature "std"
+num-traits v0.2.19|default,i128,std (*)
+num-traits feature "std" (*)
+num-traits feature "default"
+num-traits v0.2.19|default,i128,std (*)
+num-traits feature "std" (*)
+safe-cex-num feature "default" (command-line) (*)
+safe-cex-store feature "default" (command-line)
+safe-cex-store v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-store)|
+ryu-js feature "default" (*)
+safe-cex-types feature "default" (command-line) (*)
+indexmap feature "default" (*)
+indexmap feature "serde" (*)
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "arbitrary_precision" (*)
+serde_json feature "default" (*)
+serde_json feature "float_roundtrip" (*)
+serde_json feature "preserve_order" (*)
+safe-cex-num feature "default" (command-line) (*)
+safe-cex-transport feature "default" (command-line)
+safe-cex-transport v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-transport)|
+safe-cex-types feature "default" (command-line) (*)
+indexmap feature "default" (*)
+indexmap feature "serde" (*)
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "arbitrary_precision" (*)
+serde_json feature "default" (*)
+serde_json feature "float_roundtrip" (*)
+serde_json feature "preserve_order" (*)
+safe-cex-num feature "default" (command-line) (*)
+base64 feature "default"
+base64 v0.23.1|alloc,default,simd-unsafe,std
+base64 feature "simd-unsafe"
+base64 v0.23.1|alloc,default,simd-unsafe,std
+base64 feature "std"
+base64 v0.23.1|alloc,default,simd-unsafe,std
+base64 feature "alloc"
+base64 v0.23.1|alloc,default,simd-unsafe,std
+flate2 feature "rust_backend"
+flate2 v1.1.10|any_impl,miniz_oxide,rust_backend
+crc32fast v1.5.2|
+cfg-if feature "default" (*)
+miniz_oxide feature "default"
+miniz_oxide v0.9.1|default,simd,simd-adler32,with-alloc
+adler2 v2.0.1|
+simd-adler32 v0.3.10|
+miniz_oxide feature "with-alloc"
+miniz_oxide v0.9.1|default,simd,simd-adler32,with-alloc (*)
+miniz_oxide feature "simd"
+miniz_oxide v0.9.1|default,simd,simd-adler32,with-alloc (*)
+miniz_oxide feature "simd-adler32"
+miniz_oxide v0.9.1|default,simd,simd-adler32,with-alloc (*)
+flate2 feature "any_impl"
+flate2 v1.1.10|any_impl,miniz_oxide,rust_backend (*)
+flate2 feature "miniz_oxide"
+flate2 v1.1.10|any_impl,miniz_oxide,rust_backend (*)
+flate2 feature "any_impl" (*)
+url feature "default"
+url v2.5.8|default,std
+form_urlencoded feature "alloc"
+form_urlencoded v1.2.2|alloc,std
+percent-encoding v2.3.2|alloc,std
+percent-encoding feature "alloc"
+percent-encoding v2.3.2|alloc,std
+percent-encoding feature "alloc" (*)
+idna feature "alloc"
+idna v1.1.0|alloc,compiled_data,std
+smallvec feature "const_generics" (*)
+smallvec feature "default"
+smallvec v1.16.3|const_generics,const_new,union
+utf8_iter feature "default"
+utf8_iter v1.0.4|
+idna_adapter feature "default"
+idna_adapter v1.2.1|compiled_data
+icu_normalizer v2.1.1|compiled_data,utf16_iter,utf8_iter (*)
+icu_properties v2.1.2|compiled_data (*)
+idna feature "compiled_data"
+idna v1.1.0|alloc,compiled_data,std (*)
+idna_adapter feature "compiled_data"
+idna_adapter v1.2.1|compiled_data (*)
+icu_normalizer feature "compiled_data" (*)
+icu_properties feature "compiled_data"
+icu_properties v2.1.2|compiled_data (*)
+icu_provider feature "baked" (*)
+url feature "std"
+url v2.5.8|default,std (*)
+form_urlencoded feature "std"
+form_urlencoded v1.2.2|alloc,std (*)
+form_urlencoded feature "alloc" (*)
+percent-encoding feature "std"
+percent-encoding v2.3.2|alloc,std
+percent-encoding feature "alloc" (*)
+percent-encoding feature "std" (*)
+idna feature "std"
+idna v1.1.0|alloc,compiled_data,std (*)
+idna feature "alloc" (*)
+toml feature "default"
+toml v1.1.8+spec-1.1.0|default,display,parse,serde,std
+winnow v1.0.4|
+serde_core feature "alloc"
+serde_core v1.0.229|alloc,result,std
+serde_spanned feature "alloc"
+serde_spanned v1.1.2|alloc,serde,std
+serde_core v1.0.229|alloc,result,std
+serde_core feature "alloc" (*)
+toml_datetime feature "alloc"
+toml_datetime v1.1.2+spec-1.1.0|alloc,serde,std
+serde_core v1.0.229|alloc,result,std
+serde_core feature "alloc" (*)
+toml_parser feature "alloc"
+toml_parser v1.1.5+spec-1.1.0|alloc,std
+winnow v1.0.4|
+toml_writer feature "alloc"
+toml_writer v1.1.3+spec-1.1.0|alloc,std
+toml feature "display"
+toml v1.1.8+spec-1.1.0|default,display,parse,serde,std (*)
+toml feature "parse"
+toml v1.1.8+spec-1.1.0|default,display,parse,serde,std (*)
+toml feature "serde"
+toml v1.1.8+spec-1.1.0|default,display,parse,serde,std (*)
+serde_spanned feature "serde"
+serde_spanned v1.1.2|alloc,serde,std (*)
+toml_datetime feature "serde"
+toml_datetime v1.1.2+spec-1.1.0|alloc,serde,std (*)
+toml feature "std"
+toml v1.1.8+spec-1.1.0|default,display,parse,serde,std (*)
+serde_core feature "std" (*)
+serde_spanned feature "std"
+serde_spanned v1.1.2|alloc,serde,std (*)
+serde_core feature "std" (*)
+serde_spanned feature "alloc" (*)
+toml_datetime feature "std"
+toml_datetime v1.1.2+spec-1.1.0|alloc,serde,std (*)
+serde_core feature "std" (*)
+toml_datetime feature "alloc" (*)
+toml_parser feature "std"
+toml_parser v1.1.5+spec-1.1.0|alloc,std (*)
+toml_parser feature "alloc" (*)
+toml_writer feature "std"
+toml_writer v1.1.3+spec-1.1.0|alloc,std
+toml_writer feature "alloc" (*)
+indexmap feature "default" (*)
+indexmap feature "serde" (*)
+trybuild feature "default"
+trybuild v1.0.116|
+serde feature "default" (*)
+serde_derive feature "default" (*)
+serde_json feature "default" (*)
+termcolor feature "default" (*)
+toml feature "default" (*)
+glob feature "default"
+glob v0.3.4|
+target-triple feature "default"
+target-triple v1.0.1|
+safe-cex-num feature "default" (command-line) (*)
+safe-cex-store feature "default" (command-line) (*)
+safe-cex-transport feature "default" (command-line) (*)
+serde_json feature "arbitrary_precision" (*)
+serde_json feature "default" (*)
+serde_json feature "float_roundtrip" (*)
+serde_json feature "preserve_order" (*)
+
+safe-cex-candle-cache v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-candle-cache)| (*)
+
+safe-cex-crypto v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-crypto)| (*)
+
+safe-cex-exchange v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-exchange)|default,health (*)
+
+safe-cex-ffi v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-ffi)|default
+safe-cex feature "default" (command-line)
+safe-cex v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex)| (*)
+safe-cex-registry feature "default" (command-line)
+safe-cex-registry v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-registry)|
+safe-cex-types feature "default" (command-line) (*)
+serde feature "default" (*)
+serde feature "derive" (*)
+serde_json feature "arbitrary_precision" (*)
+serde_json feature "default" (*)
+serde_json feature "float_roundtrip" (*)
+serde_json feature "preserve_order" (*)
+safe-cex-exchange feature "default" (command-line)
+safe-cex-exchange v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-exchange)|default,health (*)
+safe-cex-store feature "default" (command-line) (*)
+safe-cex-transport feature "default" (command-line) (*)
+
+safe-cex-num v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-num)| (*)
+
+safe-cex-parity v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-parity)|
+serde feature "default" (*)
+serde feature "derive" (*)
+syn feature "default" (*)
+syn feature "full" (*)
+syn feature "visit" (*)
+toml feature "default" (*)
+
+safe-cex-registry v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-registry)| (*)
+
+safe-cex-store v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-store)| (*)
+
+safe-cex-transport v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-transport)| (*)
+
+safe-cex-types v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-types)| (*)
+
+safe-cex-venue-apexomni v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-apexomni)|
+
+safe-cex-venue-asterdex v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-asterdex)|
+
+safe-cex-venue-backpack v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-backpack)|
+
+safe-cex-venue-binance v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-binance)|
+
+safe-cex-venue-bingx v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-bingx)|
+
+safe-cex-venue-bitget v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-bitget)|
+
+safe-cex-venue-bitrue v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-bitrue)|
+
+safe-cex-venue-bitunix v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-bitunix)|
+
+safe-cex-venue-blofin v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-blofin)|
+
+safe-cex-venue-breakoutprop v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-breakoutprop)|
+
+safe-cex-venue-bybit v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-bybit)|
+
+safe-cex-venue-coinbase v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-coinbase)|
+
+safe-cex-venue-cryptocom v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-cryptocom)|
+
+safe-cex-venue-grvt v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-grvt)|
+
+safe-cex-venue-hyperliquid v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-hyperliquid)|
+
+safe-cex-venue-kraken v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-kraken)|
+
+safe-cex-venue-kucoin v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-kucoin)|
+
+safe-cex-venue-lighter v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-lighter)|
+
+safe-cex-venue-mexc v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-mexc)|
+
+safe-cex-venue-okx v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-okx)|
+
+safe-cex-venue-orderly v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-orderly)|
+
+safe-cex-venue-paradex v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-paradex)|
+
+safe-cex-venue-phemex v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-phemex)|
+
+safe-cex-venue-polymarket v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-polymarket)|
+
+safe-cex-venue-weex v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-weex)|
+
+safe-cex-venue-woo v0.1.0 (/Users/sam/cs/tealstreet-next/.aimux/worktrees/rust-js-primitives/sdk-rs/safe-cex-venue-woo)|
