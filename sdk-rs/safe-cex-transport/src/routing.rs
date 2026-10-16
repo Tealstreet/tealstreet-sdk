@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 #[path = "routing_generated.rs"]
 mod generated;
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
 pub enum HowEgress {
     #[serde(rename = "jp")]
     Jp,
@@ -12,7 +12,22 @@ pub enum HowEgress {
     Sg,
 }
 
-#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Deserialize)]
+#[serde(remote = "HowEgress")]
+enum HowEgressWire {
+    #[serde(rename = "jp")]
+    Jp,
+    #[serde(rename = "sg")]
+    Sg,
+}
+impl<'de> Deserialize<'de> for HowEgress {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(d)?;
+        HowEgressWire::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+    }
+}
+
+#[derive(Debug, Default, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedWs {
     pub tunnelled: bool,
@@ -26,7 +41,26 @@ pub struct ResolvedWs {
     pub readonly: Option<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Deserialize)]
+#[serde(remote = "ResolvedWs", rename_all = "camelCase")]
+struct ResolvedWsWire {
+    tunnelled: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    host: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    fallback: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    relay: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    readonly: Option<String>,
+}
+impl<'de> Deserialize<'de> for ResolvedWs {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        ResolvedWsWire::deserialize(safe_cex_types::strict_decode::object(d))
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
 #[serde(rename_all = "camelCase")]
 pub struct ResolvedRouting {
     pub rest_proxy_host: String,
@@ -36,21 +70,49 @@ pub struct ResolvedRouting {
     pub ws_business: ResolvedWs,
 }
 
+#[derive(Deserialize)]
+#[serde(remote = "ResolvedRouting", rename_all = "camelCase")]
+struct ResolvedRoutingWire {
+    rest_proxy_host: String,
+    how_egress: HowEgress,
+    ws_public: ResolvedWs,
+    ws_private: ResolvedWs,
+    ws_business: ResolvedWs,
+}
+impl<'de> Deserialize<'de> for ResolvedRouting {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        ResolvedRoutingWire::deserialize(safe_cex_types::strict_decode::object(d))
+    }
+}
+
 /// Site IDs use the account model's closed enum, so typos cannot select another route.
 /// The typed_site_doctest_reports_e0308 gate checks this example’s actual diagnostic.
 /// ```compile_fail
 /// use safe_cex_transport::RoutingOptions;
 /// let _ = RoutingOptions { bybit_site_id: Some(String::from("bra_btl")), ..Default::default() };
 /// ```
-#[derive(Debug, Default, Clone, Deserialize)]
-#[serde(rename_all = "camelCase")]
+#[derive(Debug, Default, Clone)]
 pub struct RoutingOptions {
-    #[serde(default)]
     pub tealstreet_proxy: bool,
-    #[serde(default)]
     pub tealstreet_ws_route: bool,
     pub proxy_region: Option<String>,
     pub bybit_site_id: Option<ExchangeOptionsBybitSiteId>,
+}
+
+#[derive(Deserialize)]
+#[serde(remote = "RoutingOptions", rename_all = "camelCase")]
+struct RoutingOptionsWire {
+    #[serde(default)]
+    tealstreet_proxy: bool,
+    #[serde(default)]
+    tealstreet_ws_route: bool,
+    proxy_region: Option<String>,
+    bybit_site_id: Option<ExchangeOptionsBybitSiteId>,
+}
+impl<'de> Deserialize<'de> for RoutingOptions {
+    fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        RoutingOptionsWire::deserialize(safe_cex_types::strict_decode::object(d))
+    }
 }
 
 impl From<&ExchangeOptions> for RoutingOptions {

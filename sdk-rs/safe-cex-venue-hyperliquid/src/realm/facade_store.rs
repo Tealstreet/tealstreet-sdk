@@ -3,7 +3,10 @@
 //! CHOSEN: reads are snapshots. `store.orders` returns a fresh array of fresh
 //! order objects, so mutating a returned object does not write the Store; the
 //! ported bodies write through the Store methods, which is what persists.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{Exotic, Kind, PropKey, Thrown, Value},
+};
 use safe_cex_store::{Store, StoreUpdate};
 use safe_cex_types::{Order, Position};
 use serde_json::{Map, Value as Json};
