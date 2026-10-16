@@ -36,4 +36,5 @@ pub mod websocket_account_events;
 
 pub mod order_composition;
 
+pub mod binding;
 pub mod history_stream_api;

@@ -9,6 +9,8 @@ const encode=v=>typeof v==='number'?(Number.isNaN(v)?'NaN':v===Infinity?'Infinit
 const traces=[
  [{op:'sub',id:'3',n:1e16},{op:'sub',id:'1',n:-1e16},{op:'sub',id:'2',n:1}],
  [{op:'size',n:-0},{op:'recalc'},{op:'size',n:NaN},{op:'recalc'},{op:'size',n:Infinity},{op:'recalc'}],
+ [{op:'size',n:0.158},{op:'set',id:'a',n:0.1},{op:'set',id:'b',n:0.058},{op:'recalc'},{op:'size',n:-0.158},{op:'recalc'},{op:'size',n:0.159},{op:'recalc'}],
+ [{op:'size',n:1e12},{op:'set',id:'a',n:1e12-1e3},{op:'recalc'},{op:'set',id:'a',n:1e12-1e2},{op:'recalc'}],
  [{op:'attempt'},{op:'attempt'},{op:'attempt'},{op:'attempt'},{op:'complete'},{op:'complete',reason:''},{op:'claim'},{op:'claim'}],
  [{op:'ids',ids:['a','b','a']},{op:'ids',ids:[]},{op:'ids',ids:['b','c']},{op:'flags',min:-1.5,pending:true,fresh:true},{op:'flags',min:NaN,pending:false,fresh:false},{op:'flags',min:2,pending:true,fresh:false},{op:'flags',min:3,pending:false,fresh:true}],
  [{op:'sub',id:'a',n:3},{op:'sub',id:'a',n:2},{op:'add',id:'a',n:1},{op:'set',id:'a',n:2},{op:'set',id:'a',n:12},{op:'sub',id:'a',n:1},{op:'recalc'},{op:'size',n:3},{op:'recalc'}],

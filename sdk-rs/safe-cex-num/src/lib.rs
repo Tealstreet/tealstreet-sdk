@@ -87,6 +87,111 @@ pub fn js_to_fixed(value: f64, digits: f64) -> Result<String, &'static str> {
     Ok(text)
 }
 
+/// ECMAScript Number.prototype.toPrecision over the exact binary value: the
+/// nearest `precision` significant digits, ties to the larger magnitude.
+pub fn js_to_precision(value: f64, precision: f64) -> Result<String, &'static str> {
+    use num_bigint::BigUint;
+    if !value.is_finite() {
+        return Ok(js_number_string(value));
+    }
+    let precision = if precision.is_nan() {
+        0.0
+    } else {
+        precision.trunc()
+    };
+    if !(1.0..=100.0).contains(&precision) {
+        return Err("toPrecision() argument must be between 1 and 100");
+    }
+    let p = precision as i64;
+    if value == 0.0 {
+        let mut text = "0".to_owned();
+        if p > 1 {
+            text.push('.');
+            text.extend(std::iter::repeat_n('0', (p - 1) as usize));
+        }
+        return Ok(text);
+    }
+    let bits = value.abs().to_bits();
+    let exponent = ((bits >> 52) & 0x7ff) as i64;
+    let mantissa = (bits & ((1_u64 << 52) - 1)) | if exponent == 0 { 0 } else { 1_u64 << 52 };
+    let power = if exponent == 0 {
+        -1074
+    } else {
+        exponent - 1075
+    };
+    // |value| = num / den exactly.
+    let (num, den) = if power >= 0 {
+        (
+            BigUint::from(mantissa) << power as usize,
+            BigUint::from(1_u32),
+        )
+    } else {
+        (
+            BigUint::from(mantissa),
+            BigUint::from(1_u32) << (-power) as usize,
+        )
+    };
+    let ten = BigUint::from(10_u32);
+    let pow10 = |n: i64| ten.pow(n.unsigned_abs() as u32);
+    // 10^e <= |value| < 10^(e+1), starting from the f64 estimate.
+    let at_least = |e: i64| {
+        if e >= 0 {
+            num >= &den * pow10(e)
+        } else {
+            &num * pow10(e) >= den
+        }
+    };
+    let mut e = value.abs().log10().floor() as i64;
+    while !at_least(e) {
+        e -= 1;
+    }
+    while at_least(e + 1) {
+        e += 1;
+    }
+    // n = round(|value| / 10^(e-p+1)), ties to the larger n.
+    let shift = e - p + 1;
+    let (scaled_num, scaled_den) = if shift >= 0 {
+        (num, den * pow10(shift))
+    } else {
+        (num * pow10(shift), den)
+    };
+    let mut n = &scaled_num / &scaled_den;
+    if (&scaled_num % &scaled_den) * 2_u32 >= scaled_den {
+        n += 1_u32;
+    }
+    if n == pow10(p) {
+        n = pow10(p - 1);
+        e += 1;
+    }
+    let digits = n.to_string();
+    let mut text = if value < 0.0 {
+        "-".to_owned()
+    } else {
+        String::new()
+    };
+    if e < -6 || e >= p {
+        text.push_str(&digits[..1]);
+        if p > 1 {
+            text.push('.');
+            text.push_str(&digits[1..]);
+        }
+        text.push('e');
+        text.push(if e >= 0 { '+' } else { '-' });
+        text.push_str(&e.unsigned_abs().to_string());
+    } else if e == p - 1 {
+        text.push_str(&digits);
+    } else if e >= 0 {
+        text.push_str(&digits[..(e + 1) as usize]);
+        text.push('.');
+        text.push_str(&digits[(e + 1) as usize..]);
+    } else {
+        text.push_str("0.");
+        text.extend(std::iter::repeat_n('0', (-(e + 1)) as usize));
+        text.push_str(&digits);
+    }
+    Ok(text)
+}
+
 /// JavaScript Math.round: ties toward positive infinity; preserves NaN and -0.
 /// For rendering precision and NaN-to-zero policy, use display_round instead.
 pub fn math_round(value: f64) -> f64 {

@@ -117,6 +117,11 @@ pub trait WsProtocol {
     ) -> Result<(), ExchangeError> {
         Err(ExchangeError::new("Not implemented"))
     }
+    /// The socket's `error` event, after the base error handling; TS fires venue
+    /// error listeners whether or not the parent is disposed.
+    fn on_error(&self, _socket: &BaseWebSocket, _message: &str) -> Result<(), ExchangeError> {
+        Ok(())
+    }
     fn recovery_complete(&self) -> bool {
         true
     }
@@ -1542,14 +1547,13 @@ impl BaseWebSocket {
         self.parent.resync_coordinator().request(self);
     }
     pub fn handle_web_socket_error(&self, message: &str) -> Result<(), ExchangeError> {
-        if self.is_disposed() {
-            return Ok(());
-        }
-        if let Some(message) = self.get_web_socket_error_log_message(message) {
+        if !self.is_disposed()
+            && let Some(logged) = self.get_web_socket_error_log_message(message)
+        {
             self.parent
-                .log(&format!("WebSocket error: {message}"), LogSeverity::Error)?;
+                .log(&format!("WebSocket error: {logged}"), LogSeverity::Error)?;
         }
-        Ok(())
+        self.protocol.on_error(self, message)
     }
     pub fn send(self: &Rc<Self>, message: &str) -> Result<(), ExchangeError> {
         if self.is_disposed() {

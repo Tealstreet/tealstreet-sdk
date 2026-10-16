@@ -1,0 +1,50 @@
+[file]
+ts = "packages/safe-cex/src/utils/signatureRejection.ts"
+
+[[symbol]]
+ts = "SIGNATURE_RETRY_CONFIG_KEY"
+kind = "const"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "IsSignatureRejection"
+kind = "type"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "isBinanceStyleSignatureRejection"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "hasRetriedSignature"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "signatureRejectedResponse"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "resendOnSignatureRejection"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
