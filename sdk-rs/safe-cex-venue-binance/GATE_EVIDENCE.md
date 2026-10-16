@@ -3351,3 +3351,41 @@ no self-referential tip SHA or unexecuted preservation result is asserted here.
 See [GATE-CLASS-OWNERS.md](GATE-CLASS-OWNERS.md) for the final twelve-row census,
 SHA-bound scoped gates, discriminating controls, review findings and accepted
 omissions. Raw measured records are in [gate-evidence/class-owners](gate-evidence/class-owners).
+
+### Independent record ingress witnesses
+
+The generated Futures risk, PM risk, income record and income options decoders
+use private Serde remote schemas through `strict_decode::object`, inside their
+existing `JsNumberInput` capture. Public fields and every remote field, rename,
+default and presence attribute were compared byte for byte with the previous
+schema. The generator remains the source of the Rust declarations.
+
+`tests/accepted_record_shapes.rs` replaces the serialization-derived positional
+sequence builder with four independently authored complete arrays in declaration
+order: 21 Futures risk fields, 17 PM risk fields, eight income fields and five
+option fields. Seven decode routes inspect every native field, optional presence
+and numeric bits, and reject the ordered array and scalar/null shapes. Options
+also retain absent versus present-null behavior.
+The original pre-refactor source passes these same four independent fixtures;
+this refactor preserves the existing public object admission boundary.
+
+`python3 sdk-rs/safe-cex-venue-binance/scripts/record-shape-controls.py` completed
+four compiled controls. Removing only each owner's object guard admits its full
+valid positional array and fails that owner's named assertion; restoring the
+source passes the same test. All four source restorations passed.
+
+The restored `accepted_record_shapes`, `types` and `numeric_ingress` targets pass
+13 tests with `--include-ignored`, including the live TypeScript tables, income
+variants, numeric corpus and direct field-identity observations. Generator
+freshness, both formatter-toolchain tests, formatting and whitespace checks pass.
+Fresh ordinary native/default inventory retains seven Deserialize owners and
+adds no Deserialize owner for the private remote schemas. Its 235 owners,
+80 aliases and two construction policies are a discovery count; individual
+accepted-contract review continues beyond these four records.
+
+The four selected accepted contracts execute against actual production libraries
+with zero failed owners. Reproduce fresh discovery and that scoped execution with
+`node sdk-rs/safe-cex-venue-binance/scripts/record-contracts.mjs`; run accepted
+probes serially. Scoped all-target Clippy passes with warnings denied, and the
+invention/status checker passes 7,459 rows and 17,164 public Rust items. These
+results cover this record tranche; the other accepted contracts remain under review.
