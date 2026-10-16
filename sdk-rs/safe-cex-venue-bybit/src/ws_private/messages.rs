@@ -192,7 +192,7 @@ impl PrivateProtocol {
             if status(&order, "Filled")? || status(&order, "PartiallyFilled")? {
                 let raw = to_json(&order)?;
                 let executed = crate::fill_event::resolve_bybit_execution(raw.as_object())
-                    .map_err(|e| Thrown::type_error(e))?;
+                    .map_err(Thrown::type_error)?;
                 let cumulative = get_key(&order, "cumExecValue")?.parse_float()?;
                 let first = orders.get("0")?;
                 let id = first.get("id")?;
