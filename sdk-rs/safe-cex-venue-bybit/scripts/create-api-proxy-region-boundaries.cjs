@@ -41,6 +41,8 @@ const responsePath = 'packages/safe-cex/src/exchanges/bybit/bybit.response.ts';
 const response = load(responsePath, parse(responsePath).text);
 const readsPath = 'packages/safe-cex/src/utils/retryReadsOnly.ts';
 const reads = load(readsPath, parse(readsPath).text, { 'axios-retry': retry });
+const rejectionPath = 'packages/safe-cex/src/utils/signatureRejection.ts';
+const rejection = load(rejectionPath, parse(rejectionPath).text);
 const cases = [];
 for (const region of [undefined, 'JA', 'SG', '', 'US']) {
   const options = { key: 'key', secret: 'secret', tealstreetTunnel: true,
@@ -83,6 +85,7 @@ for (const region of [undefined, 'JA', 'SG', '', 'US']) {
     './bybit.site': { getBybitSiteHeaders: () => ({}) },
     './bybit.types': types,
     '../../utils/retryReadsOnly': reads,
+    '../../utils/signatureRejection': rejection,
   });
   const result = module.createAPI(options, { name: 'bybitinverse', isDemo: false });
   assert.equal(result, client);

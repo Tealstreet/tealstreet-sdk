@@ -49,7 +49,7 @@ for (const statement of apiSource.statements) {
 }
 assert.deepEqual(moduleFunctions, [
   'isSignedRequest', 'isPublicEndpoint', 'isInstrumentsInfoRequest', 'isBybitClockSyncRetMsg',
-  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitEnvProbeRequest',
+  'parseBybitServerTimestamp', 'hasRetriedClockSync', 'isBybitSignRejection', 'isBybitEnvProbeRequest',
   'shouldRetryBybitRequest', 'createAPI',
 ], 'independent module function inventory');
 assert.ok(factory);
@@ -84,6 +84,7 @@ const types = load('assembled-bybit-api-constants.ts', {}, typesProgram);
 assert.deepEqual(Object.keys(types).sort(), [...typeNames].sort());
 const response = load('packages/safe-cex/src/exchanges/bybit/bybit.response.ts');
 const retryReads = load('packages/safe-cex/src/utils/retryReadsOnly.ts', { 'axios-retry': retry });
+const signatureRejection = load('packages/safe-cex/src/utils/signatureRejection.ts');
 
 const inputs = [
   { id: 'shared-mismatch-cached', kind: 'mismatch', cancelFirstCaller: false },
@@ -158,7 +159,7 @@ async function run(input) {
     } },
     './bybit.response': response,
     './bybit.site': { getBybitSiteHeaders: () => ({}) },
-    './bybit.types': types, '../../utils/retryReadsOnly': retryReads,
+    './bybit.types': types, '../../utils/retryReadsOnly': retryReads, '../../utils/signatureRejection': signatureRejection,
   }, apiSource.text, { error: (...args) => logs.push(args) });
   const client = api.createAPI(options, { name: 'bybit', isDemo: false,
     recordAuthFailure() { authFailures++; if (authFailures === 2) markTwoFailures(); },

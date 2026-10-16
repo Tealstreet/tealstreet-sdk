@@ -185,8 +185,11 @@ async fn prepare_request(
     let data = if request.method == "get" {
         query
     } else if let Some(body) = &request.body {
-        let value = body.untransformed().map_err(|e| e.to_string())?;
-        json_bytes(value)?
+        // A resent config carries the body axios already serialized; sign it as sent.
+        match body.untransformed().map_err(|e| e.to_string())? {
+            Value::String(text) => text.clone(),
+            value => json_bytes(value)?,
+        }
     } else {
         String::new()
     };
@@ -206,13 +209,10 @@ async fn prepare_request(
         Encoding::Hex,
     )
     .await?;
-    let mut headers = signed
-        .headers
-        .unwrap_or_default()
-        .into_iter()
-        .collect::<Vec<_>>();
-    headers.extend(request.headers);
-    request.headers = headers.into_iter().collect();
+    // Signer headers last: a replayed config still carries the previous signature's.
+    for (key, value) in signed.headers.unwrap_or_default() {
+        request.headers.insert(key, value);
+    }
     request
         .headers
         .insert("X-BAPI-SIGN".into(), signed.signature);
@@ -238,8 +238,27 @@ async fn prepare_request(
 #[cfg(test)]
 mod tests;
 
-pub(crate) fn http_failure_message(status: u16, status_text: Option<&str>) -> String {
+/// The tunnel wraps a non-JSON body as `{ raw_response }`; a direct adapter hands the string.
+pub(crate) fn blocked_by_cdn(data: &Value) -> bool {
+    let raw = match data {
+        Value::String(text) => Some(text.as_str()),
+        Value::Object(map) => map.get("raw_response").and_then(Value::as_str),
+        _ => None,
+    };
+    raw.is_some_and(|text| text.to_ascii_lowercase().contains("cloudfront"))
+}
+
+/// CloudFront refusing the egress address answers 403 before Bybit sees the request:
+/// not the key, so `blocked_by_cdn` keeps it out of the auth wording and backoff.
+pub(crate) fn http_failure_message(
+    status: u16,
+    status_text: Option<&str>,
+    blocked_by_cdn: bool,
+) -> String {
     match status {
+        _ if blocked_by_cdn => {
+            format!("HTTP {status} Forbidden — blocked by Bybit's CDN before reaching Bybit")
+        }
         401 => "HTTP 401 Unauthorized — API key rejected".into(),
         403 => "HTTP 403 Forbidden — API key rejected".into(),
         _ => match status_text.filter(|reason| !reason.is_empty()) {
