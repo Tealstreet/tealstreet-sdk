@@ -2400,6 +2400,30 @@
     "file": "safe-cex-venue-bitget/src/subscriptions.rs"
   },
   {
+    "function": "member",
+    "body": "dce7483ef849779e",
+    "reference": "crate :: runtime_lifecycle :: dispose",
+    "file": "safe-cex-venue-bitrue/src/binding/classes.rs"
+  },
+  {
+    "function": "member",
+    "body": "dce7483ef849779e",
+    "reference": "crate :: runtime_lifecycle :: start",
+    "file": "safe-cex-venue-bitrue/src/binding/classes.rs"
+  },
+  {
+    "function": "member",
+    "body": "dce7483ef849779e",
+    "reference": "crate :: refresh_entrypoints :: change_margin_type",
+    "file": "safe-cex-venue-bitrue/src/binding/classes.rs"
+  },
+  {
+    "function": "leverage",
+    "body": "e78cdc265655e4c4",
+    "reference": "crate :: leverage_reads :: fetch_symbol_max_leverage",
+    "file": "safe-cex-venue-bitrue/src/binding/classes.rs"
+  },
+  {
     "function": "public_only",
     "body": "db5f2973936c8998",
     "reference": "Exchange :: is_public_data_only",

@@ -29,7 +29,7 @@ adapter choices and the existing helper-level divergences.
 
 Validation on the branch:
 
-- Full Bitrue crate before routing follow-up: 64 tests across26 targets,0failed/ignored, including actual
+- Full Bitrue crate: 65 tests across26 targets,0failed/ignored, including actual
   TypeScript oracles (`SAFE_CEX_TYPESCRIPT_PATH` set; `--include-ignored`).
 - `scripts/binding-controls.py`:16 independent dispatch mutations compile and
   exit101 at their named BIND assertion; each restored production file passes.
@@ -37,10 +37,11 @@ Validation on the branch:
 - Strict all-target host and wasm library clippy; scoped registry clippy.
 - Global parity:check and extractor check; layer and registry checks.
 
-The shared cancellation inventory passes all7 tests. The shared override audit
-is tracked separately by #175; latest master exposes a Crypto.com dispose/base
-classification that belongs to that venue's owner. No Bitrue production change
-is hidden behind an audit exemption.
+The combined shared dependency gates pass58 JS-runtime tests,7 cancellation
+inventory tests and the live TypeScript override inventory. The override audit
+combines #175 and Crypto.com's source-matched disposal #186/#158. Four Bitrue
+body references are recorded explicitly: dispose/start/margin refusal in the
+member dispatcher and the existing maximum-leverage helper delegation.
 
 The routing follow-up adds one E2E and two compiling disconnect controls in
 `scripts/routing-controls.py`. Earlier sixteen method controls remain unchanged.
