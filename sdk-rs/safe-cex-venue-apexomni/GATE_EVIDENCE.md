@@ -710,3 +710,15 @@ axes still compare directly. Read-only extractor reports no ApexOmni drift; only
 Polymarket and registry.native metadata were stale at this integration base.
 The dispatch inventory updates only reviewed ApexOmni calls; public_data_only's
 base can_sign delegation is guarded against a future source canSign override.
+
+Final master refresh c537b291d4 (merge f10b86b3ec): source oracle161,
+assembled E2Es27, native HTTP/WS proof1 plus registry13, registry equivalence1,
+layers88, global parity0 (7459rows/17126public items), host/wasm strict Clippy and
+workspace fmt all pass. The live source override inventory passes1 and the
+cancellation inventory passes6 with its explicit exporter ignored. The full
+shared dispatch guard stops at AsterDEX base_dispose's unreviewed dispose
+call, so no full-workspace dispatch pass is claimed. Apex-only discovery was
+reviewed against its36 committed call sites and its sole guarded delegation;
+all other lanes' inventory rows remain unchanged. The compiled negative-control
+receipts precede this final master refresh; the positive suites above were rerun
+against the resulting shared dependencies.

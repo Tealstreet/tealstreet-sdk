@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
+Status: implemented for `apexomni`, `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
 `bitgetusdc`), `bitunix`, `blofin`, Coinbase (`coinbase`, `coinbasespot`),
 the Kraken family (`kraken`, `krakenspot`), `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
