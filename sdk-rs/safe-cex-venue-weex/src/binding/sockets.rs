@@ -33,7 +33,7 @@ fn base_dispose(h: &Host) -> Result<(), Thrown> {
     sockets::base_websocket_class(&h.0.shared.sockets)
         .get("prototype")?
         .get("dispose")?
-        .call(h.this(), vec![])?;
+        .call(h.this(), std::vec![])?;
     Ok(())
 }
 fn disposed(h: &Host) -> Result<bool, Thrown> {
@@ -52,11 +52,11 @@ fn parent_call(h: &Host, name: &str, args: Vec<Js>) -> Result<Js, Thrown> {
             }
             receiver = receiver.get(name)?;
         }
-        unreachable!()
+        std::unreachable!()
     }
 }
 fn warn(h: &Host, message: Js) -> Result<(), Thrown> {
-    parent_call(h, "log", vec![message, Js::str("warning")])?;
+    parent_call(h, "log", std::vec![message, Js::str("warning")])?;
     Ok(())
 }
 fn call_unit(h: &Host, name: &str, args: Vec<Js>) -> Result<(), Thrown> {
@@ -70,17 +70,21 @@ fn parse(h: &Host, units: &[u16]) -> Result<Js, Thrown> {
     ))
 }
 fn serialize(h: &Host, value: Js) -> Result<Js, Thrown> {
-    h.global("JSON.stringify")?.call(Js::Undefined, vec![value])
+    h.global("JSON.stringify")?
+        .call(Js::Undefined, std::vec![value])
 }
 fn frame(h: &Host, method: &str, topics: Option<Js>, id: f64, logged: bool) -> Result<(), Thrown> {
-    let payload = Js::object(vec![("method", Js::str(method)), ("id", Js::Number(id))]);
+    let payload = Js::object(std::vec![
+        ("method", Js::str(method)),
+        ("id", Js::Number(id))
+    ]);
     if let Some(topics) = topics {
         payload.define("params", topics)?;
     }
     call_unit(
         h,
         if logged { "sendWithLog" } else { "send" },
-        vec![serialize(h, payload)?],
+        std::vec![serialize(h, payload)?],
     )
 }
 fn strings(value: Js) -> Result<Vec<Vec<u16>>, Thrown> {
@@ -88,7 +92,7 @@ fn strings(value: Js) -> Result<Vec<Vec<u16>>, Thrown> {
         value.array_values().unwrap()
     } else {
         value
-            .call_method("values", vec![])?
+            .call_method("values", std::vec![])?
             .array_values()
             .ok_or_else(|| Thrown::type_error("topics is not iterable"))?
     };
@@ -140,9 +144,9 @@ fn save_subscriptions(h: &Host, state: &WeexSubscriptionState) -> Result<(), Thr
         ("tickerTopics", &state.ticker_topics),
     ] {
         let set = h.root(name)?;
-        set.call_method("clear", vec![])?;
+        set.call_method("clear", std::vec![])?;
         for value in values {
-            set.call_method("add", vec![Js::utf16(value)])?;
+            set.call_method("add", std::vec![Js::utf16(value)])?;
         }
     }
     h.this().set(
@@ -173,7 +177,7 @@ fn subscription_runtime() -> WeexSubscriptionRuntime<Host, Thrown> {
         },
         desired_topics: |h, s| {
             save_subscriptions(h, s)?;
-            let desired = strings(h.call("getDesiredTickerTopics", vec![])?)?;
+            let desired = strings(h.call("getDesiredTickerTopics", std::vec![])?)?;
             *s = subscriptions(h)?;
             Ok(desired)
         },
@@ -238,13 +242,17 @@ fn control_runtime() -> WeexWebsocketControlRuntime<Host, Thrown> {
         },
         snapshot: |h, s, tries| {
             save_control(h, s)?;
-            parent_call(h, "fetchAndSetPrivateSnapshot", vec![Js::Number(tries)])?;
+            parent_call(
+                h,
+                "fetchAndSetPrivateSnapshot",
+                std::vec![Js::Number(tries)],
+            )?;
             *s = control_state(h)?;
             Ok(())
         },
         emit_reconnected: |h, s| {
             save_control(h, s)?;
-            call_unit(h, "emitWsReconnected", vec![])?;
+            call_unit(h, "emitWsReconnected", std::vec![])?;
             *s = control_state(h)?;
             Ok(())
         },
@@ -274,10 +282,12 @@ fn handlers() -> crate::message_handlers::WeexMessageHandlerRuntime<Host, Js, Js
         next: |h, value| v::next(h, value),
         close_on_throw: |_, _, error| error,
         invoke: |_, handler, message| {
-            handler.call(Js::Undefined, vec![message.clone()])?;
+            handler.call(Js::Undefined, std::vec![message.clone()])?;
             Ok(())
         },
-        cleanup_stats: |h, key| call_unit(h, "cleanupMessageHandlerStats", vec![Js::utf16(key)]),
+        cleanup_stats: |h, key| {
+            call_unit(h, "cleanupMessageHandlerStats", std::vec![Js::utf16(key)])
+        },
     }
 }
 pub(super) fn dispatch(
@@ -330,7 +340,7 @@ pub(super) fn dispatch(
             let result = match name {
                 "onOpen" => control::public_on_open(&mut h, &mut state, &runtime, |h, s| {
                     save_subscriptions(h, s)?;
-                    call_unit(h, "emitWsReconnected", vec![])?;
+                    call_unit(h, "emitWsReconnected", std::vec![])?;
                     *s = subscriptions(h)?;
                     Ok(())
                 }),
@@ -374,7 +384,7 @@ pub(super) fn dispatch(
                     return result.map(Js::Bool);
                 }
                 _ => {
-                    return Err(Thrown::type_error(&format!(
+                    return Err(Thrown::type_error(&std::format!(
                         "Unknown WEEX public socket member {name}"
                     )));
                 }
