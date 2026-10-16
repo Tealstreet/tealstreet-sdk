@@ -21,6 +21,7 @@ pub mod imports;
 pub mod imports_utils;
 pub mod imports_venue;
 mod host_classes;
+mod host_cache;
 mod host_core;
 mod host_leaves;
 mod host_market;

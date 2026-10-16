@@ -31,7 +31,37 @@ impl HyperliquidBuilderProvider for BuilderOptions {
     }
 }
 
+struct WalletKey(String);
+struct SignedView(safe_cex_num::JsJsonValue);
+impl crate::signing::SigningInput for SignedView {
+    fn encoding_view(&self) -> Cow<'_, safe_cex_num::JsJsonValue> {
+        Cow::Borrowed(&self.0)
+    }
+}
+
+/// `class HyperliquidUnreadableOrderResponseError extends Error`.
+fn unreadable_error_class(realm: &Realm) -> Value {
+    realm.singleton("HyperliquidUnreadableOrderResponseError", |realm| {
+        let mut r = realm.clone();
+        let base = r.global_binding("Error").expect("Error intrinsic");
+        let (class, _) = r
+            .derived_class(
+                "HyperliquidUnreadableOrderResponseError",
+                1,
+                &base,
+                std::rc::Rc::new(|r, class, args, new_target| {
+                    let e = r.super_construct(class, args, new_target)?;
+                    r.set_str(&e, "name", Value::str("HyperliquidUnreadableOrderResponseError"))?;
+                    Ok(e)
+                }),
+            )
+            .expect("derived error class");
+        class
+    })
+}
+
 pub fn bind(realm: &Realm) {
+    realm.bind_import("HyperliquidUnreadableOrderResponseError", unreadable_error_class(realm));
     let b = |name: &'static str, length: u8, body: fn(&mut Realm, &[Value]) -> Result<Value, Thrown>| {
         realm.bind_import(name, realm.native(name, length, move |r, _, a| body(r, a)));
     };
@@ -155,6 +185,77 @@ pub fn bind(realm: &Realm) {
             })))
         }),
     );
+    // ethers.Wallet stand-in: the address is public; the key stays native.
+    b("createWalletFromPrivateKey", 1, |r, a| {
+        let key = r.to_rust_string(&arg(a, 0))?;
+        let signer = safe_cex_crypto::wallet_utils::create_wallet_from_private_key(&key).map_err(|e| r.error(&e))?;
+        let wallet = r.host_object(std::rc::Rc::new(WalletKey(key)));
+        r.define_str(&wallet, "address", Value::str(&signer.address().to_string()))?;
+        Ok(wallet)
+    });
+    b("orderRequestToOrderWire", 2, |r, a| {
+        let order = r.to_serde(&arg(a, 0))?;
+        let asset = num(r, &arg(a, 1))?;
+        let payload = crate::signing::order_request_to_order_wire(&order, asset).map_err(|e| r.error_of(e.name, &e.message))?;
+        use crate::signing::SigningInput;
+        Ok(r.from_js_json(&payload.encoding_view()))
+    });
+    for (name, grouping) in [
+        ("orderWiresToOrderAction", "na"),
+        ("orderWiresToNormalTPSLAction", "normalTpsl"),
+        ("orderWiresToPositionalTPSLAction", "positionTpsl"),
+    ] {
+        // The source object literal: wires aliased, builder only when truthy.
+        realm.bind_import(
+            name,
+            realm.native(name, 2, move |r, _, a| {
+                let action = r.object_from(vec![
+                    ("type", Value::str("order")),
+                    ("orders", arg(a, 0)),
+                    ("grouping", Value::str(grouping)),
+                ]);
+                if arg(a, 1).truthy() {
+                    r.set_str(&action, "builder", arg(a, 1))?;
+                }
+                Ok(action)
+            }),
+        );
+    }
+    b("signL1Action", 5, |r, a| {
+        let wallet = arg(a, 0)
+            .host::<WalletKey>()
+            .ok_or_else(|| r.type_error("signL1Action expects a wallet from createWalletFromPrivateKey"))?;
+        let action = SignedView(r.to_js_json(&arg(a, 1))?);
+        let vault = match arg(a, 2) {
+            v if v.is_nullish() => None,
+            v => Some(r.to_rust_string(&v)?),
+        };
+        let nonce = r.to_serde(&arg(a, 3))?;
+        let mainnet = match arg(a, 4) {
+            Value::Undefined => true,
+            v => v.truthy(),
+        };
+        let result = crate::signing::sign_l1_action(&wallet.0, &action, vault.as_deref(), &nonce, mainnet)
+            .map_err(|e| r.error(&e))
+            .and_then(|sig| r.from_typed(&sig));
+        Ok(r.settled_promise(result))
+    });
+    b("parseHyperliquidOrderResponse", 1, |r, a| {
+        use crate::order_response::HyperliquidOrderResponseError as E;
+        let data = r.to_serde(&arg(a, 0))?;
+        match crate::order_response::parse_hyperliquid_order_response(&data) {
+            Ok(parsed) => {
+                let ids = r.from_typed(&parsed.order_ids)?;
+                Ok(r.object_from(vec![("orderIds", ids), ("waitingForTrigger", Value::Bool(parsed.waiting_for_trigger))]))
+            }
+            Err(E::Unreadable(e)) => {
+                let class = unreadable_error_class(r);
+                Err(r.construct(&class, &[Value::str(&e.message)], None)?)
+            }
+            Err(E::Venue(message)) => Err(r.error(&message)),
+            Err(E::Coercion(e)) => Err(r.error_of(e.name, e.message)),
+        }
+    });
     b("validateWalletAndPrivateKey", 2, |r, a| {
         let key = r.to_rust_string(&arg(a, 0))?;
         let wallet = r.to_rust_string(&arg(a, 1))?;

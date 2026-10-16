@@ -203,3 +203,55 @@ impl Realm {
         JsString(text.encode_utf16().collect())
     }
 }
+
+impl Realm {
+    /// The signing view of a value: own enumerable data in key order, with
+    /// `undefined` members retained (msgpack encodes them as nil; JSON drops them).
+    pub fn to_js_json(&mut self, value: &Value) -> Result<safe_cex_num::JsJsonValue, Thrown> {
+        use safe_cex_num::JsJsonValue as J;
+        Ok(match value {
+            Value::Undefined => J::Undefined,
+            Value::Null => J::Null,
+            Value::Bool(b) => J::Bool(*b),
+            Value::Number(n) => J::Number(*n),
+            Value::String(u) => J::String(String::from_utf16_lossy(u)),
+            Value::Symbol(_) => J::Undefined,
+            Value::Object(_) if value.is_array() => {
+                let items = self.collect_iterable(value)?;
+                J::Array(items.iter().map(|v| self.to_js_json(v)).collect::<Result<_, _>>()?)
+            }
+            Value::Object(_) => {
+                let mut out = vec![];
+                for (k, v) in self.own_entries(value)? {
+                    if v.is_callable() {
+                        continue;
+                    }
+                    out.push((String::from_utf16_lossy(k.units().unwrap_or_default()), self.to_js_json(&v)?));
+                }
+                J::Object(out)
+            }
+        })
+    }
+    pub fn from_js_json(&self, value: &safe_cex_num::JsJsonValue) -> Value {
+        use safe_cex_num::JsJsonValue as J;
+        match value {
+            J::Undefined => Value::Undefined,
+            J::Null => Value::Null,
+            J::Bool(b) => Value::Bool(*b),
+            J::Number(n) => Value::Number(*n),
+            J::String(s) => Value::str(s),
+            J::BigInt(b) => Value::str(&b.to_string()),
+            J::Array(items) => self.new_array(items.iter().map(|v| self.from_js_json(v)).collect()),
+            J::Object(entries) => {
+                let o = self.new_object();
+                {
+                    let mut d = o.object().unwrap().borrow_mut();
+                    for (k, v) in entries {
+                        d.put(PropKey::str(k), self.from_js_json(v), true);
+                    }
+                }
+                o
+            }
+        }
+    }
+}

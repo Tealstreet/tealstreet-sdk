@@ -77,6 +77,10 @@ pub fn bind(realm: &Realm) {
     realm.bind_import("GRAFANA_ENDPOINTS_PERIODIC", strings(realm, types::GRAFANA_ENDPOINTS_PERIODIC));
     realm.bind_import("SPOT_ASSET_INDEX_OFFSET", Value::Number(crate::constants::SPOT_ASSET_INDEX_OFFSET as f64));
     realm.bind_import(
+        "PERP_MAX_PRICE_DECIMALS",
+        Value::Number(crate::constants::PERP_MAX_PRICE_DECIMALS as f64),
+    );
+    realm.bind_import(
         "SPOT_MAX_PRICE_DECIMALS",
         Value::Number(crate::constants::SPOT_MAX_PRICE_DECIMALS as f64),
     );
@@ -92,6 +96,7 @@ pub fn bind(realm: &Realm) {
     super::imports_utils::bind(realm);
     super::ccxt::bind(realm);
     super::imports_venue::bind(realm);
+    super::host_cache::bind(realm);
 }
 
 /// Imported async helpers return a promise over the ported body.
