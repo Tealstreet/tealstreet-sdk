@@ -547,8 +547,20 @@ primary source bodies. Valid-array source cases are distinct from malformed-fram
 error coverage. The registry uses its existing Bybit host/dependency edge with the
 caller-owned limiter, including local and secretless hosted HTTP signing.
 
-FINDING ddi2il-38: concrete shared PublicProtocol currently rebuilds public topics
-from Store markets, bypassing source active-symbol selection and both live change
-callbacks/topic retention. Public class/constructor rows remain pending. The
-existing public_ticker_topics/public_ws_lifecycle body ports do not prove that
-wiring; it is a separate production follow-up before Inverse/HyroTrader binding.
+The concrete public ticker lifecycle now composes the existing topic/recovery
+and lifecycle ports in `ws_public/topics.rs`. Primary linear/inverse sockets
+subscribe every eligible non-option market in their category; active-symbol
+selection belongs to Spot and the separate dedicated Inverse class. Spot calls
+its live receiver selector on each synchronization, retains the union of prior
+and desired subscriptions, registers the active callback before dialing, and
+replaces its own markets callback on each open. Market additions preserve source
+duplicates; removing active symbols does not unsubscribe prior topics.
+The canonical subscribe and Spot market-addition bodies execute the first send
+and sleep factory eagerly, before their remaining Future tail is registered with
+core ownership. Weak socket/venue captures avoid retaining the facade. Source
+OHLCV/order-book methods and recovery-timer class wiring remain separate pending
+rows. `public_topic_binding` has four concrete tests, including 24 maintained
+source constructor/handler compositions with 360 snapshots and pending-tail
+cancellation/weak-reference witnesses. `scripts/public-topic-controls.py` has six
+compiled consumer controls; all must fail runtime assertions and restore exact
+production bytes before the four positive tests pass.
