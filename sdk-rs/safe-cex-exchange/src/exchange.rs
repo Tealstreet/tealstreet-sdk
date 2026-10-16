@@ -625,6 +625,11 @@ impl BaseExchange {
     pub fn is_disposed(&self) -> bool {
         self.disposed.get()
     }
+    /// The writable TS `isDisposed` field. Venue overrides assign it before
+    /// their own cleanup; assignment alone must not run `BaseExchange.dispose`.
+    pub fn set_disposed_flag(&self, disposed: bool) {
+        self.disposed.set(disposed);
+    }
     pub fn is_online(&self) -> bool {
         self.online.get()
     }

@@ -3972,6 +3972,8 @@ dependencies = [
  "safe-cex-venue-coinbase",
  "safe-cex-venue-hyperliquid",
  "safe-cex-venue-kraken",
+ "safe-cex-venue-kucoin",
+ "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
  "safe-cex-venue-orderly",
  "safe-cex-venue-polymarket",
