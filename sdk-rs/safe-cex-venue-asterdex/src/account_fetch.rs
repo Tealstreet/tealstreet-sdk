@@ -90,7 +90,7 @@ impl AccountFetch {
             }
         }
     }
-    async fn fetch_balance(&self) -> Result<safe_cex_types::Balance, ExchangeError> {
+    pub(crate) async fn fetch_balance(&self) -> Result<safe_cex_types::Balance, ExchangeError> {
         let result = async {
             let data = self
                 .request(
