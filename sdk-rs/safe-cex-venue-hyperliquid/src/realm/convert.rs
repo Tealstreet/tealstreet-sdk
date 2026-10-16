@@ -1,6 +1,9 @@
 //! Abstract conversions and operators (ToPrimitive, ToString, ToNumber,
 //! relational/arithmetic operators and loose equality).
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{Kind, PropKey, Thrown, Value},
+};
 use std::rc::Rc;
 
 fn units(text: &str) -> Rc<[u16]> {

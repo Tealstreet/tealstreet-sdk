@@ -1,6 +1,9 @@
 //! Adapt the family realm's owned DTO snapshots to the shared native typed codec.
 //! JSON wire serialization remains separate; f64 NaN/infinities/-0 retain bits.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{PropKey, Value},
+};
 use safe_cex_exchange::js_runtime::value::{self as shared, Js};
 
 impl Realm {

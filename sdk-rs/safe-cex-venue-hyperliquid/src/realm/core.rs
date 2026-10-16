@@ -1,6 +1,12 @@
 //! Object allocation, property access, calls and the iteration protocol.
 //! No RefCell borrow is held across a call back into script.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{
+        FunctionData, IterSource, Kind, NativeFn, Obj, ObjectData, Prop, PropKey, Slot, Thrown,
+        Value,
+    },
+};
 use crate::spot_json::JsString;
 use std::{cell::RefCell, rc::Rc};
 
