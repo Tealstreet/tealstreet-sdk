@@ -3,7 +3,6 @@
 #![cfg(not(target_arch = "wasm32"))]
 use safe_cex_exchange::{
     exchange::{BaseExchange, Exchange, ExchangeSettings},
-    native::NativeRuntime,
     websocket::WsRuntime,
 };
 use safe_cex_store::store::DefaultStore;
@@ -63,8 +62,8 @@ fn backpack_constructs_on_the_native_host_and_reads_markets_over_http() {
             }
         });
 
-        let host: Rc<dyn WsRuntime> = NativeRuntime::new();
-        let adapter = Arc::new(LocalOrigin { inner: ReqwestAdapter::new().unwrap(), origin });
+        let host: Rc<dyn WsRuntime> = safe_cex_exchange::native::native_runtime();
+        let adapter = Arc::new(LocalOrigin { inner: safe_cex_transport::native::reqwest_adapter().unwrap(), origin });
         let inputs = native_inputs(host.clone(), adapter);
         let options = serde_json::from_value(json!({"key":"","secret":"","publicDataOnly":true})).unwrap();
         let base = BaseExchange::new(

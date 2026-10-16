@@ -55,15 +55,13 @@ pub fn tls_config() -> Result<Arc<rustls::ClientConfig>, TransportError> {
 pub struct ReqwestAdapter {
     client: reqwest::Client,
 }
-impl ReqwestAdapter {
-    pub fn new() -> Result<Self, TransportError> {
-        let tls = (*tls_config()?).clone();
-        reqwest::Client::builder()
-            .tls_backend_preconfigured(tls)
-            .build()
-            .map(|client| Self { client })
-            .map_err(|e| TransportError::Host(format!("HTTP client: {e}")))
-    }
+pub fn reqwest_adapter() -> Result<ReqwestAdapter, TransportError> {
+    let tls = (*tls_config()?).clone();
+    reqwest::Client::builder()
+        .tls_backend_preconfigured(tls)
+        .build()
+        .map(|client| ReqwestAdapter { client })
+        .map_err(|e| TransportError::Host(format!("HTTP client: {e}")))
 }
 fn request_url(request: &RestRequest) -> String {
     if request.url.starts_with("http") {

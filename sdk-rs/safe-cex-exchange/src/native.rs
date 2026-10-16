@@ -67,21 +67,19 @@ pub struct NativeRuntime {
     min_reconnection_delay_ms: f64,
     library_min_reconnection_delay_ms: f64,
 }
-impl NativeRuntime {
-    /// Direct transport: requests go straight to the venue, as `directTransport` does.
-    pub fn new() -> Rc<Self> {
-        Self::with_transport(Arc::new(DirectTransport))
-    }
-    pub fn with_transport(transport: Arc<dyn TransportProvider>) -> Rc<Self> {
-        let random = random_unit();
-        Rc::new(Self {
-            origin: Instant::now(),
-            transport,
-            tunnel: Rc::new(NativeTunnelHost),
-            min_reconnection_delay_ms: 1000.0 + random * 2000.0,
-            library_min_reconnection_delay_ms: 1000.0 + random * 4000.0,
-        })
-    }
+/// Direct transport: requests go straight to the venue, as `directTransport` does.
+pub fn native_runtime() -> Rc<NativeRuntime> {
+    native_runtime_with_transport(Arc::new(DirectTransport))
+}
+pub fn native_runtime_with_transport(transport: Arc<dyn TransportProvider>) -> Rc<NativeRuntime> {
+    let random = random_unit();
+    Rc::new(NativeRuntime {
+        origin: Instant::now(),
+        transport,
+        tunnel: Rc::new(NativeTunnelHost),
+        min_reconnection_delay_ms: 1000.0 + random * 2000.0,
+        library_min_reconnection_delay_ms: 1000.0 + random * 4000.0,
+    })
 }
 fn random_unit() -> f64 {
     (u64::from_le_bytes(random_bytes::<8>()) >> 11) as f64 / (1u64 << 53) as f64
@@ -163,7 +161,7 @@ impl WsRuntime for NativeRuntime {
             let socket = connect_websocket(&url, &protocols, &headers)
                 .await
                 .map_err(|e| ExchangeError::new(e.to_string()))?;
-            Ok(Rc::new(NativeWsSocket::new(socket)) as Rc<dyn WsSocket>)
+            Ok(Rc::new(native_ws_socket(socket)) as Rc<dyn WsSocket>)
         })
     }
     fn headers_capable(&self) -> bool {
@@ -193,13 +191,11 @@ pub struct NativeWsSocket {
     opened: Rc<Cell<bool>>,
     ended: Rc<Cell<bool>>,
 }
-impl NativeWsSocket {
-    fn new(inner: NativeSocket) -> Self {
-        Self {
-            inner: Rc::new(inner),
-            opened: Rc::new(Cell::new(false)),
-            ended: Rc::new(Cell::new(false)),
-        }
+fn native_ws_socket(inner: NativeSocket) -> NativeWsSocket {
+    NativeWsSocket {
+        inner: Rc::new(inner),
+        opened: Rc::new(Cell::new(false)),
+        ended: Rc::new(Cell::new(false)),
     }
 }
 impl WsSocket for NativeWsSocket {

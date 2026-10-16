@@ -28,14 +28,14 @@ use safe_cex_exchange::{
         HttpClient, HttpClientOptions, HttpHost, safe_cex_axios_create,
         safe_cex_axios_create_no_proxy,
     },
-    native::{NativeHttpHost, NativeRuntime, nanoid},
+    native::{NativeHttpHost, nanoid},
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{BaseWebSocket, WsProtocol, WsRuntime},
 };
 use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestRequest, RestResponse, TransportRegistry,
-    native::ReqwestAdapter, socket::SocketFrame,
+    socket::SocketFrame,
 };
 use serde_json::{Map, Value};
 use std::{
@@ -61,23 +61,14 @@ fn to_json(value: &EventValue) -> Result<Value, Failure> {
     serde_json::from_str(&text).map_err(|e| failure(e.to_string()))
 }
 
-/// Production Binance dependencies over the given native runtime.
+/// Production Binance dependencies over a native runtime and terminal HTTP adapter.
 pub fn native_dependencies(
-    runtime: Rc<NativeRuntime>,
-) -> Result<ExchangeDependencies, ExchangeError> {
-    let runtime: Rc<dyn WsRuntime> = runtime;
-    let adapter: Arc<dyn RestAdapter> =
-        Arc::new(ReqwestAdapter::new().map_err(|e| ExchangeError::new(e.to_string()))?);
-    Ok(native_dependencies_with_adapter(runtime, adapter))
-}
-/// As `native_dependencies`, with an explicit terminal HTTP adapter.
-pub fn native_dependencies_with_adapter(
     runtime: Rc<dyn WsRuntime>,
     adapter: Arc<dyn RestAdapter>,
 ) -> ExchangeDependencies {
     ExchangeDependencies {
         runtime: runtime.clone(),
-        imports: NativeImports::new(runtime, adapter),
+        imports: native_imports(runtime, adapter),
         signers: Default::default(),
         remote_signer_token: None,
         payload_signer_token: None,
@@ -98,37 +89,36 @@ pub struct NativeImports {
     this: Weak<NativeImports>,
 }
 type Emitter = Rc<dyn Fn(EventValue) -> Result<(), Failure>>;
-impl NativeImports {
-    pub fn new(runtime: Rc<dyn WsRuntime>, adapter: Arc<dyn RestAdapter>) -> Rc<Self> {
-        Rc::new_cyclic(|this| Self {
-            timers: NativeTimers::new(runtime.clone()),
-            runtime,
-            emitter: Rc::new(RefCell::new(None)),
-            public_client: RefCell::new(None),
-            adapter,
-            host: Rc::new(NativeHttpHost),
-            registry: TransportRegistry::default(),
-            clients: RefCell::new(vec![]),
-            this: this.clone(),
-        })
-    }
-    fn register_rc(&self, client: Rc<NativeClient>) -> (Rc<NativeClient>, EventValue) {
-        let mut clients = self.clients.borrow_mut();
-        clients.push(client.clone());
-        (
-            client,
-            record([("nativeClient", number((clients.len() - 1) as f64))]),
-        )
-    }
-    fn client(&self, handle: &EventValue) -> Result<Rc<NativeClient>, Failure> {
-        let index = handle.get("nativeClient")?.number()?;
-        self.clients
-            .borrow()
-            .get(index as usize)
-            .cloned()
-            .ok_or_else(|| failure("unknown native HTTP client handle"))
-    }
+pub fn native_imports(runtime: Rc<dyn WsRuntime>, adapter: Arc<dyn RestAdapter>) -> Rc<NativeImports> {
+    Rc::new_cyclic(|this| NativeImports {
+        timers: native_timers(runtime.clone()),
+        runtime,
+        emitter: Rc::new(RefCell::new(None)),
+        public_client: RefCell::new(None),
+        adapter,
+        host: Rc::new(NativeHttpHost),
+        registry: TransportRegistry::default(),
+        clients: RefCell::new(vec![]),
+        this: this.clone(),
+    })
 }
+fn register_client(this: &NativeImports, client: Rc<NativeClient>) -> (Rc<NativeClient>, EventValue) {
+    let mut clients = this.clients.borrow_mut();
+    clients.push(client.clone());
+    (
+        client,
+        record([("nativeClient", number((clients.len() - 1) as f64))]),
+    )
+}
+fn lookup_client(this: &NativeImports, handle: &EventValue) -> Result<Rc<NativeClient>, Failure> {
+    let index = handle.get("nativeClient")?.number()?;
+    this.clients
+        .borrow()
+        .get(index as usize)
+        .cloned()
+        .ok_or_else(|| failure("unknown native HTTP client handle"))
+}
+
 
 /// An axios instance: defaults, interceptors, retry and rate limit around one HttpClient.
 struct NativeClient {
@@ -152,43 +142,42 @@ struct RateWindow {
     per_ms: f64,
     starts: VecDeque<f64>,
 }
-impl NativeClient {
-    fn http(&self) -> Result<&HttpClient, Failure> {
-        self.http
-            .as_ref()
-            .ok_or_else(|| failure("routing client has no transport"))
-    }
-    async fn wait_for_slot(&self, runtime: &Rc<dyn WsRuntime>) -> Result<(), Failure> {
-        loop {
-            let delay = {
-                let mut limit = self.limit.borrow_mut();
-                let Some(window) = limit.as_mut() else {
-                    return Ok(());
-                };
-                let now = runtime.monotonic_now_ms();
-                while window
-                    .starts
-                    .front()
-                    .is_some_and(|t| now - t >= window.per_ms)
-                {
-                    window.starts.pop_front();
-                }
-                if window.starts.len() < window.max {
-                    window.starts.push_back(now);
-                    return Ok(());
-                }
-                window
-                    .starts
-                    .front()
-                    .map_or(0.0, |t| window.per_ms - (now - t))
+fn client_http(this: &NativeClient) -> Result<&HttpClient, Failure> {
+    this.http
+        .as_ref()
+        .ok_or_else(|| failure("routing client has no transport"))
+}
+async fn wait_for_slot(this: &NativeClient, runtime: &Rc<dyn WsRuntime>) -> Result<(), Failure> {
+    loop {
+        let delay = {
+            let mut limit = this.limit.borrow_mut();
+            let Some(window) = limit.as_mut() else {
+                return Ok(());
             };
-            runtime
-                .sleep(delay.max(1.0) as u64)
-                .await
-                .map_err(exchange_failure)?;
-        }
+            let now = runtime.monotonic_now_ms();
+            while window
+                .starts
+                .front()
+                .is_some_and(|t| now - t >= window.per_ms)
+            {
+                window.starts.pop_front();
+            }
+            if window.starts.len() < window.max {
+                window.starts.push_back(now);
+                return Ok(());
+            }
+            window
+                .starts
+                .front()
+                .map_or(0.0, |t| window.per_ms - (now - t))
+        };
+        runtime
+            .sleep(delay.max(1.0) as u64)
+            .await
+            .map_err(exchange_failure)?;
     }
 }
+
 fn method_name(method: HttpMethod) -> &'static str {
     match method {
         HttpMethod::Get => "get",
@@ -215,7 +204,7 @@ async fn run_request(
     }
     let mut attempt = 0u32;
     loop {
-        client.wait_for_slot(&imports.runtime).await?;
+        wait_for_slot(&client, &imports.runtime).await?;
         let outcome = dispatch(&client, method, path, args.clone()).await;
         let retry = client.retry.borrow().clone();
         if let (Err(Dispatch::Transport(error, _)), Some((retries, read))) = (&outcome, retry)
@@ -255,7 +244,7 @@ async fn dispatch(
         _ => {}
     }
     let raised: Rc<RefCell<Option<Failure>>> = Rc::new(RefCell::new(None));
-    let http = client.http().map_err(|e| {
+    let http = client_http(client).map_err(|e| {
         Dispatch::Transport(
             RestFailure::pre_transmit(e.message.clone(), RestRequest::default()),
             Some(e),
@@ -705,7 +694,7 @@ impl ExchangeImports for NativeImports {
         let client = b
             .pending
             .ok_or_else(|| failure("factory created no client"))?;
-        let (client, handle) = self.register_rc(Rc::new(client));
+        let (client, handle) = register_client(self, Rc::new(client));
         if kind == Factory::PublicAPI {
             *self.public_client.borrow_mut() = Some(client);
         }
@@ -736,7 +725,7 @@ impl ExchangeImports for NativeImports {
         };
         if !secondary_key.truthy() {
             if venue == Venue::Spot {
-                *self.public_client.borrow_mut() = Some(self.client(&primary)?);
+                *self.public_client.borrow_mut() = Some(lookup_client(self, &primary)?);
             }
             return Ok(triple(primary.clone(), primary.clone(), primary));
         }
@@ -750,7 +739,7 @@ impl ExchangeImports for NativeImports {
         let secondary = factory(secondary_options)?;
         let route = NativeClient {
             http: None,
-            route: Some((self.client(&primary)?, self.client(&secondary)?)),
+            route: Some((lookup_client(self, &primary)?, lookup_client(self, &secondary)?)),
             request: RefCell::new(vec![]),
             response: RefCell::new(vec![]),
             retry: RefCell::new(None),
@@ -758,14 +747,14 @@ impl ExchangeImports for NativeImports {
             limit: RefCell::new(None),
             emitter: self.emitter.clone(),
         };
-        let (route, handle) = self.register_rc(Rc::new(route));
+        let (route, handle) = register_client(self, Rc::new(route));
         if venue == Venue::Spot {
             *self.public_client.borrow_mut() = Some(route);
         }
         Ok(triple(handle, primary, secondary))
     }
     fn rate_limit(&self, client: EventValue, max_rps: f64) -> Result<EventValue, Failure> {
-        *self.client(&client)?.limit.borrow_mut() = Some(RateWindow {
+        *lookup_client(self, &client)?.limit.borrow_mut() = Some(RateWindow {
             max: max_rps.max(1.0) as usize,
             per_ms: 1000.0,
             starts: VecDeque::new(),
@@ -779,7 +768,7 @@ impl ExchangeImports for NativeImports {
         path: &'static str,
         args: Option<EventValue>,
     ) -> Result<SnapshotRequestFuture, Failure> {
-        let target = self.client(&client)?;
+        let target = lookup_client(self, &client)?;
         let imports = self
             .this
             .upgrade()
@@ -797,7 +786,7 @@ impl ExchangeImports for NativeImports {
         fulfilled: Fulfilled<EventValue>,
         rejected: Rejected<EventValue, Failure>,
     ) -> Result<(), Failure> {
-        let mut target = self.client(&client)?;
+        let mut target = lookup_client(self, &client)?;
         // Proxy reads fall through to the default (primary) instance's interceptors.
         if let Some((primary, _)) = &target.route {
             target = primary.clone();
@@ -818,7 +807,7 @@ impl ExchangeImports for NativeImports {
         let ws_parent = parent
             .socket_parent()
             .ok_or_else(|| failure("private parent supplies no socket parent"))?;
-        Ok(CorePrivateBase::new(ws_parent, self.runtime.clone()))
+        Ok(core_private_base(ws_parent, self.runtime.clone()))
     }
     fn listener_operations(&self) -> Rc<dyn ListenerHost> {
         Rc::new(NativeListenerOperations {
@@ -917,60 +906,59 @@ pub struct NativeTimers {
     live: RefCell<HashMap<u64, Box<dyn ExchangeTask>>>,
     this: Weak<NativeTimers>,
 }
-impl NativeTimers {
-    fn new(runtime: Rc<dyn WsRuntime>) -> Rc<Self> {
-        Rc::new_cyclic(|this| Self {
-            runtime,
-            next: Cell::new(0.0),
-            live: RefCell::new(HashMap::new()),
-            this: this.clone(),
-        })
-    }
-    fn live_self(&self) -> Result<Rc<Self>, Failure> {
-        self.this
-            .upgrade()
-            .ok_or_else(|| failure("timer owner dropped"))
-    }
-    fn schedule(
-        self: &Rc<Self>,
-        action: Rc<dyn Fn() -> Result<(), Failure>>,
-        delay: f64,
-    ) -> EventValue {
-        let id = self.next.get() + 1.0;
-        self.next.set(id);
-        let (runtime, timers) = (self.runtime.clone(), Rc::downgrade(self));
-        let task = self.runtime.spawn_local(Box::pin(async move {
-            if runtime.sleep(delay.max(0.0) as u64).await.is_err() {
-                return;
-            }
-            if let Some(timers) = timers.upgrade() {
-                timers.live.borrow_mut().remove(&(id as u64));
-            }
-            if let Err(error) = action() {
-                runtime.report_exception(&error, &serde_json::json!({"operation":"binance timer"}));
-            }
-        }));
-        self.live.borrow_mut().insert(id as u64, task);
-        number(id)
-    }
-    fn cancel(&self, ticket: &EventValue) -> Result<(), Failure> {
-        if ticket.nullish() {
-            return Ok(());
-        }
-        let task = self.live.borrow_mut().remove(&(ticket.number()? as u64));
-        if let Some(task) = task {
-            task.cancel();
-        }
-        Ok(())
-    }
+fn native_timers(runtime: Rc<dyn WsRuntime>) -> Rc<NativeTimers> {
+    Rc::new_cyclic(|this| NativeTimers {
+        runtime,
+        next: Cell::new(0.0),
+        live: RefCell::new(HashMap::new()),
+        this: this.clone(),
+    })
 }
+fn timers_self(this: &NativeTimers) -> Result<Rc<NativeTimers>, Failure> {
+    this.this
+        .upgrade()
+        .ok_or_else(|| failure("timer owner dropped"))
+}
+fn schedule_timer(
+    this: &Rc<NativeTimers>,
+    action: Rc<dyn Fn() -> Result<(), Failure>>,
+    delay: f64,
+) -> EventValue {
+    let id = this.next.get() + 1.0;
+    this.next.set(id);
+    let (runtime, timers) = (this.runtime.clone(), Rc::downgrade(this));
+    let task = this.runtime.spawn_local(Box::pin(async move {
+        if runtime.sleep(delay.max(0.0) as u64).await.is_err() {
+            return;
+        }
+        if let Some(timers) = timers.upgrade() {
+            timers.live.borrow_mut().remove(&(id as u64));
+        }
+        if let Err(error) = action() {
+            runtime.report_exception(&error, &serde_json::json!({"operation":"binance timer"}));
+        }
+    }));
+    this.live.borrow_mut().insert(id as u64, task);
+    number(id)
+}
+fn cancel_timer(this: &NativeTimers, ticket: &EventValue) -> Result<(), Failure> {
+    if ticket.nullish() {
+        return Ok(());
+    }
+    let task = this.live.borrow_mut().remove(&(ticket.number()? as u64));
+    if let Some(task) = task {
+        task.cancel();
+    }
+    Ok(())
+}
+
 impl PrivateTimers for NativeTimers {
     fn set(&self, action: CapturedAction, delay: f64) -> Result<EventValue, Failure> {
-        let this = self.live_self()?;
-        Ok(this.schedule(Rc::new(move || action.call()), delay))
+        let this = timers_self(&self)?;
+        Ok(schedule_timer(&this, Rc::new(move || action.call()), delay))
     }
     fn clear(&self, ticket: EventValue) -> Result<(), Failure> {
-        self.cancel(&ticket)
+        cancel_timer(&self, &ticket)
     }
 }
 
@@ -993,10 +981,10 @@ impl ListenerHost for NativeListenerOperations {
         callback: public_listeners::Action,
         delay: f64,
     ) -> Result<EventValue, Failure> {
-        Ok(self.timers.live_self()?.schedule(callback, delay))
+        Ok(schedule_timer(&timers_self(&self.timers)?, callback, delay))
     }
     fn clear_timeout(&self, ticket: EventValue) -> Result<(), Failure> {
-        self.timers.cancel(&ticket)
+        cancel_timer(&self.timers, &ticket)
     }
     fn cleanup(&self, _handler: &str) -> Result<(), Failure> {
         Ok(())
@@ -1131,27 +1119,26 @@ struct ListenerProtocol {
 fn into_exchange(error: Failure) -> ExchangeError {
     (*error).clone()
 }
-impl ListenerProtocol {
-    fn fire(&self, event: &str, data: Option<EventValue>) -> Result<(), ExchangeError> {
-        let targets: Vec<_> = self
-            .listeners
-            .borrow()
-            .iter()
-            .filter(|(name, _)| *name == event)
-            .map(|(_, callback)| callback.clone())
-            .collect();
-        for callback in targets {
-            match (&callback, &data) {
-                (PrivateCallback::Message(f), Some(data)) => {
-                    f(data.clone()).map_err(into_exchange)?
-                }
-                (PrivateCallback::Action(f), _) => f().map_err(into_exchange)?,
-                (PrivateCallback::Message(_), None) => {}
+fn fire_listeners(this: &ListenerProtocol, event: &str, data: Option<EventValue>) -> Result<(), ExchangeError> {
+    let targets: Vec<_> = this
+        .listeners
+        .borrow()
+        .iter()
+        .filter(|(name, _)| *name == event)
+        .map(|(_, callback)| callback.clone())
+        .collect();
+    for callback in targets {
+        match (&callback, &data) {
+            (PrivateCallback::Message(f), Some(data)) => {
+                f(data.clone()).map_err(into_exchange)?
             }
+            (PrivateCallback::Action(f), _) => f().map_err(into_exchange)?,
+            (PrivateCallback::Message(_), None) => {}
         }
-        Ok(())
     }
+    Ok(())
 }
+
 impl WsProtocol for ListenerProtocol {
     fn ping(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         let hook = self.hooks.borrow().as_ref().map(|(ping, _)| ping.clone());
@@ -1170,7 +1157,7 @@ impl WsProtocol for ListenerProtocol {
         hook.map_or(Ok(()), |connect| connect().map_err(into_exchange))
     }
     fn on_open(&self, _socket: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
-        let result = self.fire("open", None);
+        let result = fire_listeners(self, "open", None);
         Box::pin(async move { result })
     }
     fn on_message(
@@ -1183,28 +1170,27 @@ impl WsProtocol for ListenerProtocol {
             SocketFrame::Binary(bytes) => string(String::from_utf8_lossy(bytes).into_owned()),
             SocketFrame::Close { .. } => return Ok(()),
         };
-        self.fire("message", Some(data))
+        fire_listeners(self, "message", Some(data))
     }
 }
-impl CorePrivateBase {
-    fn new(
-        parent: Rc<dyn safe_cex_exchange::websocket::WsParent>,
-        runtime: Rc<dyn WsRuntime>,
-    ) -> Rc<Self> {
-        let listeners = Rc::new(RefCell::new(vec![]));
-        let hooks = Rc::new(RefCell::new(None));
-        let protocol = Rc::new(ListenerProtocol {
-            listeners: listeners.clone(),
-            hooks: hooks.clone(),
-        });
-        Rc::new(Self {
-            socket: BaseWebSocket::new(3, parent, runtime, protocol),
-            current: RefCell::new(None),
-            listeners,
-            hooks,
-        })
-    }
+fn core_private_base(
+    parent: Rc<dyn safe_cex_exchange::websocket::WsParent>,
+    runtime: Rc<dyn WsRuntime>,
+) -> Rc<CorePrivateBase> {
+    let listeners = Rc::new(RefCell::new(vec![]));
+    let hooks = Rc::new(RefCell::new(None));
+    let protocol = Rc::new(ListenerProtocol {
+        listeners: listeners.clone(),
+        hooks: hooks.clone(),
+    });
+    Rc::new(CorePrivateBase {
+        socket: BaseWebSocket::new(3, parent, runtime, protocol),
+        current: RefCell::new(None),
+        listeners,
+        hooks,
+    })
 }
+
 struct CoreSocketHandle {
     socket: Rc<BaseWebSocket>,
     listeners: Rc<RefCell<Vec<(&'static str, PrivateCallback)>>>,

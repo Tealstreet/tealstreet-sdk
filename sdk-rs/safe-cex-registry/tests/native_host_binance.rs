@@ -1,11 +1,10 @@
-//! BinanceExchange built with the production native host against a local
+//! BinanceExchange constructed by the registry on the production native host, against a local
 //! HTTP + WebSocket server: real reqwest and tungstenite traffic on 127.0.0.1.
 //! Only the venue hostnames are rewritten; signing, codecs and sockets are production.
 #![cfg(not(target_arch = "wasm32"))]
 use futures_util::{SinkExt, StreamExt};
 use hmac::{Hmac, Mac};
 use safe_cex_exchange::{
-    exchange::Exchange,
     native::NativeRuntime,
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
@@ -15,7 +14,8 @@ use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, TransportProvider, native::ReqwestAdapter,
     socket::TunnelHost,
 };
-use safe_cex_venue_binance::{exchange_classes::BinanceExchange, native_host};
+use safe_cex_registry::{native_host::native_venue_host_with, rust_venues::rust_constructor};
+use safe_cex_types::ExchangeName;
 use serde_json::{Value, json};
 use std::{
     cell::RefCell, collections::HashMap, future::Future, pin::Pin, rc::Rc, sync::Arc,
@@ -328,13 +328,18 @@ fn binance_futures_runs_on_the_native_host_over_local_http_and_websocket() {
         tokio::task::spawn_local(serve_http(http, Rc::new(routes()), seen.clone()));
         tokio::task::spawn_local(serve_ws(ws, peers.clone(), received.clone()));
 
-        let host = Rc::new(LocalDial { inner: NativeRuntime::new(), origin: ws_origin });
-        let adapter = Arc::new(LocalOrigin { inner: ReqwestAdapter::new().unwrap(), origin: http_origin });
-        let deps = native_host::native_dependencies_with_adapter(host, adapter);
+        let host = Rc::new(LocalDial { inner: safe_cex_exchange::native::native_runtime(), origin: ws_origin });
+        let adapters = Rc::new(move || {
+            let inner = safe_cex_transport::native::reqwest_adapter().map_err(|e| ExchangeError::new(e.to_string()))?;
+            Ok(Arc::new(LocalOrigin { inner, origin: http_origin.clone() }) as Arc<dyn RestAdapter>)
+        });
+        let constructor = rust_constructor(&ExchangeName::Binance, native_venue_host_with(host, adapters))
+            .expect("binance is a Rust-constructed venue");
         let options = serde_json::from_value(json!({"key":"native-key","secret":SECRET})).unwrap();
         let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
-        let exchange = BinanceExchange::new(serde_json::from_value(json!("binance")).unwrap(), options, store.clone(), deps)
-            .expect("BinanceExchange::new with the production native host");
+        let exchange = constructor
+            .construct(ExchangeName::Binance, options, store.clone())
+            .expect("registry constructs BinanceExchange on the production native host");
 
         let markets = exchange.fetch_markets().await.expect("fetchMarkets over HTTP");
         assert!(markets.iter().any(|m| m.symbol == "BTCUSDT"), "exchangeInfo parsed from the wire");
@@ -351,7 +356,7 @@ fn binance_futures_runs_on_the_native_host_over_local_http_and_websocket() {
         assert!(seen.borrow().iter().any(|s| s.method == "POST" && s.path == "/fapi/v1/listenKey"));
 
         let order: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":1,"price":10})).unwrap();
-        let ids = exchange.base().place_order(&exchange, order).await.expect("placeOrder over HTTP");
+        let ids = exchange.base().place_order(exchange.as_ref(), order).await.expect("placeOrder over HTTP");
         assert_eq!(ids, vec!["9001"]);
         let placed = seen.borrow().iter().rev().find(|s| s.path == "/fapi/v1/order").cloned().expect("order reached the server");
         assert_eq!(placed.method, "POST");
