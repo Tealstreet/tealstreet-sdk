@@ -6,11 +6,15 @@
 pub mod convert;
 pub mod core;
 pub mod json;
+pub mod ops;
 pub mod promise;
 pub mod regex;
 pub mod value;
 
 mod builtins;
+mod host_classes;
+mod host_core;
+mod host_leaves;
 
 use crate::spot_json::JsString;
 use safe_cex_exchange::runtime::ExchangeRuntime;
@@ -45,6 +49,8 @@ pub struct State {
     pub imports: RefCell<HashMap<String, Value>>,
     /// Unhandled rejections already reported, so each is reported once.
     pub reported: RefCell<Vec<Obj>>,
+    /// Module-level values whose identity must be stable across reads.
+    pub singletons: RefCell<HashMap<&'static str, Value>>,
 }
 
 /// Cloning shares the realm; `lexical` is the class binding a method body sees.
@@ -94,6 +100,7 @@ impl Realm {
                 globals,
                 imports: RefCell::default(),
                 reported: RefCell::default(),
+                singletons: RefCell::default(),
             }),
             lexical: None,
         };
@@ -145,6 +152,14 @@ impl Realm {
             .globals
             .borrow_mut()
             .put(PropKey::str(name), value, false);
+    }
+    pub fn singleton(&self, name: &'static str, init: impl FnOnce(&Realm) -> Value) -> Value {
+        if let Some(v) = self.state.singletons.borrow().get(name) {
+            return v.clone();
+        }
+        let v = init(self);
+        self.state.singletons.borrow_mut().insert(name, v.clone());
+        v
     }
     pub fn js_string(&self, value: &Value) -> Option<JsString> {
         value.as_units().map(|u| JsString(u.to_vec()))
