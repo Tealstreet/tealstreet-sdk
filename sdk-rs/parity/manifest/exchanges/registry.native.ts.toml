@@ -142,17 +142,17 @@ note = "CHOSEN: native_breakoutprop selects the actual source module ./breakoutp
 ts = "exchangeRegistry.bybit"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_bybit"
+rs = [ "safe-cex-registry/src/loaders.rs::native_bybit", "safe-cex-registry/src/rust_venues.rs::bybit_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit" ]
 status = "divergent"
-note = "CHOSEN: native_bybit selects the actual source module ./bybit/bybit.exchange and export BybitExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybit. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::bybit_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit construct the bound Bybit or Demo facade from its per-construction native HTTP, clock, and external-data dependencies. CHOSEN: native_bybit selects the actual source module ./bybit/bybit.exchange and export BybitExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybit. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.bybitdemo"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_bybitdemo"
+rs = [ "safe-cex-registry/src/loaders.rs::native_bybitdemo", "safe-cex-registry/src/rust_venues.rs::bybit_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit" ]
 status = "divergent"
-note = "CHOSEN: native_bybitdemo selects the actual source module ./bybit/bybitdemo.exchange and export BybitDemoExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybitdemo. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::bybit_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::bybit construct the bound Bybit or Demo facade from its per-construction native HTTP, clock, and external-data dependencies. CHOSEN: native_bybitdemo selects the actual source module ./bybit/bybitdemo.exchange and export BybitDemoExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bybitdemo. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.hyrotrader"

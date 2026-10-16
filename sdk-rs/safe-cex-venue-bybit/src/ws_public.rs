@@ -373,7 +373,7 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
             &socket,
             self.runtime.as_ref(),
             self.category,
-            parent.base.is_demo,
+            parent.uses_bybit_demo_environment(),
             None,
         )
     }
