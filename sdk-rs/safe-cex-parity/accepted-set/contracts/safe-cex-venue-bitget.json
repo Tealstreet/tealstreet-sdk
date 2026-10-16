@@ -33636,9 +33636,94 @@
         }
       }
     },
-    "category": "non-decoder",
-    "reason": "The Rc<RefCell<Vec<O>>> alias is a shared mutable native order collection; it is constructed by the cancellation host and not itself a protocol JSON decoder.",
-    "evidence": "Reviewed this exact alias declaration, generic order and full raw/expanded compiler target. A policy-owned fixed Value/String/static instantiation will receive actual native type identity and all seven raw-trait probes; no claim for all generic arguments. Callable/future semantics remain owned by their actual consumers."
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      [],
+      [
+        17
+      ],
+      [
+        null
+      ],
+      [
+        "raw"
+      ],
+      [
+        {}
+      ],
+      [
+        [
+          1
+        ]
+      ],
+      [
+        {
+          "id": "native-a"
+        },
+        {
+          "id": "native-b"
+        }
+      ]
+    ],
+    "negative": [
+      null,
+      false,
+      17,
+      "raw",
+      {},
+      {
+        "0": {}
+      }
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed exact Rc<RefCell<Vec<O>>> declaration and its policy-owned Value instantiation. Actual native trait discovery proves Serde admits arrays through Rc and RefCell, despite its cancellation-handle use. This contract covers that real decoder, with unconstrained Value elements and no new record grammar. Native observations inspect the decoded vector and clone the actual Rc to verify shared-cell identity; never serialize/redecode the decoded owner. The fixed compiler expected type, authenticated roots and all seven alternate trait probes remain active.",
+    "observation": {
+      "call": "{match serde_json::from_value::<$type>($value.clone()){Ok(decoded)=>{let shared=decoded.clone();let same=std::rc::Rc::ptr_eq(&decoded,&shared);let rows=decoded.borrow();serde_json::json!({\"ok\":true,\"count\":rows.len(),\"firstId\":rows.first().and_then(|row|row.get(\"id\")).and_then(serde_json::Value::as_str),\"lastId\":rows.last().and_then(|row|row.get(\"id\")).and_then(serde_json::Value::as_str),\"sameCell\":same})},Err(_)=>serde_json::json!({\"ok\":false})}}",
+      "cases": [
+        {
+          "input": [
+            {
+              "id": "native-a"
+            },
+            {
+              "id": "native-b"
+            }
+          ],
+          "output": {
+            "ok": true,
+            "count": 2,
+            "firstId": "native-a",
+            "lastId": "native-b",
+            "sameCell": true
+          }
+        },
+        {
+          "input": [
+            {
+              "id": "native-c"
+            }
+          ],
+          "output": {
+            "ok": true,
+            "count": 1,
+            "firstId": "native-c",
+            "lastId": "native-c",
+            "sameCell": true
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": true,
+            "count": 0,
+            "firstId": null,
+            "lastId": null,
+            "sameCell": true
+          }
+        }
+      ]
+    }
   },
   "safe_cex_venue_bitget::cancellation::CancelFuture": {
     "generics": {
