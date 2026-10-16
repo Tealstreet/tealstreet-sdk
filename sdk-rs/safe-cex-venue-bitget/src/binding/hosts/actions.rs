@@ -218,6 +218,9 @@ fn bind_callable(owner: Js, member: Js, name: &str) -> Js {
 
 fn invoke_value(f: &Js, args: Vec<Js>) -> Result<Js, Thrown> {
     if !f.is_callable() {
+        if std::env::var("BITGET_DEBUG_CALLS").is_ok() {
+            eprintln!("NONCALL-A {}", std::backtrace::Backtrace::force_capture());
+        }
         return Err(Thrown::type_error(&format!("{} is not a function", f.to_display())));
     }
     f.call(Js::Undefined, args)

@@ -24,6 +24,8 @@ use std::{
 pub struct BitgetDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub imports: Rc<dyn BitgetImports>,
+    /// Provider for `options.externalPublicData`; required when that option is set.
+    pub external_public_data: Option<super::rt::ExternalPublicDataFactory>,
 }
 
 pub fn settings() -> ExchangeSettings {
@@ -64,6 +66,11 @@ impl BitgetExchange {
                 )));
             }
         };
+        if options.external_public_data.is_some() && deps.external_public_data.is_none() {
+            return Err(ExchangeError::new(
+                "BitgetExchange: externalPublicData is configured but no external public data provider was supplied",
+            ));
+        }
         builtins::install_runtime(deps.runtime.clone());
         let shared = Rc::new_cyclic(|weak: &std::rc::Weak<Shared>| {
             let globals = globals::build(weak.clone());
@@ -79,6 +86,7 @@ impl BitgetExchange {
                 variant,
                 name: name.clone(),
                 options: options.clone(),
+                external_public_data: deps.external_public_data.clone(),
             }
         });
         let rt = Rt { shared: shared.clone(), this: Js::Undefined };
@@ -96,6 +104,7 @@ impl BitgetExchange {
         };
         *shared.exchange.borrow_mut() = receiver.clone();
         super::getters::install(&rt.with_this(receiver.clone()));
+        super::prototype::install(&rt.with_this(receiver.clone()));
         let venue = Rc::new(Self {
             rt: rt.with_this(receiver),
             capabilities: capabilities(),

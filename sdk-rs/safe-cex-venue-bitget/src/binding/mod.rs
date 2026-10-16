@@ -6,6 +6,7 @@ pub mod getters;
 pub mod globals;
 pub mod hosts;
 pub mod promise;
+pub mod prototype;
 pub mod rt;
 pub mod sockets;
 pub mod store;

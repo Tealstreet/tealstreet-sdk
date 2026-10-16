@@ -583,7 +583,12 @@ impl Js {
     pub fn call(&self, this: Js, args: Vec<Js>) -> Result<Js, Thrown> {
         match self {
             Js::Function(f) => (f.call)(this, args),
-            other => Err(Thrown::type_error(&format!("{} is not a function", other.to_display()))),
+            other => {
+                if std::env::var("BITGET_DEBUG_CALLS").is_ok() {
+                    eprintln!("NONCALL {:?}\n{}", other, std::backtrace::Backtrace::force_capture());
+                }
+                Err(Thrown::type_error(&format!("{} is not a function", other.to_display())))
+            }
         }
     }
     pub fn call_method(&self, name: &str, args: Vec<Js>) -> Result<Js, Thrown> {

@@ -212,6 +212,9 @@ impl Http {
 impl BitgetImports for Http {
     fn send(&self, config: Js) -> JsFuture<'static> {
         let read = |k: &str| config.get(k).ok().map(|v| to_json(&v).unwrap_or(Value::Null)).unwrap_or(Value::Null);
+        if std::env::var("BITGET_DEBUG_HTTP").is_ok() {
+            eprintln!("CONFIG {:?}", config);
+        }
         let method = read("method").as_str().unwrap_or("get").to_uppercase();
         let url = read("url").as_str().unwrap_or_default().to_owned();
         self.requests.borrow_mut().push(Request {
@@ -242,7 +245,7 @@ impl BitgetImports for Http {
 pub struct Harness {
     pub runtime: Rc<Runtime>,
     pub http: Rc<Http>,
-    pub store: Rc<safe_cex_store::DefaultStore>,
+    pub store: Rc<safe_cex_store::store::DefaultStore>,
     pub exchange: Rc<BitgetExchange>,
 }
 
@@ -256,12 +259,12 @@ pub fn harness(name: ExchangeName, options: ExchangeOptions, script: impl FnOnce
     runtime.now.set(1_700_000_000_000.0);
     let http = Rc::new(Http::default());
     script(&http);
-    let store = Rc::new(safe_cex_store::DefaultStore::new());
+    let store = Rc::new(safe_cex_store::store::DefaultStore::new());
     let exchange = BitgetExchange::new(
         name,
         options,
         store.clone(),
-        BitgetDependencies { runtime: runtime.clone(), imports: http.clone() },
+        BitgetDependencies { runtime: runtime.clone(), imports: http.clone(), external_public_data: None },
     )
     .expect("BitgetExchange constructs from real options");
     Harness { runtime, http, store, exchange }

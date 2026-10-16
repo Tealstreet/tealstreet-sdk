@@ -33,7 +33,12 @@ pub struct Shared {
     pub variant: Variant,
     pub name: safe_cex_types::ExchangeName,
     pub options: safe_cex_types::ExchangeOptions,
+    pub external_public_data: Option<ExternalPublicDataFactory>,
 }
+
+pub type ExternalPublicDataFactory = Rc<
+    dyn Fn(&safe_cex_types::ExchangeOptionsExternalPublicData) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData>,
+>;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Variant {
@@ -65,9 +70,18 @@ impl Rt {
         self.shared.runtime.clone()
     }
     pub fn global(&self, name: &str) -> Result<Js, Thrown> {
-        let value = self.shared.globals.get(name)?;
-        if value.is_undefined() && !self.shared.globals.has_own(name) {
-            return Err(Thrown::error("ReferenceError", &format!("{name} is not defined")));
+        let globals = &self.shared.globals;
+        if globals.has_own(name) {
+            return globals.get(name);
+        }
+        let mut parts = name.split('.');
+        let first = parts.next().unwrap_or_default();
+        if !globals.has_own(first) {
+            return Err(Thrown::error("ReferenceError", &format!("{first} is not defined")));
+        }
+        let mut value = globals.get(first)?;
+        for part in parts {
+            value = super::hosts::assembly::bound_member(&value, part)?;
         }
         Ok(value)
     }
