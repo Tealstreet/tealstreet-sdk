@@ -1,3 +1,26 @@
+# Associated-type alias review proposal
+
+Six native witnesses instantiate `PrivateValue`, `PrivateError`, `PublicValue`,
+`PublicError`, `ExchangeValue` and `ExchangeError` with the actual production Realm.
+Each public alias remains the exact `<H as WsPingHost>::Value` or `::Error`
+projection; no declaration or trait bound changes. The compiler-authenticated
+Realm implementation binds both associated types to `realm::value::Value`.
+
+`tests/support/accepted_projection_aliases.rs`: **6/6 native tests pass**. Each
+checks both directions of mutable-reference type equality and actual TypeId,
+then retains the original native slot, undefined, negative-zero/infinity bits,
+unpaired UTF-16 units, object identity and thrown-object identity. A write through
+the aliased reference is visible through the original object. An initial fixture
+compile error (missing `mut` on the Realm binding) was repaired before execution;
+it is not runtime failure evidence. Strict native all-targets clippy passes.
+The independent review found no issues.
+
+This is a finite native identity proposal for Realm only. The ordinary accepted
+package gate retains its associated-projection refusal until the shared finite
+policy route is reviewed. No contract or generic policy permission is installed
+by this proof, and decoder traits, alternate ingress and route behavior remain
+separate obligations. No whole-package acceptance is claimed.
+
 # Placement-record decoder boundary proof
 
 The actual `HyperliquidPlacementRecord` decoder initially failed three named
