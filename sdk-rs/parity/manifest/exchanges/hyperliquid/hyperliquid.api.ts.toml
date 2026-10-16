@@ -1,14 +1,14 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.api.ts"
-rust_files = [ "safe-cex-venue-hyperliquid/src/api.rs" ]
+rust_files = [ "safe-cex-venue-hyperliquid/src/api.rs", "safe-cex-venue-hyperliquid/src/json_values.rs" ]
 
 [[symbol]]
 ts = "getRequestActionType"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/api.rs::get_request_action_type"
+rs = [ "safe-cex-venue-hyperliquid/src/api.rs::get_request_action_type", "safe-cex-venue-hyperliquid/src/json_values.rs::JsonValue" ]
 status = "divergent"
-note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. The maintained caller only compares cancel/cancelByCloid; an extracted private helper returning D800 does not establish a retained program consumer, so the prior FORCED claim is withdrawn under sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Raw ignored-surrogate cancellation selection remains repaired. The128-level nesting-depth budget still refuses depth140 to bound recursive ingress work; accessors/custom prototypes remain outside the JSON adapter. Targets: safe-cex-venue-hyperliquid/src/api.rs::get_request_action_type ."
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. The maintained caller only compares cancel/cancelByCloid; an extracted private helper returning D800 does not establish a retained program consumer, so the prior FORCED claim is withdrawn under sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Raw ignored-surrogate cancellation selection remains repaired. The128-level nesting-depth budget still refuses depth140 to bound recursive ingress work; accessors/custom prototypes remain outside the JSON adapter. Targets: safe-cex-venue-hyperliquid/src/api.rs::get_request_action_type . Split member `safe-cex-venue-hyperliquid/src/json_values.rs::JsonValue` - shared raw JSON value carrier (UTF-16 strings, binary64 numbers, ordered keys); also serves 1 other mapped rows."
 
 [[symbol]]
 ts = "getOrderErrorTelemetry"
@@ -38,9 +38,9 @@ note = "CHOSEN: safe-cex-venue-hyperliquid/CLAUDE.md#api-execution-contract. The
 ts = "addRateLimitInterceptor"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/api.rs::ApiClient::prepare_request"
+rs = [ "safe-cex-venue-hyperliquid/src/api.rs::ApiClient::prepare_request", "safe-cex-venue-hyperliquid/src/json_values.rs::JsonObject::get" ]
 status = "divergent"
-note = "CHOSEN: safe-cex-venue-hyperliquid/CLAUDE.md#api-execution-contract and #limiter-execution-contract. Encoded text now reaches the weight selector exactly once; ignored D800/depth140 fields no longer reduce userRole60 to20. Physical JSON string literals reserve20 rather than being parsed again as userRole60. Native subsequent-request clocks observe the reservation; source global singleton and eager Promise ownership remain host-supplied costs. Targets: safe-cex-venue-hyperliquid/src/api.rs::ApiClient::prepare_request . Incoming integration independently repaired physical parse-once classification; its nine request/reservation cases through capture and body-provenance receipts are retained. The earlier source60/native20 full-parser cost is superseded here by the raw selector repair. The repaired boundary retains modeled TypeError name/message through preparation and actual execution before pacing/transport; the existing shared JavaScript error variant carries those fields. Native error and zero-clock/adapter assertions plus actual source interception distinguish this from heap Error identity."
+note = "CHOSEN: safe-cex-venue-hyperliquid/CLAUDE.md#api-execution-contract and #limiter-execution-contract. Encoded text now reaches the weight selector exactly once; ignored D800/depth140 fields no longer reduce userRole60 to20. Physical JSON string literals reserve20 rather than being parsed again as userRole60. Native subsequent-request clocks observe the reservation; source global singleton and eager Promise ownership remain host-supplied costs. Targets: safe-cex-venue-hyperliquid/src/api.rs::ApiClient::prepare_request . Incoming integration independently repaired physical parse-once classification; its nine request/reservation cases through capture and body-provenance receipts are retained. The earlier source60/native20 full-parser cost is superseded here by the raw selector repair. The repaired boundary retains modeled TypeError name/message through preparation and actual execution before pacing/transport; the existing shared JavaScript error variant carries those fields. Native error and zero-clock/adapter assertions plus actual source interception distinguish this from heap Error identity. Split member `safe-cex-venue-hyperliquid/src/json_values.rs::JsonObject::get` - own-property lookup of the shared JSON snapshot carrier; also serves 180 other mapped rows."
 
 [[symbol]]
 ts = "createExchangeAPI"

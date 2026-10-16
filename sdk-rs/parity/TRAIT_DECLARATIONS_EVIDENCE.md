@@ -259,13 +259,13 @@ runtime-bound AccountCallback branches. These are explicit declarations of
 consumed capabilities, not claims of completed host runtime implementations.
 Policy definitions remain at [MANIFEST-SPEC](MANIFEST-SPEC.md#divergence-taxonomy).
 
-Two findings remain deliberately unassigned and still fail canonical invention:
+One finding remains deliberately unassigned and still fails canonical invention; the second is superseded:
 
 - `safe-cex-venue-woo/src/legacy_market_reads.rs::Host::nullish`: declared as a
   required public capability, but no production algorithm call site was found.
-- `safe-cex-venue-grvt/src/account_runtime.rs::AccountHost::number_value`: no
-  production algorithm call site was found; the maintained test host does call
-  it internally while implementing other coercion primitives.
+- `safe-cex-venue-grvt/src/account_runtime.rs::AccountHost::number_value`:
+  superseded. `trading_runtime.rs` calls it through `TradingHost: AccountHost`
+  (placeOrder status, fill size), so it is now mapped on `GrvtExchange.placeOrder`.
 
 Neither is proved dead for external implementors of these public traits.
 Deleting the public API or assigning a fictitious consuming operation merely to

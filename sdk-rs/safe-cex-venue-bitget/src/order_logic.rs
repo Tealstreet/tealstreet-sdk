@@ -271,6 +271,7 @@ pub fn build_uta_strategy_place_opts_from_order(order: &safe_cex_types::Order) -
         client_order_id: None,
         max_slippage_pct: None,
         close: None,
+        implied_volatility: None,
     }
 }
 

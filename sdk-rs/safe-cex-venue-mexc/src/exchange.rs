@@ -52,6 +52,7 @@ pub struct MexcExchange {
     rejected: RefCell<BTreeMap<String, f64>>,
     symbol_settings: RefCell<BTreeMap<String, MexcSymbolConfig>>,
     account_position_mode: RefCell<PositionMode>,
+    public_socket: RefCell<Option<Rc<crate::ws_public::MexcPublicSocket>>>,
 }
 enum OrderKind {
     Regular,
@@ -207,6 +208,36 @@ impl Exchange for MexcExchange {
     fn fetch_positions(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Position>> {
         MexcExchange::fetch_positions(self, symbols)
     }
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        if self.base.external_public_data_provider.borrow().is_some() {
+            return self.base.listen_ohlcv(options, callback);
+        }
+        let socket = self
+            .public_socket
+            .borrow()
+            .clone()
+            .ok_or_else(|| ExchangeError::new("MEXC public socket has not been constructed"))?;
+        socket.listen_ohlcv(options, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        if self.base.external_public_data_provider.borrow().is_some() {
+            return self.base.listen_order_book(symbol, callback);
+        }
+        let socket = self
+            .public_socket
+            .borrow()
+            .clone()
+            .ok_or_else(|| ExchangeError::new("MEXC public socket has not been constructed"))?;
+        socket.listen_order_book(symbol, callback)
+    }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
         MexcExchange::fetch_ohlcv(self, options)
     }
@@ -248,6 +279,151 @@ fn failure_report_value(error: &RestFailure) -> Value {
 }
 
 impl MexcExchange {
+    pub fn new(
+        base: BaseExchange,
+        xhr: Rc<dyn RestAdapter>,
+        local_to_utc: Rc<dyn Fn(f64) -> f64>,
+        sockets: crate::sockets::MexcSocketDependencies,
+    ) -> Rc<Self> {
+        let exchange = Rc::new(Self {
+            base,
+            xhr,
+            local_to_utc: local_to_utc.clone(),
+            capabilities: ExchangeCapabilities::default(),
+            placed: RefCell::default(),
+            canceled: RefCell::default(),
+            rejected: RefCell::default(),
+            symbol_settings: RefCell::default(),
+            account_position_mode: RefCell::new(PositionMode::Hedged),
+            public_socket: RefCell::default(),
+        });
+        let public = crate::ws_public::MexcPublicProtocol::bind(
+            &exchange,
+            sockets.runtime.clone(),
+            local_to_utc.clone(),
+        );
+        exchange.base.set_socket(
+            safe_cex_exchange::socket_lifecycle::SocketSlot::Public,
+            Some(public.base.clone()),
+        );
+        *exchange.public_socket.borrow_mut() = Some(public);
+        let reject = Rc::downgrade(&exchange);
+        let seen = Rc::downgrade(&exchange);
+        let canceled = Rc::downgrade(&exchange);
+        let handlers = crate::ws_private::MexcPrivateHandlers::new_with_fallible_hooks(
+            local_to_utc,
+            None,
+            Rc::new(move |id, code| {
+                reject
+                    .upgrade()
+                    .ok_or_else(|| ExchangeError::new("MEXC parent was dropped"))?
+                    .note_rejected_regular_order(&id, code)
+            }),
+            Rc::new(move |id| {
+                let parent = seen
+                    .upgrade()
+                    .ok_or_else(|| ExchangeError::new("MEXC parent was dropped"))?;
+                mark_stop_like_order_seen(&mut parent.placed.borrow_mut(), &id);
+                Ok(())
+            }),
+            Rc::new(move |id| {
+                let parent = canceled
+                    .upgrade()
+                    .ok_or_else(|| ExchangeError::new("MEXC parent was dropped"))?;
+                let found = crate::exchange_helpers::is_recently_canceled_stop_like_order_id(
+                    &mut parent.canceled.borrow_mut(),
+                    id,
+                    &|| parent.base.runtime.now_ms(),
+                );
+                Ok(found)
+            }),
+            sockets.emit_fill,
+        );
+        let private = crate::sockets::PrivateProtocol::bind(
+            &exchange,
+            sockets.runtime,
+            handlers,
+            sockets.remote_account_name,
+        );
+        exchange.base.set_socket(
+            safe_cex_exchange::socket_lifecycle::SocketSlot::Private,
+            Some(private),
+        );
+        exchange
+    }
+    pub(crate) fn login_signature(
+        self: &Rc<Self>,
+        api_key: String,
+        req_time: String,
+        account_name: Option<String>,
+    ) -> ExchangeFuture<'static, Option<String>> {
+        let owner = self.clone();
+        let remote = self.base.signers.remote_signer.clone();
+        let local = remote.is_none().then(|| {
+            crate::api::sign_mexc_ws_login(&self.base.options().secret, &api_key, &req_time)
+        });
+        let id = remote.as_ref().map(|_| self.base.runtime.unique_id());
+        let mut future = Box::pin(async move {
+            if let Some(local) = local {
+                return local.map(Some).map_err(ExchangeError::new);
+            }
+            let remote = remote.expect("MEXC remote signer branch");
+            let request = safe_cex_transport::signing::RemoteSignerRequest::WsAuth {
+                exchange_name: safe_cex_types::ExchangeName::Mexc,
+                account_name,
+                request: safe_cex_types::ws_auth::WsAuthRequest {
+                    id: id.map(Value::String),
+                    request_type: Some(
+                        serde_json::value::RawValue::from_string("\"ws-auth\"".into())
+                            .expect("WS request type"),
+                    ),
+                    ws_auth: Some(safe_cex_types::ws_auth::WsAuth {
+                        to_sign: Some(format!("{api_key}{req_time}")),
+                        output_format: Some(json!("hex")),
+                        extra_data: Some(
+                            serde_json::value::RawValue::from_string(
+                                json!({"reqTime":req_time}).to_string(),
+                            )
+                            .expect("WS request data"),
+                        ),
+                    }),
+                },
+            };
+            let response = crate::sockets::reaction(remote.sign(request))
+                .await
+                .map_err(|error| ExchangeError::new(error.to_string()))?;
+            let safe_cex_transport::signing::RemoteSignerResponse::WsAuth(response) = response
+            else {
+                return Err(ExchangeError::new("MEXC WS signer returned HTTP response"));
+            };
+            if response.error.as_ref().is_some_and(|s| !s.is_empty())
+                || response
+                    .ws_auth_signature
+                    .as_ref()
+                    .is_none_or(|s| s.is_empty())
+            {
+                owner.base.emit_and_log_error(
+                    ExchangeErrorInput::Message(format!(
+                        "Remote WS signing unavailable: {}",
+                        response.error.as_deref().unwrap_or("no signature returned")
+                    )),
+                    None,
+                    None,
+                )?;
+                return Ok(None);
+            }
+            Ok(response.ws_auth_signature)
+        });
+        use std::future::Future;
+        match future
+            .as_mut()
+            .poll(&mut std::task::Context::from_waker(std::task::Waker::noop()))
+        {
+            std::task::Poll::Ready(value) => Box::pin(async move { value }),
+            std::task::Poll::Pending => future,
+        }
+    }
+
     // ts: MexcExchange.validateAccount
     pub fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
         Box::pin(async move {
@@ -295,13 +471,8 @@ impl MexcExchange {
         Box::pin(async move {
             let validation = self.validate_account().await?;
             if safe_cex_num::js_truthy(Some(validation.error.as_value())) {
-                let message = safe_cex_num::js_string(Some(validation.error.as_value())).map_err(
-                    |cause| {
-                        let mut error = ExchangeError::new(cause.message);
-                        error.name = cause.name.into();
-                        error
-                    },
-                )?;
+                let message = safe_cex_num::js_string(Some(validation.error.as_value()))
+                    .map_err(crate::exchange_errors::coercion)?;
                 return Err(ExchangeError::new(message));
             }
             let options = self.base.options();
@@ -498,11 +669,11 @@ impl MexcExchange {
                 params: Some(Value::Object(params)),
                 ..Default::default()
             };
-            let response = self.xhr.execute(request).await.map_err(|error| {
-                ExchangeError::new(
-                    failure_message(&error).unwrap_or_else(|message| message.message),
-                )
-            })?;
+            let response = self
+                .xhr
+                .execute(request)
+                .await
+                .map_err(ExchangeError::from)?;
             let payload: Value = parse_response_json(&response.body)
                 .map_err(|error| ExchangeError::new(error.to_string()))?;
             let mut candles = normalize_kline_response(&payload, self.local_to_utc.as_ref())
@@ -861,9 +1032,11 @@ impl MexcExchange {
                 ..Default::default()
             };
             let result = async {
-                let response = self.xhr.execute(request.clone()).await.map_err(|error| {
-                    failure_message(&error).unwrap_or_else(|message| message.message)
-                })?;
+                let response = self
+                    .xhr
+                    .execute(request.clone())
+                    .await
+                    .map_err(|error| failure_report_value(&error))?;
                 let payload: Value =
                     parse_response_json(&response.body).map_err(|error| error.to_string())?;
                 let mut rows = BTreeMap::new();
@@ -884,18 +1057,15 @@ impl MexcExchange {
                         );
                     }
                 }
-                Ok::<_, String>(tickers)
+                Ok::<_, Value>(tickers)
             }
             .await;
 
             match result {
                 Ok(tickers) => Ok(tickers),
                 Err(message) => {
-                    self.base.emit_and_log_error(
-                        ExchangeErrorInput::Message(message),
-                        None,
-                        None,
-                    )?;
+                    self.base
+                        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)?;
                     Ok(self.base.store.tickers().to_vec())
                 }
             }
@@ -988,9 +1158,11 @@ impl MexcExchange {
                 ..Default::default()
             };
             let result = async {
-                let response = self.xhr.execute(request.clone()).await.map_err(|error| {
-                    failure_message(&error).unwrap_or_else(|message| message.message)
-                })?;
+                let response = self
+                    .xhr
+                    .execute(request.clone())
+                    .await
+                    .map_err(|error| failure_report_value(&error))?;
                 let payload: Value =
                     parse_response_json(&response.body).map_err(|error| error.to_string())?;
                 let rows = extract_rows(Some(&payload), &[]);
@@ -1011,18 +1183,15 @@ impl MexcExchange {
                 for row in &tradable {
                     markets.push(normalize_market(row).map_err(|error| error.message.to_string())?);
                 }
-                Ok::<_, String>(markets)
+                Ok::<_, Value>(markets)
             }
             .await;
 
             match result {
                 Ok(markets) => Ok(markets),
                 Err(message) => {
-                    self.base.emit_and_log_error(
-                        ExchangeErrorInput::Message(message),
-                        None,
-                        None,
-                    )?;
+                    self.base
+                        .emit_and_log_error(ExchangeErrorInput::Raw(message), None, None)?;
                     Ok(self.base.store.markets().to_vec())
                 }
             }

@@ -140,6 +140,7 @@ pub fn prepare_update_order(order: &Order, update: OrderUpdate) -> PlaceOrderOpt
         client_order_id: None,
         max_slippage_pct: None,
         close: order.close,
+        implied_volatility: None,
     };
     if let Some(price) = update.price {
         opts.price = price;

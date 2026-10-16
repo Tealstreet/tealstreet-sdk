@@ -360,6 +360,7 @@ impl DisplayedPositionsPostprocessor {
                     info: None,
                     extra: None,
                     last_update: None,
+                    option: None,
                 },
                 key: None,
                 account: self.account_name.clone(),

@@ -99,6 +99,7 @@ pub fn normalize_market(raw: &WeexUtilityInput) -> Result<Market, WeexUtilityErr
                 min: min_leverage,
                 max: max_leverage,
             },
+            price: None,
         },
         contract_size: Some(contract_val),
         maker_fee: Some(maker_fee),
@@ -110,6 +111,7 @@ pub fn normalize_market(raw: &WeexUtilityInput) -> Result<Market, WeexUtilityErr
         is_spot: None,
         is_perpetual: None,
         is_read_only: None,
+        option: None,
     })
 }
 

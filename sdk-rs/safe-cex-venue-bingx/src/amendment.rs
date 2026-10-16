@@ -122,6 +122,7 @@ fn opts(order: &Order, price: f64, kind: OrderType) -> PlaceOrderOpts {
         trigger_price: None,
         trigger_type: None,
         max_slippage_pct: None,
+        implied_volatility: None,
     }
 }
 impl BingxAmendment {

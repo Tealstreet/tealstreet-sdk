@@ -128,6 +128,7 @@ pub fn normalize_market(raw: &Map<String, Value>) -> Result<Market, JsCoercionEr
                 min: to_number(raw.get("minLeverage"), Some(1.0))?,
                 max: to_number(pick(raw, &["maxLeverage", "regularMaxLeverage"]), Some(1.0))?,
             },
+            price: None,
         },
         contract_size: Some(contract_size),
         maker_fee: Some(to_number(raw.get("makerFeeRate"), None)?),
@@ -138,6 +139,7 @@ pub fn normalize_market(raw: &Map<String, Value>) -> Result<Market, JsCoercionEr
         is_spot: None,
         is_perpetual: None,
         is_read_only: None,
+        option: None,
     })
 }
 
@@ -466,6 +468,7 @@ fn fake_position(
             unrealized_pnl_native: Some(0.0),
         }),
         last_update: Some(0.0),
+        option: None,
     }
 }
 
@@ -717,11 +720,13 @@ pub fn normalize_position(
             pick(raw, &["updateTime", "modifyTime", "createTime"]),
             local_to_utc,
         )?),
+        option: None,
     }))
 }
 
 fn empty_order(id: String, symbol: String, side: OrderSide) -> safe_cex_types::Order {
     safe_cex_types::Order {
+        client_order_id: None,
         id,
         parent_id: None,
         status: OrderStatus::Open,

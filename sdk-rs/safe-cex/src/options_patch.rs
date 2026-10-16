@@ -276,5 +276,7 @@ pub(crate) fn empty_options() -> ExchangeOptions {
         payload_signer: None,
         hosted_mode: None,
         external_public_data: None,
+        enable_inverse_markets: None,
+        enable_option_markets: None,
     }
 }

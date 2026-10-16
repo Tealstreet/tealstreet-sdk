@@ -151,6 +151,7 @@ pub fn fetch_spot_positions(store: &dyn Store) -> Vec<Position> {
                 margin_size: None,
                 extra: None,
                 last_update: None,
+                option: None,
             });
         }
     }
