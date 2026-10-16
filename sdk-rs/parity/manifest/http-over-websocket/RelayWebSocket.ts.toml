@@ -22,9 +22,9 @@ note = "FINDING owner: HOW transport annotation audit. makeErrorEvent selects th
 ts = "RelayWebSocket"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-transport/src/relay.rs::RelayWebSocket"
+rs = [ "safe-cex-transport/src/relay.rs::RelayWebSocket", "safe-cex-transport/src/relay.rs::RelayWebSocket::ready_state" ]
 status = "ported"
-note = "Renamed to safe-cex-transport/src/relay.rs::RelayWebSocket."
+note = "Renamed to safe-cex-transport/src/relay.rs::RelayWebSocket. Split member `safe-cex-transport/src/relay.rs::RelayWebSocket::ready_state`; the public readyState field (CONNECTING/OPEN/CLOSING/CLOSED) projected from the relay state machine."
 
 [[symbol]]
 ts = "RelayWebSocket.onopen"

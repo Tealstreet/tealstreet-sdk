@@ -161,6 +161,10 @@ owners, including newly added Deserialize implementations on old declarations,
 may never gain fingerprints. This changes admission policy, not the 115-owner
 measurement above. The reviewed bootstrap is `266f305ac1642598cac948efb8ecba3466c66bb0`;
 the ledger path is anchored, so rename-plus-enlarge cannot create a fresh baseline.
+In the tealstreet-sdk mirror, where that monorepo commit is not an ancestor, the
+anchor is the seed commit `91a50c7a2c14cc5e291c4b4f0633fde32f752757`, which restored
+the ledger byte-identical to monorepo master `f769aa8323` after the #8006 re-root
+import removed it. Gate authority moved here with tealstreet-next #8013.
 
 Birth proof uses actual current compiler ownership plus historical nominal source
 declarations, independently of active cfg and Deserialize. All historical source

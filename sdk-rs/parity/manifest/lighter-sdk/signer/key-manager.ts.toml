@@ -78,9 +78,9 @@ note = "Source typed string domain under ordinary intrinsics: exact UTF16 length
 ts = "normalizePrivateKey"
 kind = "function"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_key_management.rs::normalize_private_key"
+rs = [ "safe-cex-venue-lighter/src/sdk_key_management.rs::normalize_private_key", "safe-cex-venue-lighter/src/sdk_key_management.rs::KeyInput" ]
 status = "ported"
-note = "Ordinary UTF16 strings and owned unmodified Buffer/Uint8Array bytes: lowercase-only 0x removal, case preservation, lowercase byte hex and source validation/error text. Exotic prototype/global overrides and iterators outside adapter. Native result/error oracle."
+note = "Ordinary UTF16 strings and owned unmodified Buffer/Uint8Array bytes: lowercase-only 0x removal, case preservation, lowercase byte hex and source validation/error text. Exotic prototype/global overrides and iterators outside adapter. Native result/error oracle. Split member `safe-cex-venue-lighter/src/sdk_key_management.rs::KeyInput`. Inline string | Buffer | Uint8Array parameter shape accepted by the normalizePrivateKey body (and shared with normalizePublicKey)."
 
 [[symbol]]
 ts = "normalizePublicKey"

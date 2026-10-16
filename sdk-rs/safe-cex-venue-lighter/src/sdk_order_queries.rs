@@ -148,7 +148,7 @@ pub struct GetTradesOptions {
 pub trait OrderQuerySemantics {
     fn to_string_method(&self, value: &AccountValue) -> SigningResult<AccountValue>;
 }
-/// Partial native class. getOrderBookOrders and the manifest class row remain pending.
+/// Native class; getOrderBookOrders lives in safe-cex-lighter-sdk/src/api_reads.rs.
 pub struct OrderApi {
     host: AccountApi,
     semantics: Rc<dyn AccountSemantics>,
