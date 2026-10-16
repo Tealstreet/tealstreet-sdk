@@ -17,6 +17,7 @@ use safe_cex_exchange::{
         base_exchange::{self, BaseExchangeParts},
         client::JsHttpHost,
         globals::{install_builtins, install_enums},
+        library::install_library,
         promise::await_js,
         scope::ScopeShared,
         store,
@@ -102,6 +103,7 @@ impl LighterNativeExchange {
             let globals = Js::object(vec![]);
             install_builtins(&globals, weak.clone());
             install_enums(&globals);
+            install_library(&globals, weak.clone());
             let _ = globals.define(
                 "BaseExchange",
                 base_exchange_class(weak.clone(), name.clone(), options.clone()),
@@ -119,6 +121,10 @@ impl LighterNativeExchange {
         super::globals::install(&shared.globals).map_err(err)?;
         let realm = Realm(shared.clone());
         install_sdk_client(&realm, deps.registry.clone()).map_err(err)?;
+        super::sdk_client::install(&realm).map_err(err)?;
+        super::signer::install(&realm).map_err(err)?;
+        super::ws_public::install(&realm).map_err(err)?;
+        super::ws_private::install(&realm).map_err(err)?;
         let class = LighterExchange::define(&realm).map_err(|e| err(to_thrown(e)))?;
         let this = to_js(&class)
             .call(
