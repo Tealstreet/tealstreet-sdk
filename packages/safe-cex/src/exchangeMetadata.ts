@@ -1669,7 +1669,7 @@ const TxFlowMetadata: ExchangeMetadata = {
   ...defaultMetaData,
   exchangeName: 'txflow' as ExchangeName,
   prettyName: 'TxFlow',
-  logo: '/static/exchanges/logos/TXFLOW/light.png',
+  logo: '/static/exchanges/logos/TXFLOW/logo.svg',
   lightLogo: '/static/exchanges/logos/TXFLOW/light.png',
   darkLogo: '/static/exchanges/logos/TXFLOW/dark.png',
   refImage: '',
