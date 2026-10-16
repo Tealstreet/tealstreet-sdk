@@ -11,6 +11,11 @@ the Kraken family (`kraken`, `krakenspot`),
 (crate layout, "Constructors and loaders live in `safe-cex-registry`"; P4 exit,
 "a tier-1 account on the Rust path behind a flag").
 
+TxFlow (`txflow`) is also constructible as its existing **Phase-0 scaffold**.
+Its `start` emits and returns the exact source refusal before any IO; this entry
+does not enable REST, WebSocket or trading support. `native_host_txflow` verifies
+the production constructor and both network guards.
+
 ## Today
 
 `loaders.rs` forwards a TypeScript module specifier and export name to a host
