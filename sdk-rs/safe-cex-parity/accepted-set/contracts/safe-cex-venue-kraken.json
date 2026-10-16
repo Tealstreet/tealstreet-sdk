@@ -641,5 +641,421 @@
     },
     "reason": "Compares two already-typed UTF-8 operands through the shared pinned root collator and returns native Ordering. The string operands are literal sort keys, not serialized representations; this body parses no value or record.",
     "evidence": "Reviewed the complete production body against packages/safe-cex/src/exchanges/kraken/kraken.api.ts. tests/accepted_helpers.rs::sort_compares_literal_operands_without_decoding_them executes independently authored native observations through this exact API; tests/helpers.rs runs the actual TS declarations and pinned nanoid dependency. The combined four native plus five live-source tests pass with zero ignored. scripts/helper-contract-controls.py compiled a changed result, required this named native witness to fail after compilation, restored exact source and passed the named witness. All nine native/source tests pass again after the four controls. Accepted-set receipts for this role are classification-only, not execution. The existing UTF-8/root-collator/error-snapshot/fixed-ID host profile is MANIFEST-SPEC#kraken-module-utility-adapters; no new decoding exemption or complete alias/feature/wasm coverage is claimed."
+  },
+  "safe_cex_venue_kraken::futures_candles::Options": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "symbol": "PF_XRPUSD",
+      "interval": "1m",
+      "limit": 17.25,
+      "from": 31.75,
+      "to": 123.5
+    },
+    "evidence": "packages/safe-cex/src/types.ts::OHLCVOptions and kraken.exchange.ts::fetchOHLCV. The private typed projection retains symbol/interval and optional limit/from/to; none of the source method algorithm is reclassified. The concrete Deserialize uses the existing shared JsNumberInput backend and object guard with a private serde(remote) schema, preserving field order, optional/null behavior, numeric-output registration, unknown-field behavior and Serialize. Native unit witnesses observe every field, presence and numeric bits over seven ordinary/qualified/numeric routes, without serializing the owner to infer its fields. Independently authored complete valid declaration-order arrays were accepted by all four original decoders. Removing only each object guard produces its named compiled full-array admission failure, and exact restoration passes all four owner tests. Pinned native witnesses and fresh production probes pass negative-zero, binary64 rounding, subnormal and nonfinite observations. Fresh compiler inspection confirms each remote companion is private, has no independent Deserialize or conversion trait, and exposes only its generated generic Serde helper returning the actual reviewed owner. MANIFEST-SPEC#numeric-ingress-defect and #closed-typed-output-boundary; the existing mapper host profile is MANIFEST-SPEC#kraken-futures-candle-host. Other owners, aliases, receiver refusals and feature/wasm accepted behavior remain independent.",
+    "entrypoints": [],
+    "nativeObservation": {
+      "nativeFields": [
+        "symbol",
+        "interval",
+        "limitBits",
+        "fromBits",
+        "toBits"
+      ],
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independently authored raw JSON\")) { Ok(d) => serde_json::json!({\"ok\":true, \"symbol\":d.symbol, \"interval\":d.interval, \"limitBits\":d.limit.map(|n| format!(\"{:016x}\", n.to_bits())), \"fromBits\":d.from.map(|n| format!(\"{:016x}\", n.to_bits())), \"toBits\":d.to.map(|n| format!(\"{:016x}\", n.to_bits()))}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "{\"symbol\":\"PF_XRPUSD\",\"interval\":\"1m\",\"limit\":17.25,\"from\":-0,\"to\":123.5,\"ignored\":true}",
+          "output": {
+            "ok": true,
+            "symbol": "PF_XRPUSD",
+            "interval": "1m",
+            "limitBits": "4031400000000000",
+            "fromBits": "8000000000000000",
+            "toBits": "405ee00000000000"
+          }
+        },
+        {
+          "input": "{\"symbol\":\"ETH/USD\",\"interval\":\"5m\"}",
+          "output": {
+            "ok": true,
+            "symbol": "ETH/USD",
+            "interval": "5m",
+            "limitBits": null,
+            "fromBits": null,
+            "toBits": null
+          }
+        },
+        {
+          "input": "{\"symbol\":\"ETH/USD\",\"interval\":\"5m\",\"limit\":null,\"from\":null,\"to\":null}",
+          "output": {
+            "ok": true,
+            "symbol": "ETH/USD",
+            "interval": "5m",
+            "limitBits": null,
+            "fromBits": null,
+            "toBits": null
+          }
+        },
+        {
+          "input": "{\"symbol\":\"NUM\",\"interval\":\"1m\",\"limit\":9007199254740993,\"from\":5e-324,\"to\":1e400}",
+          "output": {
+            "ok": true,
+            "symbol": "NUM",
+            "interval": "1m",
+            "limitBits": "4340000000000000",
+            "fromBits": "0000000000000001",
+            "toBits": "7ff0000000000000"
+          }
+        },
+        {
+          "input": "[\"PF_XRPUSD\",\"1m\",17.25,31.75,123.5]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"symbol\":\"x\",\"interval\":\"1m\",\"limit\":\"17\"}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kraken::spot_reads::Options": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "symbol": "XBT/USD",
+      "interval": "15m",
+      "from": 47.25
+    },
+    "evidence": "packages/safe-cex/src/types.ts::OHLCVOptions and krakenspot.exchange.ts::fetchOHLCV. The private typed projection retains symbol/interval/from; limit and to are not fields of this Rust owner. The concrete Deserialize uses the existing shared JsNumberInput backend and object guard with a private serde(remote) schema, preserving field order, optional/null behavior, numeric-output registration, unknown-field behavior and Serialize. Native unit witnesses observe every field, presence and numeric bits over seven ordinary/qualified/numeric routes, without serializing the owner to infer its fields. Independently authored complete valid declaration-order arrays were accepted by all four original decoders. Removing only each object guard produces its named compiled full-array admission failure, and exact restoration passes all four owner tests. Pinned native witnesses and fresh production probes pass negative-zero, binary64 rounding, subnormal and nonfinite observations. Fresh compiler inspection confirms each remote companion is private, has no independent Deserialize or conversion trait, and exposes only its generated generic Serde helper returning the actual reviewed owner. MANIFEST-SPEC#numeric-ingress-defect and #closed-typed-output-boundary; the existing mapper host profile is MANIFEST-SPEC#kraken-spot-candle-host. Other owners, aliases, receiver refusals and feature/wasm accepted behavior remain independent.",
+    "entrypoints": [],
+    "nativeObservation": {
+      "nativeFields": [
+        "symbol",
+        "interval",
+        "fromBits"
+      ],
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independently authored raw JSON\")) { Ok(d) => serde_json::json!({\"ok\":true, \"symbol\":d.symbol, \"interval\":d.interval, \"fromBits\":d.from.map(|n| format!(\"{:016x}\", n.to_bits()))}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "{\"symbol\":\"XBT/USD\",\"interval\":\"15m\",\"from\":-0,\"ignored\":true}",
+          "output": {
+            "ok": true,
+            "symbol": "XBT/USD",
+            "interval": "15m",
+            "fromBits": "8000000000000000"
+          }
+        },
+        {
+          "input": "{\"symbol\":\"ETH/USD\",\"interval\":\"5m\"}",
+          "output": {
+            "ok": true,
+            "symbol": "ETH/USD",
+            "interval": "5m",
+            "fromBits": null
+          }
+        },
+        {
+          "input": "{\"symbol\":\"ETH/USD\",\"interval\":\"5m\",\"from\":null}",
+          "output": {
+            "ok": true,
+            "symbol": "ETH/USD",
+            "interval": "5m",
+            "fromBits": null
+          }
+        },
+        {
+          "input": "{\"symbol\":\"NUM\",\"interval\":\"1m\",\"from\":1e400}",
+          "output": {
+            "ok": true,
+            "symbol": "NUM",
+            "interval": "1m",
+            "fromBits": "7ff0000000000000"
+          }
+        },
+        {
+          "input": "[\"XBT/USD\",\"15m\",47.25]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"symbol\":\"x\",\"interval\":\"1m\",\"from\":true}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kraken::reads::AccountLogParams": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "startTime": 19.5,
+      "limit": 7.25
+    },
+    "evidence": "packages/safe-cex/src/exchanges/kraken/kraken.exchange.ts::KrakenExchange._fetchAccountLogPage params object. Required numeric startTime and limit retain the existing camelCase serialization/field admission; snake_case is not a wire alias. The concrete Deserialize uses the existing shared JsNumberInput backend and object guard with a private serde(remote) schema, preserving field order, optional/null behavior, numeric-output registration, unknown-field behavior and Serialize. Native unit witnesses observe every field, presence and numeric bits over seven ordinary/qualified/numeric routes, without serializing the owner to infer its fields. Independently authored complete valid declaration-order arrays were accepted by all four original decoders. Removing only each object guard produces its named compiled full-array admission failure, and exact restoration passes all four owner tests. Pinned native witnesses and fresh production probes pass negative-zero, binary64 rounding, subnormal and nonfinite observations. Fresh compiler inspection confirms each remote companion is private, has no independent Deserialize or conversion trait, and exposes only its generated generic Serde helper returning the actual reviewed owner. MANIFEST-SPEC#numeric-ingress-defect and #closed-typed-output-boundary; the existing mapper host profile is MANIFEST-SPEC#kraken-parsed-read-boundary. Other owners, aliases, receiver refusals and feature/wasm accepted behavior remain independent.",
+    "entrypoints": [],
+    "nativeObservation": {
+      "nativeFields": [
+        "startTimeBits",
+        "limitBits"
+      ],
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independently authored raw JSON\")) { Ok(d) => serde_json::json!({\"ok\":true, \"startTimeBits\":format!(\"{:016x}\", d.start_time.to_bits()), \"limitBits\":format!(\"{:016x}\", d.limit.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "{\"startTime\":-0,\"limit\":7.25,\"ignored\":true}",
+          "output": {
+            "ok": true,
+            "startTimeBits": "8000000000000000",
+            "limitBits": "401d000000000000"
+          }
+        },
+        {
+          "input": "{\"startTime\":9007199254740993,\"limit\":1e400}",
+          "output": {
+            "ok": true,
+            "startTimeBits": "4340000000000000",
+            "limitBits": "7ff0000000000000"
+          }
+        },
+        {
+          "input": "[19.5,7.25]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"start_time\":19.5,\"limit\":7.25}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"startTime\":null,\"limit\":7.25}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_kraken::reads::HistoricalOptions": {
+    "category": "decoder",
+    "shape": "map",
+    "sample": {
+      "account": "account-A",
+      "from": 71.25,
+      "to": 93.5
+    },
+    "evidence": "packages/safe-cex/src/exchanges/kraken/kraken.exchange.ts::KrakenExchange.fetchHistoricalPositions options object. Required string account and optional numeric from/to retain their literal typed request role; the journal algorithm is not this decoder owner. The concrete Deserialize uses the existing shared JsNumberInput backend and object guard with a private serde(remote) schema, preserving field order, optional/null behavior, numeric-output registration, unknown-field behavior and Serialize. Native unit witnesses observe every field, presence and numeric bits over seven ordinary/qualified/numeric routes, without serializing the owner to infer its fields. Independently authored complete valid declaration-order arrays were accepted by all four original decoders. Removing only each object guard produces its named compiled full-array admission failure, and exact restoration passes all four owner tests. Pinned native witnesses and fresh production probes pass negative-zero, binary64 rounding, subnormal and nonfinite observations. Fresh compiler inspection confirms each remote companion is private, has no independent Deserialize or conversion trait, and exposes only its generated generic Serde helper returning the actual reviewed owner. MANIFEST-SPEC#numeric-ingress-defect and #closed-typed-output-boundary; the existing mapper host profile is MANIFEST-SPEC#kraken-journal-delegation. Other owners, aliases, receiver refusals and feature/wasm accepted behavior remain independent.",
+    "entrypoints": [],
+    "nativeObservation": {
+      "nativeFields": [
+        "account",
+        "fromBits",
+        "toBits"
+      ],
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"independently authored raw JSON\")) { Ok(d) => serde_json::json!({\"ok\":true, \"account\":d.account, \"fromBits\":d.from.map(|n| format!(\"{:016x}\", n.to_bits())), \"toBits\":d.to.map(|n| format!(\"{:016x}\", n.to_bits()))}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "{\"account\":\"account-A\",\"from\":-0,\"to\":93.5,\"ignored\":true}",
+          "output": {
+            "ok": true,
+            "account": "account-A",
+            "fromBits": "8000000000000000",
+            "toBits": "4057600000000000"
+          }
+        },
+        {
+          "input": "{\"account\":\"account-B\"}",
+          "output": {
+            "ok": true,
+            "account": "account-B",
+            "fromBits": null,
+            "toBits": null
+          }
+        },
+        {
+          "input": "{\"account\":\"account-B\",\"from\":null,\"to\":null}",
+          "output": {
+            "ok": true,
+            "account": "account-B",
+            "fromBits": null,
+            "toBits": null
+          }
+        },
+        {
+          "input": "{\"account\":\"NUM\",\"from\":5e-324,\"to\":-1e400}",
+          "output": {
+            "ok": true,
+            "account": "NUM",
+            "fromBits": "0000000000000001",
+            "toBits": "fff0000000000000"
+          }
+        },
+        {
+          "input": "[\"account-A\",71.25,93.5]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"account\":15}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "false",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "42",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"record\"",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }
