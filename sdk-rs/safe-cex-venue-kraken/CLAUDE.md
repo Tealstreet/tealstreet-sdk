@@ -313,3 +313,18 @@ signer into the live parent options. Private challenge auth must read that live
 options. The native registry HTTP and WS witnesses and compiling controls live
 in `safe-cex-registry/tests/native_host_kraken_signer.rs` and
 `safe-cex-registry/scripts/kraken-hosted-controls.py`.
+
+
+`KrakenBaseUrl` is a string-only decoder for the two source literals. Its private
+remote Serde schema retains lowercase serialization; `String::deserialize` guards
+all admission paths before variant decoding. `tests/accepted_base_url.rs` checks
+both native variants before serialization and refuses each valid tagged-null map
+through owned, borrowed, qualified, JSON-text and shared numeric-ingress routes.
+Run `scripts/base-url-string-control.py` with the explicit compiler environment
+for a compiled guard-removal failure and exact-source restored six-test pass.
+`node sdk-rs/safe-cex-venue-kraken/scripts/base-url-contracts.mjs` from repository
+root inventories and executes only this native/default production owner, including
+an independent native-variant observation. This selected probe leaves the 25
+whole-crate receiver refusals and all other owners/aliases/locals/construction
+open; it is not a whole-venue accepted-set pass. The compiler check also requires
+the private remote companion to have no independent Deserialize or public API.

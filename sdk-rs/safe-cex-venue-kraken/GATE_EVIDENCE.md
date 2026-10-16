@@ -1439,3 +1439,48 @@ compiling controls from sdk-rs. Omitting the native signer fails the HTTP tests;
 reading a missing live signer property fails the WS witness. Each restored tree
 passes all three native witnesses. The controls ran sequentially with one Cargo
 job. Read-only sub-agent review reported no blocking findings.
+
+
+## Accepted base-URL string union (2026-10-17)
+
+Source `kraken.types.ts::KrakenBaseUrl` declares exactly `derivatives | history`
+as strings. The original derived Rust decoder compiled and passed its valid
+native-variant witness, but failed the new named tagged-shape test by admitting
+`{"derivatives":null}`. The production fix uses existing `String::deserialize`
+and a private remote Serde schema. Serialize spellings and numeric-output
+registration remain unchanged.
+
+The two new native tests pass alongside all four existing actual-source `types`
+tests, with zero ignored. Both hardcoded native variants are checked before
+Serialize through five ingress paths. Each of the two valid tagged-null maps,
+five other non-string shapes and four invalid tags is refused through the same
+five paths (55 refusal assertions). Existing `types` independently checks the
+complete two-literal source union, as well as tables and normalization.
+
+`scripts/base-url-string-control.py` ran successfully: baseline six tests pass;
+remove only String admission and the compiled named
+`tagged_base_url_shapes_are_rejected_on_every_ingress_path` fails on the native
+owned tagged-map assertion; restore exact source bytes and all six pass again.
+A compiler error cannot satisfy this control.
+
+`scripts/base-url-contracts.mjs` ran fresh native/default private/hidden rustdoc,
+then the maintained selected-owner production probe: **one actual runtime
+result, zero classification-only receipts, zero failed owners**. Its hand-authored
+observation matches actual native enum variants without serializing the enum,
+and records all 11 refusals independently. Compiler identity confirms the private
+remote schema has no independent Deserialize or public inherent API. The new
+per-crate contract contains this owner only; no shared policy row is exempted.
+
+The full inventory attempt still refused **25 unsupported Kraken receiver
+methods**. This is open review work, not a passing gate. The selected owner does
+not discharge other owners, aliases, local functions, construction or feature/
+wasm accepted coverage. The old seven-file `types-parity-check.py` wrapper also
+raises AttributeError on current list-valued manifest mappings before indexing;
+the maintained global checker was executed successfully instead: **7459 rows,
+17204 public Rust items**, including Kraken. Its compiled checker/dependency inputs
+are unchanged from the previously built and validated binary. The maintained
+seven-file TS extractor passes separately: **83 source symbols**. Neither
+structural gate claims behavioral parity.
+
+Read-only independent review found no actionable issue in the production fix,
+native fixture, selected probe, contract or mutation/restoration controller.
