@@ -1,5 +1,5 @@
 [file]
-ts = "packages/script-api-core/src/order/positionSizing.ts"
+ts = "packages/safe-cex/src/utils/nativePositionSize.ts"
 rust_files = [ "safe-cex-num/src/lib.rs" ]
 
 [[symbol]]

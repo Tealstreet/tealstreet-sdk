@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 
-import { nativePositionSize } from './positionSizing';
+import { nativePositionSize } from './nativePositionSize';
 
 /**
  * The case this function exists to make impossible to get wrong twice.

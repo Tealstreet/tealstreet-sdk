@@ -139,7 +139,7 @@ mod tests {
             ("packages/safe-cex/src/health/errorPatterns.ts", PHASES[4]),
             ("packages/safe-cex/src/utils/egressRegion.ts", PHASES[2]),
             (
-                "packages/script-api-core/src/order/positionSizing.ts",
+                "packages/safe-cex/src/utils/nativePositionSize.ts",
                 PHASES[1],
             ),
             ("packages/safe-cex/src/transport/direct.ts", PHASES[2]),
