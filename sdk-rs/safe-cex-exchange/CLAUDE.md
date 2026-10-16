@@ -936,3 +936,9 @@ authenticates with the account's proxy token and checks expiry with the canonica
 Hosted JS venues receive the signer through JsHttpHost, shared by Scope and BaseExchange assembly. Structural exchange_options decoding omits capability handles without altering the JS options object; never serialize hosted signers into the uninhabited JSON markers. The native host binds the exchange name before sending, wraps the existing RemoteSigningAdapter and propagates its effective configuration to source response hooks. Query serialization uses the shared HTTP codec after signing; response/error configs retain signed params and source URLs for retries. Native registry tests exercise secretless validation and private websocket auth over real local sockets.
 
 The js_runtime typed-value bridge uses the shared native serialization capture and native Serde visitors, preserving NaN, infinities and signed zero in scalar and nested model fields. `to_json` remains the explicit wire projection; do not route typed values through it. Native nonfinite values aimed at opaque serde_json::Value are refused rather than silently projected to null. Typed input retains the shared UTF-8 and bounded-depth choices. `tests/typed_js_values.rs` checks both directions independently, actual order-option fields, enum shapes and optional values; venue E2E tests own their receiver-level effects.
+
+Venue overrides that assign `this.isDisposed` before socket cleanup use the shared
+JS setter or `BaseExchange::set_disposed_flag`. This writes only the core flag;
+`dispose()` still owns superclass cleanup. Six actual GRVT/Crypto.com source
+cases cover successful cleanup and each throwing socket, shared-cell visibility,
+retained listeners, and resetting the writable flag in `tests/js_runtime.rs`.

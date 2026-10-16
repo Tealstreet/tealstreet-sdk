@@ -2278,3 +2278,102 @@ fn client_rejection_handlers_follow_the_axios_promise_chain() {
         "Request failed with status code 500"
     );
 }
+
+#[test]
+#[ignore = "requires Node and maintained TypeScript"]
+fn disposed_assignment_matches_actual_venue_cleanup_sequence() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/js-runtime-disposal-oracle.cjs"
+        ))
+        .output()
+        .expect("source oracle");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    assert_eq!(rows.len(), 6);
+    for row in rows {
+        let assembled = assemble(json!({"key":"k","secret":"s"})).unwrap();
+        let this = assembled.this;
+        let base = assembled.base;
+        let events = Rc::new(RefCell::new(vec![]));
+        let observed = Rc::new(std::cell::Cell::new(0));
+        let observed_in_listener = observed.clone();
+        base.on(
+            "update",
+            Rc::new(move |_, _| {
+                observed_in_listener.set(observed_in_listener.get() + 1);
+                Ok(())
+            }),
+        );
+        for side in ["public", "private"] {
+            let events = events.clone();
+            let base = base.clone();
+            let fail = row["fail"] == side;
+            this.define(
+                &format!("{side}Websocket"),
+                Js::object(vec![(
+                    "dispose",
+                    Js::function("dispose", move |_, _| {
+                        events.borrow_mut().push(json!([side, base.is_disposed()]));
+                        if fail {
+                            Err(Thrown::new(Js::str(&format!("{side}-cleanup"))))
+                        } else {
+                            Ok(Js::Undefined)
+                        }
+                    }),
+                )]),
+            )
+            .unwrap();
+        }
+        let result = (|| -> Result<(), Thrown> {
+            this.set("isDisposed", Js::Bool(true))?;
+            this.get("publicWebsocket")?
+                .call_method("dispose", vec![])?;
+            this.get("privateWebsocket")?
+                .call_method("dispose", vec![])?;
+            Ok(())
+        })();
+        assert_eq!(
+            json!(events.borrow().clone()),
+            row["events"],
+            "{} {} callback sequence",
+            row["venue"],
+            row["fail"]
+        );
+        assert_eq!(
+            base.is_disposed(),
+            row["disposed"].as_bool().unwrap(),
+            "shared core observes source assignment"
+        );
+        assert!(
+            this.get("isDisposed")
+                .unwrap()
+                .strict_equals(&Js::Bool(true)),
+            "facade reads the same cell"
+        );
+        assert_eq!(
+            result
+                .err()
+                .map(|e| to_json(&e.value).unwrap())
+                .unwrap_or(Value::Null),
+            row["error"],
+            "cleanup throw identity"
+        );
+        base.emit("update", json!({})).unwrap();
+        assert_eq!(
+            observed.get(),
+            1,
+            "flag assignment must not run superclass listener cleanup"
+        );
+        this.set("isDisposed", Js::Bool(false)).unwrap();
+        assert!(
+            !base.is_disposed(),
+            "the source field is writable in either direction"
+        );
+    }
+}
