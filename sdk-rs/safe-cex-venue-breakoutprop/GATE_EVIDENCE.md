@@ -587,3 +587,20 @@ compiled and failed the original immediate callback, then passed after the fix.
 It covers omitted, zero, negative, NaN, configured finite and infinite intervals,
 and checks callback deferral separately from the sleep deadline. This adds one
 binding test; the final binding target is 14/14 and full venue suite is 70/70.
+
+# Binding-integrated construction review
+
+After inheriting #193, the ordinary gate named ProductionHost's private-field
+Clone as a new construction obligation, then refused the binding's glob import.
+The import is now the ten concrete used types; no scanner exemption was added.
+ProductionHost Clone retains reusable runtime/HTTP/provider/transport/date handles
+and the same parent attachment slot. Its exact construction review is separate
+from all raw API/record contracts.
+
+The integrated full venue suite passes 71 tests, including the new native cloned
+host witness: second-account construction rejects before any request and the
+original account still logs in with its original credentials. A control replaces
+only the derived host Clone with an implementation that detaches the parent slot;
+it compiles and fails the named live-account assertion at exit101. Exact source
+restoration then passes the same native test. This proves the attachment boundary
+without changing production Clone or adding any validation authority.

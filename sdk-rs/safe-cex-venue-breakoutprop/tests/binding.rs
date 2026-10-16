@@ -495,3 +495,28 @@ fn poll_loop_uses_source_fallback_and_disables_infinity() {
         f.exchange.dispose().unwrap();
     }
 }
+
+#[test]
+fn cloned_production_host_retains_its_live_account_attachment() {
+    let f = fixture();
+    let cloned = Rc::new(f.host.as_ref().clone());
+    let result = BreakoutpropExchange::new(
+        cloned,
+        ExchangeName::Breakoutprop,
+        serde_json::from_value(json!({"key":"another-user","secret":"another-secret"})).unwrap(),
+        Rc::new(DefaultStore::new()),
+    );
+    let error = match result {
+        Err(error) => error,
+        Ok(_) => panic!("cloning the host must not detach its live-account guard"),
+    };
+    assert_eq!(
+        error.message,
+        "Breakout Prop host already belongs to another account"
+    );
+    assert!(f.wire.requests.borrow().is_empty());
+    f.run(f.exchange.validate_account()).unwrap();
+    let login = f.request("POST", "/login");
+    assert_eq!(login["data"]["username"], "k");
+    assert_eq!(login["data"]["password"], "s");
+}
