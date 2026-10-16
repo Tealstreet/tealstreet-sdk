@@ -26,7 +26,7 @@ impl Realm {
     /// `class Name extends base`: a constructor whose [[Prototype]] is `base`,
     /// a prototype inheriting `base.prototype`, and [[Construct]] → `body`.
     /// Calling it without `new` throws, as a class constructor does.
-    pub fn derived_class(
+    pub(crate) fn derived_class(
         &mut self,
         name: &str,
         length: u8,
@@ -78,7 +78,7 @@ impl Realm {
         Ok((class, prototype))
     }
     /// `super(...args)`: construct the class's *current* superclass with the original newTarget.
-    pub fn super_construct(
+    pub(crate) fn super_construct(
         &mut self,
         class: &Value,
         args: &[Value],

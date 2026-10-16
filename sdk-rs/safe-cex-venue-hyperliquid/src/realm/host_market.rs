@@ -12,7 +12,7 @@ fn units(text: &str) -> JsString {
 }
 
 /// Exact comparison of plain decimal strings (ccxt Precise.stringEq/Gt/Lt).
-pub fn compare_decimal(a: &str, b: &str) -> Option<Ordering> {
+pub(crate) fn compare_decimal(a: &str, b: &str) -> Option<Ordering> {
     fn parts(s: &str) -> Option<(bool, String, String)> {
         let s = s.trim();
         let (neg, s) = match s.strip_prefix('-') {

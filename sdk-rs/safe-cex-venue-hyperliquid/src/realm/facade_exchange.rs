@@ -28,7 +28,7 @@ fn payload(r: &mut Realm, args: &[Value]) -> Result<serde_json::Value, Thrown> {
         }
     }
 }
-pub fn error_input(r: &mut Realm, value: &Value) -> Result<ExchangeErrorInput, Thrown> {
+pub(crate) fn error_input(r: &mut Realm, value: &Value) -> Result<ExchangeErrorInput, Thrown> {
     Ok(match value {
         Value::Undefined => ExchangeErrorInput::Missing,
         Value::String(u) => ExchangeErrorInput::Message(String::from_utf16_lossy(u)),
@@ -44,7 +44,7 @@ pub fn error_input(r: &mut Realm, value: &Value) -> Result<ExchangeErrorInput, T
 
 /// The JS class; instances are allocated with newTarget's prototype and carry
 /// the source constructor's own fields (`options`, `store`, `emitter`).
-pub fn base_exchange_class(realm: &mut Realm, base: Rc<BaseExchange>) -> Value {
+pub(crate) fn base_exchange_class(realm: &mut Realm, base: Rc<BaseExchange>) -> Value {
     let prototype = realm.new_object();
     let construct: NativeConstruct = {
         let fallback = prototype.object().unwrap().clone();

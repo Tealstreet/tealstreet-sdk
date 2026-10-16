@@ -110,7 +110,7 @@ impl Realm {
     }
 }
 
-pub fn bind(realm: &Realm) {
+pub(crate) fn bind(realm: &Realm) {
     realm.bind_import(
         "getCrossCache",
         realm.native("getCrossCache", 0, |r, _, _| {

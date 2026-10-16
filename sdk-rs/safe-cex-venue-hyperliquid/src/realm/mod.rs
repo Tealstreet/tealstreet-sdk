@@ -3,36 +3,38 @@
 //! The venue's method bodies are generic over JS host traits; this realm is
 //! their production host. Builtins live on intrinsic prototypes, module
 //! imports in an explicit table, and native resources behind host objects.
-pub mod ccxt;
-pub mod convert;
-pub mod core;
-pub mod json;
-pub mod ops;
-pub mod promise;
-pub mod regex;
-pub mod value;
+// `to_string`/`to_number`/`from_json` name the ECMAScript abstract operations
+// they implement, which take the realm, not a self conversion.
+#![allow(clippy::wrong_self_convention)]
+pub(crate) mod ccxt;
+pub(crate) mod convert;
+pub(crate) mod core;
+pub(crate) mod json;
+pub(crate) mod ops;
+pub(crate) mod promise;
+pub(crate) mod regex;
+pub(crate) mod value;
 
 pub(crate) mod builtins;
-pub mod facade_exchange;
-pub mod facade_rest;
-pub mod facade_socket;
-pub mod facade_store;
+pub(crate) mod facade_exchange;
+pub(crate) mod facade_rest;
+pub(crate) mod facade_socket;
+pub(crate) mod facade_store;
 mod host_cache;
 mod host_classes;
 mod host_core;
 mod host_leaves;
 mod host_market;
 mod host_startup;
-pub mod imports;
-pub mod imports_utils;
-pub mod imports_venue;
+pub(crate) mod imports;
+pub(crate) mod imports_utils;
+pub(crate) mod imports_venue;
 
-use crate::spot_json::JsString;
 use safe_cex_exchange::runtime::ExchangeRuntime;
 use std::{cell::RefCell, collections::HashMap, rc::Rc};
-pub use value::{Kind, NativeFn, Obj, ObjectData, PropKey, Thrown, Value};
+pub(crate) use value::{Kind, Obj, ObjectData, PropKey, Thrown, Value};
 
-pub struct Intrinsics {
+pub(crate) struct Intrinsics {
     pub object_proto: Obj,
     pub function_proto: Obj,
     pub array_proto: Obj,
@@ -53,13 +55,11 @@ pub struct Intrinsics {
     pub symbol_iterator: Rc<value::Symbol>,
 }
 
-pub struct State {
+pub(crate) struct State {
     pub runtime: Rc<dyn ExchangeRuntime>,
     pub intrinsics: Intrinsics,
     pub globals: Obj,
     pub imports: RefCell<HashMap<String, Value>>,
-    /// Unhandled rejections already reported, so each is reported once.
-    pub reported: RefCell<Vec<Obj>>,
     /// Module-level values whose identity must be stable across reads.
     pub singletons: RefCell<HashMap<&'static str, Value>>,
     /// The last property read that produced undefined, named in "is not a function".
@@ -68,7 +68,7 @@ pub struct State {
 
 /// Cloning shares the realm; `lexical` is the class binding a method body sees.
 #[derive(Clone)]
-pub struct Realm {
+pub(crate) struct Realm {
     pub state: Rc<State>,
     pub lexical: Option<Value>,
 }
@@ -81,7 +81,7 @@ fn proto(parent: Option<&Obj>) -> Obj {
 }
 
 impl Realm {
-    pub fn new(runtime: Rc<dyn ExchangeRuntime>) -> Self {
+    pub(crate) fn new(runtime: Rc<dyn ExchangeRuntime>) -> Self {
         let object_proto = proto(None);
         let function_proto = proto(Some(&object_proto));
         let error_proto = proto(Some(&object_proto));
@@ -115,7 +115,6 @@ impl Realm {
                 intrinsics,
                 globals,
                 imports: RefCell::default(),
-                reported: RefCell::default(),
                 singletons: RefCell::default(),
                 last_missing: RefCell::default(),
             }),
@@ -124,23 +123,23 @@ impl Realm {
         builtins::install(&mut realm);
         realm
     }
-    pub fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
+    pub(crate) fn runtime(&self) -> Rc<dyn ExchangeRuntime> {
         self.state.runtime.clone()
     }
-    pub fn intrinsics(&self) -> &Intrinsics {
+    pub(crate) fn intrinsics(&self) -> &Intrinsics {
         &self.state.intrinsics
     }
-    pub fn with_lexical(&self, class: &Value) -> Self {
+    pub(crate) fn with_lexical(&self, class: &Value) -> Self {
         Self {
             state: self.state.clone(),
             lexical: Some(class.clone()),
         }
     }
     /// Bind a module import the method bodies read by name.
-    pub fn bind_import(&self, name: &str, value: Value) {
+    pub(crate) fn bind_import(&self, name: &str, value: Value) {
         self.state.imports.borrow_mut().insert(name.into(), value);
     }
-    pub fn import(&mut self, name: &str) -> Result<Value, Thrown> {
+    pub(crate) fn import(&mut self, name: &str) -> Result<Value, Thrown> {
         let found = self.state.imports.borrow().get(name).cloned();
         match found {
             Some(v) => Ok(v),
@@ -148,7 +147,7 @@ impl Realm {
         }
     }
     /// A global identifier read; an unbound name is a ReferenceError.
-    pub fn global_binding(&mut self, name: &str) -> Result<Value, Thrown> {
+    pub(crate) fn global_binding(&mut self, name: &str) -> Result<Value, Thrown> {
         if name == "HyperliquidExchange"
             && let Some(class) = &self.lexical
         {
@@ -164,22 +163,19 @@ impl Realm {
         }
         Err(self.error_of("ReferenceError", &format!("{name} is not defined")))
     }
-    pub fn set_global(&self, name: &str, value: Value) {
+    pub(crate) fn set_global(&self, name: &str, value: Value) {
         self.state
             .globals
             .borrow_mut()
             .put(PropKey::str(name), value, false);
     }
-    pub fn singleton(&self, name: &'static str, init: impl FnOnce(&Realm) -> Value) -> Value {
+    pub(crate) fn singleton(&self, name: &'static str, init: impl FnOnce(&Realm) -> Value) -> Value {
         if let Some(v) = self.state.singletons.borrow().get(name) {
             return v.clone();
         }
         let v = init(self);
         self.state.singletons.borrow_mut().insert(name, v.clone());
         v
-    }
-    pub fn js_string(&self, value: &Value) -> Option<JsString> {
-        value.as_units().map(|u| JsString(u.to_vec()))
     }
 }
 

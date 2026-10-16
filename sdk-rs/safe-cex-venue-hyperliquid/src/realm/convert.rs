@@ -8,19 +8,19 @@ fn units(text: &str) -> Rc<[u16]> {
 }
 
 /// StringToNumber over UTF-16 (whitespace-trimmed decimal, hex/octal/binary, Infinity).
-pub fn string_to_number(units: &[u16]) -> f64 {
+pub(crate) fn string_to_number(units: &[u16]) -> f64 {
     safe_cex_num::number_from_string(&String::from_utf16_lossy(units))
 }
 
 #[derive(Clone, Copy, PartialEq)]
-pub enum Hint {
+pub(crate) enum Hint {
     Default,
     Number,
     String,
 }
 
 impl Realm {
-    pub fn to_primitive(&mut self, v: &Value, hint: Hint) -> Result<Value, Thrown> {
+    pub(crate) fn to_primitive(&mut self, v: &Value, hint: Hint) -> Result<Value, Thrown> {
         let Value::Object(o) = v else {
             return Ok(v.clone());
         };
@@ -45,7 +45,7 @@ impl Realm {
         }
         Err(self.type_error("Cannot convert object to primitive value"))
     }
-    pub fn to_string(&mut self, v: &Value) -> Result<Rc<[u16]>, Thrown> {
+    pub(crate) fn to_string(&mut self, v: &Value) -> Result<Rc<[u16]>, Thrown> {
         Ok(match v {
             Value::Undefined => units("undefined"),
             Value::Null => units("null"),
@@ -61,10 +61,10 @@ impl Realm {
             }
         })
     }
-    pub fn to_rust_string(&mut self, v: &Value) -> Result<String, Thrown> {
+    pub(crate) fn to_rust_string(&mut self, v: &Value) -> Result<String, Thrown> {
         Ok(String::from_utf16_lossy(&self.to_string(v)?))
     }
-    pub fn to_number(&mut self, v: &Value) -> Result<f64, Thrown> {
+    pub(crate) fn to_number(&mut self, v: &Value) -> Result<f64, Thrown> {
         Ok(match v {
             Value::Undefined => f64::NAN,
             Value::Null => 0.0,
@@ -80,7 +80,7 @@ impl Realm {
             }
         })
     }
-    pub fn to_property_key(&mut self, v: &Value) -> Result<PropKey, Thrown> {
+    pub(crate) fn to_property_key(&mut self, v: &Value) -> Result<PropKey, Thrown> {
         Ok(match v {
             Value::Symbol(s) => PropKey::Symbol(s.clone()),
             Value::String(u) => PropKey::String(u.clone()),
@@ -93,7 +93,7 @@ impl Realm {
             }
         })
     }
-    pub fn index(&mut self, o: &Value, key: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn index(&mut self, o: &Value, key: &Value) -> Result<Value, Thrown> {
         if o.is_nullish() {
             let name = self.to_rust_string(key).unwrap_or_default();
             let what = if matches!(o, Value::Null) {
@@ -108,12 +108,12 @@ impl Realm {
         let key = self.to_property_key(key)?;
         self.get(o, &key)
     }
-    pub fn set_index(&mut self, o: &Value, key: &Value, value: Value) -> Result<(), Thrown> {
+    pub(crate) fn set_index(&mut self, o: &Value, key: &Value, value: Value) -> Result<(), Thrown> {
         let key = self.to_property_key(key)?;
         self.set(o, &key, value)
     }
     /// IsLooselyEqual (`==`).
-    pub fn loose_equal(&mut self, a: &Value, b: &Value) -> Result<bool, Thrown> {
+    pub(crate) fn loose_equal(&mut self, a: &Value, b: &Value) -> Result<bool, Thrown> {
         Ok(match (a, b) {
             (Value::Undefined | Value::Null, Value::Undefined | Value::Null) => true,
             (Value::Undefined | Value::Null, _) | (_, Value::Undefined | Value::Null) => false,
@@ -141,7 +141,7 @@ impl Realm {
         })
     }
     /// Abstract relational comparison `a < b`; None is undefined (NaN involved).
-    pub fn less_than(
+    pub(crate) fn less_than(
         &mut self,
         a: &Value,
         b: &Value,
@@ -163,7 +163,7 @@ impl Realm {
         }
         Ok(Some(x < y))
     }
-    pub fn add(&mut self, a: &Value, b: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn add(&mut self, a: &Value, b: &Value) -> Result<Value, Thrown> {
         let pa = self.to_primitive(a, Hint::Default)?;
         let pb = self.to_primitive(b, Hint::Default)?;
         if matches!(pa, Value::String(_)) || matches!(pb, Value::String(_)) {
@@ -174,7 +174,7 @@ impl Realm {
         Ok(Value::Number(self.to_number(&pa)? + self.to_number(&pb)?))
     }
     /// Binary operators by source spelling.
-    pub fn binary(&mut self, op: &str, a: &Value, b: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn binary(&mut self, op: &str, a: &Value, b: &Value) -> Result<Value, Thrown> {
         // Some ported bodies name operators instead of spelling them.
         let op = match op {
             "plus" | "add" => "+",
@@ -249,7 +249,7 @@ impl Realm {
             other => return Err(self.error(&format!("unsupported operator {other}"))),
         })
     }
-    pub fn unary(&mut self, op: &str, v: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn unary(&mut self, op: &str, v: &Value) -> Result<Value, Thrown> {
         Ok(match op {
             "+" | "plus" => Value::Number(self.to_number(v)?),
             "-" | "minus" => Value::Number(-self.to_number(v)?),
@@ -260,12 +260,12 @@ impl Realm {
         })
     }
     /// `${value}` (ToString, symbols throw).
-    pub fn template(&mut self, v: &Value) -> Result<Rc<[u16]>, Thrown> {
+    pub(crate) fn template(&mut self, v: &Value) -> Result<Rc<[u16]>, Thrown> {
         self.to_string(v)
     }
 }
 
-pub fn to_int32(n: f64) -> i32 {
+pub(crate) fn to_int32(n: f64) -> i32 {
     if !n.is_finite() || n == 0.0 {
         return 0;
     }

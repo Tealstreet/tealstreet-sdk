@@ -5,7 +5,7 @@ use super::{Realm, convert::Hint, promise::settle, regex::Pattern, value::*};
 use crate::spot_json::JsString;
 use std::{cell::RefCell, rc::Rc};
 
-pub fn arg(args: &[Value], i: usize) -> Value {
+pub(crate) fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 fn units(text: &str) -> Rc<[u16]> {
@@ -1050,7 +1050,7 @@ fn replace(r: &mut Realm, this: &Value, args: &[Value], all: bool) -> Result<Val
 }
 
 /// V8 DoubleToRadixCString: shortest digits that round-trip, for any radix.
-pub fn radix_string(value: f64, radix: u32) -> String {
+pub(crate) fn radix_string(value: f64, radix: u32) -> String {
     if value.is_nan() {
         return "NaN".into();
     }
@@ -1973,7 +1973,7 @@ fn install_console(realm: &mut Realm) {
 }
 
 /// Date.prototype.toISOString for a finite time value (proleptic Gregorian, UTC).
-pub fn iso_string(t: f64) -> String {
+pub(crate) fn iso_string(t: f64) -> String {
     let ms = t as i64;
     let days = ms.div_euclid(86_400_000);
     let rem = ms.rem_euclid(86_400_000);

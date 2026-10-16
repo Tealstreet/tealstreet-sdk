@@ -27,7 +27,7 @@ fn enumeration(r: &Realm, rows: &[(&str, &str)]) -> Value {
     o
 }
 
-pub fn bind(realm: &Realm) {
+pub(crate) fn bind(realm: &Realm) {
     let enums: [(&str, &[(&str, &str)]); 8] = [
         (
             "LogSeverity",

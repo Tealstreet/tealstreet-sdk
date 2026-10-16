@@ -3,19 +3,19 @@
 //! realm: the ported venue bodies call them as imports.
 use super::{Realm, value::*};
 
-pub const TRUNCATE: f64 = 0.0;
-pub const ROUND: f64 = 1.0;
-pub const DECIMAL_PLACES: f64 = 2.0;
-pub const SIGNIFICANT_DIGITS: f64 = 3.0;
-pub const TICK_SIZE: f64 = 4.0;
-pub const NO_PADDING: f64 = 5.0;
+pub(crate) const TRUNCATE: f64 = 0.0;
+pub(crate) const ROUND: f64 = 1.0;
+pub(crate) const DECIMAL_PLACES: f64 = 2.0;
+pub(crate) const SIGNIFICANT_DIGITS: f64 = 3.0;
+pub(crate) const TICK_SIZE: f64 = 4.0;
+pub(crate) const NO_PADDING: f64 = 5.0;
 
 fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
 /// numberToString for a number: JS spelling without scientific notation.
-pub fn number_to_string(x: f64) -> String {
+pub(crate) fn number_to_string(x: f64) -> String {
     let s = safe_cex_num::js_number_string(x);
     if x.abs() < 1.0 {
         let mut parts = s.splitn(2, "e-");
@@ -47,7 +47,7 @@ pub fn number_to_string(x: f64) -> String {
     s
 }
 
-pub fn precision_from_string(s: &str) -> f64 {
+pub(crate) fn precision_from_string(s: &str) -> f64 {
     if s.contains('e') || s.contains('E') {
         // str.replace(/\d\.?\d*[eE]/, '') — the first mantissa-and-marker run.
         let re = regex::Regex::new(r"\d\.?\d*[eE]").expect("static pattern");
@@ -61,7 +61,7 @@ pub fn precision_from_string(s: &str) -> f64 {
     }
 }
 
-pub fn parse_precision(precision: &str) -> String {
+pub(crate) fn parse_precision(precision: &str) -> String {
     let n = safe_cex_num::parse_int(precision, None);
     if n == 0.0 {
         return "1".into();
@@ -76,7 +76,7 @@ pub fn parse_precision(precision: &str) -> String {
 
 /// A decimalToPrecision operand: the source accepts numbers and strings.
 #[derive(Clone)]
-pub enum Operand {
+pub(crate) enum Operand {
     Number(f64),
     Text(String),
 }
@@ -95,7 +95,7 @@ impl Operand {
     }
 }
 
-pub fn decimal_to_precision(
+pub(crate) fn decimal_to_precision(
     x: Operand,
     rounding: f64,
     digits: Operand,
@@ -307,7 +307,7 @@ fn operand(r: &mut Realm, v: &Value) -> Result<Operand, Thrown> {
     })
 }
 
-pub fn bind(realm: &Realm) {
+pub(crate) fn bind(realm: &Realm) {
     for (name, value) in [
         ("TRUNCATE", TRUNCATE),
         ("ROUND", ROUND),

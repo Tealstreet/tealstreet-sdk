@@ -66,7 +66,7 @@ fn unreadable_error_class(realm: &Realm) -> Value {
     })
 }
 
-pub fn bind(realm: &Realm) {
+pub(crate) fn bind(realm: &Realm) {
     realm.bind_import(
         "HyperliquidUnreadableOrderResponseError",
         unreadable_error_class(realm),

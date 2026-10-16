@@ -5,7 +5,7 @@ impl Realm {
     /// `const [a, b, ...] = value` over `slots`; a `false` slot is an elision.
     /// After the last slot the iterator is closed unless already exhausted; a
     /// throwing `return` propagates (normal completion).
-    pub fn array_pattern(&mut self, value: &Value, slots: &[bool]) -> Result<Vec<Value>, Thrown> {
+    pub(crate) fn array_pattern(&mut self, value: &Value, slots: &[bool]) -> Result<Vec<Value>, Thrown> {
         let iterator = self.get_iterator(value)?;
         let mut out = vec![];
         let mut done = false;
@@ -26,11 +26,11 @@ impl Realm {
         }
         Ok(out)
     }
-    pub fn array_slots(&mut self, value: &Value, count: usize) -> Result<Vec<Value>, Thrown> {
+    pub(crate) fn array_slots(&mut self, value: &Value, count: usize) -> Result<Vec<Value>, Thrown> {
         self.array_pattern(value, &vec![true; count])
     }
     /// `const [head, ...rest] = value`.
-    pub fn head_rest(&mut self, value: &Value) -> Result<(Value, Value), Thrown> {
+    pub(crate) fn head_rest(&mut self, value: &Value) -> Result<(Value, Value), Thrown> {
         let iterator = self.get_iterator(value)?;
         let head = self.iterator_step(&iterator)?.unwrap_or(Value::Undefined);
         let mut rest = vec![];
@@ -40,7 +40,7 @@ impl Realm {
         Ok((head, self.new_array(rest)))
     }
     /// `const { k1, k2 } = value`, with the source destructuring TypeError.
-    pub fn object_pattern(&mut self, value: &Value, keys: &[&str]) -> Result<Vec<Value>, Thrown> {
+    pub(crate) fn object_pattern(&mut self, value: &Value, keys: &[&str]) -> Result<Vec<Value>, Thrown> {
         if value.is_nullish() {
             let first = keys.first().copied().unwrap_or("");
             let shown = if matches!(value, Value::Null) {
@@ -60,7 +60,7 @@ impl Realm {
         keys.iter().map(|k| self.get_str(value, k)).collect()
     }
     /// Object spread / CopyDataProperties: own enumerable string then symbol keys.
-    pub fn copy_data_properties(&mut self, target: &Value, source: &Value) -> Result<(), Thrown> {
+    pub(crate) fn copy_data_properties(&mut self, target: &Value, source: &Value) -> Result<(), Thrown> {
         if source.is_nullish() {
             return Ok(());
         }
@@ -84,40 +84,40 @@ impl Realm {
         }
         Ok(())
     }
-    pub fn spread_object(&mut self, source: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn spread_object(&mut self, source: &Value) -> Result<Value, Thrown> {
         let out = self.new_object();
         self.copy_data_properties(&out, source)?;
         Ok(out)
     }
     /// `[...value]`.
-    pub fn spread_to_array(&mut self, value: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn spread_to_array(&mut self, value: &Value) -> Result<Value, Thrown> {
         let items = self.collect_iterable(value)?;
         Ok(self.new_array(items))
     }
     /// `f(...value)` appends the iterable's items to an argument list.
-    pub fn spread_args(&mut self, args: &mut Vec<Value>, value: &Value) -> Result<(), Thrown> {
+    pub(crate) fn spread_args(&mut self, args: &mut Vec<Value>, value: &Value) -> Result<(), Thrown> {
         args.extend(self.collect_iterable(value)?);
         Ok(())
     }
     /// `[...array, last]`.
-    pub fn spread_append(&mut self, iterable: &Value, last: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn spread_append(&mut self, iterable: &Value, last: &Value) -> Result<Value, Thrown> {
         let mut items = self.collect_iterable(iterable)?;
         items.push(last.clone());
         Ok(self.new_array(items))
     }
     /// Append to an array literal under construction (CreateDataProperty at its length).
-    pub fn append(&mut self, array: &Value, value: &Value) -> Result<(), Thrown> {
+    pub(crate) fn append(&mut self, array: &Value, value: &Value) -> Result<(), Thrown> {
         let len = self.get_str(array, "length")?;
         let len = self.to_number(&len)? as usize;
         self.define(array, PropKey::str(&len.to_string()), value.clone())
     }
     /// `const { data } = await response` with the source nullish diagnostic.
-    pub fn data_binding(&mut self, value: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn data_binding(&mut self, value: &Value) -> Result<Value, Thrown> {
         Ok(self.object_pattern(value, &["data"])?.remove(0))
     }
     /// for-in: enumerable string keys along the prototype chain, own first,
     /// skipping shadowed names. Snapshotted at loop entry.
-    pub fn for_in_keys(&mut self, value: &Value) -> Vec<Value> {
+    pub(crate) fn for_in_keys(&mut self, value: &Value) -> Vec<Value> {
         let mut seen: Vec<PropKey> = vec![];
         let mut out = vec![];
         let mut current = value.object().cloned();
@@ -146,7 +146,7 @@ impl Realm {
         out
     }
     /// `super.name` from a method whose home object's prototype is `home_proto`.
-    pub fn super_get(
+    pub(crate) fn super_get(
         &mut self,
         home_proto: &Value,
         receiver: &Value,

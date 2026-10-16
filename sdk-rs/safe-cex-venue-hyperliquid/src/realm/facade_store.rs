@@ -74,7 +74,7 @@ fn snapshot<T: serde::Serialize + ?Sized>(r: &mut Realm, value: &T) -> Result<Va
     r.from_typed(&value)
 }
 
-pub fn store_object(realm: &Realm, store: Rc<dyn Store>) -> Value {
+pub(crate) fn store_object(realm: &Realm, store: Rc<dyn Store>) -> Value {
     let o = realm.new_object();
     let getter =
         |name: &str, body: Rc<dyn Fn(&mut Realm, &Rc<dyn Store>) -> Result<Value, Thrown>>| {

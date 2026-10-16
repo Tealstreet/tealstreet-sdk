@@ -38,7 +38,7 @@ fn quote(units: &[u16], out: &mut Vec<u16>) {
 }
 
 impl Realm {
-    pub fn from_json(&self, value: JsonValue) -> Value {
+    pub(crate) fn from_json(&self, value: JsonValue) -> Value {
         match value {
             JsonValue::Null => Value::Null,
             JsonValue::Bool(b) => Value::Bool(b),
@@ -62,7 +62,7 @@ impl Realm {
         }
     }
     /// JSON.parse; a SyntaxError carries the parser's message.
-    pub fn parse_json(&mut self, text: &[u16]) -> Result<Value, Thrown> {
+    pub(crate) fn parse_json(&mut self, text: &[u16]) -> Result<Value, Thrown> {
         let text = String::from_utf16_lossy(text);
         match serde_json::from_str::<JsonValue>(&text) {
             Ok(v) => Ok(self.from_json(v)),
@@ -70,7 +70,7 @@ impl Realm {
         }
     }
     /// JSON.stringify(value) without replacer/space; None is a top-level undefined.
-    pub fn stringify(&mut self, value: &Value) -> Result<Option<Vec<u16>>, Thrown> {
+    pub(crate) fn stringify(&mut self, value: &Value) -> Result<Option<Vec<u16>>, Thrown> {
         let mut out = vec![];
         let mut stack = vec![];
         if self.write_json(value, &mut out, &mut stack, true)? {
@@ -158,7 +158,7 @@ impl Realm {
     }
 
     // ---- typed boundary ----
-    pub fn from_serde(&self, value: &serde_json::Value) -> Value {
+    pub(crate) fn from_serde(&self, value: &serde_json::Value) -> Value {
         match value {
             serde_json::Value::Null => Value::Null,
             serde_json::Value::Bool(b) => Value::Bool(*b),
@@ -184,23 +184,23 @@ impl Realm {
     }
     /// The JSON-shaped projection of a value: undefined members are omitted,
     /// non-finite numbers become null, as JSON.stringify would.
-    pub fn to_serde(&mut self, value: &Value) -> Result<serde_json::Value, Thrown> {
+    pub(crate) fn to_serde(&mut self, value: &Value) -> Result<serde_json::Value, Thrown> {
         let Some(units) = self.stringify(value)? else {
             return Ok(serde_json::Value::Null);
         };
         serde_json::from_str(&String::from_utf16_lossy(&units))
             .map_err(|e| self.error(&format!("unserializable value: {e}")))
     }
-    pub fn to_typed<T: serde::de::DeserializeOwned>(&mut self, value: &Value) -> Result<T, Thrown> {
+    pub(crate) fn to_typed<T: serde::de::DeserializeOwned>(&mut self, value: &Value) -> Result<T, Thrown> {
         let json = self.to_serde(value)?;
         serde_json::from_value(json).map_err(|e| self.type_error(&format!("typed boundary: {e}")))
     }
-    pub fn from_typed<T: serde::Serialize>(&mut self, value: &T) -> Result<Value, Thrown> {
+    pub(crate) fn from_typed<T: serde::Serialize>(&mut self, value: &T) -> Result<Value, Thrown> {
         let json = serde_json::to_value(value)
             .map_err(|e| self.type_error(&format!("typed boundary: {e}")))?;
         Ok(self.from_serde(&json))
     }
-    pub fn js_text(&self, text: &str) -> JsString {
+    pub(crate) fn js_text(&self, text: &str) -> JsString {
         JsString(text.encode_utf16().collect())
     }
 }
@@ -208,7 +208,7 @@ impl Realm {
 impl Realm {
     /// The signing view of a value: own enumerable data in key order, with
     /// `undefined` members retained (msgpack encodes them as nil; JSON drops them).
-    pub fn to_js_json(&mut self, value: &Value) -> Result<safe_cex_num::JsJsonValue, Thrown> {
+    pub(crate) fn to_js_json(&mut self, value: &Value) -> Result<safe_cex_num::JsJsonValue, Thrown> {
         use safe_cex_num::JsJsonValue as J;
         Ok(match value {
             Value::Undefined => J::Undefined,
@@ -241,7 +241,7 @@ impl Realm {
             }
         })
     }
-    pub fn from_js_json(&self, value: &safe_cex_num::JsJsonValue) -> Value {
+    pub(crate) fn from_js_json(&self, value: &safe_cex_num::JsJsonValue) -> Value {
         use safe_cex_num::JsJsonValue as J;
         match value {
             J::Undefined => Value::Undefined,

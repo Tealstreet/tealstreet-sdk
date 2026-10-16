@@ -19,7 +19,7 @@ use std::{rc::Rc, sync::Arc};
 /// The host transport the clients send through, plus the one process-wide
 /// Hyperliquid weight limiter every client and account must share.
 #[derive(Clone)]
-pub struct RestDependencies {
+pub(crate) struct RestDependencies {
     pub http: Arc<dyn RestAdapter>,
     pub limiter: Rc<RateLimiter>,
     pub clock: Arc<dyn RateLimitClock>,
@@ -42,7 +42,7 @@ fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
-pub fn thrown_from(r: &mut Realm, error: ExchangeError) -> Thrown {
+pub(crate) fn thrown_from(r: &mut Realm, error: ExchangeError) -> Thrown {
     let e = r.error(&error.message);
     if error.name != "Error" {
         r.define_hidden(&e, PropKey::str("name"), Value::str(&error.name));
@@ -134,7 +134,7 @@ fn client_object(realm: &Realm, client: Client) -> Value {
 }
 
 /// Bind the three API factory imports for one exchange instance.
-pub fn bind_api_factories(realm: &Realm, base: Rc<BaseExchange>, deps: RestDependencies) {
+pub(crate) fn bind_api_factories(realm: &Realm, base: Rc<BaseExchange>, deps: RestDependencies) {
     let deps_for_fetch = deps.http.clone();
     for (name, kind) in [
         ("createExchangeAPI", ClientKind::Exchange),

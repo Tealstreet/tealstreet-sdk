@@ -4,14 +4,14 @@ use super::Realm;
 use crate::spot_json::JsString;
 use std::{cell::RefCell, fmt, rc::Rc, task::Waker};
 
-pub type Obj = Rc<RefCell<ObjectData>>;
-pub type Thrown = Value;
-pub type NativeFn = Rc<dyn Fn(&mut Realm, &Value, &[Value]) -> Result<Value, Thrown>>;
+pub(crate) type Obj = Rc<RefCell<ObjectData>>;
+pub(crate) type Thrown = Value;
+pub(crate) type NativeFn = Rc<dyn Fn(&mut Realm, &Value, &[Value]) -> Result<Value, Thrown>>;
 /// `new_target` is the constructor `new` was applied to (a subclass for `super`).
-pub type NativeConstruct = Rc<dyn Fn(&mut Realm, &[Value], &Value) -> Result<Value, Thrown>>;
+pub(crate) type NativeConstruct = Rc<dyn Fn(&mut Realm, &[Value], &Value) -> Result<Value, Thrown>>;
 
 #[derive(Clone)]
-pub enum Value {
+pub(crate) enum Value {
     Undefined,
     Null,
     Bool(bool),
@@ -22,18 +22,18 @@ pub enum Value {
 }
 
 #[derive(Debug)]
-pub struct Symbol {
+pub(crate) struct Symbol {
     pub description: &'static str,
 }
 
 #[derive(Clone)]
-pub enum PropKey {
+pub(crate) enum PropKey {
     String(Rc<[u16]>),
     Symbol(Rc<Symbol>),
 }
 
 #[derive(Clone)]
-pub enum Slot {
+pub(crate) enum Slot {
     Data(Value),
     Accessor {
         get: Option<Value>,
@@ -42,7 +42,7 @@ pub enum Slot {
 }
 
 #[derive(Clone)]
-pub struct Prop {
+pub(crate) struct Prop {
     pub key: PropKey,
     pub slot: Slot,
     pub enumerable: bool,
@@ -50,7 +50,7 @@ pub struct Prop {
     pub configurable: bool,
 }
 
-pub struct FunctionData {
+pub(crate) struct FunctionData {
     pub name: JsString,
     pub length: u8,
     pub call: Option<NativeFn>,
@@ -58,7 +58,7 @@ pub struct FunctionData {
 }
 
 #[derive(Default)]
-pub enum PromiseState {
+pub(crate) enum PromiseState {
     #[default]
     Pending,
     Fulfilled(Value),
@@ -66,13 +66,13 @@ pub enum PromiseState {
 }
 
 #[derive(Default)]
-pub struct PromiseCell {
+pub(crate) struct PromiseCell {
     pub state: PromiseState,
     pub wakers: Vec<Waker>,
     pub handled: bool,
 }
 
-pub enum IterSource {
+pub(crate) enum IterSource {
     Array {
         target: Obj,
         index: usize,
@@ -109,7 +109,7 @@ pub enum IterSource {
     Done,
 }
 
-pub enum Kind {
+pub(crate) enum Kind {
     Ordinary,
     Array(Vec<Value>),
     Map(Vec<(Value, Value)>),
@@ -128,12 +128,12 @@ pub enum Kind {
 
 /// Keyed views (store tables) materialize one entry per lookup rather than
 /// converting the whole table on every read.
-pub trait Exotic {
+pub(crate) trait Exotic {
     fn lookup(&self, realm: &mut Realm, key: &PropKey) -> Option<Value>;
     fn keys(&self) -> Vec<PropKey>;
 }
 
-pub struct ObjectData {
+pub(crate) struct ObjectData {
     pub proto: Option<Obj>,
     pub props: Vec<Prop>,
     pub kind: Kind,
@@ -141,37 +141,37 @@ pub struct ObjectData {
 }
 
 impl Value {
-    pub fn str(text: &str) -> Self {
+    pub(crate) fn str(text: &str) -> Self {
         Value::String(text.encode_utf16().collect::<Vec<_>>().into())
     }
-    pub fn units(units: &[u16]) -> Self {
+    pub(crate) fn units(units: &[u16]) -> Self {
         Value::String(units.into())
     }
-    pub fn js(text: &JsString) -> Self {
+    pub(crate) fn js(text: &JsString) -> Self {
         Value::String(text.0.as_slice().into())
     }
-    pub fn object(&self) -> Option<&Obj> {
+    pub(crate) fn object(&self) -> Option<&Obj> {
         match self {
             Value::Object(o) => Some(o),
             _ => None,
         }
     }
-    pub fn as_units(&self) -> Option<&[u16]> {
+    pub(crate) fn as_units(&self) -> Option<&[u16]> {
         match self {
             Value::String(u) => Some(u),
             _ => None,
         }
     }
-    pub fn as_number(&self) -> Option<f64> {
+    pub(crate) fn as_number(&self) -> Option<f64> {
         match self {
             Value::Number(n) => Some(*n),
             _ => None,
         }
     }
-    pub fn is_nullish(&self) -> bool {
+    pub(crate) fn is_nullish(&self) -> bool {
         matches!(self, Value::Undefined | Value::Null)
     }
-    pub fn truthy(&self) -> bool {
+    pub(crate) fn truthy(&self) -> bool {
         match self {
             Value::Undefined | Value::Null => false,
             Value::Bool(b) => *b,
@@ -181,7 +181,7 @@ impl Value {
         }
     }
     /// `===`, including NaN !== NaN and +0 === -0.
-    pub fn strict_equal(&self, other: &Value) -> bool {
+    pub(crate) fn strict_equal(&self, other: &Value) -> bool {
         match (self, other) {
             (Value::Undefined, Value::Undefined) | (Value::Null, Value::Null) => true,
             (Value::Bool(a), Value::Bool(b)) => a == b,
@@ -193,13 +193,13 @@ impl Value {
         }
     }
     /// SameValueZero (Map/Set keys, Array.prototype.includes).
-    pub fn same_value_zero(&self, other: &Value) -> bool {
+    pub(crate) fn same_value_zero(&self, other: &Value) -> bool {
         match (self, other) {
             (Value::Number(a), Value::Number(b)) if a.is_nan() && b.is_nan() => true,
             _ => self.strict_equal(other),
         }
     }
-    pub fn type_of(&self) -> &'static str {
+    pub(crate) fn type_of(&self) -> &'static str {
         match self {
             Value::Undefined => "undefined",
             Value::Null => "object",
@@ -213,52 +213,52 @@ impl Value {
             },
         }
     }
-    pub fn is_callable(&self) -> bool {
+    pub(crate) fn is_callable(&self) -> bool {
         self.function().is_some_and(|f| f.call.is_some())
     }
-    pub fn function(&self) -> Option<Rc<FunctionData>> {
+    pub(crate) fn function(&self) -> Option<Rc<FunctionData>> {
         match &self.object()?.borrow().kind {
             Kind::Function(f) => Some(f.clone()),
             _ => None,
         }
     }
-    pub fn promise(&self) -> Option<Rc<RefCell<PromiseCell>>> {
+    pub(crate) fn promise(&self) -> Option<Rc<RefCell<PromiseCell>>> {
         match &self.object()?.borrow().kind {
             Kind::Promise(p) => Some(p.clone()),
             _ => None,
         }
     }
-    pub fn host<T: 'static>(&self) -> Option<Rc<T>> {
+    pub(crate) fn host<T: 'static>(&self) -> Option<Rc<T>> {
         match &self.object()?.borrow().kind {
             Kind::Host(any) => any.clone().downcast::<T>().ok(),
             _ => None,
         }
     }
-    pub fn is_array(&self) -> bool {
+    pub(crate) fn is_array(&self) -> bool {
         self.object()
             .is_some_and(|o| matches!(o.borrow().kind, Kind::Array(_)))
     }
 }
 
 impl PropKey {
-    pub fn str(text: &str) -> Self {
+    pub(crate) fn str(text: &str) -> Self {
         PropKey::String(text.encode_utf16().collect::<Vec<_>>().into())
     }
-    pub fn same(&self, other: &PropKey) -> bool {
+    pub(crate) fn same(&self, other: &PropKey) -> bool {
         match (self, other) {
             (PropKey::String(a), PropKey::String(b)) => a == b,
             (PropKey::Symbol(a), PropKey::Symbol(b)) => Rc::ptr_eq(a, b),
             _ => false,
         }
     }
-    pub fn units(&self) -> Option<&[u16]> {
+    pub(crate) fn units(&self) -> Option<&[u16]> {
         match self {
             PropKey::String(u) => Some(u),
             PropKey::Symbol(_) => None,
         }
     }
     /// The canonical array index this key names, if any.
-    pub fn array_index(&self) -> Option<usize> {
+    pub(crate) fn array_index(&self) -> Option<usize> {
         let units = self.units()?;
         if units.is_empty() || (units.len() > 1 && units[0] == b'0' as u16) {
             return None;
@@ -274,7 +274,7 @@ impl PropKey {
         }
         (value < u32::MAX as usize).then_some(value)
     }
-    pub fn to_value(&self) -> Value {
+    pub(crate) fn to_value(&self) -> Value {
         match self {
             PropKey::String(u) => Value::String(u.clone()),
             PropKey::Symbol(s) => Value::Symbol(s.clone()),
@@ -283,7 +283,7 @@ impl PropKey {
 }
 
 impl ObjectData {
-    pub fn new(kind: Kind, proto: Option<Obj>) -> Self {
+    pub(crate) fn new(kind: Kind, proto: Option<Obj>) -> Self {
         Self {
             proto,
             props: vec![],
@@ -291,14 +291,14 @@ impl ObjectData {
             extensible: true,
         }
     }
-    pub fn own(&self, key: &PropKey) -> Option<&Prop> {
+    pub(crate) fn own(&self, key: &PropKey) -> Option<&Prop> {
         self.props.iter().find(|p| p.key.same(key))
     }
-    pub fn own_mut(&mut self, key: &PropKey) -> Option<&mut Prop> {
+    pub(crate) fn own_mut(&mut self, key: &PropKey) -> Option<&mut Prop> {
         self.props.iter_mut().find(|p| p.key.same(key))
     }
     /// Define or replace a writable, enumerable, configurable data property.
-    pub fn put(&mut self, key: PropKey, value: Value, enumerable: bool) {
+    pub(crate) fn put(&mut self, key: PropKey, value: Value, enumerable: bool) {
         if let Some(p) = self.own_mut(&key) {
             p.slot = Slot::Data(value);
             return;

@@ -6,7 +6,7 @@ fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Undefined)
 }
 
-pub fn bind(realm: &Realm) {
+pub(crate) fn bind(realm: &Realm) {
     // utils/get-key `v`: exact, then snake_case, then camelCase `in` checks.
     realm.bind_import(
         "v",

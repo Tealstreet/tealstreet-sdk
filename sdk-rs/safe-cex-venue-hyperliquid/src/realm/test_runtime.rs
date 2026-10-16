@@ -21,7 +21,7 @@ impl Wake for Flag {
 }
 
 #[derive(Default)]
-pub struct TestRuntime {
+pub(crate) struct TestRuntime {
     pub now: Cell<f64>,
     jobs: RefCell<Vec<(Job, Arc<Flag>)>>,
     timers: RefCell<Vec<(f64, Rc<Cell<bool>>)>>,
@@ -45,7 +45,7 @@ impl Future for Sleep {
 }
 impl TestRuntime {
     /// Poll every job until none makes progress; then fire due timers and repeat.
-    pub fn drain(&self) {
+    pub(crate) fn drain(&self) {
         for _ in 0..10_000 {
             let jobs = std::mem::take(&mut *self.jobs.borrow_mut());
             if jobs.is_empty() {

@@ -9,7 +9,7 @@ pub mod exchange_helpers;
 pub mod lifecycle_delegates;
 pub mod market_data_selectors;
 pub mod order_request_leaves;
-pub mod realm;
+pub(crate) mod realm;
 pub mod spot_constants;
 pub mod spot_json;
 pub mod spot_models;

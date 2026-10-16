@@ -23,7 +23,7 @@ use std::{
 };
 
 #[derive(Clone)]
-pub struct SocketDependencies {
+pub(crate) struct SocketDependencies {
     pub runtime: Rc<dyn WsRuntime>,
     pub parent: Rc<dyn WsParent>,
     pub base: Rc<BaseExchange>,
@@ -151,7 +151,7 @@ fn formatter(realm: &Realm, f: Value) -> Option<Rc<dyn Fn(&serde_json::Value) ->
     }))
 }
 
-pub fn base_websocket_class(realm: &mut Realm, deps: SocketDependencies) -> Value {
+pub(crate) fn base_websocket_class(realm: &mut Realm, deps: SocketDependencies) -> Value {
     let prototype = realm.new_object();
     let next_id = Rc::new(Cell::new(1u64));
     let construct: NativeConstruct = {

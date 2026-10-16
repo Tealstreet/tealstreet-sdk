@@ -2,7 +2,7 @@
 //! `\d`, `\s`, groups, anchors, `i`) is shared by JS and the `regex` crate.
 //! Matching runs on UTF-8; inputs with lone surrogates match their U+FFFD form.
 
-pub struct Pattern {
+pub(crate) struct Pattern {
     pub source: String,
     pub flags: String,
     re: regex::Regex,
@@ -10,7 +10,7 @@ pub struct Pattern {
 
 impl Pattern {
     /// Parse a `/source/flags` literal.
-    pub fn literal(text: &str) -> Result<Self, String> {
+    pub(crate) fn literal(text: &str) -> Result<Self, String> {
         let end = text
             .rfind('/')
             .filter(|&i| i > 0 && text.starts_with('/'))
@@ -19,7 +19,7 @@ impl Pattern {
         let flags = &text[end + 1..];
         Self::new(source, flags)
     }
-    pub fn new(source: &str, flags: &str) -> Result<Self, String> {
+    pub(crate) fn new(source: &str, flags: &str) -> Result<Self, String> {
         let mut prefix = String::new();
         for flag in flags.chars() {
             match flag {
@@ -36,11 +36,11 @@ impl Pattern {
             re,
         })
     }
-    pub fn test(&self, units: &[u16]) -> bool {
+    pub(crate) fn test(&self, units: &[u16]) -> bool {
         self.re.is_match(&String::from_utf16_lossy(units))
     }
     /// `exec` without lastIndex: the whole match then each group (None when unmatched).
-    pub fn exec(&self, units: &[u16]) -> Option<(usize, Vec<Option<Vec<u16>>>)> {
+    pub(crate) fn exec(&self, units: &[u16]) -> Option<(usize, Vec<Option<Vec<u16>>>)> {
         let text = String::from_utf16_lossy(units);
         let captures = self.re.captures(&text)?;
         let start = text[..captures.get(0)?.start()].encode_utf16().count();
@@ -51,7 +51,7 @@ impl Pattern {
         Some((start, groups))
     }
     /// `String.prototype.split(regex)`: separators removed, captured groups spliced in.
-    pub fn split(&self, units: &[u16]) -> Vec<Option<Vec<u16>>> {
+    pub(crate) fn split(&self, units: &[u16]) -> Vec<Option<Vec<u16>>> {
         let text = String::from_utf16_lossy(units);
         if text.is_empty() {
             return if self.re.is_match("") {

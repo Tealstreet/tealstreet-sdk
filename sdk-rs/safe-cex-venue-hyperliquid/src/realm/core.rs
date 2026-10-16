@@ -12,13 +12,13 @@ fn index_key(i: usize) -> PropKey {
 }
 
 impl Realm {
-    pub fn alloc(&self, kind: Kind, proto: Option<&Obj>) -> Value {
+    pub(crate) fn alloc(&self, kind: Kind, proto: Option<&Obj>) -> Value {
         Value::Object(Rc::new(RefCell::new(ObjectData::new(kind, proto.cloned()))))
     }
-    pub fn new_object(&self) -> Value {
+    pub(crate) fn new_object(&self) -> Value {
         self.alloc(Kind::Ordinary, Some(&self.intrinsics().object_proto))
     }
-    pub fn object_from(&self, fields: Vec<(&str, Value)>) -> Value {
+    pub(crate) fn object_from(&self, fields: Vec<(&str, Value)>) -> Value {
         let o = self.new_object();
         {
             let mut data = o.object().unwrap().borrow_mut();
@@ -28,19 +28,19 @@ impl Realm {
         }
         o
     }
-    pub fn new_array(&self, values: Vec<Value>) -> Value {
+    pub(crate) fn new_array(&self, values: Vec<Value>) -> Value {
         self.alloc(Kind::Array(values), Some(&self.intrinsics().array_proto))
     }
-    pub fn new_map(&self) -> Value {
+    pub(crate) fn new_map(&self) -> Value {
         self.alloc(Kind::Map(vec![]), Some(&self.intrinsics().map_proto))
     }
-    pub fn new_set(&self) -> Value {
+    pub(crate) fn new_set(&self) -> Value {
         self.alloc(Kind::Set(vec![]), Some(&self.intrinsics().set_proto))
     }
-    pub fn host_object<T: 'static>(&self, resource: Rc<T>) -> Value {
+    pub(crate) fn host_object<T: 'static>(&self, resource: Rc<T>) -> Value {
         self.alloc(Kind::Host(resource), Some(&self.intrinsics().object_proto))
     }
-    pub fn function(&self, name: &str, length: u8, call: NativeFn) -> Value {
+    pub(crate) fn function(&self, name: &str, length: u8, call: NativeFn) -> Value {
         self.function_data(FunctionData {
             name: JsString(name.encode_utf16().collect()),
             length,
@@ -48,7 +48,7 @@ impl Realm {
             construct: None,
         })
     }
-    pub fn function_data(&self, data: FunctionData) -> Value {
+    pub(crate) fn function_data(&self, data: FunctionData) -> Value {
         let f = self.alloc(
             Kind::Function(Rc::new(data)),
             Some(&self.intrinsics().function_proto),
@@ -56,7 +56,7 @@ impl Realm {
         f
     }
     /// A native function from a closure.
-    pub fn native(
+    pub(crate) fn native(
         &self,
         name: &str,
         length: u8,
@@ -66,7 +66,7 @@ impl Realm {
     }
 
     // ---- errors ----
-    pub fn error_proto_for(&self, class: &str) -> Obj {
+    pub(crate) fn error_proto_for(&self, class: &str) -> Obj {
         let i = self.intrinsics();
         match class {
             "TypeError" => i.type_error_proto.clone(),
@@ -78,7 +78,7 @@ impl Realm {
     }
     /// A fresh Error instance of `class` (its `name` comes from the prototype,
     /// except ReferenceError, which shares TypeError's shape with its own name).
-    pub fn error_of(&self, class: &str, message: &str) -> Value {
+    pub(crate) fn error_of(&self, class: &str, message: &str) -> Value {
         let e = self.alloc(Kind::Error, Some(&self.error_proto_for(class)));
         {
             let mut data = e.object().unwrap().borrow_mut();
@@ -89,10 +89,10 @@ impl Realm {
         }
         e
     }
-    pub fn type_error(&self, message: &str) -> Thrown {
+    pub(crate) fn type_error(&self, message: &str) -> Thrown {
         self.error_of("TypeError", message)
     }
-    pub fn error(&self, message: &str) -> Thrown {
+    pub(crate) fn error(&self, message: &str) -> Thrown {
         self.error_of("Error", message)
     }
 
@@ -147,13 +147,13 @@ impl Realm {
         }
         data.own(key).map(|p| p.slot.clone())
     }
-    pub fn get(&mut self, v: &Value, key: &PropKey) -> Result<Value, Thrown> {
+    pub(crate) fn get(&mut self, v: &Value, key: &PropKey) -> Result<Value, Thrown> {
         self.get_with_receiver(v, key, v)
     }
-    pub fn get_str(&mut self, v: &Value, key: &str) -> Result<Value, Thrown> {
+    pub(crate) fn get_str(&mut self, v: &Value, key: &str) -> Result<Value, Thrown> {
         self.get(v, &PropKey::str(key))
     }
-    pub fn get_with_receiver(
+    pub(crate) fn get_with_receiver(
         &mut self,
         v: &Value,
         key: &PropKey,
@@ -197,7 +197,7 @@ impl Realm {
         Ok(Value::Undefined)
     }
     /// Strict-mode `o[key] = value`.
-    pub fn set(&mut self, target: &Value, key: &PropKey, value: Value) -> Result<(), Thrown> {
+    pub(crate) fn set(&mut self, target: &Value, key: &PropKey, value: Value) -> Result<(), Thrown> {
         let o = match target {
             Value::Object(o) => o.clone(),
             Value::Undefined | Value::Null => {
@@ -296,11 +296,11 @@ impl Realm {
         }
         self.define(target, key.clone(), value)
     }
-    pub fn set_str(&mut self, target: &Value, key: &str, value: Value) -> Result<(), Thrown> {
+    pub(crate) fn set_str(&mut self, target: &Value, key: &str, value: Value) -> Result<(), Thrown> {
         self.set(target, &PropKey::str(key), value)
     }
     /// CreateDataPropertyOrThrow.
-    pub fn define(&mut self, target: &Value, key: PropKey, value: Value) -> Result<(), Thrown> {
+    pub(crate) fn define(&mut self, target: &Value, key: PropKey, value: Value) -> Result<(), Thrown> {
         let Some(o) = target.object() else {
             return Err(self.type_error("CreateDataProperty called on non-object"));
         };
@@ -340,11 +340,11 @@ impl Realm {
         });
         Ok(())
     }
-    pub fn define_str(&mut self, target: &Value, key: &str, value: Value) -> Result<(), Thrown> {
+    pub(crate) fn define_str(&mut self, target: &Value, key: &str, value: Value) -> Result<(), Thrown> {
         self.define(target, PropKey::str(key), value)
     }
     /// A non-enumerable own method/field (class prototype member).
-    pub fn define_hidden(&self, target: &Value, key: PropKey, value: Value) {
+    pub(crate) fn define_hidden(&self, target: &Value, key: PropKey, value: Value) {
         if let Some(o) = target.object() {
             let mut data = o.borrow_mut();
             if let Some(p) = data.own_mut(&key) {
@@ -361,7 +361,7 @@ impl Realm {
             });
         }
     }
-    pub fn define_getter(&self, target: &Value, key: PropKey, getter: Value) {
+    pub(crate) fn define_getter(&self, target: &Value, key: PropKey, getter: Value) {
         if let Some(o) = target.object() {
             let mut data = o.borrow_mut();
             data.props.retain(|p| !p.key.same(&key));
@@ -378,7 +378,7 @@ impl Realm {
         }
     }
     /// Strict `delete o[key]`; a non-configurable property throws.
-    pub fn delete(&mut self, target: &Value, key: &PropKey) -> Result<bool, Thrown> {
+    pub(crate) fn delete(&mut self, target: &Value, key: &PropKey) -> Result<bool, Thrown> {
         let Some(o) = target.object() else {
             if target.is_nullish() {
                 return Err(self.type_error("Cannot convert undefined or null to object"));
@@ -410,7 +410,7 @@ impl Realm {
         Ok(true)
     }
     /// The `in` operator.
-    pub fn has_property(&mut self, target: &Value, key: &PropKey) -> Result<bool, Thrown> {
+    pub(crate) fn has_property(&mut self, target: &Value, key: &PropKey) -> Result<bool, Thrown> {
         let Some(o) = target.object() else {
             let name = key
                 .units()
@@ -440,7 +440,7 @@ impl Realm {
         }
         Ok(false)
     }
-    pub fn has_own(&self, target: &Value, key: &PropKey) -> bool {
+    pub(crate) fn has_own(&self, target: &Value, key: &PropKey) -> bool {
         target.object().is_some_and(|o| {
             Self::own_slot(o, key).is_some()
                 || matches!(&o.borrow().kind, Kind::Exotic(view) if view.keys().iter().any(|k| k.same(key)))
@@ -448,7 +448,7 @@ impl Realm {
     }
     /// OrdinaryOwnPropertyKeys order: integer keys ascending, then strings by
     /// insertion. `enumerable_only` filters for Object.keys / for-in / spread.
-    pub fn own_keys(&self, target: &Value, enumerable_only: bool) -> Vec<PropKey> {
+    pub(crate) fn own_keys(&self, target: &Value, enumerable_only: bool) -> Vec<PropKey> {
         let Some(o) = target.object() else {
             if let Value::String(u) = target {
                 return (0..u.len()).map(index_key).collect();
@@ -485,7 +485,7 @@ impl Realm {
         ints.into_iter().map(|(_, k)| k).chain(strings).collect()
     }
     /// Own enumerable string-keyed values in key order (for spreads/Object.entries).
-    pub fn own_entries(&mut self, target: &Value) -> Result<Vec<(PropKey, Value)>, Thrown> {
+    pub(crate) fn own_entries(&mut self, target: &Value) -> Result<Vec<(PropKey, Value)>, Thrown> {
         let keys = self.own_keys(target, true);
         let mut out = Vec::with_capacity(keys.len());
         for k in keys {
@@ -496,7 +496,7 @@ impl Realm {
     }
 
     // ---- calls ----
-    pub fn call(&mut self, f: &Value, this: &Value, args: &[Value]) -> Result<Value, Thrown> {
+    pub(crate) fn call(&mut self, f: &Value, this: &Value, args: &[Value]) -> Result<Value, Thrown> {
         match f.function().and_then(|f| f.call.clone()) {
             Some(body) => body(self, this, args),
             None => {
@@ -517,7 +517,7 @@ impl Realm {
             }
         }
     }
-    pub fn call_method(
+    pub(crate) fn call_method(
         &mut self,
         target: &Value,
         name: &str,
@@ -532,7 +532,7 @@ impl Realm {
         }
         self.call(&f, target, args)
     }
-    pub fn construct(
+    pub(crate) fn construct(
         &mut self,
         f: &Value,
         args: &[Value],
@@ -545,7 +545,7 @@ impl Realm {
         body(self, args, &target)
     }
     /// The `prototype` of `new_target`, for allocating a constructed instance.
-    pub fn prototype_of_target(
+    pub(crate) fn prototype_of_target(
         &mut self,
         new_target: &Value,
         fallback: &Obj,
@@ -553,7 +553,7 @@ impl Realm {
         let p = self.get_str(new_target, "prototype")?;
         Ok(p.object().cloned().unwrap_or_else(|| fallback.clone()))
     }
-    pub fn instance_of(&mut self, v: &Value, ctor: &Value) -> Result<bool, Thrown> {
+    pub(crate) fn instance_of(&mut self, v: &Value, ctor: &Value) -> Result<bool, Thrown> {
         if !ctor.is_callable() && ctor.function().is_none() {
             return Err(self.type_error("Right-hand side of 'instanceof' is not callable"));
         }
@@ -572,14 +572,14 @@ impl Realm {
     }
 
     // ---- iteration ----
-    pub fn iterator_object(&self, source: IterSource) -> Value {
+    pub(crate) fn iterator_object(&self, source: IterSource) -> Value {
         self.alloc(
             Kind::Iterator(source),
             Some(&self.intrinsics().iterator_proto),
         )
     }
     /// GetIterator for for-of / spread / destructuring.
-    pub fn get_iterator(&mut self, v: &Value) -> Result<Value, Thrown> {
+    pub(crate) fn get_iterator(&mut self, v: &Value) -> Result<Value, Thrown> {
         match v {
             Value::String(u) => {
                 return Ok(self.iterator_object(IterSource::String {
@@ -626,7 +626,7 @@ impl Realm {
             String::from_utf16_lossy(&self.to_string(v).unwrap_or_else(|_| units("object")));
         Err(self.type_error(&format!("{shown} is not iterable")))
     }
-    pub fn iterator_step(&mut self, iterator: &Value) -> Result<Option<Value>, Thrown> {
+    pub(crate) fn iterator_step(&mut self, iterator: &Value) -> Result<Option<Value>, Thrown> {
         let Some(o) = iterator.object().cloned() else {
             return Err(self.type_error("iterator is not an object"));
         };
@@ -744,11 +744,11 @@ impl Realm {
         })
     }
     /// IteratorClose after an abrupt body completion: errors from `return` are dropped.
-    pub fn iterator_close_after_throw(&mut self, iterator: &Value) {
+    pub(crate) fn iterator_close_after_throw(&mut self, iterator: &Value) {
         let _ = self.iterator_close(iterator);
     }
     /// IteratorClose after break/return: a throwing `return` propagates.
-    pub fn iterator_close(&mut self, iterator: &Value) -> Result<(), Thrown> {
+    pub(crate) fn iterator_close(&mut self, iterator: &Value) -> Result<(), Thrown> {
         let protocol = iterator.object().and_then(|o| match &o.borrow().kind {
             Kind::Iterator(IterSource::Protocol { iterator, .. }) => Some(iterator.clone()),
             _ => None,
@@ -770,7 +770,7 @@ impl Realm {
         Ok(())
     }
     /// Spread/Array.from over any iterable.
-    pub fn collect_iterable(&mut self, v: &Value) -> Result<Vec<Value>, Thrown> {
+    pub(crate) fn collect_iterable(&mut self, v: &Value) -> Result<Vec<Value>, Thrown> {
         let iterator = self.get_iterator(v)?;
         let mut out = vec![];
         while let Some(item) = self.iterator_step(&iterator)? {

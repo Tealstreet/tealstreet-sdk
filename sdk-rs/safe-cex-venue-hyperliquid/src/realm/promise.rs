@@ -12,8 +12,8 @@ use std::{
     task::{Context, Poll, Waker},
 };
 
-pub type Task = Pin<Box<dyn Future<Output = ()>>>;
-pub type ValueFuture = Pin<Box<dyn Future<Output = Result<Value, Thrown>>>>;
+pub(crate) type Task = Pin<Box<dyn Future<Output = ()>>>;
+pub(crate) type ValueFuture = Pin<Box<dyn Future<Output = Result<Value, Thrown>>>>;
 
 struct Await {
     cell: Rc<RefCell<PromiseCell>>,
@@ -37,7 +37,7 @@ impl Future for Await {
 }
 
 impl Realm {
-    pub fn new_promise(&self) -> (Value, Rc<RefCell<PromiseCell>>) {
+    pub(crate) fn new_promise(&self) -> (Value, Rc<RefCell<PromiseCell>>) {
         let cell = Rc::new(RefCell::new(PromiseCell::default()));
         let p = self.alloc(
             Kind::Promise(cell.clone()),
@@ -45,13 +45,13 @@ impl Realm {
         );
         (p, cell)
     }
-    pub fn settled_promise(&self, result: Result<Value, Thrown>) -> Value {
+    pub(crate) fn settled_promise(&self, result: Result<Value, Thrown>) -> Value {
         let (p, cell) = self.new_promise();
         settle(&cell, result);
         p
     }
     /// Resolve with adoption: a promise result is followed, not nested.
-    pub fn resolve_promise(&self, cell: &Rc<RefCell<PromiseCell>>, value: Value) {
+    pub(crate) fn resolve_promise(&self, cell: &Rc<RefCell<PromiseCell>>, value: Value) {
         if let Some(inner) = value.promise() {
             if Rc::ptr_eq(&inner, cell) {
                 let e = self.type_error("Chaining cycle detected for promise #<Promise>");
@@ -68,14 +68,14 @@ impl Realm {
         settle(cell, Ok(value));
     }
     /// Await: a promise suspends until settled; any other value resumes with itself.
-    pub fn await_value(&self, value: Value) -> ValueFuture {
+    pub(crate) fn await_value(&self, value: Value) -> ValueFuture {
         match value.promise() {
             Some(cell) => Box::pin(Await { cell }),
             None => Box::pin(std::future::ready(Ok(value))),
         }
     }
     /// A promise for `body`, started now (its synchronous prefix runs immediately).
-    pub fn spawn_value(&self, body: ValueFuture) -> Value {
+    pub(crate) fn spawn_value(&self, body: ValueFuture) -> Value {
         let (p, cell) = self.new_promise();
         let realm = self.clone();
         self.start(Box::pin(async move {
@@ -87,7 +87,7 @@ impl Realm {
         p
     }
     /// Poll the synchronous prefix now; hand the remainder to the runtime.
-    pub fn start(&self, mut task: Task) {
+    pub(crate) fn start(&self, mut task: Task) {
         let waker = Waker::noop();
         let mut cx = Context::from_waker(waker);
         if task.as_mut().poll(&mut cx).is_ready() {
@@ -95,13 +95,13 @@ impl Realm {
         }
         self.spawn(task);
     }
-    pub fn spawn(&self, task: Task) {
+    pub(crate) fn spawn(&self, task: Task) {
         // The runtime owns the task; dropping the handle does not cancel it.
         let _handle = self.runtime().spawn_local(task);
     }
 }
 
-pub fn settle(cell: &Rc<RefCell<PromiseCell>>, result: Result<Value, Thrown>) {
+pub(crate) fn settle(cell: &Rc<RefCell<PromiseCell>>, result: Result<Value, Thrown>) {
     let wakers = {
         let mut c = cell.borrow_mut();
         if !matches!(c.state, PromiseState::Pending) {
@@ -121,7 +121,7 @@ pub fn settle(cell: &Rc<RefCell<PromiseCell>>, result: Result<Value, Thrown>) {
 impl Realm {
     /// The ExchangeError view of a thrown value: an Error's message (and its
     /// `name` when not plain Error), otherwise String(value).
-    pub fn exchange_error(&mut self, thrown: &Value) -> safe_cex_exchange::runtime::ExchangeError {
+    pub(crate) fn exchange_error(&mut self, thrown: &Value) -> safe_cex_exchange::runtime::ExchangeError {
         let message = if thrown
             .object()
             .is_some_and(|o| matches!(o.borrow().kind, Kind::Error))
@@ -148,12 +148,12 @@ impl Realm {
         error
     }
     /// Unawaited failures are reported to the runtime, never swallowed.
-    pub fn report_thrown(&mut self, thrown: &Value, context: &str) {
+    pub(crate) fn report_thrown(&mut self, thrown: &Value, context: &str) {
         let error = self.exchange_error(thrown);
         self.runtime()
             .report_exception(&error, &serde_json::json!({ "context": context }));
     }
-    pub fn regexp(&self, literal: &str) -> Result<Value, Thrown> {
+    pub(crate) fn regexp(&self, literal: &str) -> Result<Value, Thrown> {
         let pattern = super::regex::Pattern::literal(literal)
             .map_err(|e| self.error_of("SyntaxError", &e))?;
         Ok(self.alloc(
