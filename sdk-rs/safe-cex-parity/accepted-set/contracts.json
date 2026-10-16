@@ -140289,5 +140289,1279 @@
         "reason": "ClassHost and its associated Value arguments are already supplied executable host capabilities; the constructor initializes/binds that host object."
       }
     ]
+  },
+  "safe_cex_venue_weex::binding::actions::fields": {
+    "api": {
+      "kind": "function",
+      "name": "fields",
+      "signature": {
+        "inputs": [
+          [
+            "values",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "tuple": [
+                                        {
+                                          "borrowed_ref": {
+                                            "lifetime": "'static",
+                                            "is_mutable": false,
+                                            "type": {
+                                              "primitive": "str"
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "resolved_path": {
+                                            "path": "safe_cex_venue_weex::account_actions::WeexActionValue",
+                                            "args": null
+                                          }
+                                        }
+                                      ]
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::js_runtime::value::Js",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Converts already typed optional request-field pairs and WeexActionValue string variants into a VM object/array, preserving field names. This constructs outbound request data rather than admitting serialized input.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/actions.rs at 4-25. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::classes::constant": {
+    "api": {
+      "kind": "function",
+      "name": "constant",
+      "signature": {
+        "inputs": [
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Selects a compiled constant/table by its internal name and projects typed values into the VM; the argument is a code selector, with no input record or text grammar.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/classes.rs at 51-79. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::classes::dispatch": {
+    "api": {
+      "kind": "function",
+      "name": "dispatch",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_weex::binding::rt::Host",
+                "args": null
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Routes a statically named source exchange method over existing VM receiver/argument handles to the concrete native body. Per-method normalization and transport bridges keep their own contracts; this function supplies method dispatch and promise assembly.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/classes.rs at 337-535. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::sockets::call_unit": {
+    "api": {
+      "kind": "function",
+      "name": "call_unit",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::binding::rt::Host",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Invokes an existing Host method selected by its internal name and discards the returned VM handle; no wire input is decoded by this wrapper.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/sockets.rs at 62-65. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::sockets::dispatch": {
+    "api": {
+      "kind": "function",
+      "name": "dispatch",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_weex::binding::rt::Host",
+                "args": null
+              }
+            }
+          ],
+          [
+            "kind",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_weex::classes::ClassKind",
+                "args": null
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Routes a statically selected public-socket source operation to its existing body over VM handles, including event callbacks and subscription operations. Frame parsing remains the explicitly called parser operation.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/sockets.rs at 283-387. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::sockets::frame": {
+    "api": {
+      "kind": "function",
+      "name": "frame",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::binding::rt::Host",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "topics",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "id",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "logged",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Builds the outbound method/id/optional-params VM object and sends its shared JSON.stringify result through send or sendWithLog. Its method string is an outbound operation identifier, not serialized input.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/sockets.rs at 75-85. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::sockets::parent_call": {
+    "api": {
+      "kind": "function",
+      "name": "parent_call",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::binding::rt::Host",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Resolves an internal dotted parent method selector through VM properties and invokes it with existing arguments; it dispatches executable host capabilities rather than decoding a wire data owner.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/sockets.rs at 45-57. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::sockets::private::dispatch": {
+    "api": {
+      "kind": "function",
+      "name": "dispatch",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_weex::binding::rt::Host",
+                "args": null
+              }
+            }
+          ],
+          [
+            "name",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "args",
+            {
+              "resolved_path": {
+                "path": "alloc::vec::Vec",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "safe_cex_exchange::js_runtime::value::Js",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Selects a named private-socket source operation over an existing Host and VM argument vector, routing to native auth/refresh/message/disposal bodies. It adds no independent serialized-data admission policy.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/socket_private.rs at 240-281. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::values::define": {
+    "api": {
+      "kind": "function",
+      "name": "define",
+      "signature": {
+        "inputs": [
+          [
+            "_",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::binding::rt::Host",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "field",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Defines a VM object field using a typed static property name and existing VM value; the operation does not deserialize either argument.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 14-16. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::values::equals": {
+    "api": {
+      "kind": "function",
+      "name": "equals",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "text",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Performs strict equality between an existing VM value and a typed string literal; it returns a boolean without constructing a decoded owner.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 51-53. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::values::extract": {
+    "api": {
+      "kind": "function",
+      "name": "extract",
+      "signature": {
+        "inputs": [
+          [
+            "h",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::binding::rt::Host",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "safe_cex_exchange::js_runtime::value::Js",
+                "args": null
+              }
+            }
+          ],
+          [
+            "keys",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Supplies property/array operations to selection::extract_array, retaining existing VM arrays or producing an empty VM array. The key strings are property selectors, with the selection algorithm independently owned by its mapped operation.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 89-105. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::values::get": {
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "_",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::binding::rt::Host",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Delegates one typed property-name lookup to the existing VM value get operation; it has no separate input codec.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 4-6. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::values::method": {
+    "api": {
+      "kind": "function",
+      "name": "method",
+      "signature": {
+        "inputs": [
+          [
+            "_",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::binding::rt::Host",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Resolves an existing VM member into a bound executable handle using the shared scope bridge; the static name identifies a method.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 17-19. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::values::optional": {
+    "api": {
+      "kind": "function",
+      "name": "optional",
+      "signature": {
+        "inputs": [
+          [
+            "_",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_venue_weex::binding::rt::Host",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Returns undefined for a nullish VM receiver or delegates its selected property lookup. This is optional access over already carried VM values.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 7-13. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
+  },
+  "safe_cex_venue_weex::binding::values::optional_dummy": {
+    "api": {
+      "kind": "function",
+      "name": "optional_dummy",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_exchange::js_runtime::value::Js",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Js",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::js_runtime::value::Thrown",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "category": "non-decoder",
+    "reason": "Applies the same nullish/property access operation without a Host argument; the string selects a VM property and no data owner is decoded.",
+    "evidence": "Reviewed actual binding body in safe-cex-venue-weex/src/binding/values.rs at 219-225. Its exact compiler signature receives a native classification receipt. Production exchange/socket E2Es exercise the concrete binding; this role classification does not exempt invoked parser/normalizer owners."
   }
 }
