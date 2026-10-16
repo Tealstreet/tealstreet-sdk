@@ -11,7 +11,7 @@ import { runProbes } from './accepted-probes.mjs';
 import { reviewedLocalHelper, requireNativeDecoderObservations } from './accepted-local-helpers.mjs';
 import { aliasClaim, aliasTargetIdentity, toolingAliasExemption } from './accepted-aliases.mjs';
 import { verifiedMacroOrigins } from './accepted-macro-origins.mjs';
-import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition } from './accepted-number-output.mjs';
+import { verifiedNumberOutputOrigin, verifiedNumberOutputDefinition, numberOutputDefinitionCovers } from './accepted-number-output.mjs';
 import { genericAliasProbe } from './accepted-callable-alias.mjs';
 import { buildScanner } from './accepted-scanner.mjs';
 
@@ -145,9 +145,7 @@ for (const pkg of members) {
       assert.equal(contract.sourceSha256, createHash('sha256').update(fs.readFileSync(file)).digest('hex'), `${label}: accepted-set assertion: reviewed nested-function source changed`);
       return null;
     }
-    if (numberOutputDefinition && fs.realpathSync(file) === numberOutputDefinition.file
-        && ident === numberOutputDefinition.ident && Number(row) === numberOutputDefinition.line
-        && Number(column) === numberOutputDefinition.column) return null;
+    if (numberOutputDefinitionCovers(numberOutputDefinition, file, ident, row, column)) return null;
     const scopeReason = ident.startsWith('UNSUPPORTED_MODULE_MACRO')
       ? 'module-scope macro may introduce decoder declarations and needs production coverage'
       : 'unsupported local scope needs module-scope production coverage';

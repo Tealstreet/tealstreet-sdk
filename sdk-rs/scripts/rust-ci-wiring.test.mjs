@@ -947,10 +947,10 @@ test('accepted-set control registry pins files and executed mutations', async ()
   // Reviewed aliases and exchange runtime coverage retain every earlier control.
   // Two exact serializer metadata constants add policy and production-native
   // controls plus six refusal mutations; all prior controls remain required.
-  assert.equal(Object.values(registry.tests).flat().length, 126, 'registered accepted-set test count');
+  assert.equal(Object.values(registry.tests).flat().length, 127, 'registered accepted-set test count');
   // Provider self coverage adds a same-file nested-definition refusal control;
   // consumer recipe/route controls and every earlier mutation remain required.
-  assert.equal(registry.mutations.length, 147, 'registered accepted-set mutation count');
+  assert.equal(registry.mutations.length, 150, 'registered accepted-set mutation count');
   const output = [...Object.values(registry.tests).flat().map((name, i) => `ok ${i + 1} - ${name}`), ...registry.mutations.map(name => `# ${name}: named assertion; process exit 1`), '# fail 0', '# skipped 0', '# todo 0'].join('\n');
   verifyControls(output, registry);
   for (const name of registry.mutations) assert.throws(() => verifyControls(output.replace(`# ${name}: named assertion; process exit 1`, ''), registry), /mutation inventory/);

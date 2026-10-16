@@ -27,7 +27,7 @@ pins, Clone/Copy traits, role reviews and native observations remain required.
 Evidence ledgers, fixed compiler fixtures and control registries retain their
 own formats; they are not maps of independently appended crate reviews.
 
-The initial cutover from master `5515ddd7a4` preserved all 152 records across
+The initial cutover from master `d9d338ebff` preserved all 160 records across
 eight tables in 52 shards. The cutover compares every complete parsed old map
 with `loadPolicy`, including native adapter strings and negative zero, using:
 

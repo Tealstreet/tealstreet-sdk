@@ -112,6 +112,15 @@ boundaries; it is never used to render a query string. Wire decoding captures
 numeric tokens with the canonical RetainedJsonInput before constructing query
 variants, preserving numeric-looking strings. There is no Value conversion shim.
 
+Accepted-set source discovery reviews local form/query output helpers and retry
+predicates individually, with exact source pins. Their native witnesses are in
+`tests/accepted_local_helpers.rs` and `tests/query_params.rs`: they observe output
+bytes, depth boundaries, retained input identities and predicate error order.
+The private `QueryWire` serializer stays at module scope so its generic Serialize
+implementation remains visible to ordinary compiler discovery. Explicit imports
+and the qualified wasm-bindgen attribute keep macro origins unambiguous; they do
+not grant permission to unknown local macros or input decoders.
+
 RestAdapter success receipts carry the returned response together with its actual
 request configuration. The default receipt method is for terminal adapters;
 rewriting middleware forwards execute_with_receipt and preserves inner changes

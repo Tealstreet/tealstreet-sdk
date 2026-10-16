@@ -576,3 +576,13 @@ Spot keeps its own `placeOrders` override. Inverse construction remains pending.
 Native promise tails belong to Scope and stop on disposal. The batch source
 oracle executes the actual five member bodies with maintained helpers; the
 physical transport tests separately cover BBO/options, fallback and disposal.
+
+The primary/Demo leverage and position-mode receiver bodies retain `Js` Position
+values through cached reads, fetched mapping and Store publication. Never pass
+those native models through JSON: NaN current leverage must trigger a write,
+and NaN/-0 fetched leverage must survive mode discovery during placement.
+`exchange_binding` has native regressions and 32 actual-source compositions;
+`scripts/native-position-controls.py` reinstates four projection faults and
+requires runtime failures plus exact restoration. The older public JSON helper
+APIs retain their separately scoped contracts. Primary not-modified responses
+remain accepted; the dedicated Inverse source's stricter policy is separate.

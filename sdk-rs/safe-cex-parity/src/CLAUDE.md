@@ -208,6 +208,14 @@ existing unsized alias path requires invariant native function/pointer type
 equality and ordinary Serde/conversion checks. The finite static capability
 identity does not execute its callback or classify other lifetimes.
 
+The Num output macro provider proof returns the exact `macro_export` attribute
+span only after validating its unconditional source route, canonical definition,
+export syntax and recipe. The driver covers that one attribute event alongside
+the existing exact definition event. The scope scanner still reports every
+export attribute; an unrelated exported macro in the same file remains refused.
+The registered numeric-output controls test both retained coverage and nearby
+position refusal. Provider native observations retain the parsed attribute span.
+
 Reviewed policy maps are split per crate under `../accepted-set/<table>/` and
 loaded through `scripts/accepted-policy-files.mjs::loadPolicy`. Existing compiler,
 source-pin and native evidence checks receive the same merged records. Keep the
