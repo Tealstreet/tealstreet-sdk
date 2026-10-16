@@ -203,6 +203,14 @@ impl Realm {
         key: &PropKey,
         value: Value,
     ) -> Result<(), Thrown> {
+        self.set_property(target, key, value.clone())?;
+        let after_set = target.object().and_then(|o| o.borrow().after_set.clone());
+        if let Some(after_set) = after_set {
+            after_set(self, key, &value)?;
+        }
+        Ok(())
+    }
+    fn set_property(&mut self, target: &Value, key: &PropKey, value: Value) -> Result<(), Thrown> {
         let o = match target {
             Value::Object(o) => o.clone(),
             Value::Undefined | Value::Null => {

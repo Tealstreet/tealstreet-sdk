@@ -9,6 +9,7 @@ pub(crate) type Thrown = Value;
 pub(crate) type NativeFn = Rc<dyn Fn(&mut Realm, &Value, &[Value]) -> Result<Value, Thrown>>;
 /// `new_target` is the constructor `new` was applied to (a subclass for `super`).
 pub(crate) type NativeConstruct = Rc<dyn Fn(&mut Realm, &[Value], &Value) -> Result<Value, Thrown>>;
+pub(crate) type AfterSet = Rc<dyn Fn(&Realm, &PropKey, &Value) -> Result<(), Thrown>>;
 
 #[derive(Clone)]
 pub(crate) enum Value {
@@ -138,6 +139,8 @@ pub(crate) struct ObjectData {
     pub props: Vec<Prop>,
     pub kind: Kind,
     pub extensible: bool,
+    /// Mirror successful host-owned option writes without changing descriptors.
+    pub after_set: Option<AfterSet>,
 }
 
 impl Value {
@@ -289,6 +292,7 @@ impl ObjectData {
             props: vec![],
             kind,
             extensible: true,
+            after_set: None,
         }
     }
     pub(crate) fn own(&self, key: &PropKey) -> Option<&Prop> {

@@ -29,17 +29,24 @@ struct Fixture {
 }
 #[allow(clippy::arc_with_non_send_sync)]
 fn fixture(routes: Vec<(&str, Value)>) -> Fixture {
+    fixture_with_options(
+        routes,
+        json!({
+            "key": agent_address(),
+            "secret": AGENT_KEY,
+            "applicationId": MASTER,
+        }),
+    )
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn fixture_with_options(routes: Vec<(&str, Value)>, options: Value) -> Fixture {
     let host = Rc::new(Host::default());
     let routes = Routes::new(routes);
     let clock = Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
         host.clone(),
     ));
-    let options = serde_json::from_value(json!({
-        "key": agent_address(),
-        "secret": AGENT_KEY,
-        "applicationId": MASTER,
-    }))
-    .unwrap();
+    let options = serde_json::from_value(options).unwrap();
     let exchange = HyperliquidExchange::new(
         options,
         Rc::new(DefaultStore::new()),
@@ -161,6 +168,40 @@ fn start_loads_markets_balance_and_dials_both_sockets() {
         "startup reported {:?}",
         f.host.reports.borrow()
     );
+}
+
+#[test]
+fn resolved_legacy_identity_reaches_native_options_and_privacy_checks() {
+    for role in ["user", "vault", "agent", "subAccount"] {
+        let mut routes = venue_routes();
+        routes.push((
+            "info:userRole",
+            json!({"role":role,"data":{"user":MASTER,"master":MASTER}}),
+        ));
+        let f = fixture_with_options(
+            routes,
+            json!({
+                "key": agent_address(),
+                "secret": AGENT_KEY,
+            }),
+        );
+        assert!(f.exchange.is_public_data_only());
+        f.host.block_on(f.exchange.start()).unwrap();
+        let options = f.exchange.base().options();
+        let (identity, expected) = match role {
+            "vault" => (options.vault.as_deref(), agent_address()),
+            "user" => (options.application_id.as_deref(), agent_address()),
+            _ => (options.application_id.as_deref(), MASTER.to_string()),
+        };
+        assert_eq!(
+            identity,
+            Some(expected.as_str()),
+            "resolved identity must reach the native BaseExchange options for {role}"
+        );
+        assert!(!f.exchange.is_public_data_only(), "{role}");
+        assert!(f.exchange.has_private_session_identity(), "{role}");
+        assert_eq!(f.routes.count("info:userRole"), 1, "{role}");
+    }
 }
 
 fn ok_action() -> Value {

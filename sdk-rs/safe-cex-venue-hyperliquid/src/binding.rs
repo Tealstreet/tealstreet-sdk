@@ -20,7 +20,10 @@ use safe_cex_exchange::{
     capabilities::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
     },
-    exchange::{BaseExchange, Exchange, ExchangeSettings, ValidatedBatch, ValidatedOrder},
+    exchange::{
+        AccountIdentityPatch, BaseExchange, Exchange, ExchangeSettings, IdentityFieldPatch,
+        ValidatedBatch, ValidatedOrder,
+    },
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime},
     websocket::WsRuntime,
     ws_parent::WsExchangeParent,
@@ -130,6 +133,39 @@ impl HyperliquidExchange {
         let js_options = realm
             .from_typed(&options)
             .map_err(|e| thrown(&mut realm, e))?;
+        // Startup resolves legacy identities by mutating the shared JS options.
+        // Publish each successful write immediately to native privacy readers,
+        // including callbacks that run before start() returns or rejects.
+        let identity_owner = venue.base.clone();
+        js_options.object().unwrap().borrow_mut().after_set =
+            Some(Rc::new(move |r, key, value| {
+                let application_id = key.same(&crate::realm::PropKey::str("applicationId"));
+                if !application_id && !key.same(&crate::realm::PropKey::str("vault")) {
+                    return Ok(());
+                }
+                let value = match value {
+                    Value::Undefined => IdentityFieldPatch::Remove,
+                    Value::String(units) => {
+                        IdentityFieldPatch::Set(String::from_utf16(units).map_err(|_| {
+                            r.type_error("Native account identity requires scalar Unicode")
+                        })?)
+                    }
+                    _ => return Err(r.type_error("Native account identity must be a string")),
+                };
+                let patch = if application_id {
+                    AccountIdentityPatch {
+                        application_id: value,
+                        vault: IdentityFieldPatch::Unchanged,
+                    }
+                } else {
+                    AccountIdentityPatch {
+                        application_id: IdentityFieldPatch::Unchanged,
+                        vault: value,
+                    }
+                };
+                identity_owner.patch_account_identity(patch);
+                Ok(())
+            }));
         let js_store = store_object(&realm, store);
         let mut scope = realm.with_lexical(&class);
         let instance = scope

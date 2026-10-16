@@ -266,9 +266,16 @@ name throws a ReferenceError rather than resolving to a stand-in.
 clean startup. Run `python3 sdk-rs/safe-cex-venue-hyperliquid/scripts/binding-controls.py`
 from the repository root for reproducible dispatch controls: each of the 16
 trait overrides is corrupted independently, must compile and fail its named
-E2E test, and is restored byte-for-byte. The restored suite must pass all 11
+E2E test, and is restored byte-for-byte. The restored suite must pass all 12
 tests. These controls establish dispatch coverage; they do not establish full
 JavaScript semantics or live exchange parity. Logs stay outside the repository.
+
+Startup's successful `applicationId`/`vault` assignments also patch the native
+BaseExchange identity immediately. A host write observer preserves the realm
+object's ordinary property descriptors; it runs after successful assignment and
+outside the object's borrow. The scripted legacy-account test covers user,
+vault, agent and subAccount roles against both native options and privacy checks.
+Native identity strings retain the shared scalar-Unicode boundary.
 
 Declared realm choices: promise reactions run as runtime tasks, not a V8
 microtask queue; store reads are snapshots (writes go through Store methods);
