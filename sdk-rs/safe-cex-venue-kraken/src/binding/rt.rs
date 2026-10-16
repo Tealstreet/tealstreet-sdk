@@ -21,11 +21,7 @@ pub(crate) struct KrakenExtra {
     >,
 }
 
-pub type ExternalPublicDataFactory = Rc<
-    dyn Fn(
-        &safe_cex_types::ExchangeOptionsExternalPublicData,
-    ) -> Rc<dyn safe_cex_exchange::external::ExternalPublicData>,
->;
+pub use safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory;
 
 pub(crate) type Shared = ScopeShared<KrakenExtra>;
 pub(crate) type Rt = Scope<KrakenExtra>;
