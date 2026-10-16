@@ -147,3 +147,5 @@ semantic depth refusals on the surviving object; first key insertion stays fixed
 The discarded_duplicate_capture target independently guards overwritten lone-unit
 and depth140 values, native first-key position and unrelated lexemes. Invalid
 JSON syntax and surviving-value refusals remain separate negative cases.
+
+ExchangeOptions.polymarket carries the five runtime account fields consumed by the Polymarket constructor. Its typed ExchangeOptionsPolymarket record uses existing UTF-8 credential strings and native f64 signerType; do not coerce numeric signature modes or replace the venue retained UTF-16 Text record with it. The source root declaration lacks this opts-as-any extension, so the field is skipped only in generated static TS, never in native serialization or source projection.
