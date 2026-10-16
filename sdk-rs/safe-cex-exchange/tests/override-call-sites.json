@@ -1273,19 +1273,13 @@
   },
   {
     "function": "dispose",
-    "body": "3a88dc6401d4fa45",
-    "call": "self . base . dispose ()",
-    "file": "safe-cex-venue-backpack/src/adapter.rs"
-  },
-  {
-    "function": "dispose",
-    "body": "3a88dc6401d4fa45",
+    "body": "81769b39f01b3fc2",
     "call": "self . public_websocket . get () . expect (\"constructed public socket\") . dispose ()",
     "file": "safe-cex-venue-backpack/src/adapter.rs"
   },
   {
     "function": "dispose",
-    "body": "3a88dc6401d4fa45",
+    "body": "81769b39f01b3fc2",
     "call": "self . private_websocket . get () . expect (\"constructed private socket\") . dispose ()",
     "file": "safe-cex-venue-backpack/src/adapter.rs"
   },
@@ -1524,12 +1518,6 @@
     "file": "safe-cex-venue-backpack/src/adapter_runtime.rs"
   },
   {
-    "function": "dispose",
-    "body": "23549a99593343b4",
-    "call": "self . base . dispose ()",
-    "file": "safe-cex-venue-backpack/src/private_adapter.rs"
-  },
-  {
     "function": "fetch",
     "body": "db2ace7ef48511bc",
     "call": "o . fetch_positions ()",
@@ -1551,12 +1539,6 @@
     "function": "listen_order_book",
     "body": "b27dc6d412556e92",
     "reference": "listeners :: listen_order_book",
-    "file": "safe-cex-venue-backpack/src/public_adapter.rs"
-  },
-  {
-    "function": "dispose",
-    "body": "9d36ce6004cab194",
-    "call": "self . base . dispose ()",
     "file": "safe-cex-venue-backpack/src/public_adapter.rs"
   },
   {

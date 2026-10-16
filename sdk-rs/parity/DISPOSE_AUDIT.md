@@ -39,9 +39,9 @@ same. Source `base.ws.ts:1194-1202` distinguishes `forceClose` metadata from
 `ws.close`; Crypto.com's two own socket disposals and Hyperliquid's private
 disposal call the latter without super. They need #227's
 `close_current_websocket` primitive and native/source forceClosed-retention
-witnesses. The shared bridge is assigned to codex-nlry7m; the Hyperliquid bridge
-is assigned to codex-nkxoxx. These routed runtime issues are outside this
-classification gate's proof.
+witnesses. The shared bridge repair is codex-nlry7m's #240, with 16 source/native
+state-retention cases; the Hyperliquid bridge is assigned to codex-nkxoxx. These
+routed runtime repairs remain separate from this classification gate's proof.
 
 ## Complete venue pass
 
