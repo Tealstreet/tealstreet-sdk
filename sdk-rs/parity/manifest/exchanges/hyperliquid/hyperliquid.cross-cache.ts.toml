@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.cross-cache.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/json_models.rs", "safe-cex-venue-hyperliquid/src/cache_runtime.rs", "safe-cex-venue-hyperliquid/src/cache_orders.rs", "safe-cex-venue-hyperliquid/src/cross_cache.rs" ]
 
 [[symbol]]
 ts = "PrePlacementEntry"
@@ -31,7 +32,7 @@ kind = "constructor"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::new_cache"
 status = "ported"
-note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof."
+note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::new_cache`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#initializeBroadcastChannel"
@@ -39,7 +40,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::initialize_broadcast_channel"
 status = "ported"
-note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof."
+note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::initialize_broadcast_channel`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#clearStaleSessionStorage"
@@ -47,7 +48,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::clear_stale_session_storage"
 status = "ported"
-note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim."
+note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim. Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::clear_stale_session_storage`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#getSessionStorage"
@@ -55,7 +56,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::get_session_storage"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::get_session_storage`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#broadcastCacheUpdate"
@@ -63,7 +64,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::broadcast_cache_update"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::broadcast_cache_update`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#getPrePlacementKey"
@@ -71,7 +72,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::get_pre_placement_key"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::get_pre_placement_key`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#readPrePlacementCache"
@@ -79,7 +80,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::read_pre_placement_cache"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::read_pre_placement_cache`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#writePrePlacementCache"
@@ -87,7 +88,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::write_pre_placement_cache"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::write_pre_placement_cache`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.addPrePlacement"
@@ -95,7 +96,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::add_pre_placement"
 status = "ported"
-note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof."
+note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::add_pre_placement`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.matchPrePlacement"
@@ -103,7 +104,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::match_pre_placement"
 status = "ported"
-note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof."
+note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::match_pre_placement`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.clearPrePlacement"
@@ -111,7 +112,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::clear_pre_placement"
 status = "ported"
-note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim."
+note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim. Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::clear_pre_placement`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#readPendingOrdersCache"
@@ -119,7 +120,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::read_pending_orders_cache"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::read_pending_orders_cache`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#writePendingOrdersCache"
@@ -127,7 +128,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::write_pending_orders_cache"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::write_pending_orders_cache`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.getPendingOrder"
@@ -135,7 +136,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::get_pending_order"
 status = "ported"
-note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim."
+note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim. Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::get_pending_order`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.addPendingOrder"
@@ -143,7 +144,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::add_pending_order"
 status = "ported"
-note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim."
+note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim. Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::add_pending_order`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.removePendingOrder"
@@ -151,7 +152,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::remove_pending_order"
 status = "ported"
-note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim."
+note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim. Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::remove_pending_order`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.hasSeenFill"
@@ -159,7 +160,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::has_seen_fill"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::has_seen_fill`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.markFillSeen"
@@ -167,7 +168,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::mark_fill_seen"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::mark_fill_seen`."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.dispose"
@@ -175,7 +176,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::dispose"
 status = "ported"
-note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN."
+note = "Individual source method algorithm: fresh global/property reads, exact catch boundaries, JSON primitive result types, worker map iteration with binding-error IteratorClose, shallow array copies and pending-entry aliases, own broadcast literal fields, Set FIFO eviction and disposal assignment as applicable. Explicit browser/JS primitive bindings preserve native receiver/argument/error effects. Native source oracle covers ten fixed methods/80 cases through79; no full class/constructor or browser intrinsic implementation claim. Historical sweep stays OPEN. Rename target: `safe-cex-venue-hyperliquid/src/cross_cache.rs::dispose`."
 
 [[symbol]]
 ts = "getCrossCache"

@@ -72,7 +72,7 @@ kind = "constructor"
 layer = "adapted"
 rs = [ "safe-cex-venue-hyperliquid/src/rate_limit.rs::RateLimiter::with_defaults", "safe-cex-venue-hyperliquid/src/rate_limit.rs::RateLimiter::new" ]
 status = "divergent"
-note = "CHOSEN: behaviour finding repaired: with_defaults(clock,capacity,window) distinguishes omitted arguments from explicit0/NaN, supplying1200/60000 only for omission. Retain injected runtime clock and caller-owned pacing/cancellation rather than a process-global Date/setTimeout/Promise chain, so the common runtime controls disposal and reservations. Eager host-owned tasks could mirror source scheduling; this is a choice. Six independent native default/override cases stop at explicit NaN; separate source constructor witness."
+note = "CHOSEN: behaviour finding repaired: with_defaults(clock,capacity,window) distinguishes omitted arguments from explicit0/NaN, supplying1200/60000 only for omission. Retain injected runtime clock and caller-owned pacing/cancellation rather than a process-global Date/setTimeout/Promise chain, so the common runtime controls disposal and reservations. Eager host-owned tasks could mirror source scheduling; this is a choice. Six independent native default/override cases stop at explicit NaN; separate source constructor witness. Rename target: `safe-cex-venue-hyperliquid/src/rate_limit.rs::RateLimiter::with_defaults`."
 
 [[symbol]]
 ts = "RateLimiter.waitForToken"

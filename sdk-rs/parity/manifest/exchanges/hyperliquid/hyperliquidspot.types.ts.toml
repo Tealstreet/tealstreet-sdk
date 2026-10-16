@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.types.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/spot_types.rs", "safe-cex-venue-hyperliquid/src/spot_models.rs", "safe-cex-venue-hyperliquid/src/json_models.rs", "safe-cex-venue-hyperliquid/src/spot_user_event.rs" ]
 
 [[symbol]]
 ts = "BASE_URLS"

@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.builderFee.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/builder_fee.rs", "safe-cex-venue-hyperliquid/src/browser_approval_flows.rs" ]
 
 [[symbol]]
 ts = "DEFAULT_BUILDER_FEE_TENTHS_BPS"
@@ -39,7 +40,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/browser_approval_flows.rs::builder_switch_to_correct_network"
 status = "ported"
-note = "Owned builder-specific switch/add/switch helper bodies and module-local chain object identity; captured chainId, catch boundaries and builder failure wording. Rust owns this source body/local network helpers under venue-local provider/primitive/imported-callee and first-poll host-await bindings. Native134case floor through133 and227independent pending-once await expectations check fields/handles/arguments/return aliases/catch order before wire, not a roundtrip. Imported constants/builder helpers are actual source in oracle; ethers/provider/fetch/JSON and sibling callees are fixture contracts. Arbitrary eager JS invocation/microtask scheduling, live wallet/network/signing and full class/callee/general behavior remain outside this leaf proof."
+note = "Owned builder-specific switch/add/switch helper bodies and module-local chain object identity; captured chainId, catch boundaries and builder failure wording. Rust owns this source body/local network helpers under venue-local provider/primitive/imported-callee and first-poll host-await bindings. Native134case floor through133 and227independent pending-once await expectations check fields/handles/arguments/return aliases/catch order before wire, not a roundtrip. Imported constants/builder helpers are actual source in oracle; ethers/provider/fetch/JSON and sibling callees are fixture contracts. Arbitrary eager JS invocation/microtask scheduling, live wallet/network/signing and full class/callee/general behavior remain outside this leaf proof. Rename target: `safe-cex-venue-hyperliquid/src/browser_approval_flows.rs::builder_switch_to_correct_network`."
 
 [[symbol]]
 ts = "APPROVE_BUILDER_FEE_TYPES"

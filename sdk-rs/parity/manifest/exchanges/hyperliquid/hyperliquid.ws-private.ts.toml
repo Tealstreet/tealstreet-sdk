@@ -16,7 +16,7 @@ kind = "constructor"
 layer = "adapted"
 rs = [ "safe-cex-venue-hyperliquid/src/private_constructor.rs::new_core_private_socket", "safe-cex-venue-hyperliquid/src/private_class.rs::construct_core_private_class" ]
 status = "ported"
-note = "Source derived constructor and27field initializers after native super(parent). Retains original parent/defining-class/newTarget handles, base-returned receiver, source-ordered independent Map/Set/queue/state/buffer allocations and19fresh lexical arrow captures/name/length/selectors. Native41case floor through40 define-error/handleOrderUpdates covers14scenes plus27outer field-definition failures, decoded own-field prefixes, positive-zero bits, map/member/capture/class/receiver identities, actual detached onOpen body, per-instance freshness and independent partial allocation floors before source comparison. Native superclass/prototype construction, descriptors, collection primitives and arrow allocation are embedding bindings. Class frame/callable dispatchers are mapped separately to private_class.rs; the earlier41constructor witness alone did not compose their bodies. Native contract forwarding does not establish dynamic superclass or prototype implementation, nested allocation/global-get/arrow-allocation failures, proxies/general scheduling/live operation. Canonical references: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Native class constructor entry target safe-cex-venue-hyperliquid/src/private_class.rs::construct_core_private_class forwards the original defining class, parent and newTarget to the existing ordered constructor."
+note = "Source derived constructor and27field initializers after native super(parent). Retains original parent/defining-class/newTarget handles, base-returned receiver, source-ordered independent Map/Set/queue/state/buffer allocations and19fresh lexical arrow captures/name/length/selectors. Native41case floor through40 define-error/handleOrderUpdates covers14scenes plus27outer field-definition failures, decoded own-field prefixes, positive-zero bits, map/member/capture/class/receiver identities, actual detached onOpen body, per-instance freshness and independent partial allocation floors before source comparison. Native superclass/prototype construction, descriptors, collection primitives and arrow allocation are embedding bindings. Class frame/callable dispatchers are mapped separately to private_class.rs; the earlier41constructor witness alone did not compose their bodies. Native contract forwarding does not establish dynamic superclass or prototype implementation, nested allocation/global-get/arrow-allocation failures, proxies/general scheduling/live operation. Canonical references: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Native class constructor entry target safe-cex-venue-hyperliquid/src/private_class.rs::construct_core_private_class forwards the original defining class, parent and newTarget to the existing ordered constructor. Rename target: `safe-cex-venue-hyperliquid/src/private_constructor.rs::new_core_private_socket`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.connectAndSubscribe"
@@ -24,7 +24,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs::private_connect_and_subscribe"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket.connectAndSubscribe algorithm in Rust with venue-local property/callee/global/browser bindings. Native actual-source202case floor through201; explicit WsVenue selects distinct perp/spot URL bindings, three fresh socket/callee/handler reads, spot immediate refresh boolean and clock-before-payload order retained as applicable. Source reconnect parameter unused. Private class assembly is mapped separately in private_class.rs; native browser/global primitives, virtual callees and live socket operation remain outside this earlier leaf witness."
+note = "Source HyperliquidPrivateWebSocket.connectAndSubscribe algorithm in Rust with venue-local property/callee/global/browser bindings. Native actual-source202case floor through201; explicit WsVenue selects distinct perp/spot URL bindings, three fresh socket/callee/handler reads, spot immediate refresh boolean and clock-before-payload order retained as applicable. Source reconnect parameter unused. Private class assembly is mapped separately in private_class.rs; native browser/global primitives, virtual callees and live socket operation remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs::private_connect_and_subscribe`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.onOpen"
@@ -32,7 +32,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_on_open" ]
 status = "ported"
-note = "Source private websocket onOpen algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness."
+note = "Source private websocket onOpen algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_on_open`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#startPingLoop"
@@ -40,7 +40,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_start_ping_loop" ]
 status = "ported"
-note = "Source private websocket startPingLoop algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness."
+note = "Source private websocket startPingLoop algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_start_ping_loop`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#schedulePing"
@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_schedule_ping" ]
 status = "ported"
-note = "Source private websocket schedulePing algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness."
+note = "Source private websocket schedulePing algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_schedule_ping`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#stopPingLoop"
@@ -56,7 +56,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_stop_ping_loop" ]
 status = "ported"
-note = "Source private websocket stopPingLoop algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness."
+note = "Source private websocket stopPingLoop algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_stop_ping_loop`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.subscribe"
@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs::private_subscribe"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket.subscribe algorithm in Rust with venue-local property/callee/global/browser bindings. Native actual-source202case floor through201; explicit WsVenue selects distinct perp/spot URL bindings, three fresh socket/callee/handler reads, spot immediate refresh boolean and clock-before-payload order retained as applicable. Source reconnect parameter unused. Private class assembly is mapped separately in private_class.rs; native browser/global primitives, virtual callees and live socket operation remain outside this earlier leaf witness."
+note = "Source HyperliquidPrivateWebSocket.subscribe algorithm in Rust with venue-local property/callee/global/browser bindings. Native actual-source202case floor through201; explicit WsVenue selects distinct perp/spot URL bindings, three fresh socket/callee/handler reads, spot immediate refresh boolean and clock-before-payload order retained as applicable. Source reconnect parameter unused. Private class assembly is mapped separately in private_class.rs; native browser/global primitives, virtual callees and live socket operation remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs::private_subscribe`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.ping"
@@ -72,7 +72,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = [ "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_ping" ]
 status = "ported"
-note = "Source private websocket ping algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness."
+note = "Source private websocket ping algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Private class assembly is mapped separately in private_class.rs; virtual callees and live timer/socket operation remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::private_ping`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.subscribeSystemTopics"
@@ -80,7 +80,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::private_subscribe_system_topics"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket.subscribeSystemTopics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Private class assembly is mapped separately in private_class.rs; primitive/virtual callee implementations and live sockets remain outside this earlier leaf witness."
+note = "Source HyperliquidPrivateWebSocket.subscribeSystemTopics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Private class assembly is mapped separately in private_class.rs; primitive/virtual callee implementations and live sockets remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::private_subscribe_system_topics`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#subscribeAllActiveAssetData"
@@ -88,15 +88,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::private_subscribe_all_active_asset_data"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket.subscribeAllActiveAssetData algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Private class assembly is mapped separately in private_class.rs; primitive/virtual callee implementations and live sockets remain outside this earlier leaf witness."
+note = "Source HyperliquidPrivateWebSocket.subscribeAllActiveAssetData algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Private class assembly is mapped separately in private_class.rs; primitive/virtual callee implementations and live sockets remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::private_subscribe_all_active_asset_data`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#getStaleCheckChannelKey"
 kind = "method"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::get_stale_check_channel_key"
 status = "ported"
-note = "Host-bound Rust source algorithm. Strict clearinghouseState guard, optional truthy dex then fresh dex read, source template/String/lowercase order and native colon-separated UTF16 result; other channel native value returned unchanged. Actual-source market-data-selectors-oracle.cjs covers161fixedcases through160 across ten roots with decoded native members/fields/arguments/state before wire; iterator/property/regex/coercion/imported libraries and fullclass implementations remain host contracts, no exhaustive behavior claim."
+note = "Host-bound Rust source algorithm. Strict clearinghouseState guard, optional truthy dex then fresh dex read, source template/String/lowercase order and native colon-separated UTF16 result; other channel native value returned unchanged. Actual-source market-data-selectors-oracle.cjs covers161fixedcases through160 across ten roots with decoded native members/fields/arguments/state before wire; iterator/property/regex/coercion/imported libraries and fullclass implementations remain host contracts, no exhaustive behavior claim. Rename target: `safe-cex-venue-hyperliquid/src/market_data_selectors.rs::get_stale_check_channel_key`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#getMessageTimestamp"
@@ -117,10 +117,10 @@ note = "Actual class execution target safe-cex-venue-hyperliquid/src/private_cla
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#collectHip3DexesFromFills"
 kind = "method"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::collect_hip3_dexes_from_fills"
 status = "ported"
-note = "Host-bound Rust source algorithm. Fresh Set construction, captured markets dictionary, optional coin/String/coercion and colon prefix or nested optional market.info.hip3Dex routing; source iterator close, native Set dedup/insertion order and alias effects. Actual-source market-data-selectors-oracle.cjs covers161fixedcases through160 across ten roots with decoded native members/fields/arguments/state before wire; iterator/property/regex/coercion/imported libraries and fullclass implementations remain host contracts, no exhaustive behavior claim."
+note = "Host-bound Rust source algorithm. Fresh Set construction, captured markets dictionary, optional coin/String/coercion and colon prefix or nested optional market.info.hip3Dex routing; source iterator close, native Set dedup/insertion order and alias effects. Actual-source market-data-selectors-oracle.cjs covers161fixedcases through160 across ten roots with decoded native members/fields/arguments/state before wire; iterator/property/regex/coercion/imported libraries and fullclass implementations remain host contracts, no exhaustive behavior claim. Rename target: `safe-cex-venue-hyperliquid/src/market_data_selectors.rs::collect_hip3_dexes_from_fills`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#resolvePositionMode"
@@ -136,7 +136,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_is_stale_message"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket#isStaleMessage body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof."
+note = "Source HyperliquidPrivateWebSocket#isStaleMessage body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof. Rename target: `safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_is_stale_message`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.onMessage"
@@ -144,7 +144,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_on_message"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket.onMessage body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof."
+note = "Source HyperliquidPrivateWebSocket.onMessage body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof. Rename target: `safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_on_message`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#sendWithDiagnostics"
@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::private_send_with_diagnostics"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket.sendWithDiagnostics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Private class assembly is mapped separately in private_class.rs; primitive/virtual callee implementations and live sockets remain outside this earlier leaf witness."
+note = "Source HyperliquidPrivateWebSocket.sendWithDiagnostics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Private class assembly is mapped separately in private_class.rs; primitive/virtual callee implementations and live sockets remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::private_send_with_diagnostics`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#emitReceiveDiagnostics"
@@ -160,7 +160,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::private_emit_receive_diagnostics"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket.emitReceiveDiagnostics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Private class assembly is mapped separately in private_class.rs; primitive/virtual callee implementations and live sockets remain outside this earlier leaf witness."
+note = "Source HyperliquidPrivateWebSocket.emitReceiveDiagnostics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Private class assembly is mapped separately in private_class.rs; primitive/virtual callee implementations and live sockets remain outside this earlier leaf witness. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::private_emit_receive_diagnostics`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#processMessage"
@@ -168,7 +168,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_process_message"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket#processMessage body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof."
+note = "Source HyperliquidPrivateWebSocket#processMessage body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof. Rename target: `safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_process_message`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#handleHip3AllMids"
@@ -176,7 +176,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_hip3_all_mids"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket#handleHip3AllMids body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof."
+note = "Source HyperliquidPrivateWebSocket#handleHip3AllMids body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof. Rename target: `safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_hip3_all_mids`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#handleUserEvents"
@@ -184,7 +184,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_user_events"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket#handleUserEvents body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof."
+note = "Source HyperliquidPrivateWebSocket#handleUserEvents body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof. Rename target: `safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_user_events`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#handleServerError"
@@ -192,47 +192,47 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_server_error"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket#handleServerError body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof."
+note = "Source HyperliquidPrivateWebSocket#handleServerError body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof. Rename target: `safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_server_error`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.applyCoreClearinghouseState"
 kind = "method"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::apply_core_clearinghouse_state"
 status = "ported"
-note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN."
+note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN. Rename target: `safe-cex-venue-hyperliquid/src/core_position_order_state.rs::apply_core_clearinghouse_state`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.dispose"
 kind = "field-fn"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::private_dispose"
 status = "ported"
-note = "Rust stops the ping-loop virtual callee then implements ws?.close?.() with separate nullish receiver/function guards, exact native receiver and callee/error identity. Falsy non-nullish close values still call and throw as source; full class/socket-close primitive remains host supplied. Actual-source lifecycle-delegates-oracle.cjs covers111fixedcases through110 across ten roots with native values/effects before any wire; no exhaustive/cardinality closure claim."
+note = "Rust stops the ping-loop virtual callee then implements ws?.close?.() with separate nullish receiver/function guards, exact native receiver and callee/error identity. Falsy non-nullish close values still call and throw as source; full class/socket-close primitive remains host supplied. Actual-source lifecycle-delegates-oracle.cjs covers111fixedcases through110 across ten roots with native values/effects before any wire; no exhaustive/cardinality closure claim. Rename target: `safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::private_dispose`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.handleHip3ClearinghouseState"
 kind = "field-fn"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::handle_hip3_clearinghouse_state"
 status = "ported"
-note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN."
+note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN. Rename target: `safe-cex-venue-hyperliquid/src/core_position_order_state.rs::handle_hip3_clearinghouse_state`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.handleFills"
 kind = "field-fn"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::handle_fills"
 status = "ported"
-note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN."
+note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN. Rename target: `safe-cex-venue-hyperliquid/src/core_position_order_state.rs::handle_fills`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#applyOptimisticCorePositionFromFill"
 kind = "method"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::apply_optimistic_core_position_from_fill"
 status = "ported"
-note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN."
+note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN. Rename target: `safe-cex-venue-hyperliquid/src/core_position_order_state.rs::apply_optimistic_core_position_from_fill`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.handleFundings"
@@ -240,7 +240,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_fundings"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket.handleFundings body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof."
+note = "Source HyperliquidPrivateWebSocket.handleFundings body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof. Rename target: `safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_fundings`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.handleUserNonFundingLedgerUpdates"
@@ -248,15 +248,15 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_ledger_updates"
 status = "ported"
-note = "Source HyperliquidPrivateWebSocket.handleUserNonFundingLedgerUpdates body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof."
+note = "Source HyperliquidPrivateWebSocket.handleUserNonFundingLedgerUpdates body in Rust with venue-local JS primitive/property/virtual-callee bindings; native actual-source140case floor through139. Core routing, strict-null timestamp guard, source-order optional/fresh reads, scoped catch, valid-fill predicate and lexical routes, inherited for-in enumeration, reused ticker buffers and mark/mid branches retained as applicable. Native scalar/UTF16/identity/field/prototype/map/set/buffer/callback assertions precede all wire assertions. Funding body preserves no effects/undefined. Primitive and virtual callee implementations, imported fast-context decoder binding, full class composition, live sockets and general/exhaustive/reentrant behavior outside this proof. Rename target: `safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::core_handle_ledger_updates`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket.handleOrderUpdates"
 kind = "field-fn"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::handle_order_updates"
 status = "ported"
-note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN."
+note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN. Rename target: `safe-cex-venue-hyperliquid/src/core_position_order_state.rs::handle_order_updates`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#getFillPositionSide"
@@ -280,7 +280,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::track_processed_realized_pnl_fill"
 status = "ported"
-note = "Source private helper algorithm: UTF-16 substring/key/Unicode casing, Number finite/positive masks and nullish/falsy distinction, fresh snapshot field reads, PnL get/set/add receiver-before-argument order and queue/Set duplicate/empty-oldest eviction behavior as applicable. Native scalar bits/units/variants, decoded summary members, mutable PnL/queue/Set state and native callback receiver/argument/error effects checked against actual source and actual enum declarations. Browser/JS primitives and virtual method dependencies are explicit host bindings; standard String.includes algorithm is owned Rust. Summary is an owned field snapshot, not a prototype/descriptor/alias representation. Eleven new symbols/133fixed cases through132; full WS class/handlers/live operation and universal cardinality remain unclaimed. Mutable lexical-class limit read repaired after queue.length and before native relational comparison;136private-helper cases through135 include limits0/1 and original getter-error identity with retained add/push effects. Class assembly is mapped separately; this earlier helper floor did not compose it."
+note = "Source private helper algorithm: UTF-16 substring/key/Unicode casing, Number finite/positive masks and nullish/falsy distinction, fresh snapshot field reads, PnL get/set/add receiver-before-argument order and queue/Set duplicate/empty-oldest eviction behavior as applicable. Native scalar bits/units/variants, decoded summary members, mutable PnL/queue/Set state and native callback receiver/argument/error effects checked against actual source and actual enum declarations. Browser/JS primitives and virtual method dependencies are explicit host bindings; standard String.includes algorithm is owned Rust. Summary is an owned field snapshot, not a prototype/descriptor/alias representation. Eleven new symbols/133fixed cases through132; full WS class/handlers/live operation and universal cardinality remain unclaimed. Mutable lexical-class limit read repaired after queue.length and before native relational comparison;136private-helper cases through135 include limits0/1 and original getter-error identity with retained add/push effects. Class assembly is mapped separately; this earlier helper floor did not compose it. Rename target: `safe-cex-venue-hyperliquid/src/private_position_helpers.rs::track_processed_realized_pnl_fill`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#getRealizedPnlKey"
@@ -304,7 +304,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::set_realized_pnl_for_position"
 status = "ported"
-note = "Source private helper algorithm: UTF-16 substring/key/Unicode casing, Number finite/positive masks and nullish/falsy distinction, fresh snapshot field reads, PnL get/set/add receiver-before-argument order and queue/Set duplicate/empty-oldest eviction behavior as applicable. Native scalar bits/units/variants, decoded summary members, mutable PnL/queue/Set state and native callback receiver/argument/error effects checked against actual source and actual enum declarations. Browser/JS primitives and virtual method dependencies are explicit host bindings; standard String.includes algorithm is owned Rust. Summary is an owned field snapshot, not a prototype/descriptor/alias representation. Eleven new symbols/133fixed cases through132; full WS class/handlers/live operation and universal cardinality remain unclaimed."
+note = "Source private helper algorithm: UTF-16 substring/key/Unicode casing, Number finite/positive masks and nullish/falsy distinction, fresh snapshot field reads, PnL get/set/add receiver-before-argument order and queue/Set duplicate/empty-oldest eviction behavior as applicable. Native scalar bits/units/variants, decoded summary members, mutable PnL/queue/Set state and native callback receiver/argument/error effects checked against actual source and actual enum declarations. Browser/JS primitives and virtual method dependencies are explicit host bindings; standard String.includes algorithm is owned Rust. Summary is an owned field snapshot, not a prototype/descriptor/alias representation. Eleven new symbols/133fixed cases through132; full WS class/handlers/live operation and universal cardinality remain unclaimed. Rename target: `safe-cex-venue-hyperliquid/src/private_position_helpers.rs::set_realized_pnl_for_position`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#incrementRealizedPnlForPosition"
@@ -312,15 +312,15 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::increment_realized_pnl_for_position"
 status = "ported"
-note = "Source private helper algorithm: UTF-16 substring/key/Unicode casing, Number finite/positive masks and nullish/falsy distinction, fresh snapshot field reads, PnL get/set/add receiver-before-argument order and queue/Set duplicate/empty-oldest eviction behavior as applicable. Native scalar bits/units/variants, decoded summary members, mutable PnL/queue/Set state and native callback receiver/argument/error effects checked against actual source and actual enum declarations. Browser/JS primitives and virtual method dependencies are explicit host bindings; standard String.includes algorithm is owned Rust. Summary is an owned field snapshot, not a prototype/descriptor/alias representation. Eleven new symbols/133fixed cases through132; full WS class/handlers/live operation and universal cardinality remain unclaimed."
+note = "Source private helper algorithm: UTF-16 substring/key/Unicode casing, Number finite/positive masks and nullish/falsy distinction, fresh snapshot field reads, PnL get/set/add receiver-before-argument order and queue/Set duplicate/empty-oldest eviction behavior as applicable. Native scalar bits/units/variants, decoded summary members, mutable PnL/queue/Set state and native callback receiver/argument/error effects checked against actual source and actual enum declarations. Browser/JS primitives and virtual method dependencies are explicit host bindings; standard String.includes algorithm is owned Rust. Summary is an owned field snapshot, not a prototype/descriptor/alias representation. Eleven new symbols/133fixed cases through132; full WS class/handlers/live operation and universal cardinality remain unclaimed. Rename target: `safe-cex-venue-hyperliquid/src/private_position_helpers.rs::increment_realized_pnl_for_position`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#applyRealizedPnlToCurrentPosition"
 kind = "method"
-layer = ""
+layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::apply_realized_pnl_to_current_position"
 status = "ported"
-note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN."
+note = "Source position/order ingestion body and owned callbacks in Rust, with fresh reads, branch/coercion order, native literal/spread payloads and iterator/catch boundaries. Actual-source106case floor through105 and9manualawait points; decoded native callbacks/fields/binary64 bits/UTF16/identity/state/receivers/errors asserted before wire. Distinct websocket Map last-wins versus REST uniqBy first-wins; core/REST numeric and TIF distinctions retained. ECMAScript libraries and sibling/helper/virtual callees are explicit venue-local host contracts; prototype/reentrant/sparse/generalasync/fullclass/live behavior not enumerated by this floor. Original cardinality sweep remains OPEN. Rename target: `safe-cex-venue-hyperliquid/src/core_position_order_state.rs::apply_realized_pnl_to_current_position`."
 
 [[symbol]]
 ts = "HyperliquidPrivateWebSocket#getRealizedPnlForPosition"
@@ -328,4 +328,4 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::get_realized_pnl_for_position"
 status = "ported"
-note = "Source private helper algorithm: UTF-16 substring/key/Unicode casing, Number finite/positive masks and nullish/falsy distinction, fresh snapshot field reads, PnL get/set/add receiver-before-argument order and queue/Set duplicate/empty-oldest eviction behavior as applicable. Native scalar bits/units/variants, decoded summary members, mutable PnL/queue/Set state and native callback receiver/argument/error effects checked against actual source and actual enum declarations. Browser/JS primitives and virtual method dependencies are explicit host bindings; standard String.includes algorithm is owned Rust. Summary is an owned field snapshot, not a prototype/descriptor/alias representation. Eleven new symbols/133fixed cases through132; full WS class/handlers/live operation and universal cardinality remain unclaimed."
+note = "Source private helper algorithm: UTF-16 substring/key/Unicode casing, Number finite/positive masks and nullish/falsy distinction, fresh snapshot field reads, PnL get/set/add receiver-before-argument order and queue/Set duplicate/empty-oldest eviction behavior as applicable. Native scalar bits/units/variants, decoded summary members, mutable PnL/queue/Set state and native callback receiver/argument/error effects checked against actual source and actual enum declarations. Browser/JS primitives and virtual method dependencies are explicit host bindings; standard String.includes algorithm is owned Rust. Summary is an owned field snapshot, not a prototype/descriptor/alias representation. Eleven new symbols/133fixed cases through132; full WS class/handlers/live operation and universal cardinality remain unclaimed. Rename target: `safe-cex-venue-hyperliquid/src/private_position_helpers.rs::get_realized_pnl_for_position`."

@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.agent.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/json_models.rs", "safe-cex-venue-hyperliquid/src/agent.rs", "safe-cex-venue-hyperliquid/src/browser_approval_flows.rs" ]
 
 [[symbol]]
 ts = "AgentWalletCreationResult"
@@ -23,7 +24,7 @@ kind = "function"
 layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/browser_approval_flows.rs::agent_switch_to_correct_network"
 status = "ported"
-note = "Owned module-local switch/add/switch async helper bodies, captured chain identity/id, fresh wallet reads and helper catch scope; fulfilled false/null requests still succeed. Rust owns this source body/local network helpers under venue-local provider/primitive/imported-callee and first-poll host-await bindings. Native134case floor through133 and227independent pending-once await expectations check fields/handles/arguments/return aliases/catch order before wire, not a roundtrip. Imported constants/builder helpers are actual source in oracle; ethers/provider/fetch/JSON and sibling callees are fixture contracts. Arbitrary eager JS invocation/microtask scheduling, live wallet/network/signing and full class/callee/general behavior remain outside this leaf proof."
+note = "Owned module-local switch/add/switch async helper bodies, captured chain identity/id, fresh wallet reads and helper catch scope; fulfilled false/null requests still succeed. Rust owns this source body/local network helpers under venue-local provider/primitive/imported-callee and first-poll host-await bindings. Native134case floor through133 and227independent pending-once await expectations check fields/handles/arguments/return aliases/catch order before wire, not a roundtrip. Imported constants/builder helpers are actual source in oracle; ethers/provider/fetch/JSON and sibling callees are fixture contracts. Arbitrary eager JS invocation/microtask scheduling, live wallet/network/signing and full class/callee/general behavior remain outside this leaf proof. Rename target: `safe-cex-venue-hyperliquid/src/browser_approval_flows.rs::agent_switch_to_correct_network`."
 
 [[symbol]]
 ts = "APPROVE_AGENT_TYPES"

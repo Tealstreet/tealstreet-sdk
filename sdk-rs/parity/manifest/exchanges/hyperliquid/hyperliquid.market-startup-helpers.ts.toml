@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.market-startup-helpers.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/market_helpers.rs", "safe-cex-venue-hyperliquid/src/market_startup.rs" ]
 
 [[symbol]]
 ts = "parseMetaAndAssetCtxsResponse"
