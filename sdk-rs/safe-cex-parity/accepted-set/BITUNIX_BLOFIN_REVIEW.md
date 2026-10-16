@@ -367,3 +367,38 @@ concrete Store integration and cancellation are not inferred from these probes.
 Together with the three position/history contracts, this leaves 16 original
 Bitunix owners and the previously measured 49 Blofin owners. Complete-package,
 local-owner and feature/WASM matrices remain separate obligations.
+
+## Concrete order formatting and amendment fields
+
+Four order-model helpers execute against the real native OrderFrame, constructed
+venue, Store and error listener. Rejection retains original error text, complete
+error-event payloads and listener-failure precedence. Create formatting inspects
+complete ordered JsJsonValue payloads, distinct fractional amount/price steps,
+raw TP/SL prices, market-price omission, both split payloads, reduce-only position
+IDs and native TIF/reduce caches. The generated-client-ID path is selected.
+
+TP/SL formatting separately covers partial TP and SL quantities and full-position
+updates. Full-position TP retains the raw opposite SL value; cached position ID
+precedes live info and prevents copying an unmatched counterpart. Append-leg
+observations distinguish trigger, quantity and LIMIT execution price, preserve
+untouched opposite-leg snapshots, and skip quantity/execution fields for position
+updates. Absent snapshots preserve the original payload. Validation failures
+retain the exact partial payload mutation and error-event sequence.
+
+All four actual native owners pass. Nine compiling copied-production mutations
+remove rejection emission or independently swap amount/price axes at every
+selected create, partial/full TP/SL and append-leg precision site. Each produces
+a named output mismatch. The six TP/SL swaps run one at a time, followed by both
+owners' complete restored native cases; the rejection/create swaps each have
+separate restored runs. Three additional post-construction controls discard all
+create payloads, retain only the first of two create payloads, or discard the
+single TP/SL payload. They preserve complete input consumption and cache effects;
+each fails the named output assertion. The complete four-owner native run passes
+after restoration. These twelve compiled controls cover nine rejection/precision
+faults and three output-loss faults. Real production source bytes remain unchanged.
+Independent review found no issues. These concrete bounded fixtures do not
+classify the OrderFrame receiver itself or infer arbitrary caller IDs/hosts.
+
+This leaves 12 original Bitunix owners and the previously measured 49 Blofin
+owners. Complete-package, local-owner and feature/WASM matrices remain separate
+obligations.
