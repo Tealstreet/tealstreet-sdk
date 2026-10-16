@@ -910,3 +910,8 @@ reconnection, and a `reconnecting` dial is refused rather than faked. The
 feature's dependencies are target-gated, so `--all-features` wasm builds stay
 I/O-free. Inherent `impl` blocks inside cfg-gated modules fail the parity
 indexer closed; native modules use free functions and trait impls only.
+
+`native_tealstreet_runtime(token)` is registerTealstreetTransport for a native host:
+`TealstreetTransport` over HOW adapters (bigInt = raw format) on a tunnel host that
+authenticates with the account's proxy token and checks expiry with the canonical
+`is_token_expired`. Proof: `safe-cex-registry/tests/native_host_tunnel.rs`.

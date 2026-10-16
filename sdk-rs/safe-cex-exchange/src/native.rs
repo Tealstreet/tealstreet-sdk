@@ -6,10 +6,18 @@ use crate::{
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
     websocket::{UpgradeHeaders, WebSocketConnectionOptions, WsEvent, WsRuntime, WsSocket},
 };
+use safe_cex_store::virtual_clock::VIRTUAL_CLOCK;
 use safe_cex_transport::{
-    DirectTransport, RestAdapter, RestFailure, RestRequest, RestResponse, TransportProvider,
+    DirectTransport, RestAdapter, RestFailure, RestRequest, RestResponse, TransportFuture,
+    TransportProvider,
+    how::{HowRestAdapter, big_int_as_string_json_parse},
+    how_config::{CreateAxiosHttpOverWebsocketAdapterOptions, HOWRegion},
     native::{NativeSocket, NativeTunnelHost, connect_websocket, spawn_local_task, wall_clock_ms},
-    socket::{SocketFrame, TunnelHost, TunnelSocket},
+    provider::RestAdapterRegion,
+    socket::{
+        SocketCapabilities, SocketFrame, TunnelDialOptions, TunnelHost, TunnelSocket, TunnelTask,
+    },
+    tealstreet::{TealstreetTransport, TealstreetTransportHost},
 };
 use safe_cex_types::ExchangeName;
 use serde_json::Value;
@@ -63,7 +71,7 @@ impl ExchangeTask for LocalTask {
 pub struct NativeRuntime {
     origin: Instant,
     transport: Arc<dyn TransportProvider>,
-    tunnel: Rc<NativeTunnelHost>,
+    tunnel: Rc<dyn TunnelHost>,
     min_reconnection_delay_ms: f64,
     library_min_reconnection_delay_ms: f64,
 }
@@ -72,14 +80,141 @@ pub fn native_runtime() -> Rc<NativeRuntime> {
     native_runtime_with_transport(Arc::new(DirectTransport))
 }
 pub fn native_runtime_with_transport(transport: Arc<dyn TransportProvider>) -> Rc<NativeRuntime> {
+    runtime_over(transport, Rc::new(NativeTunnelHost))
+}
+/// The account's proxy token (ts: the accessToken facade; exchange-server's per-account provider).
+pub type ProxyTokenSource = Rc<dyn Fn() -> TransportFuture<'static, String>>;
+/// ts: registerTealstreetTransport for a native host. `tealstreetTunnel` REST goes over
+/// the HOW tunnel and tunnel sockets authenticate with `token`.
+pub fn native_tealstreet_runtime(token: ProxyTokenSource) -> Rc<NativeRuntime> {
+    native_tealstreet_runtime_with(token, Rc::new(NativeTunnelHost))
+}
+/// As `native_tealstreet_runtime`, dialing tunnel sockets through `dials` (another origin or a test).
+pub fn native_tealstreet_runtime_with(
+    token: ProxyTokenSource,
+    dials: Rc<dyn TunnelHost>,
+) -> Rc<NativeRuntime> {
+    let tunnel: Rc<dyn TunnelHost> = Rc::new(TokenTunnel { dials, token });
+    runtime_over(tealstreet_transport(tunnel.clone()), tunnel)
+}
+// TealstreetTransport takes an Arc host; this one is local like every native future.
+#[allow(clippy::arc_with_non_send_sync)]
+fn tealstreet_transport(tunnel: Rc<dyn TunnelHost>) -> Arc<dyn TransportProvider> {
+    Arc::new(TealstreetTransport::new(Arc::new(NativeTealstreetHost {
+        tunnel,
+    })))
+}
+fn runtime_over(
+    transport: Arc<dyn TransportProvider>,
+    tunnel: Rc<dyn TunnelHost>,
+) -> Rc<NativeRuntime> {
     let random = random_unit();
     Rc::new(NativeRuntime {
         origin: Instant::now(),
         transport,
-        tunnel: Rc::new(NativeTunnelHost),
+        tunnel,
         min_reconnection_delay_ms: 1000.0 + random * 2000.0,
         library_min_reconnection_delay_ms: 1000.0 + random * 4000.0,
     })
+}
+/// A tunnel host that authenticates with the account's proxy token.
+struct TokenTunnel {
+    dials: Rc<dyn TunnelHost>,
+    token: ProxyTokenSource,
+}
+impl TunnelHost for TokenTunnel {
+    fn spawn_local(&self, future: Pin<Box<dyn Future<Output = ()>>>) -> Box<dyn TunnelTask> {
+        self.dials.spawn_local(future)
+    }
+    fn capabilities(&self) -> SocketCapabilities {
+        self.dials.capabilities()
+    }
+    fn now_ms(&self) -> u64 {
+        self.dials.now_ms()
+    }
+    fn sleep_until(&self, deadline_ms: u64) -> TransportFuture<'static, ()> {
+        self.dials.sleep_until(deadline_ms)
+    }
+    fn connect(
+        &self,
+        url: String,
+        options: TunnelDialOptions,
+    ) -> TransportFuture<'static, Rc<dyn TunnelSocket>> {
+        self.dials.connect(url, options)
+    }
+    fn proxy_token(&self) -> TransportFuture<'_, String> {
+        (self.token)()
+    }
+    fn is_token_expired(&self, token: &str) -> bool {
+        crate::proxy_token::is_token_expired(token, &VIRTUAL_CLOCK)
+    }
+    fn sync_server_time(&self, server_time: u64) {
+        self.dials.sync_server_time(server_time)
+    }
+}
+/// The Tealstreet transport's host: HOW adapters over the token tunnel. The source's
+/// `markRestProxyHeader` stamps a diagnostic config property, which RestRequest has no field for.
+struct NativeTealstreetHost {
+    tunnel: Rc<dyn TunnelHost>,
+}
+// HOW adapters are local (Rc tunnel clients) behind the transport's Arc adapter type.
+#[allow(clippy::arc_with_non_send_sync)]
+fn how(
+    tunnel: &Rc<dyn TunnelHost>,
+    options: CreateAxiosHttpOverWebsocketAdapterOptions,
+) -> Arc<dyn RestAdapter> {
+    match HowRestAdapter::with_options(tunnel.clone(), options) {
+        Ok(adapter) => Arc::new(adapter),
+        Err(error) => Arc::new(UnavailableTunnel(error.to_string())),
+    }
+}
+impl TealstreetTransportHost for NativeTealstreetHost {
+    fn get_proxy_token(&self) -> TransportFuture<'_, String> {
+        self.tunnel.proxy_token()
+    }
+    fn is_node_or_bun_runtime(&self) -> bool {
+        true
+    }
+    fn mark_rest_proxy_header(&self, _request: &mut RestRequest, _shape: &'static str) {}
+    fn default_adapter(&self) -> Arc<dyn RestAdapter> {
+        how(
+            &self.tunnel,
+            CreateAxiosHttpOverWebsocketAdapterOptions {
+                custom_parser: None,
+                region: None,
+            },
+        )
+    }
+    fn big_int_adapter(&self) -> Arc<dyn RestAdapter> {
+        how(
+            &self.tunnel,
+            CreateAxiosHttpOverWebsocketAdapterOptions {
+                custom_parser: Some(Rc::new(|text: &str| Ok(big_int_as_string_json_parse(text)))),
+                region: None,
+            },
+        )
+    }
+    fn regional_adapter(&self, region: Option<RestAdapterRegion>) -> Arc<dyn RestAdapter> {
+        how(
+            &self.tunnel,
+            CreateAxiosHttpOverWebsocketAdapterOptions {
+                custom_parser: None,
+                region: match region {
+                    Some(RestAdapterRegion::Ja) => Some(HOWRegion::JA),
+                    Some(RestAdapterRegion::Sg) => Some(HOWRegion::SG),
+                    Some(RestAdapterRegion::Other(_)) | None => None,
+                },
+            },
+        )
+    }
+}
+/// The tunnel clients could not be built; every request reports why.
+struct UnavailableTunnel(String);
+impl RestAdapter for UnavailableTunnel {
+    fn execute(&self, request: RestRequest) -> safe_cex_transport::RestFuture<'_, RestResponse> {
+        let message = format!("HOW tunnel unavailable: {}", self.0);
+        Box::pin(async move { Err(RestFailure::pre_transmit(message, request)) })
+    }
 }
 fn random_unit() -> f64 {
     (u64::from_le_bytes(random_bytes::<8>()) >> 11) as f64 / (1u64 << 53) as f64
