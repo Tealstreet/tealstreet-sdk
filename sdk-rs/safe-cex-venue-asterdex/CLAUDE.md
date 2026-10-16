@@ -58,6 +58,9 @@ controls and remaining scope are recorded in ACCEPTED_CONTRACT_REVIEW.md.
 their source/native witnesses. The selected runner and six compiled controls
 retain the separate obligations of lexical ordinary `Wire` decoders.
 
+`ENUM_CONTRACT_REVIEW.md` records eleven string/position-mode enum contracts,
+their 173 raw-text/native observations and grouped String-frontdoor control.
+
 `DECISION_CONTRACT_REVIEW.md` records eight account/exchange decision contracts,
 their 98 fixed TS/native observations and five isolated compiled controls.
 

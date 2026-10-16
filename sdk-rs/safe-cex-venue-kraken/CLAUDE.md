@@ -361,3 +361,22 @@ Each control must fail its named compiled native witness and only its own
 production output probe; every exact restoration must pass the named native
 witness and all six production probes. Other owners, aliases and all 25 receiver
 refusals remain independent, under MANIFEST-SPEC#kraken-utility-wire-domain.
+
+The four private request records in `futures_candles`, `spot_reads` and `reads`
+use their concrete Deserialize boundary with the existing shared numeric backend
+and `strict_decode::object`, followed by private Serde remote companions. Preserve
+Serialize, wire renames, declaration order, optional/null rules, ignored fields
+and every numeric-output registration. The companions return the original owner;
+they must not gain independent Deserialize/conversion traits or new inherent APIs.
+
+Their cfg(test) native witnesses use `tests/support/accepted_record_shapes.rs` to
+observe every field, Option presence and f64 bits through seven ordinary,
+qualified and shared numeric routes, then reject complete valid declaration-order
+arrays. Run `cargo test -p safe-cex-venue-kraken --lib accepted_shape --jobs 1` from
+sdk-rs, then `scripts/private-record-shape-controls.py` serially. Each removal of
+only the object wrapper must fail its exact named full-array admission assertion;
+all four tests must pass after each exact restoration. The production gate
+`scripts/private-record-contracts.mjs` inventories the four actual owners and
+separately inspects complete compiler companion implementations. New traits,
+conversions or inherent APIs require review; private companion syntax alone is
+not proof. Other owners, aliases and receiver refusals remain independent.
