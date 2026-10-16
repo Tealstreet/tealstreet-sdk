@@ -70,3 +70,9 @@ inner schemas. This audit measured no public-path failure and makes no numeric
 production repair. The six lexical inner `Wire` decoders are separate local-owner
 obligations. These public-path tests do not classify or exempt those local owners;
 the current batch remains limited to the eighteen selected helper functions.
+
+After merging master `ff420e9212`, the frozen dependency install and the selected
+source/native gate passed again: eighteen runtime owners, 87 source expectations,
+zero failed owners and zero classification-only receipts. `parity:check` also
+passed with 7,459 rows and 17,204 public Rust items. Both JavaScript entrypoints
+passed syntax checks, and the working-tree whitespace check passed.
