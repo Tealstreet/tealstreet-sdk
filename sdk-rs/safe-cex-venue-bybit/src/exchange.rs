@@ -102,8 +102,15 @@ impl BybitExchange {
         Err(safe_cex_exchange::runtime::ExchangeError::new(message))
     }
 
-    pub(crate) fn get_category_for_symbol(&self, _symbol: &str) -> &'static str {
-        "linear"
+    // ts: BybitExchange.getCategoryForSymbol — routed by symbol so a row routes before its market loads.
+    pub(crate) fn get_category_for_symbol(&self, symbol: &str) -> &'static str {
+        if crate::options::is_bybit_option_symbol(symbol) {
+            "option"
+        } else if crate::inverse_symbol::is_bybit_inverse_symbol(symbol) {
+            "inverse"
+        } else {
+            "linear"
+        }
     }
 
     pub(crate) fn get_ticker_symbols_for_category(&self, category: PublicCategory) -> Vec<String> {
@@ -113,6 +120,9 @@ impl BybitExchange {
             .markets()
             .iter()
             .filter(|market| {
+                if market.option.is_some() {
+                    return false;
+                }
                 let linear = market.quote == "USDT" || market.quote == "USDC";
                 match category {
                     PublicCategory::Linear => linear,

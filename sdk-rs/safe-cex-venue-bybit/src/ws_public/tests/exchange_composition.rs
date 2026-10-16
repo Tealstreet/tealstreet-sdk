@@ -808,14 +808,14 @@ fn concrete_category_symbols_match_source_order_and_active_fallback() {
         );
         assert_eq!(
             fixture["symbols"].as_array().unwrap().len(),
-            8,
+            10,
             "CATEGORY-CARDINALITY symbol cases"
         );
         for symbol in fixture["symbols"].as_array().unwrap() {
             assert_eq!(
                 venue.get_category_for_symbol(symbol["symbol"].as_str().unwrap()),
                 symbol["category"].as_str().unwrap(),
-                "symbol category ignores input"
+                "symbol category routes options and inverse by symbol"
             );
         }
         if index == 0 {

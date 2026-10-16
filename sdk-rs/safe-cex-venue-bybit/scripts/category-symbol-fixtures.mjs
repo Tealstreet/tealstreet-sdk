@@ -10,13 +10,22 @@ function methods(file, owner, names) {
   assert.equal(selected.length, names.length, `source method census ${owner}`);
   return selected.map(n => n.getText(source)).join('\n');
 }
-const context = vm.createContext({});
+// The routing predicates execute from their maintained modules (type-only imports).
+const helpers = {};
+for (const file of ['bybit/bybit.options.ts', 'bybit/bybit.inverse.ts']) {
+  const exports = {};
+  vm.runInNewContext(ts.transpileModule(readFileSync(new URL(file, root), 'utf8'), {
+    compilerOptions: { target: ts.ScriptTarget.ES2022, module: ts.ModuleKind.CommonJS },
+  }).outputText, { exports, require() { throw Error('no runtime imports expected'); } });
+  Object.assign(helpers, exports);
+}
+const context = vm.createContext({ isBybitOptionSymbol: helpers.isBybitOptionSymbol, isBybitInverseSymbol: helpers.isBybitInverseSymbol });
 const source = methods('bybit/bybit.exchange.ts', 'BybitExchange', ['getCategoryForSymbol', 'getTickerSymbolsForCategory', 'getSettleCoinsForCategory', 'accountType'])
   + methods('base.ts', 'BaseExchange', ['getActiveTickerSymbols', 'getTickerSymbolsForSubscription']);
 const subject = vm.runInContext(ts.transpileModule(`new class { ${source} }`, {
   compilerOptions: { target: ts.ScriptTarget.ES2022 },
 }).outputText, context);
-const symbols = ['', 'BTCUSD', 'BTCUSDT', 'constructor', '__proto__', '😀', 'ÉTH', ' unknown ']
+const symbols = ['', 'BTCUSD', 'BTCUSDT', 'constructor', '__proto__', '😀', 'ÉTH', ' unknown ', 'ETHUSDZ26', 'BTC-25SEP26-130000-C-USDT']
   .map(symbol => ({ symbol, category: subject.getCategoryForSymbol(symbol) }));
 const market = (symbol, quote, active, isInverse) => ({
   id: `id:${symbol}:${quote}`, symbol, base: 'base-only', quote, active, isInverse,
@@ -25,7 +34,9 @@ const market = (symbol, quote, active, isInverse) => ({
 });
 const mixed = [market('BTCUSD', 'USDT', false, true), market('BTCUSDT', 'USD', true, false),
   market('DUP', 'USDC', true, true), market('DUP', 'USDT', false, false),
-  market('😀', 'usd', true, false), market('ÉTH', '', false, true), market(' spaced ', 'USDC', false, false)];
+  market('😀', 'usd', true, false), market('ÉTH', '', false, true), market(' spaced ', 'USDC', false, false),
+  { ...market('BTC-25SEP26-130000-C-USDT', 'USDT', true, false), option: { underlying: 'BTC', expiry: 1790323200000, strike: 130000,
+    right: 'call', style: 'european', settlement: 'cash', premiumAsset: 'USDT', settleAsset: 'USDT' } }];
 const lists = [[], mixed, [...mixed].reverse(), mixed.slice(0, 1), mixed.slice(1, 2), mixed.slice(2, 4)];
 const activeSets = [[], ['BTCUSD'], ['BTCUSDT'], ['DUP', '😀'], ['MISSING'], [' spaced ']];
 const cases = [];
