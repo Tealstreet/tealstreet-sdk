@@ -53,8 +53,15 @@ restored and all twenty owners must pass again. Each run's native receipts and
 logs are retained outside the checkout. This is one grouped build, not twenty
 isolated builds.
 
+The measured baseline passed twenty runtime owners, zero failures and zero
+classification-only receipts. Removing the twenty guards produced exactly
+twenty named failed owners, each with a direct native mismatch for its own
+complete valid positional array. Exact-byte restoration passed all twenty again.
+All 707 maintained-source shape observations passed before every native run.
+The per-run JSON receipts preserve every owner's individual failures.
+
 The scope remains twenty native/default owners under the canonical
-[map/string boundary](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary),
+[string boundary](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary),
 [typed output boundary](../parity/MANIFEST-SPEC.md#closed-typed-output-boundary)
 and [numeric requirement](../parity/MANIFEST-SPEC.md#numeric-ingress-defect).
 Ordinary lexical Wire decoders and the generic present helper remain separate
