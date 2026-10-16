@@ -58,7 +58,7 @@
       }
     },
     "evidence": "safe-cex-parity/src/bin/accepted-source.rs::number_output_provider; real temporary source-module chain parsing and returned provider metadata are directly observed. No permission to trust invocation spellings or arbitrary macros.",
-    "call": "{ let root=std::env::temp_dir().join(format!(\"safe-cex-provider-observation-{}-{}\",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())); let dir=root.join(\"safe-cex-num/src/numeric_ingress\");std::fs::create_dir_all(&dir).unwrap();std::fs::write(root.join(\"safe-cex-num/src/lib.rs\"),$value[\"root\"].as_str().unwrap()).unwrap();std::fs::write(root.join(\"safe-cex-num/src/numeric_ingress.rs\"),\"pub mod eligibility;\").unwrap();std::fs::write(dir.join(\"eligibility.rs\"),$value[\"provider\"].as_str().unwrap()).unwrap();let observed=$type(&root);std::fs::remove_dir_all(&root).unwrap();match observed{Ok(value)=>serde_json::json!({\"ok\":true,\"tokens\":value[\"tokens\"],\"definition\":value[\"definition\"],\"moduleChain\":value[\"moduleChain\"],\"recipeFormat\":value[\"recipeFormat\"]}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+    "call": "{ let root=std::env::temp_dir().join(format!(\"safe-cex-provider-observation-{}-{}\",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())); let dir=root.join(\"safe-cex-num/src/numeric_ingress\");std::fs::create_dir_all(&dir).unwrap();std::fs::write(root.join(\"safe-cex-num/src/lib.rs\"),$value[\"root\"].as_str().unwrap()).unwrap();std::fs::write(root.join(\"safe-cex-num/src/numeric_ingress.rs\"),\"pub mod eligibility;\").unwrap();std::fs::write(dir.join(\"eligibility.rs\"),$value[\"provider\"].as_str().unwrap()).unwrap();let observed=$type(&root);std::fs::remove_dir_all(&root).unwrap();match observed{Ok(value)=>serde_json::json!({\"ok\":true,\"tokens\":value[\"tokens\"],\"definition\":value[\"definition\"],\"moduleChain\":value[\"moduleChain\"],\"recipeFormat\":value[\"recipeFormat\"],\"exportAttribute\":value[\"exportAttribute\"]}),Err(_)=>serde_json::json!({\"ok\":false})} }",
     "cases": [
       {
         "input": {
@@ -74,13 +74,18 @@
           ],
           "recipeFormat": "proc-macro2-token-string-v1",
           "ok": true,
-          "tokens": "() => { () } ;"
+          "tokens": "() => { () } ;",
+          "exportAttribute": {
+            "ident": "UNSUPPORTED_ATTRIBUTE_EXPANSION:macro_export",
+            "line": 1,
+            "column": 15
+          }
         }
       },
       {
         "input": {
           "root": "pub mod numeric_ingress;",
-          "provider": "#[macro_export] macro_rules! js_number_output { ($x:ident) => { $x }; }"
+          "provider": "\n  #[macro_export] macro_rules! js_number_output { ($x:ident) => { $x }; }"
         },
         "output": {
           "definition": "safe-cex-num/src/numeric_ingress/eligibility.rs",
@@ -91,7 +96,12 @@
           ],
           "recipeFormat": "proc-macro2-token-string-v1",
           "ok": true,
-          "tokens": "($ x : ident) => { $ x } ;"
+          "tokens": "($ x : ident) => { $ x } ;",
+          "exportAttribute": {
+            "ident": "UNSUPPORTED_ATTRIBUTE_EXPANSION:macro_export",
+            "line": 2,
+            "column": 17
+          }
         }
       },
       {
@@ -114,7 +124,7 @@
       }
     ],
     "nativeObservation": {
-      "call": "{ let root=std::env::temp_dir().join(format!(\"safe-cex-provider-observation-{}-{}\",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())); let dir=root.join(\"safe-cex-num/src/numeric_ingress\");std::fs::create_dir_all(&dir).unwrap();std::fs::write(root.join(\"safe-cex-num/src/lib.rs\"),$value[\"root\"].as_str().unwrap()).unwrap();std::fs::write(root.join(\"safe-cex-num/src/numeric_ingress.rs\"),\"pub mod eligibility;\").unwrap();std::fs::write(dir.join(\"eligibility.rs\"),$value[\"provider\"].as_str().unwrap()).unwrap();let observed=$type(&root);std::fs::remove_dir_all(&root).unwrap();match observed{Ok(value)=>serde_json::json!({\"ok\":true,\"tokens\":value[\"tokens\"],\"definition\":value[\"definition\"],\"moduleChain\":value[\"moduleChain\"],\"recipeFormat\":value[\"recipeFormat\"]}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "call": "{ let root=std::env::temp_dir().join(format!(\"safe-cex-provider-observation-{}-{}\",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())); let dir=root.join(\"safe-cex-num/src/numeric_ingress\");std::fs::create_dir_all(&dir).unwrap();std::fs::write(root.join(\"safe-cex-num/src/lib.rs\"),$value[\"root\"].as_str().unwrap()).unwrap();std::fs::write(root.join(\"safe-cex-num/src/numeric_ingress.rs\"),\"pub mod eligibility;\").unwrap();std::fs::write(dir.join(\"eligibility.rs\"),$value[\"provider\"].as_str().unwrap()).unwrap();let observed=$type(&root);std::fs::remove_dir_all(&root).unwrap();match observed{Ok(value)=>serde_json::json!({\"ok\":true,\"tokens\":value[\"tokens\"],\"definition\":value[\"definition\"],\"moduleChain\":value[\"moduleChain\"],\"recipeFormat\":value[\"recipeFormat\"],\"exportAttribute\":value[\"exportAttribute\"]}),Err(_)=>serde_json::json!({\"ok\":false})} }",
       "cases": [
         {
           "input": {
@@ -130,13 +140,18 @@
             ],
             "recipeFormat": "proc-macro2-token-string-v1",
             "ok": true,
-            "tokens": "() => { () } ;"
+            "tokens": "() => { () } ;",
+            "exportAttribute": {
+              "ident": "UNSUPPORTED_ATTRIBUTE_EXPANSION:macro_export",
+              "line": 1,
+              "column": 15
+            }
           }
         },
         {
           "input": {
             "root": "pub mod numeric_ingress;",
-            "provider": "#[macro_export] macro_rules! js_number_output { ($x:ident) => { $x }; }"
+            "provider": "\n  #[macro_export] macro_rules! js_number_output { ($x:ident) => { $x }; }"
           },
           "output": {
             "definition": "safe-cex-num/src/numeric_ingress/eligibility.rs",
@@ -147,7 +162,12 @@
             ],
             "recipeFormat": "proc-macro2-token-string-v1",
             "ok": true,
-            "tokens": "($ x : ident) => { $ x } ;"
+            "tokens": "($ x : ident) => { $ x } ;",
+            "exportAttribute": {
+              "ident": "UNSUPPORTED_ATTRIBUTE_EXPANSION:macro_export",
+              "line": 2,
+              "column": 17
+            }
           }
         },
         {
@@ -173,7 +193,8 @@
         "tokens",
         "definition",
         "moduleChain",
-        "recipeFormat"
+        "recipeFormat",
+        "exportAttribute"
       ]
     }
   }

@@ -1,7 +1,10 @@
 //! Query rendering is distinct from the JSON projection used by remote protocols.
 use safe_cex_num::{JsCoercionError, JsRootCollator};
 use safe_cex_types::{QueryValue, retained_json::RetainedJsonInput};
-use serde::{Deserialize, Serializer};
+use serde::{
+    Deserialize, Serialize, Serializer,
+    ser::{SerializeMap, SerializeSeq},
+};
 use serde_json::Value;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -173,51 +176,48 @@ pub fn query_json_projection(value: &QueryValue) -> Option<Value> {
     })
 }
 
+struct QueryWire<'a>(&'a QueryValue);
+impl Serialize for QueryWire<'_> {
+    fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
+        match self.0 {
+            QueryValue::Undefined | QueryValue::Null => serializer.serialize_none(),
+            QueryValue::Bool(value) => serializer.serialize_bool(*value),
+            QueryValue::String(value) => serializer.serialize_str(value),
+            QueryValue::Number(value) if !value.is_finite() => serializer.serialize_none(),
+            QueryValue::Number(value) => {
+                // Retain JS exponent spelling in physical wire bytes, not Value.
+                let raw = serde_json::value::RawValue::from_string(safe_cex_num::js_number_string(
+                    *value,
+                ))
+                .map_err(serde::ser::Error::custom)?;
+                raw.serialize(serializer)
+            }
+            QueryValue::Array(values) => {
+                let mut seq = serializer.serialize_seq(Some(values.len()))?;
+                for value in values {
+                    seq.serialize_element(&QueryWire(value))?;
+                }
+                seq.end()
+            }
+            QueryValue::Object(values) => {
+                let mut map = serializer.serialize_map(None)?;
+                for (key, value) in values {
+                    if !matches!(value, QueryValue::Undefined) {
+                        map.serialize_entry(key, &QueryWire(value))?;
+                    }
+                }
+                map.end()
+            }
+        }
+    }
+}
+
 pub(crate) fn serialize_query_wire<S: Serializer>(
     value: &Option<QueryValue>,
     serializer: S,
 ) -> Result<S::Ok, S::Error> {
-    use serde::{
-        Serialize,
-        ser::{SerializeMap, SerializeSeq},
-    };
-    struct Wire<'a>(&'a QueryValue);
-    impl Serialize for Wire<'_> {
-        fn serialize<S: Serializer>(&self, serializer: S) -> Result<S::Ok, S::Error> {
-            match self.0 {
-                QueryValue::Undefined | QueryValue::Null => serializer.serialize_none(),
-                QueryValue::Bool(value) => serializer.serialize_bool(*value),
-                QueryValue::String(value) => serializer.serialize_str(value),
-                QueryValue::Number(value) if !value.is_finite() => serializer.serialize_none(),
-                QueryValue::Number(value) => {
-                    // Retain JS exponent spelling in physical wire bytes, not Value.
-                    let raw = serde_json::value::RawValue::from_string(
-                        safe_cex_num::js_number_string(*value),
-                    )
-                    .map_err(serde::ser::Error::custom)?;
-                    raw.serialize(serializer)
-                }
-                QueryValue::Array(values) => {
-                    let mut seq = serializer.serialize_seq(Some(values.len()))?;
-                    for value in values {
-                        seq.serialize_element(&Wire(value))?;
-                    }
-                    seq.end()
-                }
-                QueryValue::Object(values) => {
-                    let mut map = serializer.serialize_map(None)?;
-                    for (key, value) in values {
-                        if !matches!(value, QueryValue::Undefined) {
-                            map.serialize_entry(key, &Wire(value))?;
-                        }
-                    }
-                    map.end()
-                }
-            }
-        }
-    }
     match value {
-        Some(value) => Wire(value).serialize(serializer),
+        Some(value) => QueryWire(value).serialize(serializer),
         None => serializer.serialize_none(),
     }
 }

@@ -3624,12 +3624,6 @@
     "file": "safe-cex-venue-bybit/src/binding/members/account.rs"
   },
   {
-    "function": "set_leverage",
-    "body": "444f3b058e699912",
-    "reference": "controls :: set_leverage",
-    "file": "safe-cex-venue-bybit/src/binding/members/controls.rs"
-  },
-  {
     "function": "change_margin_type",
     "body": "e4a0ccc327366bd8",
     "reference": "controls :: change_margin_type",
@@ -6022,6 +6016,54 @@
     "body": "93a0e61874b4305f",
     "reference": "socket_boundaries :: dispose",
     "file": "safe-cex-venue-okx/src/binding/typed_members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: runtime_actions :: dispose",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: runtime_actions :: start",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: trading_actions :: set_leverage",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: trading_actions :: set_all_leverage",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: runtime_actions :: update_order",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: trading_actions :: cancel_orders",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "new",
+    "body": "1bd95ab145a6277e",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-orderly/src/native_exchange.rs"
+  },
+  {
+    "function": "drop",
+    "body": "515bd8a12d555002",
+    "call": "self . dispose ()",
+    "file": "safe-cex-venue-orderly/src/native_exchange.rs"
   },
   {
     "function": "sync",

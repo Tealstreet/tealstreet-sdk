@@ -1,5 +1,11 @@
 # JavaScript numeric and language semantics
 
+The individually reviewed accepted contracts and their native/default evidence
+are described in [ACCEPTED_CONTRACTS.md](ACCEPTED_CONTRACTS.md). Keep decoder
+observations separate from body-specific non-decoder classifications. The
+numeric_output_invariant target checks native changed-bit refusals and nested
+paths; its compiling comparison fault must fail before exact restoration passes.
+
 This crate hosts shared ECMAScript compatibility helpers below services and venues.
 Use `js_trim` when porting JavaScript String.prototype.trim. Its exact set is:
 U+0009–000D, U+0020, U+00A0, U+1680, U+2000–200A, U+2028, U+2029,

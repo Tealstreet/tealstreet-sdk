@@ -1,3 +1,4 @@
+import { loadPolicy } from './accepted-policy-files.mjs';
 // Production WS native controls mutate ws_auth.rs sequentially and restore it in finally.
 import assert from 'node:assert/strict';
 import { loadContracts } from './accepted-contract-files.mjs';
@@ -13,7 +14,7 @@ const root = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '../..')
 const sourcePath = path.join(root, 'safe-cex-types/src/ws_auth.rs');
 const original = fs.readFileSync(sourcePath, 'utf8');
 const contracts = loadContracts();
-const visitorPins = JSON.parse(fs.readFileSync(path.join(root, 'safe-cex-parity/accepted-set/local-functions.json')));
+const visitorPins = loadPolicy('local-functions');
 // RequestVisitor and ResponseVisitor are delegated to their enclosing
 // Deserialize owners by the scanner. The free payload helper retains the
 // explicit whole-file pin, which also detects mutations in those two bodies.

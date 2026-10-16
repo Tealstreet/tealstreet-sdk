@@ -1,0 +1,7 @@
+{
+  "safe-cex-num/src/numeric_ingress.rs::LOCAL_FUNCTION:retained": {
+    "category": "non-decoder",
+    "reason": "Inside js_capture_output: structurally converts an already captured JsNumberInput tree into RetainedJsonInput node for node. It admits no raw shape and rejects nothing; capture itself is the module-level owner's job.",
+    "sourceSha256": "694af92e5f68ffbbf760c5bc26bf54becfe8f7ffc5967bf1a6a6b6c0d762be4c"
+  }
+}

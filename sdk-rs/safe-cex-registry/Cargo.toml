@@ -11,6 +11,7 @@ safe-cex-exchange.workspace = true
 safe-cex-types.workspace = true
 safe-cex-venue-apexomni.workspace = true
 safe-cex-venue-asterdex.workspace = true
+safe-cex-venue-orderly.workspace = true
 safe-cex-venue-kucoin.workspace = true
 safe-cex-venue-mexc.workspace = true
 safe-cex-venue-backpack.workspace = true
@@ -55,5 +56,6 @@ tokio = { workspace = true, features = ["rt", "net", "time", "io-util", "sync"] 
 tokio-tungstenite = { workspace = true }
 futures-util = { workspace = true }
 base64.workspace = true
+ed25519-dalek.workspace = true
 hmac.workspace = true
 sha2.workspace = true

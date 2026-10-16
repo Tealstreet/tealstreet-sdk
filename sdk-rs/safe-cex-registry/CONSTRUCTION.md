@@ -4,6 +4,7 @@ Status: implemented for the Lighter family (`lighter`, `lighter-robinhood`), `ap
 `bitgetusdc`), `bitrue`, `bitunix`, `blofin`, `breakoutprop`, Bybit (`bybit`, `bybitdemo`, `bybitspot`),
 Coinbase (`coinbase`, `coinbasespot`), `cryptocom`, `phemex`,
 the Kraken family (`kraken`, `krakenspot`),
+the Orderly family (`kodiakfi`, `mode`, `salsadex`, `tealstreet-dex`, `what`, `woofi`),
 `hyperliquid` and `hyperliquidspot`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), `polymarket`, `woo` and `weex`, 2026-10-16 (`src/rust_venues.rs`,
@@ -65,6 +66,10 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     its cache and routes hosted signing through the existing shared HTTP host.
     `tests/native_host_coinbase.rs` runs both names over local HTTP/WS servers and
     checks Coinbase Spot's source external-provider refusal.
+  - `kodiakfi`, `mode`, `salsadex`, `tealstreet-dex`, `what` and `woofi`, built
+    with `native_exchange::OrderlyExchange::new` on the shared js_runtime.
+    `RustVenueHost::orderly(name)` supplies the runtime, per-options HTTP
+    capability and external-public-data factory for the selected family name.
   - `okx`, `okxdemo`, `okxeu` and `okxeudemo`, one shared constructor around
     `OkxExchange::new`; the name picks the class. `OkxDependencies` carries the
     runtime and a `JsHttpHost`; the native host builds it with js_runtime
@@ -214,6 +219,13 @@ BaseExchange. Empty-secret startup/placement/cancellation and signer-refusal
 proofs run in native_host_bingx; the API skips local signing whenever that
 capability is present, including when local credentials remain configured.
 
+Orderly-family Rust construction covers kodiakfi, mode, salsadex, tealstreet-dex,
+what and woofi. `RustVenueHost::orderly(name)` supplies their shared runtime,
+per-options HTTP capability and external-public-data factory. The native host
+retains the selected family name while routing the final signed request through
+the shared transport stack. `tests/native_host_orderly.rs` verifies the actual
+Ed25519 signature server-side for every family entry. Native hosted remoteSigner
+is refused explicitly until that capability is wired.
 
 ## Hyperliquid native host
 
