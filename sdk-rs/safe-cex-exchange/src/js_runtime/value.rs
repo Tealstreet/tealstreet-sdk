@@ -23,6 +23,12 @@ pub fn utf16(text: &str) -> Str {
 #[derive(Clone)]
 pub enum Prop {
     Data(Js),
+    DataDescriptor {
+        value: Js,
+        writable: bool,
+        enumerable: bool,
+        configurable: bool,
+    },
     Accessor(Option<Getter>, Option<Setter>),
 }
 
@@ -149,7 +155,9 @@ impl fmt::Debug for Js {
                 let mut map = f.debug_map();
                 for (k, v) in props.iter() {
                     match v {
-                        Prop::Data(v) => map.entry(&String::from_utf16_lossy(k), v),
+                        Prop::Data(v) | Prop::DataDescriptor { value: v, .. } => {
+                            map.entry(&String::from_utf16_lossy(k), v)
+                        }
                         Prop::Accessor(..) => {
                             map.entry(&String::from_utf16_lossy(k), &"<accessor>")
                         }
@@ -314,7 +322,11 @@ impl Js {
                 out.into()
             }
             Js::Object(o) => {
-                if o.class == "Error" {
+                if o.class == "Buffer" && self.get("toString")?.is_callable() {
+                    self.call_method("toString", vec![])?.to_js_string()?
+                } else if o.class == "Blob" || o.class == "ArrayBuffer" {
+                    utf16(&format!("[object {}]", o.class))
+                } else if o.class == "Error" {
                     let name = self.get("name")?;
                     let message = self.get("message")?;
                     let name = if name.is_undefined() {
@@ -393,6 +405,9 @@ impl Js {
         self.get_key(&utf16(key))
     }
     pub fn get_key(&self, key: &[u16]) -> Result<Js, Thrown> {
+        self.get_key_receiver(key, self)
+    }
+    fn get_key_receiver(&self, key: &[u16], receiver: &Js) -> Result<Js, Thrown> {
         match self {
             Js::Undefined | Js::Null => {
                 return Err(Thrown::type_error(&format!(
@@ -445,8 +460,8 @@ impl Js {
         };
         let prop = props.borrow().get(key).cloned();
         match prop {
-            Some(Prop::Data(v)) => Ok(v),
-            Some(Prop::Accessor(Some(getter), _)) => getter(self),
+            Some(Prop::Data(v) | Prop::DataDescriptor { value: v, .. }) => Ok(v),
+            Some(Prop::Accessor(Some(getter), _)) => getter(receiver),
             Some(Prop::Accessor(None, _)) => Ok(Js::Undefined),
             None => {
                 if let Js::Function(function) = self {
@@ -458,7 +473,7 @@ impl Js {
                 if let Js::Object(o) = self
                     && let Some(proto) = o.proto.borrow().clone()
                 {
-                    return proto.get_key(key);
+                    return proto.get_key_receiver(key, receiver);
                 }
                 if let Js::Function(f) = self
                     && key == utf16("name").as_ref()
@@ -519,9 +534,56 @@ impl Js {
             )));
         };
         let existing = props.borrow().get(key).cloned();
+        // Inherited setters receive the original receiver; inherited read-only data
+        // properties refuse an own shadow, as ordinary strict-mode [[Set]] does.
+        if existing.is_none() {
+            let mut ancestor = match self {
+                Js::Object(object) => object.proto.borrow().clone(),
+                _ => None,
+            };
+            while let Some(parent) = ancestor {
+                let inherited = parent
+                    .own_props()
+                    .and_then(|p| p.borrow().get(key).cloned());
+                match inherited {
+                    Some(Prop::Accessor(_, Some(setter))) => return setter(self, value),
+                    Some(Prop::Accessor(_, None))
+                    | Some(Prop::DataDescriptor {
+                        writable: false, ..
+                    }) => {
+                        return Err(Thrown::type_error("Cannot assign to read only property"));
+                    }
+                    Some(_) => break,
+                    None => {}
+                }
+                ancestor = match parent {
+                    Js::Object(object) => object.proto.borrow().clone(),
+                    _ => None,
+                };
+            }
+        }
         match existing {
             Some(Prop::Accessor(_, Some(setter))) => setter(self, value),
-            Some(Prop::Accessor(_, None)) => Ok(()),
+            Some(Prop::Accessor(_, None))
+            | Some(Prop::DataDescriptor {
+                writable: false, ..
+            }) => Err(Thrown::type_error("Cannot assign to read only property")),
+            Some(Prop::DataDescriptor {
+                enumerable,
+                configurable,
+                ..
+            }) => {
+                props.borrow_mut().insert(
+                    key.into(),
+                    Prop::DataDescriptor {
+                        value,
+                        writable: true,
+                        enumerable,
+                        configurable,
+                    },
+                );
+                Ok(())
+            }
             _ => {
                 props.borrow_mut().insert(key.into(), Prop::Data(value));
                 Ok(())
@@ -537,9 +599,106 @@ impl Js {
             return self.set_key(key, value);
         }
         if let Some(props) = self.own_props() {
+            if matches!(
+                props.borrow().get(key),
+                Some(Prop::DataDescriptor {
+                    configurable: false,
+                    ..
+                })
+            ) {
+                return Err(Thrown::type_error("Cannot redefine property"));
+            }
             props.borrow_mut().insert(key.into(), Prop::Data(value));
         }
         Ok(())
+    }
+    /// Object.defineProperty's ordinary-object data-descriptor profile.
+    /// Absence differs from an explicit undefined value and flags use ToBoolean.
+    pub(super) fn define_property(&self, key: &[u16], descriptor: &Js) -> Result<(), Thrown> {
+        let props = self.own_props().ok_or_else(|| {
+            Thrown::type_error(
+                "Object.defineProperty target must be an ordinary object or function",
+            )
+        })?;
+        if descriptor.own_props().is_none() {
+            return Err(Thrown::type_error("Property description must be an object"));
+        }
+        let read = |name: &str| -> Result<Option<Js>, Thrown> {
+            if descriptor.has_property(&utf16(name)) {
+                Ok(Some(descriptor.get(name)?))
+            } else {
+                Ok(None)
+            }
+        };
+        // ToPropertyDescriptor read order is observable through getters.
+        let enumerable = read("enumerable")?.map(|v| v.truthy());
+        let configurable = read("configurable")?.map(|v| v.truthy());
+        let value = read("value")?;
+        let writable = read("writable")?.map(|v| v.truthy());
+        let get = read("get")?;
+        let set = read("set")?;
+        if get.is_some() || set.is_some() {
+            return Err(Thrown::type_error(
+                "Object.defineProperty accessor descriptors are not bound",
+            ));
+        }
+        let existing = props.borrow().get(key).cloned();
+        let (old_value, old_writable, old_enumerable, old_configurable) = match existing {
+            Some(Prop::Data(value)) => (value, true, true, true),
+            Some(Prop::DataDescriptor {
+                value,
+                writable,
+                enumerable,
+                configurable,
+            }) => (value, writable, enumerable, configurable),
+            Some(Prop::Accessor(..)) => {
+                if value.is_none() && writable.is_none() {
+                    if enumerable.is_none() && configurable.is_none() {
+                        return Ok(());
+                    }
+                    return Err(Thrown::type_error("Accessor attributes are not bound"));
+                }
+                (Js::Undefined, false, true, true)
+            }
+            None => (Js::Undefined, false, false, false),
+        };
+        if props.borrow().contains_key(key) && !old_configurable {
+            if configurable == Some(true) || enumerable.is_some_and(|v| v != old_enumerable) {
+                return Err(Thrown::type_error("Cannot redefine property"));
+            }
+            if !old_writable
+                && (writable == Some(true)
+                    || value.as_ref().is_some_and(|v| !same_value(v, &old_value)))
+            {
+                return Err(Thrown::type_error("Cannot redefine property"));
+            }
+        }
+        props.borrow_mut().insert(
+            key.into(),
+            Prop::DataDescriptor {
+                value: value.unwrap_or(old_value),
+                writable: writable.unwrap_or(old_writable),
+                enumerable: enumerable.unwrap_or(old_enumerable),
+                configurable: configurable.unwrap_or(old_configurable),
+            },
+        );
+        Ok(())
+    }
+    fn has_property(&self, key: &[u16]) -> bool {
+        if self
+            .own_props()
+            .is_some_and(|p| p.borrow().contains_key(key))
+        {
+            return true;
+        }
+        match self {
+            Js::Object(object) => object
+                .proto
+                .borrow()
+                .as_ref()
+                .is_some_and(|p| p.has_property(key)),
+            _ => false,
+        }
     }
     pub fn define_accessor(&self, key: &str, getter: Option<Getter>, setter: Option<Setter>) {
         if let Some(props) = self.own_props() {
@@ -559,7 +718,15 @@ impl Js {
             }
             _ => {
                 if let Some(props) = self.own_props() {
-                    props.borrow_mut().shift_remove(key);
+                    if !matches!(
+                        props.borrow().get(key),
+                        Some(Prop::DataDescriptor {
+                            configurable: false,
+                            ..
+                        })
+                    ) {
+                        props.borrow_mut().shift_remove(key);
+                    }
                 }
             }
         }
@@ -579,7 +746,20 @@ impl Js {
                 let Some(props) = self.own_props() else {
                     return vec![];
                 };
-                let keys: Vec<Str> = props.borrow().keys().cloned().collect();
+                let keys: Vec<Str> = props
+                    .borrow()
+                    .iter()
+                    .filter(|(_, p)| {
+                        !matches!(
+                            p,
+                            Prop::DataDescriptor {
+                                enumerable: false,
+                                ..
+                            }
+                        )
+                    })
+                    .map(|(k, _)| k.clone())
+                    .collect();
                 let mut indexed: Vec<(usize, Str)> = keys
                     .iter()
                     .filter_map(|k| array_index(k).map(|i| (i, k.clone())))
@@ -813,4 +993,12 @@ pub fn to_js_json(value: &Js) -> Result<safe_cex_num::JsJsonValue, Thrown> {
                 .collect::<Result<_, Thrown>>()?,
         ),
     })
+}
+
+// SameValue differs from === for NaN and the sign of zero.
+fn same_value(a: &Js, b: &Js) -> bool {
+    match (a, b) {
+        (Js::Number(a), Js::Number(b)) => (a.is_nan() && b.is_nan()) || a.to_bits() == b.to_bits(),
+        _ => a.strict_equals(b),
+    }
 }

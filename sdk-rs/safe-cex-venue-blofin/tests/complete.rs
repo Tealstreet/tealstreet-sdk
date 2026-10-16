@@ -30,8 +30,8 @@ fn corpus() -> &'static Value {
         assert_eq!(v["stoppedAfter"], 66);
         assert_eq!(
             v["sourceMembers"].as_array().unwrap().len(),
-            70,
-            "independent70memberfloor"
+            71,
+            "independent71memberfloor"
         );
         assert_eq!(
             v["sourcePrivate"].as_array().unwrap().len(),

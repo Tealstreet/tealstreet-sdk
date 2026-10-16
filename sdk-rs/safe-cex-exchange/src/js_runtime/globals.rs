@@ -497,6 +497,20 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
         "Object",
         Js::object(vec![
             (
+                "defineProperty",
+                Js::function("defineProperty", |_, a| {
+                    let target = arg(&a, 0);
+                    if !matches!(target, Js::Object(_) | Js::Function(_)) {
+                        return Err(Thrown::type_error(
+                            "Object.defineProperty target must be an ordinary object or function",
+                        ));
+                    }
+                    let key = arg(&a, 1).to_js_string()?;
+                    target.define_property(&key, &arg(&a, 2))?;
+                    Ok(target)
+                }),
+            ),
+            (
                 "keys",
                 Js::function("keys", |_, a| {
                     let v = arg(&a, 0);
