@@ -70,6 +70,578 @@
       ]
     }
   },
+  "safe_cex_venue_kraken::helpers::create_kraken_api_error": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "create_kraken_api_error",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "response",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "cause",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_exchange::runtime::ExchangeError",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Constructs the shared host Error from a literal message and existing optional JSON metadata. It clones response/cause snapshots into distinct fields, retaining absence versus null, without interpreting a wire schema or decoding the message. This is the declared shared-error ABI adapter, not an error deserializer.",
+    "evidence": "Reviewed the complete production body against packages/safe-cex/src/exchanges/kraken/kraken.api.ts. tests/accepted_helpers.rs::error_constructor_preserves_literal_message_distinct_snapshots_and_presence executes independently authored native observations through this exact API; tests/helpers.rs runs the actual TS declarations and pinned nanoid dependency. The combined four native plus five live-source tests pass with zero ignored. scripts/helper-contract-controls.py compiled a changed result, required this named native witness to fail after compilation, restored exact source and passed the named witness. All nine native/source tests pass again after the four controls. Accepted-set receipts for this role are classification-only, not execution. The existing UTF-8/root-collator/error-snapshot/fixed-ID host profile is MANIFEST-SPEC#kraken-module-utility-adapters; no new decoding exemption or complete alias/feature/wasm coverage is claimed."
+  },
+  "safe_cex_venue_kraken::helpers::create_kraken_spot_client_order_id": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "create_kraken_spot_client_order_id",
+      "signature": {
+        "inputs": [
+          [
+            "fill",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": true,
+                                "type": {
+                                  "slice": {
+                                    "primitive": "u8"
+                                  }
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "impl_trait": [
+            {
+              "trait_bound": {
+                "trait": {
+                  "path": "core::ops::function::FnMut",
+                  "args": {
+                    "parenthesized": {
+                      "inputs": [],
+                      "output": {
+                        "resolved_path": {
+                          "path": "core::result::Result",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "alloc::string::String",
+                                      "args": null
+                                    }
+                                  }
+                                },
+                                {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                },
+                "generic_params": [],
+                "modifier": "none"
+              }
+            }
+          ]
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnMut(&mut [u8]) -> Result<(), JsCoercionError>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": true,
+                                  "type": {
+                                    "slice": {
+                                      "primitive": "u8"
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "reason": "Creates a module-owned ID generator closure from a fallible host entropy callback. The byte slice is the callback fill buffer, not an inbound wire representation. The closure produces fixed-length hexadecimal IDs using the pinned nanoid pool path; it parses no protocol value or record. This classification does not discharge the separate binding factory/alias owners.",
+    "evidence": "Reviewed the complete production body against packages/safe-cex/src/exchanges/kraken/krakenspot.exchange.ts. tests/accepted_helpers.rs::id_factory_executes_host_entropy_and_retains_pool_after_failure executes independently authored native observations through this exact API; tests/helpers.rs runs the actual TS declarations and pinned nanoid dependency. The combined four native plus five live-source tests pass with zero ignored. scripts/helper-contract-controls.py compiled a changed result, required this named native witness to fail after compilation, restored exact source and passed the named witness. All nine native/source tests pass again after the four controls. Accepted-set receipts for this role are classification-only, not execution. The existing UTF-8/root-collator/error-snapshot/fixed-ID host profile is MANIFEST-SPEC#kraken-module-utility-adapters; no new decoding exemption or complete alias/feature/wasm coverage is claimed."
+  },
+  "safe_cex_venue_kraken::helpers::parse_trigger_signal": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_trigger_signal",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::OrderStopTriggerType",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "packages/safe-cex/src/exchanges/kraken/kraken.exchange.ts::parseTriggerSignal applies String(value || empty).toLowerCase and recognizes mark/spot/last. The actual native Option<OrderStopTriggerType> variants, absence and coercion-error class are observed directly, without enum serialization or is_ok-only admission. Independently authored cases retain truthiness, case folding, array coercion, untrimmed unknown text and non-callable toString failures. tests/accepted_helpers.rs directly witnesses native variants plus the explicit missing argument; all four native and five maintained actual-source helper tests pass with zero ignored. scripts/helper-contract-controls.py compiled a wrong spot variant, required this exact production output probe to report its own native output mismatch, restored exact source and passed the production probe and all nine native/source tests. JSON/UTF-8 scope and host adapters are declared in MANIFEST-SPEC#kraken-module-utility-adapters; no arbitrary executable objects, aliases, feature or wasm claim.",
+    "call": "{ match $type(Some($value)) { Ok(Some(safe_cex_types::OrderStopTriggerType::MarkPrice)) => serde_json::json!({\"variant\":\"MarkPrice\"}), Ok(Some(safe_cex_types::OrderStopTriggerType::IndexPrice)) => serde_json::json!({\"variant\":\"IndexPrice\"}), Ok(Some(safe_cex_types::OrderStopTriggerType::LastPrice)) => serde_json::json!({\"variant\":\"LastPrice\"}), Ok(None) => serde_json::json!({\"none\":true}), Err(error) => serde_json::json!({\"error\":error.name}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": false,
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": 0,
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": true,
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": 17,
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "MARK",
+        "output": {
+          "variant": "MarkPrice"
+        }
+      },
+      {
+        "input": "Spot",
+        "output": {
+          "variant": "IndexPrice"
+        }
+      },
+      {
+        "input": "last",
+        "output": {
+          "variant": "LastPrice"
+        }
+      },
+      {
+        "input": "marK",
+        "output": {
+          "variant": "MarkPrice"
+        }
+      },
+      {
+        "input": [
+          "spot"
+        ],
+        "output": {
+          "variant": "IndexPrice"
+        }
+      },
+      {
+        "input": [
+          "mark"
+        ],
+        "output": {
+          "variant": "MarkPrice"
+        }
+      },
+      {
+        "input": [
+          "last"
+        ],
+        "output": {
+          "variant": "LastPrice"
+        }
+      },
+      {
+        "input": [
+          "last",
+          "mark"
+        ],
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": [],
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "index",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": " mark",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": "mark ",
+        "output": {
+          "none": true
+        }
+      },
+      {
+        "input": {
+          "toString": null
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "toString": 1
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_kraken::helpers::sort": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "sort",
+      "signature": {
+        "inputs": [
+          [
+            "collator",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_num::collation::JsRootCollator",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "left",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "right",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::cmp::Ordering",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Compares two already-typed UTF-8 operands through the shared pinned root collator and returns native Ordering. The string operands are literal sort keys, not serialized representations; this body parses no value or record.",
+    "evidence": "Reviewed the complete production body against packages/safe-cex/src/exchanges/kraken/kraken.api.ts. tests/accepted_helpers.rs::sort_compares_literal_operands_without_decoding_them executes independently authored native observations through this exact API; tests/helpers.rs runs the actual TS declarations and pinned nanoid dependency. The combined four native plus five live-source tests pass with zero ignored. scripts/helper-contract-controls.py compiled a changed result, required this named native witness to fail after compilation, restored exact source and passed the named witness. All nine native/source tests pass again after the four controls. Accepted-set receipts for this role are classification-only, not execution. The existing UTF-8/root-collator/error-snapshot/fixed-ID host profile is MANIFEST-SPEC#kraken-module-utility-adapters; no new decoding exemption or complete alias/feature/wasm coverage is claimed."
+  },
   "safe_cex_venue_kraken::fills::num": {
     "category": "decoder",
     "api": {

@@ -4349,5 +4349,404 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_hyperliquid::types::Tif": {
+    "shape": "string",
+    "literals": [
+      "Alo",
+      "Ioc",
+      "Gtc"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed concrete types.rs Tif, private remote metadata, the String::deserialize admission and maintained hyperliquid.types.ts declaration (Tif/Tpsl/Grouping lines82-86; ScheduleCancelAction type line548). Exactly these tags are admitted. Independent native variant/ordinal expectations and exact serialization are checked through text, qualified owned/borrowed Value and all three shared numeric ingress routes; every valid externally tagged map must be rejected. The owner has no indexed raw entrypoint beyond Deserialize. This is an individual native/default owner review, preserving every private/local/alias and target-matrix obligation; no blanket literal exemption.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Alo => serde_json::json!({\"ok\":true,\"variant\":\"Alo\",\"ordinal\":0}), $type::Ioc => serde_json::json!({\"ok\":true,\"variant\":\"Ioc\",\"ordinal\":1}), $type::Gtc => serde_json::json!({\"ok\":true,\"variant\":\"Gtc\",\"ordinal\":2})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"Alo\"",
+          "output": {
+            "ok": true,
+            "variant": "Alo",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"Ioc\"",
+          "output": {
+            "ok": true,
+            "variant": "Ioc",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"Gtc\"",
+          "output": {
+            "ok": true,
+            "variant": "Gtc",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": " \n\"Alo\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Alo",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"Alo\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"Ioc\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"Gtc\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::Tpsl": {
+    "shape": "string",
+    "literals": [
+      "tp",
+      "sl"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed concrete types.rs Tpsl, private remote metadata, the String::deserialize admission and maintained hyperliquid.types.ts declaration (Tif/Tpsl/Grouping lines82-86; ScheduleCancelAction type line548). Exactly these tags are admitted. Independent native variant/ordinal expectations and exact serialization are checked through text, qualified owned/borrowed Value and all three shared numeric ingress routes; every valid externally tagged map must be rejected. The owner has no indexed raw entrypoint beyond Deserialize. This is an individual native/default owner review, preserving every private/local/alias and target-matrix obligation; no blanket literal exemption.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Tp => serde_json::json!({\"ok\":true,\"variant\":\"Tp\",\"ordinal\":0}), $type::Sl => serde_json::json!({\"ok\":true,\"variant\":\"Sl\",\"ordinal\":1})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"tp\"",
+          "output": {
+            "ok": true,
+            "variant": "Tp",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"sl\"",
+          "output": {
+            "ok": true,
+            "variant": "Sl",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": " \n\"tp\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Tp",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"tp\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"sl\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::Grouping": {
+    "shape": "string",
+    "literals": [
+      "na",
+      "normalTpsl",
+      "positionTpsl"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed concrete types.rs Grouping, private remote metadata, the String::deserialize admission and maintained hyperliquid.types.ts declaration (Tif/Tpsl/Grouping lines82-86; ScheduleCancelAction type line548). Exactly these tags are admitted. Independent native variant/ordinal expectations and exact serialization are checked through text, qualified owned/borrowed Value and all three shared numeric ingress routes; every valid externally tagged map must be rejected. The owner has no indexed raw entrypoint beyond Deserialize. This is an individual native/default owner review, preserving every private/local/alias and target-matrix obligation; no blanket literal exemption.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Na => serde_json::json!({\"ok\":true,\"variant\":\"Na\",\"ordinal\":0}), $type::NormalTpsl => serde_json::json!({\"ok\":true,\"variant\":\"NormalTpsl\",\"ordinal\":1}), $type::PositionTpsl => serde_json::json!({\"ok\":true,\"variant\":\"PositionTpsl\",\"ordinal\":2})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"na\"",
+          "output": {
+            "ok": true,
+            "variant": "Na",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"normalTpsl\"",
+          "output": {
+            "ok": true,
+            "variant": "NormalTpsl",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"positionTpsl\"",
+          "output": {
+            "ok": true,
+            "variant": "PositionTpsl",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": " \n\"na\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Na",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"na\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"normalTpsl\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"positionTpsl\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::ScheduleCancelActionType": {
+    "shape": "string",
+    "literals": [
+      "scheduleCancel"
+    ],
+    "entrypoints": [],
+    "evidence": "Reviewed concrete types.rs ScheduleCancelActionType, private remote metadata, the String::deserialize admission and maintained hyperliquid.types.ts declaration (Tif/Tpsl/Grouping lines82-86; ScheduleCancelAction type line548). Exactly these tags are admitted. Independent native variant/ordinal expectations and exact serialization are checked through text, qualified owned/borrowed Value and all three shared numeric ingress routes; every valid externally tagged map must be rejected. The owner has no indexed raw entrypoint beyond Deserialize. This is an individual native/default owner review, preserving every private/local/alias and target-matrix obligation; no blanket literal exemption.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::ScheduleCancel => serde_json::json!({\"ok\":true,\"variant\":\"ScheduleCancel\",\"ordinal\":0})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"scheduleCancel\"",
+          "output": {
+            "ok": true,
+            "variant": "ScheduleCancel",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"scheduleCancel\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "ScheduleCancel",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"scheduleCancel\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }
