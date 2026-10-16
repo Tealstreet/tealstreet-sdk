@@ -280,6 +280,7 @@ impl<'ast> Visit<'ast> for LocalMacroEffects {
             matches!(
                 name.to_string().as_str(),
                 "allow"
+                    | "expect"
                     | "warn"
                     | "deny"
                     | "forbid"
@@ -470,6 +471,7 @@ struct LocalTypes {
     number_output_shadowed: bool,
     module_recipes: ModuleRecipes,
     foreign_imports: HashSet<String>,
+    deserialize_owners: Vec<String>,
     inspected_recipes: HashSet<String>,
 }
 impl LocalTypes {
@@ -678,7 +680,11 @@ impl LocalTypes {
             && match origin.as_str() {
                 "std" | "core" => !matches!(name.as_str(), "json" | "Token"),
                 "serde_json" => name == "json",
-                "syn" => name == "Token",
+                // syn 2.0.119/3.0.7 grouping arms are a match on private parse helpers.
+                "syn" => matches!(
+                    name.as_str(),
+                    "Token" | "braced" | "bracketed" | "parenthesized"
+                ),
                 _ => false,
             };
         if !qualified {
@@ -1117,9 +1123,24 @@ impl<'ast> Visit<'ast> for LocalTypes {
                 "serde::Deserialize" | "serde::de::Deserialize" | "std::str::FromStr"
             ) {
                 let end = item.span().end();
+                // A serde helper inside a module-level Deserialize impl names
+                // that impl's owner, whose own probes drive the helper.
+                let helper = matches!(
+                    path.segments
+                        .last()
+                        .map(|part| part.ident.to_string())
+                        .as_deref(),
+                    Some("Visitor" | "DeserializeSeed")
+                );
+                let enclosing = self
+                    .deserialize_owners
+                    .last()
+                    .filter(|_| helper)
+                    .map(|owner| format!("@{owner}"))
+                    .unwrap_or_default();
                 self.names.push((
                     format!(
-                        "LOCAL_TRAIT_IMPL:{name}:{}",
+                        "LOCAL_TRAIT_IMPL:{name}:{}{enclosing}",
                         match &*item.self_ty {
                             syn::Type::Path(owner) => owner
                                 .path
@@ -1135,7 +1156,29 @@ impl<'ast> Visit<'ast> for LocalTypes {
                 ));
             }
         }
+        let owner = (self.depth == 0)
+            .then_some(())
+            .and(item.trait_.as_ref())
+            .filter(|(path, _)| {
+                path.segments
+                    .last()
+                    .is_some_and(|part| part.ident == "Deserialize")
+            })
+            .and(match &*item.self_ty {
+                syn::Type::Path(owner) if owner.qself.is_none() => owner
+                    .path
+                    .segments
+                    .last()
+                    .map(|part| part.ident.to_string()),
+                _ => None,
+            });
+        if let Some(owner) = &owner {
+            self.deserialize_owners.push(owner.clone());
+        }
         visit::visit_item_impl(self, item);
+        if owner.is_some() {
+            self.deserialize_owners.pop();
+        }
     }
     fn visit_item_struct(&mut self, item: &'ast syn::ItemStruct) {
         if self.depth > 0 {
@@ -1213,6 +1256,7 @@ fn known_attribute(meta: &syn::Meta) -> bool {
     matches!(
         name.as_str(),
         "allow"
+            | "expect"
             | "warn"
             | "deny"
             | "forbid"
@@ -1507,6 +1551,9 @@ fn expression_macro(name: &str) -> bool {
             | "thread_local"
             | "pin"
             | "Token"
+            | "braced"
+            | "bracketed"
+            | "parenthesized"
     )
 }
 
@@ -1776,6 +1823,76 @@ mod tests {
                 visitor.names
             );
         }
+    }
+
+    #[test]
+    fn serde_helpers_name_their_enclosing_deserialize_owner() {
+        let source = "impl<'de> serde::Deserialize<'de> for Owner { fn deserialize<D: serde::Deserializer<'de>>(d: D) -> Result<Self, D::Error> { struct Only; impl<'de> serde::de::Visitor<'de> for Only { type Value = Owner; } impl Clone for Only { fn clone(&self) -> Self { Only } } d.deserialize_map(Only) } } fn free() { struct Loose; impl<'de> serde::de::Visitor<'de> for Loose { type Value = (); } }";
+        let mut visitor = verified_test_visitor();
+        visitor.visit_file(&syn::parse_file(source).unwrap());
+        let labels: Vec<_> = visitor.names.iter().map(|row| row.0.as_str()).collect();
+        assert!(
+            labels.contains(&"LOCAL_TRAIT_IMPL:serde::de::Visitor:Only@Owner"),
+            "{labels:?}"
+        );
+        assert!(
+            labels.contains(&"LOCAL_TRAIT_IMPL:Clone:Only"),
+            "only serde helpers are bound: {labels:?}"
+        );
+        assert!(
+            labels.contains(&"LOCAL_TRAIT_IMPL:serde::de::Visitor:Loose"),
+            "free functions bind no owner: {labels:?}"
+        );
+    }
+
+    #[test]
+    fn syn_grouping_macros_need_the_verified_syn_origin() {
+        let source = "fn parse(input: ParseStream) -> Result<()> { let content; syn::braced!(content in input); let inner; syn::parenthesized!(inner in content); let list; syn::bracketed!(list in inner); Ok(()) }";
+        let syntax = syn::parse_file(source).unwrap();
+        let mut verified = verified_test_visitor();
+        verified.visit_file(&syntax);
+        assert!(verified.names.is_empty(), "{:?}", verified.names);
+        for origins in [vec!["std", "core"], vec!["std", "core", "serde_json"]] {
+            let mut unverified = LocalTypes {
+                verified_macro_origins: origins.into_iter().map(str::to_owned).collect(),
+                ..LocalTypes::default()
+            };
+            unverified.visit_file(&syntax);
+            assert!(
+                unverified
+                    .names
+                    .iter()
+                    .any(|row| row.0 == "UNSUPPORTED_LOCAL_MACRO:braced"),
+                "{:?}",
+                unverified.names
+            );
+        }
+        let mut vendor = verified_test_visitor();
+        vendor
+            .visit_file(&syn::parse_file("fn f() { vendor::braced!(content in input); }").unwrap());
+        assert!(
+            vendor
+                .names
+                .iter()
+                .any(|row| row.0 == "UNSUPPORTED_LOCAL_MACRO:braced"),
+            "{:?}",
+            vendor.names
+        );
+    }
+
+    #[test]
+    fn lint_expectations_are_inert_attributes() {
+        let source = "#![cfg_attr(not(test), expect(dead_code, reason = \"pending\"))] #[expect(clippy::arc_with_non_send_sync)] fn f() {}";
+        let syntax = syn::parse_file(source).unwrap();
+        let mut visitor = verified_test_visitor();
+        visitor.visit_file(&syntax);
+        assert!(visitor.names.is_empty(), "{:?}", visitor.names);
+        let mut guards = DocGuards(false);
+        guards.visit_file(&syntax);
+        assert!(
+            !guards.0,
+            "cfg_attr selecting a lint expectation is not doc-dependent"
+        );
     }
 
     #[test]

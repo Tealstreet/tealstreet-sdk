@@ -50,6 +50,19 @@ fn tls_config() -> Result<Arc<rustls::ClientConfig>, TransportError> {
         .map_err(TransportError::Host)
 }
 
+/// WebSocket upgrades are HTTP/1.1, so every socket dial offers exactly that ALPN
+/// (ts: the vendored ReconnectingWebSocket's ALPNProtocols, which tradetunnel requires).
+fn ws_tls_config() -> Result<Arc<rustls::ClientConfig>, TransportError> {
+    static CONFIG: OnceLock<Result<Arc<rustls::ClientConfig>, TransportError>> = OnceLock::new();
+    CONFIG
+        .get_or_init(|| {
+            let mut config = (*tls_config()?).clone();
+            config.alpn_protocols = vec![b"http/1.1".to_vec()];
+            Ok(Arc::new(config))
+        })
+        .clone()
+}
+
 /// Axios-shaped terminal adapter: sends exactly the bytes it is given and
 /// settles non-2xx statuses as response-bearing failures, like `settle()`.
 pub struct ReqwestAdapter {
@@ -250,7 +263,7 @@ pub async fn connect_websocket(
             protocols.join(", ").parse().map_err(|e| host_error(&e))?,
         );
     }
-    let connector = tokio_tungstenite::Connector::Rustls(tls_config()?);
+    let connector = tokio_tungstenite::Connector::Rustls(ws_tls_config()?);
     let (stream, _) =
         tokio_tungstenite::connect_async_tls_with_config(request, None, false, Some(connector))
             .await
@@ -391,7 +404,7 @@ impl TunnelHost for NativeTunnelHost {
         SocketCapabilities {
             runtime: SocketRuntime::Native,
             upgrade_headers: true,
-            alpn: false,
+            alpn: true,
         }
     }
     fn now_ms(&self) -> u64 {

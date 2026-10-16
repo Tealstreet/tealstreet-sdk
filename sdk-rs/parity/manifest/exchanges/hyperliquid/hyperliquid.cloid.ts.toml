@@ -1,0 +1,50 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.cloid.ts"
+
+[[symbol]]
+ts = "HYPERLIQUID_CLOID_PATTERN"
+kind = "const"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "mintHyperliquidCloid"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "hyperliquidClientOrderIdRule"
+kind = "const"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "readHyperliquidCloid"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyperliquidPlacementRecord"
+kind = "type"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "placementRecordFromWire"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

@@ -19,6 +19,14 @@ status = "ported"
 note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and binary64 bits preserve source own-property snapshots. Integer keys enumerate first, other keys retain insertion order, duplicate keys take the last value before typed decoding. Any-indexed UserRateLimit/OrderStatus retain accepted array alternatives. Actual AST writer and independent strict-source oracle cover eight fixed roots, 71 cases through70; native fields/keys/units/bits/tags are read directly before any wire assertion. No Value ingress, prototypes, non-JSON values, live-alias identity or exhaustive cardinality claim. Existing shared/core consumers and their named FINDINGs are unchanged. Split member `safe-cex-venue-hyperliquid/src/json_models.rs::CacheOrderType` - closed decoder for the entry type field."
 
 [[symbol]]
+ts = "PLACEMENT_RECORD_TTL_MS"
+kind = "const"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "HyperliquidCrossCache"
 kind = "class"
 layer = "adapted"
@@ -107,6 +115,22 @@ status = "ported"
 note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::match_pre_placement`. Split member `safe-cex-venue-hyperliquid/src/cache_runtime.rs::run_callback` - holds the validity, price and amount predicate bodies."
 
 [[symbol]]
+ts = "HyperliquidCrossCache.matchPrePlacementTrigger"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyperliquidCrossCache.removePrePlacementByCloid"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "HyperliquidCrossCache.clearPrePlacement"
 kind = "method"
 layer = "adapted"
@@ -153,6 +177,54 @@ layer = "adapted"
 rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::remove_pending_order"
 status = "ported"
 note = "Source method algorithm preserves stale requested-entry capture before >60000 cleanup, key enumeration/iterator close, strict record writes/deletes, own entry field creation with clock order, shared record/entry handles and memory/broadcast ordering as applicable. Native values/fields/UTF-16/binary64 and callback receivers/arguments/errors/state asserted against actual source; clock/property/JS collection/storage and existing cache method calls are explicit host primitives/dependencies. Source class/constructor/singleton not claimed. Ten new methods/95fixed cases through94; no universal cardinality claim. Rename target: `safe-cex-venue-hyperliquid/src/cache_orders.rs::remove_pending_order`."
+
+[[symbol]]
+ts = "HyperliquidCrossCache#readPlacementRecordStorage"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyperliquidCrossCache#writePlacementRecordStorage"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyperliquidCrossCache#isPlacementRecordLive"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyperliquidCrossCache.addPlacementRecord"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyperliquidCrossCache.getPlacementRecord"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyperliquidCrossCache.removePlacementRecord"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
 
 [[symbol]]
 ts = "HyperliquidCrossCache.hasSeenFill"
