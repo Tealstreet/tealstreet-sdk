@@ -283,7 +283,10 @@ Declared realm choices: promise reactions run as runtime tasks, not a V8
 microtask queue; store reads are snapshots (writes go through Store methods);
 the cross cache is per realm and memory-only (no BroadcastChannel or
 sessionStorage on native hosts); `close` listeners are not invoked because the
-core socket runs the close/reconnect path; external public data rejects visibly.
+core socket runs the close/reconnect path. External public data uses the shared
+BaseExchange initialization and host-supplied provider factory, retaining the
+same Store and provider disposal owner. The native host supplies its gateway
+factory; custom embeddings must supply one when the option is configured.
 Signing converts actions with `undefined` members retained, matching msgpack nil.
 
 The production host supplies `ExchangeSigners` through the existing dependency
@@ -307,3 +310,14 @@ fabricated user-only feeder row to valid funding plus user. Collection identity
 pins the repaired feeder hash and reconstructs the old excluded row to verify
 that every other feeder byte is unchanged. Neither numeric goldens nor native
 production behavior are rewritten to reconcile this source-corpus boundary.
+
+
+The production `fetch_historical_positions` trait method invokes the source
+`fetchHistoricalPositions` arrow. Its realm superclass fold calls the existing
+shared `build_records` engine through the source instance's income-range and
+execution readers. Income mapper/pager imports use the existing `income` ports;
+async REST callbacks must use `start_rest_callback`, never the synchronous
+callback dispatcher. Default journal bounds use realm Date.now (integer ms) and
+the source 30-day window, with shared 14-day straddle lookback. Returned journal
+records retain the shared typed output boundary. This is distinct from the
+venue's `deriveClosedPositions` and `fetchClosedPnl` capability.

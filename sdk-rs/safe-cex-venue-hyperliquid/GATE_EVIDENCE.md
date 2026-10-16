@@ -1290,3 +1290,74 @@ Historical survivor status made explicit: **3 resolved /0 current survivors** wi
 The earlier tests missed, respectively, the fixed-to-user composition edge because topics were empty on fixed calls; the native dispose edge because only its descriptor was inspected; and own interval:undefined because Get and JSON text cannot distinguish it from absence. The current native test invokes installed fixed with populated topics, invokes installed prototype dispose with original receiver/effect observations, and compares exact own key/descriptors before wire. FINDINGS_11_REVALIDATION.json records each cause, named assertion and broken/restored exit. This is a finite three-recipe repeat; the other twenty unique recipes are not re-run in this unit. No discarded-duplicate capture file is edited.
 
 Pinned read-only sub-agent closure review is appended to FINDINGS_11_REVIEWS.md. Final local gates remain only workspace fmt --check and locked workspace build at the delivered commit, with exits bound in the local receipt. Clippy, wasm, wiring, layers and routing are centrally owned and not run locally; full suites/static/extractor/live/CI checks also are not run. No push.
+
+
+### Production journal fold binding (ddi2il-20)
+
+`Exchange::fetch_historical_positions` now dispatches the existing source arrow,
+whose superclass helper uses the shared `build_records` engine. The engine reads
+the same realm instance's source income-range and historical-fill methods; income
+mapper/pager imports bind to `income.rs`, and asynchronous REST callbacks use the
+existing owned task dispatcher. The shared typed output boundary still applies.
+
+Compiled negative controls used the new round-trip production test: the original
+trait default failed with `no journal records path declared`; enabling only trait
+dispatch failed with `fetchHistoricalPositions is not bound by this realm`. Both
+are runtime failures after successful compilation. The restored implementation
+returns a real closed round trip (PnL1000, fees3) with requested account, bounds
+and market settlement currency. A separate default-window test pins integer
+Date.now, the source30-day range and the shared14-day straddle lookback. A native
+registry test obtains the same closed record through real reqwest HTTP without
+starting sockets. Empty results or bypassing symbol-scoped execution reads fail
+the nonempty-record assertion. The source `deriveClosedPositions` axis remains
+separate from this shared journal fold.
+
+Scoped gates: production binding16/16; native Hyperliquid HTTP2/2; registry
+construction13/13; actual-source core snapshots/core REST/rest helpers11/11;
+Hyperliquid venue-oracle39/39; parity:check0; registry48 names and control1/1;
+layers88/88. Native all-target and wasm library strict clippy plus fmt pass for
+the venue and registry. No fixture or manifest regeneration.
+### Native external public data binding (ddi2il-20)
+
+`HyperliquidDependencies.external_public_data` accepts the shared provider factory.
+The realm superclass delegates initialization to the existing native BaseExchange:
+provider creation receives the same Store owner, startup waits for both loaded
+flags, and BaseExchange disposes the retained provider. The registry supplies its
+existing gateway factory. An embedding with configured external data and no
+factory gets the shared explicit diagnostic before network activity.
+
+A new production registry test,
+`native_host_external_data::hyperliquid_starts_on_a_public_data_gateway_over_websocket`,
+was compiled against the old binding and failed at startup with the old explicit
+Hyperliquid refusal (0 passed, 1 failed). After wiring the factory it passes over
+real native websocket IO, receives gateway markets/tickers and makes no venue
+REST request. `binding::external_startup_waits_for_both_loaded_flags_and_disposes_its_provider`
+keeps startup pending with markets alone, completes after ticker hydration,
+checks the exact Store owner, makes no direct public request/socket and observes
+provider disposal once. The companion missing-factory test refuses visibly.
+
+Scoped validation: production binding 16/16; native gateway suite 4/4; native
+Hyperliquid signed HTTP 1/1; registry construction 13/13; Hyperliquid venue-oracle
+39 passing tests across its 11 selected binaries; registry source equivalence
+48 names plus mutation-control test 1/1; layers 88/88; parity:check zero findings.
+Native all-target and wasm library strict clippy cover the venue and registry.
+No manifests or fixture corpora were regenerated. The inherited seed oracle
+hash failure was resolved by merging landed #198, including its one-row
+provenance check, before the passing oracle run.
+
+### Override inventory review after external-data and journal assembly
+
+Reviewed the two `realm/facade_exchange.rs::base_exchange_class` inventory rows.
+`b.dispose()` is the inherited BaseExchange implementation reached by the source
+class's explicit super-dispose path; source override dispatch happens in the
+realm first. `b.name()` serves the inherited name getter over the native account
+name. Neither call newly bypasses a venue override. The external-data hydration/
+disposal test observes the provider released exactly once, and construction/
+native registry tests retain the venue name.
+
+The stale inventory compiled and failed
+`production_callers_do_not_bypass_exchange_override_hooks` before the repair.
+After reviewing the final combined journal/external-data body, only those two
+fingerprints changed to `f16535160061e222`; the same test passes (1/1). No inventory
+regeneration or blanket delegation was used. This final body differs from the
+external-data-only master body's fingerprint because it also binds journal folding.

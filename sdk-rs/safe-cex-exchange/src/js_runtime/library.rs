@@ -786,6 +786,41 @@ fn update_order_book(book: &Js, side: &Js, update: Js, upsert: bool) -> Result<J
     }))
 }
 
+// lodash times: ToInteger count, castFunction (non-callables are identity),
+// and ordered calls with one index argument and an undefined receiver.
+fn lodash_times(args: &[Js]) -> Result<Js, Thrown> {
+    let count = arg(args, 0).to_number()?.trunc();
+    if !(1. ..=9_007_199_254_740_991.).contains(&count) {
+        return Ok(Js::array(vec![]));
+    }
+    let iteratee = arg(args, 1);
+    let invoke = |index: u64| {
+        let value = Js::Number(index as f64);
+        if iteratee.is_callable() {
+            iteratee.call(Js::Undefined, vec![value])
+        } else {
+            Ok(value)
+        }
+    };
+    const MAX_ARRAY_LENGTH: u64 = 4_294_967_295;
+    let count = count as u64;
+    let mut values = vec![];
+    for index in 0..count.min(MAX_ARRAY_LENGTH) {
+        values.push(invoke(index)?);
+    }
+    // Preserve lodash's counter/bound arithmetic beyond its result-array limit.
+    let mut index = MAX_ARRAY_LENGTH;
+    let remaining = count.saturating_sub(MAX_ARRAY_LENGTH);
+    loop {
+        index += 1;
+        if index >= remaining {
+            break;
+        }
+        invoke(index)?;
+    }
+    Ok(Js::array(values))
+}
+
 fn define_on(owner: &Js, key: &str, value: Js) {
     let _ = owner.define(key, value);
 }
@@ -793,10 +828,27 @@ fn define_on(owner: &Js, key: &str, value: Js) {
 /// Install the shared utility modules next to `install_builtins`' globals.
 pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
     let def = |k: &str, v: Js| define_on(g, k, v);
+    def("times", func("times", |args| lodash_times(&args)));
     let scoped = |name: &'static str, f: fn(&Scope<X>, Vec<Js>) -> Result<Js, Thrown>| -> Js {
         let rt = rt.clone();
         Js::function(name, move |_, a| f(&scope_of(&rt)?, a))
     };
+
+    def(
+        "throttle",
+        scoped("throttle", |rt, a| {
+            let function = arg(&a, 0);
+            if !function.is_callable() {
+                return Err(Thrown::type_error("Expected a function"));
+            }
+            let wait = arg(&a, 1).to_number()?;
+            let wait = if wait.is_nan() { 0. } else { wait };
+            let options = arg(&a, 2);
+            let leading = !in_operator(&options, "leading") || options.get("leading")?.truthy();
+            let trailing = !in_operator(&options, "trailing") || options.get("trailing")?.truthy();
+            Ok(super::throttle::new(rt, function, wait, leading, trailing))
+        }),
+    );
 
     if let Ok(number) = g.get("Number") {
         if let Ok(parse_int) = g.get("parseInt") {
@@ -1288,6 +1340,101 @@ mod tests {
     }
     fn s(v: &Js) -> String {
         text(v).unwrap()
+    }
+
+    #[test]
+    fn lodash_times_preserves_count_callback_and_throw_identity() {
+        use std::cell::RefCell;
+        let g = globals();
+        assert!(
+            g.get("times").unwrap().is_callable(),
+            "shared lodash times import"
+        );
+        assert_eq!(json(&run(&g, "times", vec![Js::Number(3.9)])), "[0,1,2]");
+        let calls = Rc::new(RefCell::new(vec![]));
+        let seen = calls.clone();
+        let thrown = Js::object(vec![("marker", Js::str("callback rejection"))]);
+        let failure = thrown.clone();
+        let callback = Js::function("iteratee", move |this, args| {
+            assert!(this.is_undefined());
+            assert_eq!(args.len(), 1);
+            let index = args[0].to_number()?;
+            seen.borrow_mut().push(index);
+            if index == 1. {
+                Err(Thrown::new(failure.clone()))
+            } else {
+                Ok(Js::Number(index))
+            }
+        });
+        let result = g
+            .get("times")
+            .unwrap()
+            .call(Js::Undefined, vec![Js::str("3"), callback]);
+        assert!(result.unwrap_err().value.strict_equals(&thrown));
+        assert_eq!(*calls.borrow(), [0., 1.]);
+        for n in [
+            f64::NAN,
+            f64::INFINITY,
+            f64::NEG_INFINITY,
+            -0.,
+            -1.,
+            9007199254740992.,
+        ] {
+            assert_eq!(json(&run(&g, "times", vec![Js::Number(n)])), "[]");
+        }
+    }
+
+    #[test]
+    fn lodash_times_matches_installed_source() {
+        use std::cell::RefCell;
+        let output = std::process::Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/tests/js_lodash_times_oracle.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "lodash times source: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        let cases: Vec<serde_json::Value> = serde_json::from_slice(&output.stdout).unwrap();
+        let g = globals();
+        for case in cases {
+            let input = &case["input"];
+            let count = match input["special"].as_str() {
+                Some("NaN") => Js::Number(f64::NAN),
+                Some("Infinity") => Js::Number(f64::INFINITY),
+                Some("-Infinity") => Js::Number(f64::NEG_INFINITY),
+                Some("-0") => Js::Number(-0.),
+                Some(_) => unreachable!(),
+                None => input
+                    .get("count")
+                    .map_or(Js::Undefined, super::super::value::from_json),
+            };
+            let calls = Rc::new(RefCell::new(vec![]));
+            let seen = calls.clone();
+            let callback = match case["kind"].as_str().unwrap() {
+                "absent" => Js::Undefined,
+                "number" => Js::Number(7.),
+                "property" => Js::str("name"),
+                "function" => Js::function("iteratee", move |this, args| {
+                    let index = args[0].to_number()?;
+                    seen.borrow_mut().push(serde_json::json!({"index":index as u64,"arity":args.len(),"undefinedThis":this.is_undefined()}));
+                    Ok(Js::Number(index * 10.))
+                }),
+                _ => unreachable!(),
+            };
+            let values = run(&g, "times", vec![count, callback]);
+            let actual: serde_json::Value = serde_json::from_str(&json(&values)).unwrap();
+            assert_eq!(actual, case["values"], "source times values: {case}");
+            assert_eq!(
+                serde_json::json!(*calls.borrow()),
+                case["calls"],
+                "source times calls: {case}"
+            );
+        }
     }
 
     #[test]

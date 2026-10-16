@@ -9,7 +9,9 @@ use super::{
 use crate::{
     exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture},
-    websocket::{BaseWebSocket, WsProtocol, WsRuntime},
+    websocket::{
+        BaseWebSocket, PreparedWebSocket, WebSocketConnectionOptions, WsProtocol, WsRuntime,
+    },
     ws_parent::WsExchangeParent,
 };
 use safe_cex_transport::socket::SocketFrame;
@@ -55,12 +57,104 @@ pub struct SocketCore {
     pub on_close_member: RefCell<Option<Js>>,
     /// The JS `pingAt` value; every write also reaches the core's ping time.
     ping_at: RefCell<Js>,
+    /// Prevent a source `super.dispose()` from dispatching its override again.
+    disposing: Cell<bool>,
 }
 
 struct JsProtocol(Weak<SocketCore>);
 
 fn core_error(e: Thrown) -> ExchangeError {
     e.to_exchange_error()
+}
+
+fn connection_options(value: &Js) -> Result<WebSocketConnectionOptions, Thrown> {
+    let optional = |name| -> Result<Js, Thrown> {
+        if value.is_nullish() {
+            Ok(Js::Undefined)
+        } else {
+            value.get(name)
+        }
+    };
+    let number = |name| -> Result<Option<f64>, Thrown> {
+        let value = optional(name)?;
+        if value.is_undefined() {
+            Ok(None)
+        } else {
+            Ok(Some(value.to_number()?))
+        }
+    };
+    let start_closed = optional("startClosed")?;
+    Ok(WebSocketConnectionOptions {
+        min_reconnection_delay_ms: number("minReconnectionDelay")?,
+        max_reconnection_delay_ms: number("maxReconnectionDelay")?,
+        reconnection_delay_grow_factor: number("reconnectionDelayGrowFactor")?,
+        min_uptime_ms: number("minUptime")?,
+        connection_timeout_ms: number("connectionTimeout")?,
+        max_retries: number("maxRetries")?,
+        start_closed: (!start_closed.is_undefined()).then(|| start_closed.truthy()),
+        headers_required: optional("headersRequired")?.truthy(),
+        ..Default::default()
+    })
+}
+
+fn create_websocket(core: &Rc<SocketCore>, args: &[Js]) -> Result<Js, Thrown> {
+    let url = arg(args, 0).to_display();
+    let protocols = match arg(args, 1) {
+        Js::Undefined | Js::Null => vec![],
+        Js::String(value) => vec![String::from_utf16_lossy(&value)],
+        other => other
+            .array_values()
+            .ok_or_else(|| Thrown::type_error("WebSocket protocols must be strings"))?
+            .into_iter()
+            .map(|value| value.to_display())
+            .collect(),
+    };
+    let supplied = arg(args, 2);
+    let options = if supplied.is_undefined() {
+        None
+    } else {
+        Some(connection_options(&supplied)?)
+    };
+    if options
+        .as_ref()
+        .is_some_and(|options| options.headers_required)
+        && !core.context.runtime.headers_capable()
+    {
+        return Err(Thrown::error(
+            "HeaderCapableWebSocketUnavailableError",
+            "Required WebSocket upgrade headers need a header-capable ws transport",
+        ));
+    }
+    let base = core.base()?;
+    let capable = core.context.runtime.headers_capable();
+    // Native reconnects return through connectAndSubscribe/createWebsocket.
+    // Resolve the retained provider inside each owned preparation, before dial;
+    // a thrown auth error rejects preparation and cannot open a socket.
+    base.start_prepared_websocket(move || async move {
+        let mut options = options;
+        if capable && !supplied.is_nullish() {
+            let headers = supplied.get("headers").map_err(core_error)?;
+            let headers = if headers.is_callable() {
+                headers.call(Js::Undefined, vec![]).map_err(core_error)?
+            } else {
+                headers
+            };
+            if !headers.is_nullish() {
+                let mut captured = indexmap::IndexMap::new();
+                for (key, value) in headers.own_entries().map_err(core_error)? {
+                    captured.insert(String::from_utf16_lossy(&key), value.to_display());
+                }
+                options.get_or_insert_with(Default::default).headers =
+                    Some(safe_cex_transport::relay::UpgradeHeaders::Static(captured));
+            }
+        }
+        Ok(Some(PreparedWebSocket {
+            url,
+            protocols,
+            options,
+        }))
+    });
+    Ok(ws_handle(core))
 }
 
 fn close_event(code: Option<u16>, reason: &str, was_clean: bool) -> Js {
@@ -189,6 +283,26 @@ fn binary_data(bytes: &[u8], runtime: Rc<dyn crate::runtime::ExchangeRuntime>) -
 }
 
 impl WsProtocol for JsProtocol {
+    fn dispose(&self) {
+        let Some(core) = self.0.upgrade() else {
+            return;
+        };
+        if core.disposing.replace(true) {
+            return;
+        }
+        let this = core.this.borrow().clone();
+        let result = this.call_method("dispose", vec![]);
+        core.disposing.set(false);
+        // WsProtocol disposal is synchronous and infallible. Report a source
+        // throw through the host and allow core-owned transport cleanup to run.
+        if let Err(thrown) = result {
+            core.context.runtime.report_exception(
+                &core_error(thrown),
+                &serde_json::json!({ "operation": "dispose" }),
+            );
+        }
+    }
+
     fn ping(&self, _socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         let core = self.core()?;
         let this = core.this.borrow().clone();
@@ -333,7 +447,11 @@ fn base_prototype(context: &Rc<JsSocketContext>) -> Js {
                         && let Some(core) = core_of(&context, &this)
                         && let Some(base) = core.base.get()
                     {
+                        // A direct source override calling super must not
+                        // redispatch itself through the typed protocol hook.
+                        let was_disposing = core.disposing.replace(true);
                         base.dispose();
+                        core.disposing.set(was_disposing);
                     }
                     Ok(Js::Undefined)
                 }),
@@ -367,6 +485,7 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         listeners: RefCell::default(),
         on_close_member: RefCell::default(),
         ping_at: RefCell::new(Js::Number(0.0)),
+        disposing: Cell::new(false),
     });
     let def = |name: &str, f: Js| {
         let _ = socket.define(name, f);
@@ -432,12 +551,7 @@ pub fn base_websocket(context: &Rc<JsSocketContext>, parent: Js) -> Js {
         let core = core.clone();
         def(
             "createWebsocket",
-            Js::function("createWebsocket", move |_, a| {
-                let url = arg(&a, 0).to_display();
-                let base = core.base()?;
-                base.start_websocket(url, vec![], None);
-                Ok(ws_handle(&core))
-            }),
+            Js::function("createWebsocket", move |_, a| create_websocket(&core, &a)),
         );
     }
     {

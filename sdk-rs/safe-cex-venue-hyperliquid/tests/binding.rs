@@ -55,6 +55,18 @@ fn fixture_with_signers(
     options: Value,
     signers: ExchangeSigners,
 ) -> Fixture {
+    fixture_with_provider(routes, options, signers, None)
+}
+
+#[allow(clippy::arc_with_non_send_sync)]
+fn fixture_with_provider(
+    routes: Vec<(&str, Value)>,
+    options: Value,
+    signers: ExchangeSigners,
+    external_public_data: Option<
+        safe_cex_exchange::js_runtime::base_exchange::ExternalPublicDataFactory,
+    >,
+) -> Fixture {
     let host = Rc::new(Host::default());
     let routes = Routes::new(routes);
     let clock = Arc::new(safe_cex_venue_hyperliquid::binding::RuntimeClock::new(
@@ -66,6 +78,7 @@ fn fixture_with_signers(
         Rc::new(DefaultStore::new()),
         HyperliquidDependencies {
             runtime: host.clone(),
+            external_public_data,
             http: routes.clone(),
             limiter: Rc::new(RateLimiter::new(clock, 1200.0, 60_000.0)),
             signers,
@@ -77,6 +90,131 @@ fn fixture_with_signers(
         routes,
         exchange,
     }
+}
+
+#[derive(Default)]
+struct ExternalProvider {
+    connects: Cell<usize>,
+    disposes: Cell<usize>,
+}
+impl safe_cex_exchange::external::ExternalPublicData for ExternalProvider {
+    fn connect(&self) {
+        self.connects.set(self.connects.get() + 1);
+    }
+    fn dispose(&self) {
+        self.disposes.set(self.disposes.get() + 1);
+    }
+    fn is_initialized(&self) -> bool {
+        true
+    }
+    fn is_healthy(&self) -> bool {
+        true
+    }
+    fn last_message_timestamp(&self) -> Option<f64> {
+        Some(0.0)
+    }
+    fn listen_ohlcv(
+        &self,
+        _: safe_cex_types::OHLCVOptions,
+        _: Rc<dyn Fn(safe_cex_types::Candle)>,
+    ) -> Result<
+        safe_cex_exchange::runtime::ListenerCleanup,
+        safe_cex_exchange::runtime::ExchangeError,
+    > {
+        panic!("startup does not subscribe to candles")
+    }
+    fn listen_order_book(
+        &self,
+        _: String,
+        _: Rc<dyn Fn(safe_cex_types::OrderBook)>,
+    ) -> Result<
+        safe_cex_exchange::runtime::ListenerCleanup,
+        safe_cex_exchange::runtime::ExchangeError,
+    > {
+        panic!("startup does not subscribe to order books")
+    }
+}
+
+fn external_options() -> Value {
+    json!({"key":"", "secret":"", "publicDataOnly":true,
+        "externalPublicData":{"type":"websocket", "url":"ws://gateway.local", "exchangeId":"hyperliquid"}})
+}
+
+#[test]
+fn external_startup_waits_for_both_loaded_flags_and_disposes_its_provider() {
+    use std::task::Context;
+    let provider = Rc::new(ExternalProvider::default());
+    let supplied = provider.clone();
+    let parent = Rc::new(RefCell::new(None));
+    let observed = parent.clone();
+    let f = fixture_with_provider(
+        vec![],
+        external_options(),
+        ExchangeSigners::default(),
+        Some(Rc::new(move |_, owner| {
+            *observed.borrow_mut() = Some(owner);
+            supplied.clone()
+        })),
+    );
+    let mut start = f.exchange.start();
+    let mut context = Context::from_waker(std::task::Waker::noop());
+    assert!(start.as_mut().poll(&mut context).is_pending());
+    f.host.settle();
+    assert_eq!(provider.connects.get(), 1);
+    assert!(Rc::ptr_eq(
+        &parent.borrow().as_ref().unwrap().store,
+        &f.exchange.base().store,
+    ));
+    let store = &f.exchange.base().store;
+    let mut loaded = store.loaded().clone();
+    loaded.markets = true;
+    store
+        .update(
+            safe_cex_store::StoreUpdate {
+                loaded: Some(loaded.clone()),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+    f.host.advance(100.0);
+    assert!(
+        start.as_mut().poll(&mut context).is_pending(),
+        "tickers must also hydrate"
+    );
+    loaded.tickers = true;
+    store
+        .update(
+            safe_cex_store::StoreUpdate {
+                loaded: Some(loaded),
+                ..Default::default()
+            },
+            false,
+        )
+        .unwrap();
+    f.host.block_on(start).unwrap();
+    assert!(
+        f.routes.requests.borrow().is_empty(),
+        "external startup skips venue public REST"
+    );
+    assert!(
+        f.host.sockets.borrow().is_empty(),
+        "external startup skips venue public sockets"
+    );
+    f.exchange.dispose().unwrap();
+    assert_eq!(provider.disposes.get(), 1);
+}
+
+#[test]
+fn external_configuration_without_a_provider_fails_visibly_before_network() {
+    let f = fixture_with_options(vec![], external_options());
+    let error = f.host.block_on(f.exchange.start()).unwrap_err();
+    assert_eq!(
+        error.message,
+        "externalPublicData is configured but no external public data provider was supplied"
+    );
+    assert!(f.routes.requests.borrow().is_empty());
+    assert!(f.host.sockets.borrow().is_empty());
 }
 
 #[derive(Default)]
@@ -157,6 +295,92 @@ fn constructs_through_the_ported_class_constructor() {
         f.host.sockets.borrow().is_empty(),
         "the constructor dials nothing"
     );
+}
+
+#[test]
+fn historical_positions_fold_real_fills_with_account_bounds_and_settlement() {
+    let f = started();
+    f.routes.routes.borrow_mut().extend([
+        ("info:userFillsByTime".into(), json!([
+            {"coin":"BTC","tid":1,"oid":10,"time":1699999998000u64,"side":"B","px":"61000","sz":"1","fee":"1","feeToken":"USDC","closedPnl":"0","dir":"Open Long","startPosition":"0"},
+            {"coin":"BTC","tid":2,"oid":11,"time":1699999999000u64,"side":"A","px":"62000","sz":"1","fee":"2","feeToken":"USDC","closedPnl":"1000","dir":"Close Long","startPosition":"1"}
+        ])),
+        ("info:userFunding".into(), json!([])),
+    ]);
+    let records = f
+        .host
+        .block_on(f.exchange.fetch_historical_positions(
+            safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "audit-account".into(),
+                from: Some(1_699_999_000_000.0),
+                to: Some(1_700_000_000_000.0),
+            },
+        ))
+        .unwrap();
+    assert_eq!(
+        records.len(),
+        1,
+        "a real closed round trip must be returned; requests {:?}; console {:?}; reports {:?}",
+        f.routes.requests.borrow(),
+        f.host.console.borrow(),
+        f.host.reports.borrow()
+    );
+    let record: safe_cex_types::PositionRecord =
+        serde_json::from_value(records[0].clone()).unwrap();
+    assert_eq!(record.account, "audit-account");
+    assert_eq!(record.symbol, "BTC-PERP");
+    assert_eq!(
+        record.settle_currency,
+        f.exchange.base().store.markets_by_symbol()["BTC-PERP"].quote
+    );
+    assert_eq!(record.realized_pnl, 1000.0);
+    assert_eq!(record.fees, 3.0);
+    let requests = f.routes.requests.borrow();
+    let income = requests
+        .iter()
+        .find(|(route, _)| route == "info:userFillsByTime")
+        .unwrap();
+    assert_eq!(
+        income.1["startTime"].as_f64(),
+        Some(1_699_999_000_000.0 - 14.0 * 86400000.0)
+    );
+    assert_eq!(income.1["endTime"], json!(1_700_000_000_000u64));
+    assert_eq!(income.1["user"], MASTER);
+    assert!(
+        f.routes.count("info:userFillsByTime") > 1,
+        "symbol-scoped fold fetches executions after income discovery"
+    );
+}
+
+#[test]
+fn historical_positions_default_window_uses_integer_date_now_and_shared_lookback() {
+    let f = fixture(vec![
+        ("info:userFillsByTime", json!([])),
+        ("info:userFunding", json!([])),
+    ]);
+    f.host.now.set(0.75);
+    let records = f
+        .host
+        .block_on(f.exchange.fetch_historical_positions(
+            safe_cex_exchange::journal::HistoricalPositionOptions {
+                account: "empty-account".into(),
+                from: None,
+                to: None,
+            },
+        ))
+        .unwrap();
+    assert!(records.is_empty());
+    let requests = f.routes.requests.borrow();
+    let first = &requests[0].1;
+    assert_eq!(first["type"], "userFillsByTime");
+    assert_eq!(first["endTime"].as_f64(), Some(1_700_000_000_000.0));
+    assert_eq!(
+        first["startTime"].as_f64(),
+        Some(1_700_000_000_000.0 - 44.0 * 86400000.0)
+    );
+    assert_eq!(f.routes.count("info:userFunding"), 1);
+    assert!(f.host.console.borrow().is_empty());
+    assert!(f.host.reports.borrow().is_empty());
 }
 
 #[test]

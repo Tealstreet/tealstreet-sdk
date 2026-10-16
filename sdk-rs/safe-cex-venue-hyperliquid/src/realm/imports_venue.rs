@@ -2,7 +2,7 @@
 use super::{Realm, host_core::js, value::*};
 use crate::{
     constants::{self, HyperliquidBuilderConfig, HyperliquidBuilderProvider},
-    exchange_helpers, json_boundaries, market_helpers, order_inference, rate_limit,
+    exchange_helpers, income, json_boundaries, market_helpers, order_inference, rate_limit,
 };
 use std::borrow::Cow;
 
@@ -76,6 +76,30 @@ pub(crate) fn bind(realm: &Realm) {
              body: fn(&mut Realm, &[Value]) -> Result<Value, Thrown>| {
         realm.bind_import(name, realm.native(name, length, move |r, _, a| body(r, a)));
     };
+    b("mapHyperliquidFillToIncomeRecords", 2, |r, a| {
+        income::map_hyperliquid_fill_to_income_records(r, &arg(a, 0), &arg(a, 1))
+    });
+    b("mapHyperliquidFundingToIncomeRecord", 2, |r, a| {
+        income::map_hyperliquid_funding_to_income_record(r, &arg(a, 0), &arg(a, 1))
+    });
+    b("paginateHyperliquidByTime", 6, |r, a| {
+        let start = r.to_number(&arg(a, 2))?;
+        let max_pages = match arg(a, 6) {
+            Value::Undefined => None,
+            value => Some(r.to_number(&value)?),
+        };
+        let observer = income::paginate_hyperliquid_by_time(
+            r.clone(),
+            arg(a, 0),
+            arg(a, 1),
+            start,
+            arg(a, 3),
+            arg(a, 4),
+            arg(a, 5),
+            max_pages,
+        );
+        Ok(r.spawn_value(Box::pin(observer)))
+    });
     b("calculatePricePrecision", 3, |r, a| {
         let (p, amount, max) = (
             num(r, &arg(a, 0))?,

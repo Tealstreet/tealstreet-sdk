@@ -1462,3 +1462,44 @@ its loopback run completes.
 Native native_host_bingx also passes1 over real loopback HTTP/WS, checking startup,
 wire HMAC, bigint caller/order identifiers, placement and cancellation. Receipt:
 /tmp/bingx-factory-native.txt. No live credentials or exchange requests were used.
+
+
+## Native hosted signer (ddi2il-23)
+
+Source BingX createAPI skips local preparation when options.remoteSigner exists;
+the shared source remoteSigningAdapter owns the browser round trip. Rust imports
+that function as the actual shared HTTP host capability, not a serialized options
+object. ExchangeHost.signers attaches the same signer to BaseExchange before Rc
+assembly, so a secretless hosted account takes the private startup path. The API
+host capability suppresses local HMAC even when a stray local secret remains.
+The native registry passes its account signer/account name through the shared
+rest_http_host_signed path. PayloadSigner remains a separate unavailable capability.
+
+The new native_host_bingx test compiled/fails on the previous native-host refusal.
+With the capability wired, both old local signing and the new hosted proof pass.
+Hosted proof runs two complete local HTTP/WS lifecycles, with empty and deliberately
+unused local secrets, checks the actual network order against browser-side HMAC
+using source canonical key sorting, and observes caller ID/bigint cancellation.
+It then uses a fresh non-polling fixture to prove signer refusal sends no HTTP.
+The flat ASCII fixture codec is deliberately bounded; the existing actual-source
+API witnesses cover the general source serializer. Test development excluded its
+initial invalid serialized-function metadata attempt and corrected the canonical
+server comparison after Map::remove reordered a key; those are not negative proofs.
+
+hosted-signing-controls.py independently removes native HTTP signer forwarding,
+BaseExchange signer attachment and local-signing bypass. All three compile/fail
+the named native E2E and restore to pass. Relevant source/test bytes are restored
+before any other Cargo invocation. Only the two reviewed constructor body hashes
+change in the shared dispatch inventory; its other37 BingX rows and every other
+lane's rows remain unchanged. Final scoped gate results are reported in the PR.
+
+After merging master5e76c883d1 at64a5aef5e1: full venue95 and native registry2
+pass; strict host all-targets Clippy for venue/registry, wasm library Clippy and
+workspace fmt pass. Global invention/status parity0 (7459rows/17118public items)
+after mapping both new trait capability members to source createAPI/constructor.
+Cancellation inventory7 including its temporary exporter and four override tests
+including live TS inventory pass. Full dispatch census stops only at two stale
+Hyperliquid base_exchange_class body hashes from master; all39 BingX rows match.
+Control receipts precede this master integration; positive suites reran afterward.
+Logs /tmp/bingx-hosted-{before,after,controls,full,native-final,clippy,wasm,fmt,
+parity,audits}.txt. No live credentials, venue requests or deployment used.

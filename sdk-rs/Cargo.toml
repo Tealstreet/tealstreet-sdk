@@ -102,12 +102,14 @@ safe-cex-venue-backpack = { path = "safe-cex-venue-backpack" }
 safe-cex-venue-binance = { path = "safe-cex-venue-binance" }
 safe-cex-venue-bingx = { path = "safe-cex-venue-bingx" }
 safe-cex-venue-bitget = { path = "safe-cex-venue-bitget" }
+safe-cex-venue-bitrue = { path = "safe-cex-venue-bitrue" }
 safe-cex-venue-bitunix = { path = "safe-cex-venue-bitunix" }
 safe-cex-venue-blofin = { path = "safe-cex-venue-blofin" }
 safe-cex-venue-bybit = { path = "safe-cex-venue-bybit" }
 safe-cex-venue-coinbase = { path = "safe-cex-venue-coinbase" }
 safe-cex-venue-okx = { path = "safe-cex-venue-okx" }
 safe-cex-venue-kraken = { path = "safe-cex-venue-kraken" }
+safe-cex-venue-grvt = { path = "safe-cex-venue-grvt" }
 safe-cex-venue-polymarket = { path = "safe-cex-venue-polymarket" }
 safe-cex-venue-txflow = { path = "safe-cex-venue-txflow" }
 safe-cex-venue-woo = { path = "safe-cex-venue-woo" }

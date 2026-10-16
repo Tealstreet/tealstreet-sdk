@@ -887,6 +887,20 @@ impl HOWWebSocket {
             .into_iter()
             .map(|(key, value)| (key, Value::String(value)))
             .collect();
+        // The browser cannot set Cookie directly. Only HOW interprets these
+        // GRVT config extensions; direct HTTP retains the original headers.
+        for (property, header) in [
+            ("grvtCookie", "Cookie"),
+            ("grvtAccountId", "X-Grvt-Account-Id"),
+        ] {
+            if let Some(value) = request
+                .config_extensions
+                .get(property)
+                .filter(|value| js_truthy(value))
+            {
+                headers.insert(header.into(), value.clone());
+            }
+        }
         if request.params.is_some() && request.query_params.is_some() {
             return Err(TransportError::Host(
                 "Cannot combine legacy and native query parameters".into(),
