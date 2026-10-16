@@ -1,6 +1,8 @@
 # Rust venue construction through the registry
 
-Status: implemented for `backpack`, `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`), the Binance family (`binance`, `binancepm`,
+Status: implemented for `backpack`, the Bitget family (`bitget`, `bitgetinverse`,
+`bitgetusdc`), `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`),
+the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
@@ -21,6 +23,9 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 - **Initial members:**
   - `backpack`, built with `BackpackExchange::new`.
   - `binance`, built with `BinanceExchange::new`.
+  - `bitget`, `bitgetinverse` and `bitgetusdc`, one shared constructor around
+    `BitgetExchange::new`; `BitgetDependencies` carries the runtime and a
+    `JsHttpHost` built with js_runtime `rest_http_host`.
   - `bitunix`, built with `BitunixVenue::new` from a registry-built `BaseExchange`
     and `BitunixDependencies` (runtime, per-lane client builder and transport
     install, optional externalPublicData provider).
@@ -64,7 +69,7 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bitget`, `bybit`, `kucoin`, `mexc`, `lighter`
+follow-up PR. Expected next: `bybit`, `kucoin`, `mexc`, `lighter`
 and `woo`.
 
 Each follow-up does four things:

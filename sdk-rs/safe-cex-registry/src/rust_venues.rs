@@ -20,6 +20,7 @@ use safe_cex_venue_backpack::{
 use safe_cex_venue_binance::exchange_classes::{
     BinanceExchange, BinancePMExchange, BinanceSpotExchange, ExchangeDependencies,
 };
+use safe_cex_venue_bitget::{BitgetDependencies, BitgetExchange};
 use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
@@ -70,6 +71,8 @@ pub trait RustVenueHost {
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError>;
     /// Futures and Spot share the SDK runtime's nonce and client-ID state.
     fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
+    /// Bitget, Bitget USDC and Bitget inverse share one input set.
+    fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -88,6 +91,9 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Binance, binance_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
     (ExchangeName::Binancespot, binancespot_constructor),
+    (ExchangeName::Bitget, bitget_constructor),
+    (ExchangeName::Bitgetinverse, bitget_constructor),
+    (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Kraken, kraken_constructor),
@@ -162,6 +168,13 @@ fn external_factory(
             },
         )),
     }
+}
+
+pub fn bitget_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange = BitgetExchange::new(name, options, store, host.bitget()?)?;
+        Ok(exchange)
+    })
 }
 
 pub fn bitunix_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {

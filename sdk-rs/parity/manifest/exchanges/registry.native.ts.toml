@@ -86,9 +86,9 @@ note = "CHOSEN: native_bingx selects the actual source module ./bingx/bingx.exch
 ts = "exchangeRegistry.bitget"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_bitget"
+rs = [ "safe-cex-registry/src/loaders.rs::native_bitget", "safe-cex-registry/src/rust_venues.rs::bitget_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::bitget" ]
 status = "divergent"
-note = "CHOSEN: native_bitget selects the actual source module ./bitget/bitget.exchange and export BitgetExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bitget. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_bitget selects the actual source module ./bitget/bitget.exchange and export BitgetExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_bitget. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members `safe-cex-registry/src/rust_venues.rs::bitget_constructor`, `safe-cex-registry/src/rust_venues.rs::RustVenueHost::bitget`; the Rust construction route for bitget, bitgetinverse and bitgetusdc (three table entries sharing one constructor), selected only by ConstructionPath::Rust: the constructor calls BitgetExchange::new with the caller's name/options/store and the per-construction BitgetDependencies; the native host builds its wire host with js_runtime rest_http_host over a fresh terminal adapter."
 
 [[symbol]]
 ts = "exchangeRegistry.bitgetinverse"

@@ -139,6 +139,21 @@ impl RustVenueHost for NativeVenueHost {
             date_parse: inputs.date_parse,
         })
     }
+    fn bitget(&self) -> Result<safe_cex_venue_bitget::BitgetDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for bitget on the native host",
+            ));
+        }
+        Ok(safe_cex_venue_bitget::BitgetDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                (self.adapter)()?,
+            ),
+            external_public_data: None,
+        })
+    }
     fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError> {
         if self.remote.is_some() {
             return Err(ExchangeError::new(
