@@ -395,6 +395,25 @@
           "contains": "h.base_dispose(owner)?;"
         }
       ]
+    },
+    {
+      "file": "safe-cex-venue-polymarket/src/binding/members.rs",
+      "finding": "exchange bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/polymarket/polymarket.exchange.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-polymarket/src/binding/members.rs",
+          "contains": "crate::disposal::dispose_exchange(|| {"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-polymarket/src/disposal.rs",
+          "contains": "dispose_base()"
+        }
+      ]
     }
   ]
 }
