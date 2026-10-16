@@ -434,3 +434,27 @@ This leaves nine original Bitunix owners and the previously measured 49 Blofin
 owners. OrderFrame itself, complete-package/local-owner and feature/WASM matrices
 remain separate obligations. These finite selected runtime profiles make no
 arbitrary callback, source-object or complete lifecycle claim.
+
+## Concrete OrderFrame receiver
+
+All 23 inventoried OrderFrame methods execute through 61 native cases, including
+both no-argument Store snapshot methods. The actual constructor, Store, HTTP
+lanes and BaseExchange listeners supply the receiver. Declared returned JSON is
+inspected recursively with numeric bits; the probe does not serialize a decoded
+owner to manufacture its expected result. Snapshots retain complete distinct
+positions/orders. The profile observes native cache mutation, caller-ID admission,
+missing/null/false presence, identity and trigger/snapshot fields, and standalone
+HTTP delegation.
+
+GET/POST cases forward distinct nonempty inputs with false/null fields and
+numbers; actual transport params/body and GET custom headers/timeouts are checked.
+Independent review found this initial forwarding hole before publication.
+
+Eight compiling copied-production controls produce named output failures:
+GET/POST forwarding loss, empty and partial position snapshots, empty and partial
+order snapshots, flipped reduce-cache truthiness and lost own-null presence.
+Snapshot loss occurs only after constructing the complete native output. All 61
+restored native cases pass, and real production source bytes remain unchanged.
+These finite concrete profiles do not classify the other venue/socket receivers
+or replace the separate shared model, generic helper, full-package/local-owner
+and feature/WASM obligations.
