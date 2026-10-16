@@ -151,3 +151,11 @@ fields remain writable and direct signing preserves partial writes before failur
 Merge readers retain the source repeated reads and eager map-before-dedupe effects.
 The focused native regression target is `diagnostics_choices`; its maintained-source
 counterpart runs through `parity/scripts/diagnostics-choice-source-gate.cjs`.
+
+Market/Position option metadata participates in known-field partial patches and
+native merges. Incoming omission preserves the prior option value; a present
+empty PositionOption replaces it. The JS facade uses native ModelPatch carriers
+for nested option numbers and forwards Store.update's fromWorker flag, preserving
+worker market merge behavior. The facade `option_fields` target compares eight
+actual source mutation paths across five numeric profiles; the ordinary production
+Store wiring gate remains required for Store changes.

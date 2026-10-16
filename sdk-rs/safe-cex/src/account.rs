@@ -114,6 +114,15 @@ pub fn account_to_exchange_options(
     if metadata.supports_spot_toggle == Some(true) && account.enable_spot_markets == Some(true) {
         options.enable_spot_markets = Some(true);
     }
+    if metadata.supports_options_toggle == Some(true) && account.enable_option_markets == Some(true)
+    {
+        options.enable_option_markets = Some(true);
+    }
+    if metadata.supports_inverse_toggle == Some(true)
+        && account.enable_inverse_markets == Some(true)
+    {
+        options.enable_inverse_markets = Some(true);
+    }
     if forward_application {
         options.application_id = nonempty(&account.application_id);
     }
