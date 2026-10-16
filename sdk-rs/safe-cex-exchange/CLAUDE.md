@@ -944,6 +944,10 @@ indexer closed; native modules use free functions and trait impls only.
 authenticates with the account's proxy token and checks expiry with the canonical
 `is_token_expired`. Proof: `safe-cex-registry/tests/native_host_tunnel.rs`.
 
+The JS HTTP terminal honors `responseType: 'text'` for encoded response bodies,
+including non-2xx responses. It preserves raw JSON tokens and whitespace until a
+venue's bigint-safe parser runs. The default continues ordinary JSON projection.
+
 Hosted JS venues receive the signer through JsHttpHost, shared by Scope and BaseExchange assembly. Structural exchange_options decoding omits capability handles without altering the JS options object; never serialize hosted signers into the uninhabited JSON markers. The native host binds the exchange name before sending, wraps the existing RemoteSigningAdapter and propagates its effective configuration to source response hooks. Query serialization uses the shared HTTP codec after signing; response/error configs retain signed params and source URLs for retries. Native registry tests exercise secretless validation and private websocket auth over real local sockets.
 
 The js_runtime typed-value bridge uses the shared native serialization capture and native Serde visitors, preserving NaN, infinities and signed zero in scalar and nested model fields. `to_json` remains the explicit wire projection; do not route typed values through it. Native nonfinite values aimed at opaque serde_json::Value are refused rather than silently projected to null. Typed input retains the shared UTF-8 and bounded-depth choices. `tests/typed_js_values.rs` checks both directions independently, actual order-option fields, enum shapes and optional values; venue E2E tests own their receiver-level effects.
@@ -965,3 +969,8 @@ Arrays and accessor descriptors explicitly refuse until a source caller requires
 that representation. Existing host define_accessor remains the host accessor seam.
 The engine oracle in tests/js_data_descriptors_oracle.cjs checks the data-flag and
 redefinition matrix; the native error test covers Polymarket's enhanced message.
+
+The JS BaseExchange facade's `callMethodInWorker` delegates to the existing core
+worker RPC owner. Its eager Promise preserves the core reply listener, deadline,
+completion hook and reconstructed error properties. Arguments/results use the
+existing JSON worker boundary; it does not create a parallel worker protocol.

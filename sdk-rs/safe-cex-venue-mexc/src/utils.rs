@@ -391,7 +391,10 @@ pub fn normalize_balance(raw_rows: &Value) -> Result<safe_cex_types::Balance, Js
             // Only own-key omission is mirrored; inherited reads are a routed
             // shared dictionary-write FINDING, witnessed before serialization.
             if currency != "__proto__" {
-                currencies.insert(currency, currency_balance);
+                currencies.insert(
+                    currency,
+                    safe_cex_types::CurrencyBalance::from(currency_balance),
+                );
             }
         }
     }
