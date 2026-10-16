@@ -17,7 +17,11 @@ use safe_cex_exchange::{
     websocket::WsRuntime,
 };
 use safe_cex_store::Store;
-use safe_cex_types::*;
+use safe_cex_types::{
+    ExchangeAccount, ExchangeName, ExchangeOptions, Execution, ExecutionsOptions, Market, Order,
+    PlaceOrderOpts, Position, PositionSide, PublicTrade, Ticker, UpdateOrderOpts,
+    ValidateAccountResult,
+};
 use std::rc::Rc;
 
 pub struct BitgetDependencies {
