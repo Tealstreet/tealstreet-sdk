@@ -17,7 +17,7 @@ const aliasTraitMethods = [
 ];
 function aliasBody(type, targetType, contract) {
   const observation = contract.observation;
-  const unsized = contract.aliasProbeKind === 'unsized-income-fetcher';
+  const unsized = ['unsized-income-fetcher', 'reviewed-unsized'].includes(contract.aliasProbeKind);
   const equality = contract.aliasProbeExpected
     ? unsized
       ? `let _: std::marker::PhantomData<fn(*mut (${contract.aliasProbeExpected}))->*mut (${contract.aliasProbeExpected})> = std::marker::PhantomData::<fn(*mut ${targetType})->*mut ${targetType}>;`
