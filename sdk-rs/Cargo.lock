@@ -3953,6 +3953,7 @@ dependencies = [
 name = "safe-cex-registry"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "futures-util",
  "getrandom 0.2.17",
  "hmac 0.12.1",
@@ -3970,7 +3971,9 @@ dependencies = [
  "safe-cex-venue-coinbase",
  "safe-cex-venue-hyperliquid",
  "safe-cex-venue-kraken",
+ "safe-cex-venue-kucoin",
  "safe-cex-venue-lighter",
+ "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
  "safe-cex-venue-polymarket",
  "serde",

@@ -21,3 +21,9 @@ Facade Store fixtures check every notifying write's Result. Counter-only
 subscribers return success after recording their observation. Tests inspecting
 patch fields first require StoreMutationError::Patch; notification failures must
 not be flattened into field-validation errors to satisfy those assertions.
+
+Account options forward spot/options/inverse opt-ins only when metadata permits
+that category and the account enabled it. Presence-aware patches run afterward,
+including false overrides and explicit clears. The root option-toggle supplement
+runs all 48 metadata entries through actual source and facade construction. See
+`../parity/OPTION_FIELDS_AUDIT.md` for the cross-crate construction/retention audit.
