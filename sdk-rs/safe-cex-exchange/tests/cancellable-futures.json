@@ -1709,9 +1709,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "ed25514b6b7230d530649b9a60b17f53791ffe3b4e99a5a44ba87ee72743db40",
+      "producer_sha256": "c7b8b93cc60e00e2cb2bcfe44a35d00e13eef66524b5f1b158e2fdb9324eb64b",
       "classification": "no-owned-latch",
-      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged. Reviewed times integration: the only producer-token change installs a synchronous lodash times callback; all seven async boundaries and captured Promise/loop ownership remain identical."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",
