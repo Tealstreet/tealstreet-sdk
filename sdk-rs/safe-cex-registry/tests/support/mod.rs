@@ -406,8 +406,18 @@ pub async fn venue_harness(
         }) as Arc<dyn RestAdapter>)
     });
     let host = match signer {
-        Some((signer, account)) => native_venue_host_signed(host, adapters, signer, account),
-        None => native_venue_host_with(host, adapters),
+        Some((signer, account)) => native_venue_host_signed(
+            host,
+            adapters,
+            signer,
+            account,
+            safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+        ),
+        None => native_venue_host_with(
+            host,
+            adapters,
+            safe_cex_registry::native_host::hyperliquid_rate_limiter(),
+        ),
     };
     let constructor =
         rust_constructor(&name, host).expect("a Rust-constructed venue in the registry table");
