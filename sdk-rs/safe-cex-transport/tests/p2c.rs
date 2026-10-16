@@ -495,18 +495,16 @@ fn bybit_excludes_instruments_network_retry_but_keeps_signature_retry() {
     venue.replies.lock().unwrap().push_back(Err(failure));
     assert!(run(policy.execute(&venue, &RetryClock::default())).is_ok());
     assert_eq!(venue.accepted.lock().unwrap().len(), 3);
-    for venue_kind in [SignatureRetryVenue::Bitrue] {
-        venue.replies.lock().unwrap().push_back(Err(reset()));
-        let policy = signature_error_on_read(
-            read(
-                ReadClassification::Methods,
-                req("GET", "/v5/market/instruments-info"),
-            ),
-            1,
-            venue_kind,
-        );
-        assert!(run(policy.execute(&venue, &RetryClock::default())).is_ok());
-    }
+    venue.replies.lock().unwrap().push_back(Err(reset()));
+    let policy = signature_error_on_read(
+        read(
+            ReadClassification::Methods,
+            req("GET", "/v5/market/instruments-info"),
+        ),
+        1,
+        SignatureRetryVenue::Bitrue,
+    );
+    assert!(run(policy.execute(&venue, &RetryClock::default())).is_ok());
     assert_eq!(venue.accepted.lock().unwrap().len(), 5);
 }
 
