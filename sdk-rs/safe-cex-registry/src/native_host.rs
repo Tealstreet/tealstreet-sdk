@@ -22,6 +22,7 @@ use safe_cex_types::{
     Candle, ExchangeOptionsExternalPublicData, OHLCVOptions, OrderBook, StoreDataLoaded,
 };
 use safe_cex_venue_binance::exchange_classes::ExchangeDependencies;
+use safe_cex_venue_okx::binding::exchange::OkxDependencies;
 use std::{
     cell::{Cell, RefCell},
     collections::HashMap,
@@ -97,6 +98,22 @@ impl RustVenueHost for NativeVenueHost {
             build_http: inputs.build_http,
             install_transport: inputs.install_transport,
             date_parse: inputs.date_parse,
+        })
+    }
+    // externalPublicData stays unset: OkxExchange::new refuses that option visibly.
+    fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for okx on the native host",
+            ));
+        }
+        Ok(OkxDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                (self.adapter)()?,
+            ),
+            external_public_data: None,
         })
     }
 }
