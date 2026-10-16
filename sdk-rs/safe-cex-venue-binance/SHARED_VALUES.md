@@ -54,3 +54,10 @@ Each fails its named assertion; after restoring the source, all eight prototype
 and typed-value tests pass. Invention/status gates pass and extractor check
 reports zero changes. This evidence validates the graph migration, not the
 previously declared whole-venue divergences.
+
+After merging current master, the integrated checks pass 79 core tests and all
+64 tests in the six affected receiver/oracle targets. Strict host all-feature,
+all-target Clippy and wasm library Clippy pass for core and Binance; formatting
+passes. Registry and public facade compile with all features, covering downstream
+consumers of the added common variant. Parity checks pass (7459 rows / 17118
+public items), and extractor check reports zero updates.
