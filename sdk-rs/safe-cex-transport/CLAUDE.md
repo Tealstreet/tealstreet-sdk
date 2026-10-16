@@ -83,7 +83,12 @@ object. Its manifest row declares these independently from numeric normalization
 `PARSER_NUMERIC_EVIDENCE.md` records the raw source witnesses and positive Unicode.
 
 Signing envelope and secondary-options gates assert decoded native fields
-before re-encoding; roundtrip bytes cannot detect symmetric serde-name swaps.
+before re-encoding; roundtrip bytes cannot detect symmetric serde-name swaps. Secondary
+client derivation clones the typed options and overlays only the declared
+secondary credentials plus the selected proxy. Never serialize account options
+to copy them: JSON would erase native nonfinite signer types. The source oracle
+checks nested option identity before fixture encoding, and the native regression
+checks exact signer-type bits including negative zero and NaN payloads.
 The closed tryParseJson bit corpus cannot produce NaN and refuses it at capture.
 Its provenance supplement retains the old golden bytes, records the unknown
 original architecture, and distinguishes fresh verification from original capture.
@@ -176,3 +181,12 @@ buildFullPath/combineURLs semantics: exactly one joining slash, empty relative
 path retains baseURL, absolute/protocol-relative URLs remain absolute. The
 native::url_tests regression was measured against actual installed Axios and
 prove-failed on the old concatenation; DXtrade's /dxsca-web base exposed it.
+
+Concrete frame/routing/header object admission and the region string unions are
+reviewed in [ACCEPTED_SHAPES.md](ACCEPTED_SHAPES.md). The shared standalone frames
+use owner-specific `deserialize_map` visitors and private remote schemas; SDK
+records use the existing object guard. Keep generic borrowed request payloads,
+all original field/presence rules and the independently inventoried visitor
+contracts. The fourteen compiling disconnect controls restore exact source bytes.
+The bounded follow-up API reviews are recorded in
+[ACCEPTED_API_REVIEWS.md](ACCEPTED_API_REVIEWS.md).

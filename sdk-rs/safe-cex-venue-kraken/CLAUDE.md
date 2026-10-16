@@ -332,3 +332,32 @@ an independent native-variant observation. This selected probe leaves the 25
 whole-crate receiver refusals and all other owners/aliases/locals/construction
 open; it is not a whole-venue accepted-set pass. The compiler check also requires
 the private remote companion to have no independent Deserialize or public API.
+
+`tests/accepted_helpers.rs` directly observes all four module-helper APIs for
+accepted-contract review. The trigger decoder matches actual native enum variants,
+absence and coercion errors before serialization. Comparator operands, literal
+error construction/metadata snapshots and the entropy-backed ID generator retain
+three separate non-decoder roles; their classification receipts are not execution.
+Run the new native target together with `--test helpers` (one live TS process),
+then `scripts/helper-contract-controls.py` with the explicit TypeScript path.
+Its three role controls must fail named compiled native witnesses; the trigger
+control must fail its own actual production output probe. Every exact source
+restoration must pass. `scripts/helper-contracts.mjs` selects only these four
+native/default owners. Other owners, the 25 receiver refusals, aliases, local
+functions, construction and feature/wasm accepted behavior remain independent.
+The host profiles are already defined in MANIFEST-SPEC#kraken-module-utility-adapters.
+
+
+`tests/accepted_scalar_helpers.rs` observes six distinct fills/income scalar
+decoders: finite numbers, two presence-sensitive optional-number functions,
+seconds and millisecond date functions, and the raw-field position-size-leg
+predicate. Compare native f64 bits, Option presence, Boolean values and coercion
+error names before Serialize. Date fixtures retain the explicit local-time host
+boundary and pre-epoch flooring. The selected production gate
+`scripts/scalar-helper-contracts.mjs` runs all six actual APIs against independent
+cases; it is not a classification-only receipt. Run the native fixture with
+`--test utilities`, then the serial `scripts/scalar-helper-contract-controls.py`.
+Each control must fail its named compiled native witness and only its own
+production output probe; every exact restoration must pass the named native
+witness and all six production probes. Other owners, aliases and all 25 receiver
+refusals remain independent, under MANIFEST-SPEC#kraken-utility-wire-domain.

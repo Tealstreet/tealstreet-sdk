@@ -16,6 +16,9 @@ Keep implementation-specific costs and evidence in the owning rows and gate reco
 `tests/live_types.rs` checks accepted/refused shapes and native numeric bits;
 `NUMERIC_INGRESS_GATE_EXITS.md` records its bounded-depth acceptance cost.
 Tables and auth/version helpers retain their separate live-source oracles.
+`FLATTEN_NUMERIC_REVIEW.md` describes direct raw-number witnesses for the six
+public flattened records and copied lexical diagnostics for their six private
+decoders. Those diagnostics do not classify or exempt local owners.
 
 `exchange_helpers.rs` owns pure mappers and decisions. Numeric metadata uses the
 shared retained owner; `NATIVE_METADATA_GATE_EXITS.md` records its measured
@@ -51,6 +54,10 @@ native mutations must fail named assertions before a passing gate is evidence.
 accepted-contract batch against actual TS and production Rust. Its compiled
 controls and remaining scope are recorded in ACCEPTED_CONTRACT_REVIEW.md.
 
+`BUILDER_CONTRACT_REVIEW.md` records twelve additional builder contracts and
+their source/native witnesses. The selected runner and six compiled controls
+retain the separate obligations of lexical ordinary `Wire` decoders.
+
 `native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
 Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,
 AccountFetch/OrderExecution and public/private stream bodies; it never evaluates
@@ -66,3 +73,7 @@ receiver, outside structural options. Preserve the source's API-key requirement
 and use the existing exchange_options decoder when inspecting fields beside a
 runtime handle. Bare clock axios sends skip the shared remote adapter; account
 clients keep the same hosted identity through post-sign transport selection.
+
+`ALIAS_CONTRACT_REVIEW.md` records the eight original native/default aliases.
+The selected gate retains full discovery and authenticates actual compiler
+artifacts before native Serde/conversion probes and compiled identity controls.

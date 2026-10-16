@@ -21,6 +21,83 @@ policy route is reviewed. No contract or generic policy permission is installed
 by this proof, and decoder traits, alternate ingress and route behavior remain
 separate obligations. No whole-package acceptance is claimed.
 
+# Eight account, market and ledger string-enum reviews
+
+Individually reviewed contracts cover `HyperliquidUserAbstractionMode`, both
+`MetaUniverseItem` margin/growth enums, `UserFundingDeltaType`,
+`UserNonFundingLedgerDeltaType`, `WsUserNonFundingLedgerUpdateType` and both
+`Hip3MarketInfo` margin/growth enums. Maintained TS lines 79-80, 104-105, 396,
+410, 633 and 666-667 define their exact tag sets. Each native declaration and
+private remote rename table matches its own TS declaration. The production
+String admissions and bodies remain unchanged.
+
+Native tests pass **8/8** for all 23 valid tags, exact native variants and wire
+spelling, JSON whitespace, every valid externally tagged map rejection and seven
+other forbidden values. Each input traverses text, qualified owned/borrowed Value
+and all three shared numeric ingress functions. Direct contract expressions pass
+**8/8**, with **110 independently authored cases / 660 native route observations**;
+variant/ordinal fields are read before serialization. Temporary probe files are
+removed after execution.
+
+`scripts/accepted-mode-controls.py`: **8 compiled named tagged-shape failures /
+8 restored passes; final 8/8 pass**. Each existing String admission is removed
+independently, forwarding directly to that owner's private remote decoder. Its
+named test fails on the admitted tagged object, and exact source restoration
+passes. No compiler error counts as negative evidence; `types.rs` is restored
+byte-for-byte. These are owner-specific native/default reviews, with no alias,
+private helper, local scope, dependency or target-matrix exemption.
+
+Master #349's four string owners are preserved alongside these eight: 49 owner
+contracts and two Clone reviews, **51 reviewed of 572 current obligations**, with
+**521 unreviewed**. Fresh discovery's additional `host_spot::class_pair` and
+`spot_binding::HyperliquidSpotExchange` remain explicit and unreviewed. Integrated native literal tests pass **12/12** after the master merge. The
+associated-projection policy review is separate #346; its ordinary refusal is
+not waived by this batch. Strict native all-targets clippy and formatting pass
+after integration. Fresh compiler API/static eligibility passes for all eight
+owners, retaining every original census key and both additional owners. The
+ordinary gate still stops at PrivateValue's exact associated projection; it
+emits no acceptance receipts. `parity:check` passes with 7459 rows, 17206 public
+items and zero findings.
+
+# Four string-enum contract reviews
+
+The contract shard adds individual reviews for `Tif`, `Tpsl`, `Grouping` and
+`ScheduleCancelActionType`, matching the maintained TS literal declarations and
+concrete native enum variants. Each decoder retains its String admission before
+its private remote metadata; no production source changes are proposed.
+
+`tests/accepted_literal_contracts.rs`: **4/4 native tests pass**, checking all nine
+valid tags, exact native enum identity and serialization, JSON whitespace, every
+valid externally tagged map rejection, and seven other forbidden values. Each
+input runs through direct text, qualified owned and borrowed Value deserialization
+and the three shared numeric ingress functions. The contract expressions also
+execute directly: **4/4 pass, 50 authored cases across six native routes (300
+observations)**, comparing native variant/ordinal fields before serialization.
+The temporary direct-witness file is removed after execution.
+
+`scripts/accepted-literal-controls.py`: **4 compiled named tagged-shape failures /
+4 restored passes; final 4/4 pass**. Each control independently removes only one
+public decoder's String admission and calls its existing remote decoder directly.
+The named native test fails on the newly admitted tagged object. Every control
+restores `types.rs` byte-for-byte; no compiler error counts as negative evidence.
+
+The original 37-owner witness script now names its exact cohort, so new contract
+rows cannot accidentally expand or break that historical reproduction: its
+37/37 native tests pass again, covering the unchanged 248 cases and formatter. All
+existing master contracts are retained. This batch reviews four more obligations:
+41 owner contracts plus two Clone reviews, 43 of the original 570 census keys.
+Fresh compiler discovery retains every original key and additionally indexes
+`realm::host_spot::class_pair` and `spot_binding::HyperliquidSpotExchange`.
+The current total is 572 (534 owners, 36 aliases, two construction obligations):
+529 remain unreviewed, including both additional owners. The six associated-type
+projections remain a separate batch.
+Strict native all-targets clippy and formatting pass. `parity:check` passes with
+7459 rows, 17206 public items and zero findings. All four contracts match
+fresh compiler API inventory and static eligibility. The ordinary package gate
+still stops at the exact unreviewed PrivateValue associated projection; it emits
+no native acceptance receipts. No package, dependency, local-scope or target-matrix
+acceptance is claimed.
+
 # First Hyperliquid accepted-contract cohort
 
 The per-crate contract shard classifies 37 selected owners: cloid and raw-JSON

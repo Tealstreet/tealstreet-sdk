@@ -236,14 +236,14 @@ run `tests/process_count.py signing` to measure this corpus's one Node invocatio
 No new collection decoder or precision formatter is introduced by this utility.
 
 
-Signature/auth follow-on uses `safe-cex-crypto::sign_payload` with no remote
-signer, shared JavaScript Number-to-String and shared VirtualClock. Borrowed
-request fields retain the caller's params object identity; this slice does not
-claim Axios/JSON serialization. The shared signer is async, so execution begins
-when polled, unlike the source synchronous functions. Clock reads precede signing;
-explicit nonces (including zero and NaN) avoid the second read. Source TypeError
-name/message are preserved in ExchangeError. See the signing execution boundary
-in MANIFEST-SPEC; HTTP and socket dispatch remain pending.
+Signature/auth helpers use the shared local `safe-cex-crypto::hmac_sha256`
+backend synchronously at invocation, matching the source, with shared JavaScript
+Number-to-String and VirtualClock. Requests retain the caller's captured
+SigningValue params identity; this slice does not claim Axios/JSON serialization.
+Clock reads precede signing; explicit nonces (including zero and NaN) avoid the
+second read. Source TypeError name/message are preserved in ExchangeError. See
+the current signing execution boundary in MANIFEST-SPEC; HTTP and socket
+dispatch remain separate obligations.
 
 The auth witness runs the actual source and real create-hmac package in one Node
 invocation, with an injected clock sequence and pre-serialization number bits.
@@ -333,3 +333,17 @@ records and two private presence decoders. See NESTED_WIRE_CONTRACT_REVIEW.md an
 scripts/nested-wire-contracts.mjs for scope, native observations, exact selected
 construction reviews and compiling mutation controls. Other owners, aliases,
 locals, features and WASM contract execution remain separate obligations.
+
+Eight runtime helpers have individual accepted-set role reviews accompanied by
+direct private-function witnesses and compiling corruption controls. See
+RUNTIME_HELPER_CONTRACT_REVIEW.md and scripts/runtime-helper-contracts.mjs. These
+forwarding, dispatch and outbound rendering/state-write roles do not waive any
+downstream decoder, alias, construction, local or target-matrix obligation.
+
+
+Accepted signing roles: five individually reviewed native/default functions
+serialize existing data or construct outbound signatures/request fields.
+SIGNING_ROLE_CONTRACT_REVIEW.md separates fresh compiler classification receipts
+from the actual live native signing/auth targets and per-body mutation controls.
+SigningValue admission, other owners and the existing domain boundaries remain
+independent obligations; no production behavior or manifest status is changed.

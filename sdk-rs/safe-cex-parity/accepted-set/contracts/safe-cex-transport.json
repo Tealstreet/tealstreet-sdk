@@ -1,103 +1,763 @@
 {
   "safe_cex_transport::frames::Config": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
     "entrypoints": [],
     "sample": {
-      "url": "sample"
+      "url": "one-config"
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"urlLength\":row.url.len()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "url",
+        "urlLength"
+      ],
+      "cases": [
+        {
+          "input": {
+            "url": "one-config"
+          },
+          "output": {
+            "ok": true,
+            "url": "one-config",
+            "urlLength": 10
+          }
+        },
+        {
+          "input": {
+            "url": "two-config"
+          },
+          "output": {
+            "ok": true,
+            "url": "two-config",
+            "urlLength": 10
+          }
+        },
+        {
+          "input": [
+            "one-config"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::frames::HttpRequestArgs": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
     "entrypoints": [],
-    "instantiation": "HttpRequestArgs<serde_json::Map<String, serde_json::Value>>",
+    "instantiation": "HttpRequestArgs<serde_json::Value>",
     "sample": {
-      "headers": {},
-      "method": "GET",
-      "url": "sample",
-      "data": null,
-      "params": {}
+      "headers": {
+        "X-Request": "one"
+      },
+      "method": "POST",
+      "url": "one-request",
+      "data": {
+        "id": "one",
+        "quantity": 1.25
+      },
+      "params": {
+        "limit": "one"
+      }
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data,\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "headers",
+        "method",
+        "url",
+        "data",
+        "params"
+      ],
+      "cases": [
+        {
+          "input": {
+            "headers": {
+              "X-Request": "one"
+            },
+            "method": "POST",
+            "url": "one-request",
+            "data": {
+              "id": "one",
+              "quantity": 1.25
+            },
+            "params": {
+              "limit": "one"
+            }
+          },
+          "output": {
+            "ok": true,
+            "headers": {
+              "X-Request": "one"
+            },
+            "method": "POST",
+            "url": "one-request",
+            "data": {
+              "id": "one",
+              "quantity": 1.25
+            },
+            "params": {
+              "limit": "one"
+            }
+          }
+        },
+        {
+          "input": {
+            "headers": {
+              "X-Request": "two"
+            },
+            "method": "PATCH",
+            "url": "two-request",
+            "data": {
+              "id": "two",
+              "quantity": 3.5
+            },
+            "params": {
+              "limit": "two"
+            }
+          },
+          "output": {
+            "ok": true,
+            "headers": {
+              "X-Request": "two"
+            },
+            "method": "PATCH",
+            "url": "two-request",
+            "data": {
+              "id": "two",
+              "quantity": 3.5
+            },
+            "params": {
+              "limit": "two"
+            }
+          }
+        },
+        {
+          "input": [
+            {
+              "X-Request": "one"
+            },
+            "POST",
+            "one-request",
+            {
+              "id": "one",
+              "quantity": 1.25
+            },
+            {
+              "limit": "one"
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::frames::RequestDump": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
     "entrypoints": [],
     "sample": {
-      "method": "sample",
-      "url": "sample",
-      "headers": {},
-      "body": null,
-      "form_data": null,
-      "raw_form_data": null
+      "method": "PATCH",
+      "url": "one-dump",
+      "headers": {
+        "X-Dump": "one"
+      },
+      "body": {
+        "payload": "one"
+      },
+      "form_data": {
+        "key": "one"
+      },
+      "raw_form_data": "key=one"
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"method\":row.method,\"url\":row.url,\"headers\":row.headers,\"body\":row.body,\"form_data\":row.form_data,\"raw_form_data\":row.raw_form_data}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "method",
+        "url",
+        "headers",
+        "body",
+        "form_data",
+        "raw_form_data"
+      ],
+      "cases": [
+        {
+          "input": {
+            "method": "PATCH",
+            "url": "one-dump",
+            "headers": {
+              "X-Dump": "one"
+            },
+            "body": {
+              "payload": "one"
+            },
+            "form_data": {
+              "key": "one"
+            },
+            "raw_form_data": "key=one"
+          },
+          "output": {
+            "ok": true,
+            "method": "PATCH",
+            "url": "one-dump",
+            "headers": {
+              "X-Dump": "one"
+            },
+            "body": {
+              "payload": "one"
+            },
+            "form_data": {
+              "key": "one"
+            },
+            "raw_form_data": "key=one"
+          }
+        },
+        {
+          "input": {
+            "method": "DELETE",
+            "url": "two-dump",
+            "headers": {
+              "X-Dump": "two"
+            },
+            "body": {
+              "payload": "two"
+            },
+            "form_data": {
+              "key": "two"
+            },
+            "raw_form_data": "key=two"
+          },
+          "output": {
+            "ok": true,
+            "method": "DELETE",
+            "url": "two-dump",
+            "headers": {
+              "X-Dump": "two"
+            },
+            "body": {
+              "payload": "two"
+            },
+            "form_data": {
+              "key": "two"
+            },
+            "raw_form_data": "key=two"
+          }
+        },
+        {
+          "input": [
+            "PATCH",
+            "one-dump",
+            {
+              "X-Dump": "one"
+            },
+            {
+              "payload": "one"
+            },
+            {
+              "key": "one"
+            },
+            "key=one"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::frames::ResponseData": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
     "entrypoints": [],
     "sample": {
       "config": {
-        "url": "sample"
+        "url": "one-config"
       },
-      "data": null,
-      "data_raw": null,
-      "data_encoded": null,
-      "data_encoding": null,
-      "status": 1,
-      "status_text": "sample",
-      "headers": {},
-      "request_dump": null
+      "data": {
+        "result": "one"
+      },
+      "data_raw": "one-raw",
+      "data_encoded": "one-encoded",
+      "data_encoding": "base64",
+      "status": 207,
+      "status_text": "one-status",
+      "headers": {
+        "X-Response": "one"
+      },
+      "request_dump": {
+        "method": "PATCH",
+        "url": "one-dump",
+        "headers": {
+          "X-Dump": "one"
+        },
+        "body": {
+          "payload": "one"
+        },
+        "form_data": {
+          "key": "one"
+        },
+        "raw_form_data": "key=one"
+      }
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data,\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "configUrl",
+        "data",
+        "data_raw",
+        "data_encoded",
+        "data_encoding",
+        "status",
+        "status_text",
+        "headers",
+        "dumpUrl"
+      ],
+      "cases": [
+        {
+          "input": {
+            "config": {
+              "url": "one-config"
+            },
+            "data": {
+              "result": "one"
+            },
+            "data_raw": "one-raw",
+            "data_encoded": "one-encoded",
+            "data_encoding": "base64",
+            "status": 207,
+            "status_text": "one-status",
+            "headers": {
+              "X-Response": "one"
+            },
+            "request_dump": {
+              "method": "PATCH",
+              "url": "one-dump",
+              "headers": {
+                "X-Dump": "one"
+              },
+              "body": {
+                "payload": "one"
+              },
+              "form_data": {
+                "key": "one"
+              },
+              "raw_form_data": "key=one"
+            }
+          },
+          "output": {
+            "ok": true,
+            "configUrl": "one-config",
+            "data": {
+              "result": "one"
+            },
+            "data_raw": "one-raw",
+            "data_encoded": "one-encoded",
+            "data_encoding": "base64",
+            "status": 207,
+            "status_text": "one-status",
+            "headers": {
+              "X-Response": "one"
+            },
+            "dumpUrl": "one-dump"
+          }
+        },
+        {
+          "input": {
+            "config": {
+              "url": "two-config"
+            },
+            "data": {
+              "result": "two"
+            },
+            "data_raw": "two-raw",
+            "data_encoded": "two-encoded",
+            "data_encoding": "base64",
+            "status": 201,
+            "status_text": "two-status",
+            "headers": {
+              "X-Response": "two"
+            },
+            "request_dump": {
+              "method": "DELETE",
+              "url": "two-dump",
+              "headers": {
+                "X-Dump": "two"
+              },
+              "body": {
+                "payload": "two"
+              },
+              "form_data": {
+                "key": "two"
+              },
+              "raw_form_data": "key=two"
+            }
+          },
+          "output": {
+            "ok": true,
+            "configUrl": "two-config",
+            "data": {
+              "result": "two"
+            },
+            "data_raw": "two-raw",
+            "data_encoded": "two-encoded",
+            "data_encoding": "base64",
+            "status": 201,
+            "status_text": "two-status",
+            "headers": {
+              "X-Response": "two"
+            },
+            "dumpUrl": "two-dump"
+          }
+        },
+        {
+          "input": [
+            {
+              "url": "one-config"
+            },
+            {
+              "result": "one"
+            },
+            "one-raw",
+            "one-encoded",
+            "base64",
+            207,
+            "one-status",
+            {
+              "X-Response": "one"
+            },
+            {
+              "method": "PATCH",
+              "url": "one-dump",
+              "headers": {
+                "X-Dump": "one"
+              },
+              "body": {
+                "payload": "one"
+              },
+              "form_data": {
+                "key": "one"
+              },
+              "raw_form_data": "key=one"
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::frames::RpcHttpResponse": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
     "entrypoints": [],
     "sample": {
-      "type": "sample",
-      "nonce": "sample",
+      "type": "rpc.http",
+      "nonce": "one-nonce",
       "data": {
         "config": {
-          "url": "sample"
+          "url": "one-config"
         },
-        "data": null,
-        "data_raw": null,
-        "data_encoded": null,
-        "data_encoding": null,
-        "status": 1,
-        "status_text": "sample",
-        "headers": {},
-        "request_dump": null
+        "data": {
+          "result": "one"
+        },
+        "data_raw": "one-raw",
+        "data_encoded": "one-encoded",
+        "data_encoding": "base64",
+        "status": 207,
+        "status_text": "one-status",
+        "headers": {
+          "X-Response": "one"
+        },
+        "request_dump": {
+          "method": "PATCH",
+          "url": "one-dump",
+          "headers": {
+            "X-Dump": "one"
+          },
+          "body": {
+            "payload": "one"
+          },
+          "form_data": {
+            "key": "one"
+          },
+          "raw_form_data": "key=one"
+        }
       }
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"type\":row.response_type,\"nonce\":row.nonce,\"status\":row.data.status,\"configUrl\":row.data.config.url,\"data\":row.data.data}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "type",
+        "nonce",
+        "status",
+        "configUrl",
+        "data"
+      ],
+      "cases": [
+        {
+          "input": {
+            "type": "rpc.http",
+            "nonce": "one-nonce",
+            "data": {
+              "config": {
+                "url": "one-config"
+              },
+              "data": {
+                "result": "one"
+              },
+              "data_raw": "one-raw",
+              "data_encoded": "one-encoded",
+              "data_encoding": "base64",
+              "status": 207,
+              "status_text": "one-status",
+              "headers": {
+                "X-Response": "one"
+              },
+              "request_dump": {
+                "method": "PATCH",
+                "url": "one-dump",
+                "headers": {
+                  "X-Dump": "one"
+                },
+                "body": {
+                  "payload": "one"
+                },
+                "form_data": {
+                  "key": "one"
+                },
+                "raw_form_data": "key=one"
+              }
+            }
+          },
+          "output": {
+            "ok": true,
+            "type": "rpc.http",
+            "nonce": "one-nonce",
+            "status": 207,
+            "configUrl": "one-config",
+            "data": {
+              "result": "one"
+            }
+          }
+        },
+        {
+          "input": {
+            "type": "rpc.http",
+            "nonce": "two-nonce",
+            "data": {
+              "config": {
+                "url": "two-config"
+              },
+              "data": {
+                "result": "two"
+              },
+              "data_raw": "two-raw",
+              "data_encoded": "two-encoded",
+              "data_encoding": "base64",
+              "status": 201,
+              "status_text": "two-status",
+              "headers": {
+                "X-Response": "two"
+              },
+              "request_dump": {
+                "method": "DELETE",
+                "url": "two-dump",
+                "headers": {
+                  "X-Dump": "two"
+                },
+                "body": {
+                  "payload": "two"
+                },
+                "form_data": {
+                  "key": "two"
+                },
+                "raw_form_data": "key=two"
+              }
+            }
+          },
+          "output": {
+            "ok": true,
+            "type": "rpc.http",
+            "nonce": "two-nonce",
+            "status": 201,
+            "configUrl": "two-config",
+            "data": {
+              "result": "two"
+            }
+          }
+        },
+        {
+          "input": [
+            "rpc.http",
+            "one-nonce",
+            {
+              "config": {
+                "url": "one-config"
+              },
+              "data": {
+                "result": "one"
+              },
+              "data_raw": "one-raw",
+              "data_encoded": "one-encoded",
+              "data_encoding": "base64",
+              "status": 207,
+              "status_text": "one-status",
+              "headers": {
+                "X-Response": "one"
+              },
+              "request_dump": {
+                "method": "PATCH",
+                "url": "one-dump",
+                "headers": {
+                  "X-Dump": "one"
+                },
+                "body": {
+                  "payload": "one"
+                },
+                "form_data": {
+                  "key": "one"
+                },
+                "raw_form_data": "key=one"
+              }
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::how_config::HOWRegion": {
     "shape": "string",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Maintained region/egress literal union; concrete String frontdoor preserves native variants and serialization names. See ACCEPTED_SHAPES.md and independently compiled tagged-map disconnect controls.",
     "entrypoints": [],
     "literals": [
       "JA",
       "SG"
-    ]
+    ],
+    "observation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"variant\":match row {$type::JA=>\"JA\",$type::SG=>\"SG\"}}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "JA",
+          "output": {
+            "ok": true,
+            "variant": "JA"
+          }
+        },
+        {
+          "input": "SG",
+          "output": {
+            "ok": true,
+            "variant": "SG"
+          }
+        },
+        {
+          "input": {
+            "JA": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "SG": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   },
   "safe_cex_transport::how_config::LatencyEntry": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
     "entrypoints": [],
     "sample": {
-      "latencyMs": null,
-      "source": null,
-      "cached": null,
-      "sampleCount": null,
-      "measuredAt": null,
-      "updatedAt": 1
+      "latencyMs": 1.25,
+      "source": "first",
+      "cached": true,
+      "sampleCount": 3,
+      "measuredAt": 17,
+      "updatedAt": 29
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"latencyMs\":row.latency_ms,\"source\":row.source,\"cached\":row.cached,\"sampleCount\":row.sample_count,\"measuredAt\":row.measured_at,\"updatedAt\":row.updated_at}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "latencyMs",
+        "source",
+        "cached",
+        "sampleCount",
+        "measuredAt",
+        "updatedAt"
+      ],
+      "cases": [
+        {
+          "input": {
+            "latencyMs": 1.25,
+            "source": "first",
+            "cached": true,
+            "sampleCount": 3,
+            "measuredAt": 17,
+            "updatedAt": 29
+          },
+          "output": {
+            "ok": true,
+            "latencyMs": 1.25,
+            "source": "first",
+            "cached": true,
+            "sampleCount": 3,
+            "measuredAt": 17,
+            "updatedAt": 29
+          }
+        },
+        {
+          "input": {
+            "latencyMs": 3.5,
+            "source": "second",
+            "cached": false,
+            "sampleCount": 7,
+            "measuredAt": 31,
+            "updatedAt": 47
+          },
+          "output": {
+            "ok": true,
+            "latencyMs": 3.5,
+            "source": "second",
+            "cached": false,
+            "sampleCount": 7,
+            "measuredAt": 31,
+            "updatedAt": 47
+          }
+        },
+        {
+          "input": [
+            1.25,
+            "first",
+            true,
+            3,
+            17,
+            29
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::routing::HowEgress": {
     "shape": "string",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Maintained region/egress literal union; concrete String frontdoor preserves native variants and serialization names. See ACCEPTED_SHAPES.md and independently compiled tagged-map disconnect controls.",
     "entrypoints": [
       {
         "api": {
@@ -126,53 +786,267 @@
     "literals": [
       "jp",
       "sg"
-    ]
+    ],
+    "observation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"variant\":match row {$type::Jp=>\"Jp\",$type::Sg=>\"Sg\"}}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "jp",
+          "output": {
+            "ok": true,
+            "variant": "Jp"
+          }
+        },
+        {
+          "input": "sg",
+          "output": {
+            "ok": true,
+            "variant": "Sg"
+          }
+        },
+        {
+          "input": {
+            "jp": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "sg": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   },
   "safe_cex_transport::routing::ResolvedRouting": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
     "entrypoints": [],
     "sample": {
-      "restProxyHost": "sample",
+      "restProxyHost": "one-rest",
       "howEgress": "jp",
       "wsPublic": {
-        "tunnelled": false,
-        "host": null,
-        "fallback": null,
-        "relay": null,
-        "readonly": null
+        "tunnelled": true,
+        "host": "one-host",
+        "fallback": "one-fallback",
+        "relay": "one-relay",
+        "readonly": "one-readonly"
       },
       "wsPrivate": {
-        "tunnelled": false,
-        "host": null,
-        "fallback": null,
-        "relay": null,
-        "readonly": null
+        "tunnelled": true,
+        "host": "one-host",
+        "fallback": "one-fallback",
+        "relay": "one-relay",
+        "readonly": "one-readonly"
       },
       "wsBusiness": {
-        "tunnelled": false,
-        "host": null,
-        "fallback": null,
-        "relay": null,
-        "readonly": null
+        "tunnelled": true,
+        "host": "one-host",
+        "fallback": "one-fallback",
+        "relay": "one-relay",
+        "readonly": "one-readonly"
       }
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"restProxyHost\":row.rest_proxy_host,\"howEgress\":match row.how_egress {crate::routing::HowEgress::Jp=>\"jp\",crate::routing::HowEgress::Sg=>\"sg\"},\"publicHost\":row.ws_public.host,\"privateRelay\":row.ws_private.relay,\"businessReadonly\":row.ws_business.readonly,\"publicTunnelled\":row.ws_public.tunnelled,\"privateTunnelled\":row.ws_private.tunnelled,\"businessTunnelled\":row.ws_business.tunnelled}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "restProxyHost",
+        "howEgress",
+        "publicHost",
+        "privateRelay",
+        "businessReadonly",
+        "publicTunnelled",
+        "privateTunnelled",
+        "businessTunnelled"
+      ],
+      "cases": [
+        {
+          "input": {
+            "restProxyHost": "one-rest",
+            "howEgress": "jp",
+            "wsPublic": {
+              "tunnelled": true,
+              "host": "one-host",
+              "fallback": "one-fallback",
+              "relay": "one-relay",
+              "readonly": "one-readonly"
+            },
+            "wsPrivate": {
+              "tunnelled": true,
+              "host": "one-host",
+              "fallback": "one-fallback",
+              "relay": "one-relay",
+              "readonly": "one-readonly"
+            },
+            "wsBusiness": {
+              "tunnelled": true,
+              "host": "one-host",
+              "fallback": "one-fallback",
+              "relay": "one-relay",
+              "readonly": "one-readonly"
+            }
+          },
+          "output": {
+            "ok": true,
+            "restProxyHost": "one-rest",
+            "howEgress": "jp",
+            "publicHost": "one-host",
+            "privateRelay": "one-relay",
+            "businessReadonly": "one-readonly",
+            "publicTunnelled": true,
+            "privateTunnelled": true,
+            "businessTunnelled": true
+          }
+        },
+        {
+          "input": {
+            "restProxyHost": "two-rest",
+            "howEgress": "sg",
+            "wsPublic": {
+              "tunnelled": false,
+              "host": "two-host",
+              "fallback": "two-fallback",
+              "relay": "two-relay",
+              "readonly": "two-readonly"
+            },
+            "wsPrivate": {
+              "tunnelled": false,
+              "host": "two-host",
+              "fallback": "two-fallback",
+              "relay": "two-relay",
+              "readonly": "two-readonly"
+            },
+            "wsBusiness": {
+              "tunnelled": false,
+              "host": "two-host",
+              "fallback": "two-fallback",
+              "relay": "two-relay",
+              "readonly": "two-readonly"
+            }
+          },
+          "output": {
+            "ok": true,
+            "restProxyHost": "two-rest",
+            "howEgress": "sg",
+            "publicHost": "two-host",
+            "privateRelay": "two-relay",
+            "businessReadonly": "two-readonly",
+            "publicTunnelled": false,
+            "privateTunnelled": false,
+            "businessTunnelled": false
+          }
+        },
+        {
+          "input": [
+            "one-rest",
+            "jp",
+            {
+              "tunnelled": true,
+              "host": "one-host",
+              "fallback": "one-fallback",
+              "relay": "one-relay",
+              "readonly": "one-readonly"
+            },
+            {
+              "tunnelled": true,
+              "host": "one-host",
+              "fallback": "one-fallback",
+              "relay": "one-relay",
+              "readonly": "one-readonly"
+            },
+            {
+              "tunnelled": true,
+              "host": "one-host",
+              "fallback": "one-fallback",
+              "relay": "one-relay",
+              "readonly": "one-readonly"
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::routing::ResolvedWs": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
     "entrypoints": [],
     "sample": {
-      "tunnelled": false,
-      "host": null,
-      "fallback": null,
-      "relay": null,
-      "readonly": null
+      "tunnelled": true,
+      "host": "one-host",
+      "fallback": "one-fallback",
+      "relay": "one-relay",
+      "readonly": "one-readonly"
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"tunnelled\":row.tunnelled,\"host\":row.host,\"fallback\":row.fallback,\"relay\":row.relay,\"readonly\":row.readonly}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "tunnelled",
+        "host",
+        "fallback",
+        "relay",
+        "readonly"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tunnelled": true,
+            "host": "one-host",
+            "fallback": "one-fallback",
+            "relay": "one-relay",
+            "readonly": "one-readonly"
+          },
+          "output": {
+            "ok": true,
+            "tunnelled": true,
+            "host": "one-host",
+            "fallback": "one-fallback",
+            "relay": "one-relay",
+            "readonly": "one-readonly"
+          }
+        },
+        {
+          "input": {
+            "tunnelled": false,
+            "host": "two-host",
+            "fallback": "two-fallback",
+            "relay": "two-relay",
+            "readonly": "two-readonly"
+          },
+          "output": {
+            "ok": true,
+            "tunnelled": false,
+            "host": "two-host",
+            "fallback": "two-fallback",
+            "relay": "two-relay",
+            "readonly": "two-readonly"
+          }
+        },
+        {
+          "input": [
+            true,
+            "one-host",
+            "one-fallback",
+            "one-relay",
+            "one-readonly"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::routing::RoutingOptions": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
     "entrypoints": [
       {
         "api": {
@@ -228,10 +1102,62 @@
       }
     ],
     "sample": {
-      "tealstreetProxy": false,
+      "tealstreetProxy": true,
       "tealstreetWsRoute": false,
-      "proxyRegion": null,
-      "bybitSiteId": null
+      "proxyRegion": "JA",
+      "bybitSiteId": "BRA_BTL"
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"tealstreetProxy\":row.tealstreet_proxy,\"tealstreetWsRoute\":row.tealstreet_ws_route,\"proxyRegion\":row.proxy_region,\"braBtl\":row.bybit_site_id==Some(safe_cex_types::ExchangeOptionsBybitSiteId::BraBtl)}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "tealstreetProxy",
+        "tealstreetWsRoute",
+        "proxyRegion",
+        "braBtl"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tealstreetProxy": true,
+            "tealstreetWsRoute": false,
+            "proxyRegion": "JA",
+            "bybitSiteId": "BRA_BTL"
+          },
+          "output": {
+            "ok": true,
+            "tealstreetProxy": true,
+            "tealstreetWsRoute": false,
+            "proxyRegion": "JA",
+            "braBtl": true
+          }
+        },
+        {
+          "input": {
+            "tealstreetProxy": false,
+            "tealstreetWsRoute": true,
+            "proxyRegion": "SG",
+            "bybitSiteId": null
+          },
+          "output": {
+            "ok": true,
+            "tealstreetProxy": false,
+            "tealstreetWsRoute": true,
+            "proxyRegion": "SG",
+            "braBtl": false
+          }
+        },
+        {
+          "input": [
+            true,
+            false,
+            "JA",
+            "BRA_BTL"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::signing::RemoteSignerRequest": {
@@ -265,31 +1191,153 @@
   },
   "safe_cex_transport::signing::SignedConfig": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Independently reviewed remote signing wire record. Concrete production object guard already exists and is retained. Native raw JSON witnesses assert actual fields, enum identity, baseURL spelling, optional omission versus explicit null and param limit signed-zero bits. Legacy Value parameters and opt-in QueryValue parameters keep their distinct production decoders; no reserialization of decoded owner supplies the observation.",
     "entrypoints": [],
     "sample": {
-      "url": null,
-      "params": null,
-      "data": null,
-      "headers": {}
+      "url": "/native-one",
+      "params": {
+        "limit": -0.0
+      },
+      "headers": {
+        "X-Native": "one"
+      },
+      "data": {
+        "payload": "one"
+      }
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data,\"headers\":row.headers}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "url",
+        "paramsPresent",
+        "paramsNull",
+        "limitBits",
+        "dataPresent",
+        "data",
+        "headers"
+      ],
+      "cases": [
+        {
+          "input": "{\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"}}",
+          "output": {
+            "ok": true,
+            "url": "/native-one",
+            "paramsPresent": true,
+            "paramsNull": false,
+            "limitBits": "9223372036854775808",
+            "dataPresent": true,
+            "data": {
+              "payload": "one"
+            },
+            "headers": {
+              "X-Native": "one"
+            }
+          }
+        },
+        {
+          "input": "{\"url\":\"/native-two\",\"params\":null,\"headers\":{\"X-Native\":\"two\"}}",
+          "output": {
+            "ok": true,
+            "url": "/native-two",
+            "paramsPresent": true,
+            "paramsNull": true,
+            "limitBits": null,
+            "dataPresent": false,
+            "data": null,
+            "headers": {
+              "X-Native": "two"
+            }
+          }
+        },
+        {
+          "input": "[\"/native-one\",{\"limit\":-0.0},{\"payload\":\"one\"},{\"X-Native\":\"one\"}]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::signing::SigningConfig": {
     "shape": "map",
-    "evidence": "Production JSON record/union contract; see safe-cex-transport/CLAUDE.md",
+    "evidence": "Independently reviewed remote signing wire record. Concrete production object guard already exists and is retained. Native raw JSON witnesses assert actual fields, enum identity, baseURL spelling, optional omission versus explicit null and param limit signed-zero bits. Legacy Value parameters and opt-in QueryValue parameters keep their distinct production decoders; no reserialization of decoded owner supplies the observation.",
     "entrypoints": [],
     "sample": {
-      "method": "sample",
-      "url": "sample",
-      "baseUrl": "sample",
-      "params": null,
-      "data": null,
-      "headers": {}
+      "method": "PATCH",
+      "url": "/native-one",
+      "params": {
+        "limit": -0.0
+      },
+      "headers": {
+        "X-Native": "one"
+      },
+      "data": {
+        "payload": "one"
+      },
+      "baseURL": "https://one.invalid"
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":row.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":row.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":row.data.is_some(),\"data\":row.data,\"headers\":row.headers,\"method\":row.method,\"baseURL\":row.base_url}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "url",
+        "paramsPresent",
+        "paramsNull",
+        "limitBits",
+        "dataPresent",
+        "data",
+        "headers",
+        "method",
+        "baseURL"
+      ],
+      "cases": [
+        {
+          "input": "{\"method\":\"PATCH\",\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"},\"baseURL\":\"https://one.invalid\"}",
+          "output": {
+            "ok": true,
+            "url": "/native-one",
+            "paramsPresent": true,
+            "paramsNull": false,
+            "limitBits": "9223372036854775808",
+            "dataPresent": true,
+            "data": {
+              "payload": "one"
+            },
+            "headers": {
+              "X-Native": "one"
+            },
+            "method": "PATCH",
+            "baseURL": "https://one.invalid"
+          }
+        },
+        {
+          "input": "{\"method\":\"DELETE\",\"url\":\"/native-two\",\"params\":null,\"headers\":{\"X-Native\":\"two\"},\"baseURL\":\"https://two.invalid\"}",
+          "output": {
+            "ok": true,
+            "url": "/native-two",
+            "paramsPresent": true,
+            "paramsNull": true,
+            "limitBits": null,
+            "dataPresent": false,
+            "data": null,
+            "headers": {
+              "X-Native": "two"
+            },
+            "method": "DELETE",
+            "baseURL": "https://two.invalid"
+          }
+        },
+        {
+          "input": "[\"PATCH\",\"/native-one\",\"https://one.invalid\",{\"limit\":-0.0},{\"payload\":\"one\"},{\"X-Native\":\"one\"}]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
     }
   },
   "safe_cex_transport::fallback::WsDirectFallback": {
-    "shape": "typed",
-    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "shape": "observed",
+    "evidence": "Maintained packages/safe-cex/src/utils/wsDirectFallback.ts: direct-first sticky chain, disabled-candidate filtering and message-reset streaks. Native calls use the real constructor and resolve_url, observing resolved traces plus internal active index/connect count. Existing fallback unit tests independently execute these source behaviors.",
     "entrypoints": [
       {
         "api": {
@@ -311,7 +1359,165 @@
           }
         },
         "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "reason": "Initializes typed usize threshold and zero counters, without parsing serialized state. Real native resolve_url witnesses construct it with the stated threshold."
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "resolve_url",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "primary",
+                {
+                  "borrowed_ref": {
+                    "lifetime": "'a",
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "fallbacks",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "resolved_path": {
+                          "path": "core::option::Option",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "type": {
+                                    "borrowed_ref": {
+                                      "lifetime": "'a",
+                                      "is_mutable": false,
+                                      "type": {
+                                        "primitive": "str"
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Raw primary/candidate URL strings select existing connection hosts through the maintained sticky counter machine. Native receiver traces observe actual returned selections and state.",
+        "call": "{ let mut row=$type::new($value[\"max\"].as_u64().expect(\"threshold\") as usize); let primary=$value[\"primary\"].as_str().expect(\"primary\"); let candidates=$value[\"fallbacks\"].as_array().expect(\"candidate list\").iter().map(serde_json::Value::as_str).collect::<Vec<_>>(); let mut actual=Vec::new(); for step in 0..$value[\"steps\"].as_u64().expect(\"steps\") { if $value[\"messageBefore\"].as_array().expect(\"message indexes\").iter().any(|n|n.as_u64()==Some(step)){row.on_message();} actual.push(row.resolve_url(primary,&candidates).to_owned()); } serde_json::json!({\"urls\":actual,\"activeIndex\":row.active_index,\"connects\":row.connects}) }",
+        "cases": [
+          {
+            "input": {
+              "max": 2,
+              "primary": "direct",
+              "fallbacks": [
+                null,
+                "",
+                "relay",
+                "athena"
+              ],
+              "steps": 9,
+              "messageBefore": []
+            },
+            "output": {
+              "urls": [
+                "direct",
+                "direct",
+                "relay",
+                "relay",
+                "athena",
+                "athena",
+                "athena",
+                "athena",
+                "athena"
+              ],
+              "activeIndex": 2,
+              "connects": 9
+            }
+          },
+          {
+            "input": {
+              "max": 2,
+              "primary": "direct",
+              "fallbacks": [
+                "relay",
+                "athena"
+              ],
+              "steps": 5,
+              "messageBefore": [
+                2
+              ]
+            },
+            "output": {
+              "urls": [
+                "direct",
+                "direct",
+                "direct",
+                "direct",
+                "relay"
+              ],
+              "activeIndex": 1,
+              "connects": 5
+            }
+          },
+          {
+            "input": {
+              "max": 0,
+              "primary": "direct",
+              "fallbacks": [
+                "relay",
+                "athena"
+              ],
+              "steps": 3,
+              "messageBefore": []
+            },
+            "output": {
+              "urls": [
+                "relay",
+                "athena",
+                "athena"
+              ],
+              "activeIndex": 2,
+              "connects": 3
+            }
+          }
+        ]
       }
     ]
   },
@@ -936,8 +2142,8 @@
     ]
   },
   "safe_cex_transport::retry::RetryPolicy": {
-    "shape": "typed",
-    "evidence": "Owner public constructor/conversion signatures; typed construction is classified independently of Deserialize.",
+    "shape": "observed",
+    "evidence": "Exact with_delay callback carrier: create the immutable classified read through the real production factory, install a bounded typed usize->u64 callback, then execute the actual stored callback at three attempt indexes and inspect retained retry count/read method. This does not substitute for the separate retry engine/native transport tests or claim arbitrary callback behavior.",
     "entrypoints": [
       {
         "api": {
@@ -981,37 +2187,6 @@
                     }
                   ]
                 }
-              ],
-              [
-                "clock",
-                {
-                  "resolved_path": {
-                    "path": "alloc::sync::Arc",
-                    "args": {
-                      "angle_bracketed": {
-                        "args": [
-                          {
-                            "type": {
-                              "dyn_trait": {
-                                "traits": [
-                                  {
-                                    "trait": {
-                                      "path": "safe_cex_transport::rate_limit::RateLimitClock",
-                                      "args": null
-                                    },
-                                    "generic_params": []
-                                  }
-                                ],
-                                "lifetime": null
-                              }
-                            }
-                          }
-                        ],
-                        "constraints": []
-                      }
-                    }
-                  }
-                }
               ]
             ],
             "output": {
@@ -1020,8 +2195,41 @@
             "is_c_variadic": false
           }
         },
-        "input": "typed",
-        "reason": "Construction from typed dependency/configuration objects; no JSON decoding entrypoint."
+        "input": "observed",
+        "reason": "Exact with_delay callback carrier: create the immutable classified read through the real production factory, install a bounded typed usize->u64 callback, then execute the actual stored callback at three attempt indexes and inspect retained retry count/read method. This does not substitute for the separate retry engine/native transport tests or claim arbitrary callback behavior."
+      }
+    ],
+    "call": "{ let request=crate::RestRequest {method:\"get\".into(),url:\"/native-read\".into(),..Default::default()}; let crate::retry::ClassifiedRequest::Read(read)=crate::retry::ReadClassification::Methods.classify(request) else {panic!(\"real read classification\")}; let factor=$value[\"factor\"].as_u64().expect(\"factor\"); let row=crate::retry::network_error_on_read(read,$value[\"retries\"].as_u64().expect(\"retries\") as usize).with_delay(move |attempt|factor*attempt as u64); let callback=&row.delay.as_ref().expect(\"installed delay\").milliseconds; serde_json::json!({\"delays\":[callback(0),callback(1),callback(3)],\"retries\":row.retries,\"method\":row.request.0.method}) }",
+    "cases": [
+      {
+        "input": {
+          "factor": 7,
+          "retries": 2
+        },
+        "output": {
+          "delays": [
+            0,
+            7,
+            21
+          ],
+          "retries": 2,
+          "method": "get"
+        }
+      },
+      {
+        "input": {
+          "factor": 13,
+          "retries": 4
+        },
+        "output": {
+          "delays": [
+            0,
+            13,
+            39
+          ],
+          "retries": 4,
+          "method": "get"
+        }
       }
     ]
   },
@@ -5002,8 +6210,8 @@
     ]
   },
   "safe_cex_transport::direct::DirectTransport": {
-    "shape": "typed",
-    "evidence": "Typed cache backend service operations; each wire parser is separately classified.",
+    "shape": "observed",
+    "evidence": "Actual direct.ts wsConnection always returns undefined. Native DirectTransport returns None for both genuine URL witnesses; no socket is opened, URL echoed or provider-policy behavior inferred.",
     "entrypoints": [
       {
         "api": {
@@ -5064,8 +6272,20 @@
             "where_predicates": []
           }
         },
-        "input": "typed",
-        "reason": "Typed transport/cache operation on an existing service instance. String keys select storage or routing, not a serialized representation of the service owner; backend decoding is separately inventoried."
+        "input": "observed",
+        "reason": "Actual source callback ignores its URL and returns no connection capability. Honest native outputs are constant None; retain source-pinned finite constant permission for this exact method.",
+        "constantOutput": true,
+        "call": "{ use crate::provider::TransportProvider; match ($type).ws_connection($value.as_str().expect(\"URL witness\")) { None => serde_json::Value::Null, Some(_) => serde_json::json!({\"connection\":\"some\"}) } }",
+        "cases": [
+          {
+            "input": "wss://native-one.invalid/ws",
+            "output": null
+          },
+          {
+            "input": "https://native-two.invalid/path?key=2",
+            "output": null
+          }
+        ]
       },
       {
         "api": {
@@ -5579,5 +6799,3172 @@
     "category": "non-decoder",
     "evidence": "safe-cex-transport/src/direct.rs wasm-bindgen console.warn import, present only in the wasm compiler inventory.",
     "reason": "Host diagnostic output import; it receives text for logging and does not decode or construct a domain value. The gate does not invoke host logging."
+  },
+  "safe_cex_transport::signing::SigningHeader": {
+    "shape": "map",
+    "evidence": "Concrete object-only frontdoor preserving the reviewed wire schema and field/presence policy. See safe-cex-transport/ACCEPTED_SHAPES.md, native accepted_wire_shapes/accepted_frame_shapes/header_shape_tests and twelve independent compiled guard-disconnect/restoration controls.",
+    "sample": {
+      "type": "http",
+      "exchangeName": "binance",
+      "accountName": "header-one"
+    },
+    "entrypoints": [],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"kind\":row.kind,\"binance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "kind",
+        "binance",
+        "accountName"
+      ],
+      "cases": [
+        {
+          "input": {
+            "type": "http",
+            "exchangeName": "binance",
+            "accountName": "header-one"
+          },
+          "output": {
+            "ok": true,
+            "kind": "http",
+            "binance": true,
+            "accountName": "header-one"
+          }
+        },
+        {
+          "input": {
+            "type": "ws-auth",
+            "exchangeName": "kraken",
+            "accountName": null
+          },
+          "output": {
+            "ok": true,
+            "kind": "ws-auth",
+            "binance": false,
+            "accountName": null
+          }
+        },
+        {
+          "input": [
+            "http",
+            "binance",
+            "header-one"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::frames::ConfigMapVisitor": {
+    "shape": "observed",
+    "evidence": "Owner-specific standalone frame MapAccess visitor; direct native visit_map decodes independently authored complete maps and observes actual fields. expecting only formats the fixed expected-object label; it admits no input and constructs no frame. Concrete Deserialize frontdoor and complete-array controls are independently covered; see safe-cex-transport/ACCEPTED_SHAPES.md.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "map",
+                {
+                  "generic": "M"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "M"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "M",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::MapAccess",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Consumes the supplied MapAccess and delegates the unchanged private remote frame schema; genuine frame decoder with actual native field observations at the concrete serde_json::Value map instantiation."
+      }
+    ],
+    "call": "{ let visitor: $type = super::ConfigMapVisitor; let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"urlLength\":row.url.len()}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "url": "one-config"
+        },
+        "output": {
+          "ok": true,
+          "url": "one-config",
+          "urlLength": 10
+        }
+      },
+      {
+        "input": {
+          "url": "two-config"
+        },
+        "output": {
+          "ok": true,
+          "url": "two-config",
+          "urlLength": 10
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::frames::HttpRequestArgsMapVisitor": {
+    "shape": "observed",
+    "evidence": "Owner-specific standalone frame MapAccess visitor; direct native visit_map decodes independently authored complete maps and observes actual fields. expecting only formats the fixed expected-object label; it admits no input and constructs no frame. Concrete Deserialize frontdoor and complete-array controls are independently covered; see safe-cex-transport/ACCEPTED_SHAPES.md.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "map",
+                {
+                  "generic": "M"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "M"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "M",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::MapAccess",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Consumes the supplied MapAccess and delegates the unchanged private remote frame schema; genuine frame decoder with actual native field observations at the concrete serde_json::Value map instantiation."
+      }
+    ],
+    "instantiation": "HttpRequestArgsMapVisitor<serde_json::Value>",
+    "call": "{ let visitor: $type = super::HttpRequestArgsMapVisitor(std::marker::PhantomData); let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"headers\":row.headers,\"method\":row.method,\"url\":row.url,\"data\":row.data,\"params\":row.params}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "headers": {
+            "X-Request": "one"
+          },
+          "method": "POST",
+          "url": "one-request",
+          "data": {
+            "id": "one",
+            "quantity": 1.25
+          },
+          "params": {
+            "limit": "one"
+          }
+        },
+        "output": {
+          "ok": true,
+          "headers": {
+            "X-Request": "one"
+          },
+          "method": "POST",
+          "url": "one-request",
+          "data": {
+            "id": "one",
+            "quantity": 1.25
+          },
+          "params": {
+            "limit": "one"
+          }
+        }
+      },
+      {
+        "input": {
+          "headers": {
+            "X-Request": "two"
+          },
+          "method": "PATCH",
+          "url": "two-request",
+          "data": {
+            "id": "two",
+            "quantity": 3.5
+          },
+          "params": {
+            "limit": "two"
+          }
+        },
+        "output": {
+          "ok": true,
+          "headers": {
+            "X-Request": "two"
+          },
+          "method": "PATCH",
+          "url": "two-request",
+          "data": {
+            "id": "two",
+            "quantity": 3.5
+          },
+          "params": {
+            "limit": "two"
+          }
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::frames::RequestDumpMapVisitor": {
+    "shape": "observed",
+    "evidence": "Owner-specific standalone frame MapAccess visitor; direct native visit_map decodes independently authored complete maps and observes actual fields. expecting only formats the fixed expected-object label; it admits no input and constructs no frame. Concrete Deserialize frontdoor and complete-array controls are independently covered; see safe-cex-transport/ACCEPTED_SHAPES.md.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "map",
+                {
+                  "generic": "M"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "M"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "M",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::MapAccess",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Consumes the supplied MapAccess and delegates the unchanged private remote frame schema; genuine frame decoder with actual native field observations at the concrete serde_json::Value map instantiation."
+      }
+    ],
+    "call": "{ let visitor: $type = super::RequestDumpMapVisitor; let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"method\":row.method,\"url\":row.url,\"headers\":row.headers,\"body\":row.body,\"form_data\":row.form_data,\"raw_form_data\":row.raw_form_data}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "method": "PATCH",
+          "url": "one-dump",
+          "headers": {
+            "X-Dump": "one"
+          },
+          "body": {
+            "payload": "one"
+          },
+          "form_data": {
+            "key": "one"
+          },
+          "raw_form_data": "key=one"
+        },
+        "output": {
+          "ok": true,
+          "method": "PATCH",
+          "url": "one-dump",
+          "headers": {
+            "X-Dump": "one"
+          },
+          "body": {
+            "payload": "one"
+          },
+          "form_data": {
+            "key": "one"
+          },
+          "raw_form_data": "key=one"
+        }
+      },
+      {
+        "input": {
+          "method": "DELETE",
+          "url": "two-dump",
+          "headers": {
+            "X-Dump": "two"
+          },
+          "body": {
+            "payload": "two"
+          },
+          "form_data": {
+            "key": "two"
+          },
+          "raw_form_data": "key=two"
+        },
+        "output": {
+          "ok": true,
+          "method": "DELETE",
+          "url": "two-dump",
+          "headers": {
+            "X-Dump": "two"
+          },
+          "body": {
+            "payload": "two"
+          },
+          "form_data": {
+            "key": "two"
+          },
+          "raw_form_data": "key=two"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::frames::ResponseDataMapVisitor": {
+    "shape": "observed",
+    "evidence": "Owner-specific standalone frame MapAccess visitor; direct native visit_map decodes independently authored complete maps and observes actual fields. expecting only formats the fixed expected-object label; it admits no input and constructs no frame. Concrete Deserialize frontdoor and complete-array controls are independently covered; see safe-cex-transport/ACCEPTED_SHAPES.md.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "map",
+                {
+                  "generic": "M"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "M"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "M",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::MapAccess",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Consumes the supplied MapAccess and delegates the unchanged private remote frame schema; genuine frame decoder with actual native field observations at the concrete serde_json::Value map instantiation."
+      }
+    ],
+    "call": "{ let visitor: $type = super::ResponseDataMapVisitor; let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"configUrl\":row.config.url,\"data\":row.data,\"data_raw\":row.data_raw,\"data_encoded\":row.data_encoded,\"data_encoding\":row.data_encoding,\"status\":row.status,\"status_text\":row.status_text,\"headers\":row.headers,\"dumpUrl\":row.request_dump.as_ref().map(|d|d.url.as_str())}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "config": {
+            "url": "one-config"
+          },
+          "data": {
+            "result": "one"
+          },
+          "data_raw": "one-raw",
+          "data_encoded": "one-encoded",
+          "data_encoding": "base64",
+          "status": 207,
+          "status_text": "one-status",
+          "headers": {
+            "X-Response": "one"
+          },
+          "request_dump": {
+            "method": "PATCH",
+            "url": "one-dump",
+            "headers": {
+              "X-Dump": "one"
+            },
+            "body": {
+              "payload": "one"
+            },
+            "form_data": {
+              "key": "one"
+            },
+            "raw_form_data": "key=one"
+          }
+        },
+        "output": {
+          "ok": true,
+          "configUrl": "one-config",
+          "data": {
+            "result": "one"
+          },
+          "data_raw": "one-raw",
+          "data_encoded": "one-encoded",
+          "data_encoding": "base64",
+          "status": 207,
+          "status_text": "one-status",
+          "headers": {
+            "X-Response": "one"
+          },
+          "dumpUrl": "one-dump"
+        }
+      },
+      {
+        "input": {
+          "config": {
+            "url": "two-config"
+          },
+          "data": {
+            "result": "two"
+          },
+          "data_raw": "two-raw",
+          "data_encoded": "two-encoded",
+          "data_encoding": "base64",
+          "status": 201,
+          "status_text": "two-status",
+          "headers": {
+            "X-Response": "two"
+          },
+          "request_dump": {
+            "method": "DELETE",
+            "url": "two-dump",
+            "headers": {
+              "X-Dump": "two"
+            },
+            "body": {
+              "payload": "two"
+            },
+            "form_data": {
+              "key": "two"
+            },
+            "raw_form_data": "key=two"
+          }
+        },
+        "output": {
+          "ok": true,
+          "configUrl": "two-config",
+          "data": {
+            "result": "two"
+          },
+          "data_raw": "two-raw",
+          "data_encoded": "two-encoded",
+          "data_encoding": "base64",
+          "status": 201,
+          "status_text": "two-status",
+          "headers": {
+            "X-Response": "two"
+          },
+          "dumpUrl": "two-dump"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::frames::RpcHttpResponseMapVisitor": {
+    "shape": "observed",
+    "evidence": "Owner-specific standalone frame MapAccess visitor; direct native visit_map decodes independently authored complete maps and observes actual fields. expecting only formats the fixed expected-object label; it admits no input and constructs no frame. Concrete Deserialize frontdoor and complete-array controls are independently covered; see safe-cex-transport/ACCEPTED_SHAPES.md.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "map",
+                {
+                  "generic": "M"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "M"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "M",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::MapAccess",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Consumes the supplied MapAccess and delegates the unchanged private remote frame schema; genuine frame decoder with actual native field observations at the concrete serde_json::Value map instantiation."
+      }
+    ],
+    "call": "{ let visitor: $type = super::RpcHttpResponseMapVisitor; let map = serde::de::value::MapDeserializer::<_,serde_json::Error>::new($value.as_object().expect(\"reviewed map input\").clone().into_iter()); match serde::de::Visitor::visit_map(visitor,map) { Ok(row)=>serde_json::json!({\"ok\":true,\"type\":row.response_type,\"nonce\":row.nonce,\"status\":row.data.status,\"configUrl\":row.data.config.url,\"data\":row.data.data}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "type": "rpc.http",
+          "nonce": "one-nonce",
+          "data": {
+            "config": {
+              "url": "one-config"
+            },
+            "data": {
+              "result": "one"
+            },
+            "data_raw": "one-raw",
+            "data_encoded": "one-encoded",
+            "data_encoding": "base64",
+            "status": 207,
+            "status_text": "one-status",
+            "headers": {
+              "X-Response": "one"
+            },
+            "request_dump": {
+              "method": "PATCH",
+              "url": "one-dump",
+              "headers": {
+                "X-Dump": "one"
+              },
+              "body": {
+                "payload": "one"
+              },
+              "form_data": {
+                "key": "one"
+              },
+              "raw_form_data": "key=one"
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "type": "rpc.http",
+          "nonce": "one-nonce",
+          "status": 207,
+          "configUrl": "one-config",
+          "data": {
+            "result": "one"
+          }
+        }
+      },
+      {
+        "input": {
+          "type": "rpc.http",
+          "nonce": "two-nonce",
+          "data": {
+            "config": {
+              "url": "two-config"
+            },
+            "data": {
+              "result": "two"
+            },
+            "data_raw": "two-raw",
+            "data_encoded": "two-encoded",
+            "data_encoding": "base64",
+            "status": 201,
+            "status_text": "two-status",
+            "headers": {
+              "X-Response": "two"
+            },
+            "request_dump": {
+              "method": "DELETE",
+              "url": "two-dump",
+              "headers": {
+                "X-Dump": "two"
+              },
+              "body": {
+                "payload": "two"
+              },
+              "form_data": {
+                "key": "two"
+              },
+              "raw_form_data": "key=two"
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "type": "rpc.http",
+          "nonce": "two-nonce",
+          "status": 201,
+          "configUrl": "two-config",
+          "data": {
+            "result": "two"
+          }
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::transport_resolution::ResolvedTransport": {
+    "shape": "map",
+    "evidence": "Account transport Pick with three individually optional fields. Concrete object frontdoor preserves default/missing/null and flag/region behavior. accepted_wire_shapes::resolution_transport compares all native fields and four decode paths; independent complete-array guard-disconnect/restoration passes.",
+    "entrypoints": [],
+    "sample": {
+      "tealstreetProxy": true,
+      "tealstreetTunnel": false,
+      "proxyRegion": "JA"
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"proxy\":row.tealstreet_proxy,\"tunnel\":row.tealstreet_tunnel,\"region\":row.proxy_region}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "proxy",
+        "tunnel",
+        "region"
+      ],
+      "cases": [
+        {
+          "input": {
+            "tealstreetProxy": true,
+            "tealstreetTunnel": false,
+            "proxyRegion": "JA"
+          },
+          "output": {
+            "ok": true,
+            "proxy": true,
+            "tunnel": false,
+            "region": "JA"
+          }
+        },
+        {
+          "input": {
+            "tealstreetProxy": false,
+            "tealstreetTunnel": true,
+            "proxyRegion": "SG"
+          },
+          "output": {
+            "ok": true,
+            "proxy": false,
+            "tunnel": true,
+            "region": "SG"
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "proxy": null,
+            "tunnel": null,
+            "region": null
+          }
+        },
+        {
+          "input": [
+            true,
+            false,
+            "JA"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::transport_resolution::TransportMetadata": {
+    "shape": "map",
+    "evidence": "Concrete metadata Pick retaining requiresCors, optional tunnel flags and ordered native privateProxyRegions. accepted_wire_shapes::resolution_metadata observes all native fields and SG/JA iteration order; complete declaration-order array guard-removal fails then exact restoration passes. From<&ExchangeMetadata> remains a typed projection of already decoded account metadata.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "resolved_path": {
+                          "path": "safe_cex_types::exchange_metadata::generated::ExchangeMetadata",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Copies already decoded ExchangeMetadata fields and clones its native region map; it accepts no serialized metadata."
+      }
+    ],
+    "sample": {
+      "requiresCors": true,
+      "enforceWsTunnel": false,
+      "supportsTunnel": true,
+      "privateProxyRegions": {
+        "SG": [
+          "binance"
+        ],
+        "JA": [
+          "okx"
+        ]
+      }
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"cors\":row.requires_cors,\"enforce\":row.enforce_ws_tunnel,\"supports\":row.supports_tunnel,\"regionKeys\":row.private_proxy_regions.keys().collect::<Vec<_>>(),\"SG\":row.private_proxy_regions.get(\"SG\"),\"JA\":row.private_proxy_regions.get(\"JA\")}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "cors",
+        "enforce",
+        "supports",
+        "regionKeys",
+        "SG",
+        "JA"
+      ],
+      "cases": [
+        {
+          "input": {
+            "requiresCors": true,
+            "enforceWsTunnel": false,
+            "supportsTunnel": true,
+            "privateProxyRegions": {
+              "SG": [
+                "binance"
+              ],
+              "JA": [
+                "okx"
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "cors": true,
+            "enforce": false,
+            "supports": true,
+            "regionKeys": [
+              "SG",
+              "JA"
+            ],
+            "SG": [
+              "binance"
+            ],
+            "JA": [
+              "okx"
+            ]
+          }
+        },
+        {
+          "input": {
+            "requiresCors": false,
+            "privateProxyRegions": {
+              "JA": [
+                "bybit"
+              ],
+              "SG": [
+                "kraken"
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "cors": false,
+            "enforce": null,
+            "supports": null,
+            "regionKeys": [
+              "JA",
+              "SG"
+            ],
+            "SG": [
+              "kraken"
+            ],
+            "JA": [
+              "bybit"
+            ]
+          }
+        },
+        {
+          "input": [
+            true,
+            false,
+            true,
+            {
+              "SG": [
+                "binance"
+              ],
+              "JA": [
+                "okx"
+              ]
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::provider::TransportFuture": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_transport::provider::TransportError",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_transport::provider::TransportError",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Individually reviewed transport capability alias; exact actual compiler raw/expanded target and fixed generic monomorphization where needed. Native alias/root/Deserialize/alternate probes must execute; no blanket capability exemption.",
+    "reason": "Pinned, boxed asynchronous transport result capability, at the single independently reviewed 'static/bool instantiation. The future does not implement wire admission; T is not used to infer Deserialize for the future container. Actual compiler alias/root identity and native Deserialize/alternate trait probes remain mandatory.",
+    "entrypoints": []
+  },
+  "safe_cex_transport::provider::RestFuture": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        },
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_transport::provider::RestFailure",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_transport::provider::RestFailure",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": "'a"
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Individually reviewed transport capability alias; exact actual compiler raw/expanded target and fixed generic monomorphization where needed. Native alias/root/Deserialize/alternate probes must execute; no blanket capability exemption.",
+    "reason": "Pinned, boxed asynchronous REST result capability carrying RestFailure, at one fixed 'static/bool instantiation. This aliases deferred execution, not a raw result decoder; actual compiler root identity and native negative trait probes are required.",
+    "entrypoints": []
+  },
+  "safe_cex_transport::relay::FreshHeadersProvider": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "indexmap::map::IndexMap",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::string::String",
+                                              "args": null
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::string::String",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "indexmap::map::IndexMap",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::string::String",
+                                              "args": null
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::string::String",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Individually reviewed transport capability alias; exact actual compiler raw/expanded target and fixed generic monomorphization where needed. Native alias/root/Deserialize/alternate probes must execute; no blanket capability exemption.",
+    "reason": "Reference-counted zero-argument header supplier capability returning an already typed IndexMap<String,String>. The callback is not a JSON representation of itself. Actual Rc/root compiler identity and native alias trait probes classify this concrete capability; RelayWebSocket's use of returned headers remains separately reviewed.",
+    "entrypoints": []
+  },
+  "safe_cex_transport::secondary::RateLimitWrapper": {
+    "generics": {
+      "params": [
+        {
+          "name": "'a",
+          "kind": {
+            "lifetime": {
+              "outlives": []
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::Fn",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "resolved_path": {
+                        "path": "alloc::sync::Arc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "dyn_trait": {
+                                    "traits": [
+                                      {
+                                        "trait": {
+                                          "path": "safe_cex_transport::provider::RestAdapter",
+                                          "args": null
+                                        },
+                                        "generic_params": []
+                                      }
+                                    ],
+                                    "lifetime": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "alloc::sync::Arc",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "dyn_trait": {
+                                  "traits": [
+                                    {
+                                      "trait": {
+                                        "path": "safe_cex_transport::provider::RestAdapter",
+                                        "args": null
+                                      },
+                                      "generic_params": []
+                                    }
+                                  ],
+                                  "lifetime": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "target": {
+      "dyn_trait": {
+        "traits": [
+          {
+            "trait": {
+              "path": "core::ops::function::Fn",
+              "args": {
+                "parenthesized": {
+                  "inputs": [
+                    {
+                      "resolved_path": {
+                        "path": "alloc::sync::Arc",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "dyn_trait": {
+                                    "traits": [
+                                      {
+                                        "trait": {
+                                          "path": "safe_cex_transport::provider::RestAdapter",
+                                          "args": null
+                                        },
+                                        "generic_params": []
+                                      }
+                                    ],
+                                    "lifetime": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  ],
+                  "output": {
+                    "resolved_path": {
+                      "path": "alloc::sync::Arc",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "dyn_trait": {
+                                  "traits": [
+                                    {
+                                      "trait": {
+                                        "path": "safe_cex_transport::provider::RestAdapter",
+                                        "args": null
+                                      },
+                                      "generic_params": []
+                                    }
+                                  ],
+                                  "lifetime": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            },
+            "generic_params": []
+          }
+        ],
+        "lifetime": "'a"
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Individually reviewed transport capability alias; exact actual compiler raw/expanded target and fixed generic monomorphization where needed. Native alias/root/Deserialize/alternate probes must execute; no blanket capability exemption.",
+    "reason": "Unsized callable adapter-to-adapter wrapper, at the fixed 'static lifetime. Both input and output are Arc<dyn RestAdapter> capabilities. This does not decode a serialized wrapper or classify arbitrary callback implementations; exact expanded signature equality and actual negative native alias trait probes are required.",
+    "entrypoints": []
+  },
+  "safe_cex_transport::signature_rejection::IsSignatureRejection": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "primitive": "bool"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "primitive": "bool"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "category": "non-decoder",
+    "evidence": "Individually reviewed transport capability alias; exact actual compiler raw/expanded target and fixed generic monomorphization where needed. Native alias/root/Deserialize/alternate probes must execute; no blanket capability exemption.",
+    "reason": "Reference-counted callable predicate capability, not a wire representation of a callback. Its Fn(&Value)->Result<bool,JsCoercionError> signature is retained exactly; actual predicate bodies and scalar coercions have separate owner contracts/native witnesses. Compiler Rc/root identity and actual negative alias trait probes remain required.",
+    "entrypoints": []
+  },
+  "safe_cex_transport::tunnel_endpoints::TunnelEgress": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "safe_cex_transport::routing::HowEgress",
+        "args": null
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "safe_cex_transport::routing::HowEgress",
+        "args": null
+      }
+    },
+    "category": "decoder",
+    "shape": "string",
+    "evidence": "Actual TunnelEgress aliases the resolved routing HowEgress enum, whose maintained literals are jp/sg. Ordinary native alias probes verify canonical compiler identity, Deserialize admission and every alternate trait path; direct native variant observations retain this actual owner rather than a duplicate surrogate.",
+    "literals": [
+      "jp",
+      "sg"
+    ],
+    "entrypoints": [],
+    "observation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"variant\":match row {$type::Jp=>\"Jp\",$type::Sg=>\"Sg\"}}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": "jp",
+          "output": {
+            "ok": true,
+            "variant": "Jp"
+          }
+        },
+        {
+          "input": "sg",
+          "output": {
+            "ok": true,
+            "variant": "Sg"
+          }
+        },
+        {
+          "input": {
+            "jp": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "sg": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::query_signing::present_json": {
+    "category": "decoder",
+    "evidence": "Concrete field decoder retains explicit JSON null as Some(Null); field omission is handled by the remote schema default before this helper is called. It directly invokes Value::deserialize and is classified as a decoder, independently of its containing signing envelope. The executed native adapter observes actual presence plus the admitted JSON payload.",
+    "api": {
+      "kind": "function",
+      "name": "present_json",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"present\":row.is_some(),\"payload\":row}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "ok": true,
+          "present": true,
+          "payload": null
+        }
+      },
+      {
+        "input": {
+          "native": "present",
+          "nested": [
+            true,
+            3.5
+          ]
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "payload": {
+            "native": "present",
+            "nested": [
+              true,
+              3.5
+            ]
+          }
+        }
+      },
+      {
+        "input": [
+          "json-array",
+          false
+        ],
+        "output": {
+          "ok": true,
+          "present": true,
+          "payload": [
+            "json-array",
+            false
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::signing::present_json": {
+    "category": "decoder",
+    "evidence": "Concrete field decoder retains explicit JSON null as Some(Null); field omission is handled by the remote schema default before this helper is called. It directly invokes Value::deserialize and is classified as a decoder, independently of its containing signing envelope. The executed native adapter observes actual presence plus the admitted JSON payload.",
+    "api": {
+      "kind": "function",
+      "name": "present_json",
+      "signature": {
+        "inputs": [
+          [
+            "deserializer",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "serde_json::value::Value",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ match $type($value.clone()) { Ok(row)=>serde_json::json!({\"ok\":true,\"present\":row.is_some(),\"payload\":row}), Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": null,
+        "output": {
+          "ok": true,
+          "present": true,
+          "payload": null
+        }
+      },
+      {
+        "input": {
+          "native": "present",
+          "nested": [
+            true,
+            3.5
+          ]
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "payload": {
+            "native": "present",
+            "nested": [
+              true,
+              3.5
+            ]
+          }
+        }
+      },
+      {
+        "input": [
+          "json-array",
+          false
+        ],
+        "output": {
+          "ok": true,
+          "present": true,
+          "payload": [
+            "json-array",
+            false
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::signing::HttpSigningRequest": {
+    "shape": "map",
+    "evidence": "Independently reviewed remote signing wire record. Concrete production object guard already exists and is retained. Native raw JSON witnesses assert actual fields, enum identity, baseURL spelling, optional omission versus explicit null and param limit signed-zero bits. Legacy Value parameters and opt-in QueryValue parameters keep their distinct production decoders; no reserialization of decoded owner supplies the observation.",
+    "entrypoints": [],
+    "sample": {
+      "id": "request-one",
+      "exchangeName": "binance",
+      "accountName": "native-account-one",
+      "config": {
+        "method": "PATCH",
+        "url": "/native-one",
+        "params": {
+          "limit": -0.0
+        },
+        "headers": {
+          "X-Native": "one"
+        },
+        "data": {
+          "payload": "one"
+        },
+        "baseURL": "https://one.invalid"
+      }
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data,\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "id",
+        "isBinance",
+        "accountName",
+        "config"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"request-one\",\"exchangeName\":\"binance\",\"accountName\":\"native-account-one\",\"config\":{\"method\":\"PATCH\",\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"},\"baseURL\":\"https://one.invalid\"}}",
+          "output": {
+            "ok": true,
+            "id": "request-one",
+            "isBinance": true,
+            "accountName": "native-account-one",
+            "config": {
+              "ok": true,
+              "url": "/native-one",
+              "paramsPresent": true,
+              "paramsNull": false,
+              "limitBits": "9223372036854775808",
+              "dataPresent": true,
+              "data": {
+                "payload": "one"
+              },
+              "headers": {
+                "X-Native": "one"
+              },
+              "method": "PATCH",
+              "baseURL": "https://one.invalid"
+            }
+          }
+        },
+        {
+          "input": "{\"id\":\"request-two\",\"exchangeName\":\"kraken\",\"accountName\":null,\"config\":{\"method\":\"DELETE\",\"url\":\"/native-two\",\"params\":null,\"headers\":{\"X-Native\":\"two\"},\"baseURL\":\"https://two.invalid\"}}",
+          "output": {
+            "ok": true,
+            "id": "request-two",
+            "isBinance": false,
+            "accountName": null,
+            "config": {
+              "ok": true,
+              "url": "/native-two",
+              "paramsPresent": true,
+              "paramsNull": true,
+              "limitBits": null,
+              "dataPresent": false,
+              "data": null,
+              "headers": {
+                "X-Native": "two"
+              },
+              "method": "DELETE",
+              "baseURL": "https://two.invalid"
+            }
+          }
+        },
+        {
+          "input": "[\"request-one\",\"binance\",\"native-account-one\",{\"method\":\"PATCH\",\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"},\"baseURL\":\"https://one.invalid\"}]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::signing::HttpSigningResponse": {
+    "shape": "map",
+    "evidence": "Independently reviewed remote signing wire record. Concrete production object guard already exists and is retained. Native raw JSON witnesses assert actual fields, enum identity, baseURL spelling, optional omission versus explicit null and param limit signed-zero bits. Legacy Value parameters and opt-in QueryValue parameters keep their distinct production decoders; no reserialization of decoded owner supplies the observation.",
+    "entrypoints": [],
+    "sample": {
+      "id": "response-one",
+      "config": {
+        "url": "/native-one",
+        "params": {
+          "limit": -0.0
+        },
+        "headers": {
+          "X-Native": "one"
+        },
+        "data": {
+          "payload": "one"
+        }
+      },
+      "error": null
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":config.params.as_ref().is_some_and(serde_json::Value::is_null),\"limitBits\":config.params.as_ref().and_then(|v|v.get(\"limit\")).and_then(serde_json::Value::as_f64).map(|n|n.to_bits().to_string()),\"dataPresent\":config.data.is_some(),\"data\":config.data,\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "id",
+        "config",
+        "error"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"response-one\",\"config\":{\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"}},\"error\":null}",
+          "output": {
+            "ok": true,
+            "id": "response-one",
+            "config": {
+              "ok": true,
+              "url": "/native-one",
+              "paramsPresent": true,
+              "paramsNull": false,
+              "limitBits": "9223372036854775808",
+              "dataPresent": true,
+              "data": {
+                "payload": "one"
+              },
+              "headers": {
+                "X-Native": "one"
+              }
+            },
+            "error": null
+          }
+        },
+        {
+          "input": "{\"id\":\"response-two\",\"config\":{\"url\":\"/native-two\",\"params\":null,\"headers\":{\"X-Native\":\"two\"}},\"error\":\"native-error-two\"}",
+          "output": {
+            "ok": true,
+            "id": "response-two",
+            "config": {
+              "ok": true,
+              "url": "/native-two",
+              "paramsPresent": true,
+              "paramsNull": true,
+              "limitBits": null,
+              "dataPresent": false,
+              "data": null,
+              "headers": {
+                "X-Native": "two"
+              }
+            },
+            "error": "native-error-two"
+          }
+        },
+        {
+          "input": "[\"response-one\",{\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"}},null]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"id\":\"without-config\"}",
+          "output": {
+            "ok": true,
+            "id": "without-config",
+            "config": null,
+            "error": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::query_signing::SigningConfig": {
+    "shape": "map",
+    "evidence": "Independently reviewed remote signing wire record. Concrete production object guard already exists and is retained. Native raw JSON witnesses assert actual fields, enum identity, baseURL spelling, optional omission versus explicit null and param limit signed-zero bits. Legacy Value parameters and opt-in QueryValue parameters keep their distinct production decoders; no reserialization of decoded owner supplies the observation.",
+    "entrypoints": [],
+    "sample": {
+      "method": "PATCH",
+      "url": "/native-one",
+      "params": {
+        "limit": -0.0
+      },
+      "headers": {
+        "X-Native": "one"
+      },
+      "data": {
+        "payload": "one"
+      },
+      "baseURL": "https://one.invalid"
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":matches!(row.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":row.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":row.data.is_some(),\"data\":row.data,\"headers\":row.headers,\"method\":row.method,\"baseURL\":row.base_url}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "url",
+        "paramsPresent",
+        "paramsNull",
+        "limitBits",
+        "dataPresent",
+        "data",
+        "headers",
+        "method",
+        "baseURL"
+      ],
+      "cases": [
+        {
+          "input": "{\"method\":\"PATCH\",\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"},\"baseURL\":\"https://one.invalid\"}",
+          "output": {
+            "ok": true,
+            "url": "/native-one",
+            "paramsPresent": true,
+            "paramsNull": false,
+            "limitBits": "9223372036854775808",
+            "dataPresent": true,
+            "data": {
+              "payload": "one"
+            },
+            "headers": {
+              "X-Native": "one"
+            },
+            "method": "PATCH",
+            "baseURL": "https://one.invalid"
+          }
+        },
+        {
+          "input": "{\"method\":\"DELETE\",\"url\":\"/native-two\",\"params\":null,\"headers\":{\"X-Native\":\"two\"},\"baseURL\":\"https://two.invalid\"}",
+          "output": {
+            "ok": true,
+            "url": "/native-two",
+            "paramsPresent": true,
+            "paramsNull": true,
+            "limitBits": null,
+            "dataPresent": false,
+            "data": null,
+            "headers": {
+              "X-Native": "two"
+            },
+            "method": "DELETE",
+            "baseURL": "https://two.invalid"
+          }
+        },
+        {
+          "input": "[\"PATCH\",\"/native-one\",\"https://one.invalid\",{\"limit\":-0.0},{\"payload\":\"one\"},{\"X-Native\":\"one\"}]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::query_signing::SignedConfig": {
+    "shape": "map",
+    "evidence": "Independently reviewed remote signing wire record. Concrete production object guard already exists and is retained. Native raw JSON witnesses assert actual fields, enum identity, baseURL spelling, optional omission versus explicit null and param limit signed-zero bits. Legacy Value parameters and opt-in QueryValue parameters keep their distinct production decoders; no reserialization of decoded owner supplies the observation.",
+    "entrypoints": [],
+    "sample": {
+      "url": "/native-one",
+      "params": {
+        "limit": -0.0
+      },
+      "headers": {
+        "X-Native": "one"
+      },
+      "data": {
+        "payload": "one"
+      }
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>serde_json::json!({\"ok\":true,\"url\":row.url,\"paramsPresent\":row.params.is_some(),\"paramsNull\":matches!(row.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":row.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":row.data.is_some(),\"data\":row.data,\"headers\":row.headers}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "url",
+        "paramsPresent",
+        "paramsNull",
+        "limitBits",
+        "dataPresent",
+        "data",
+        "headers"
+      ],
+      "cases": [
+        {
+          "input": "{\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"}}",
+          "output": {
+            "ok": true,
+            "url": "/native-one",
+            "paramsPresent": true,
+            "paramsNull": false,
+            "limitBits": "9223372036854775808",
+            "dataPresent": true,
+            "data": {
+              "payload": "one"
+            },
+            "headers": {
+              "X-Native": "one"
+            }
+          }
+        },
+        {
+          "input": "{\"url\":\"/native-two\",\"params\":null,\"headers\":{\"X-Native\":\"two\"}}",
+          "output": {
+            "ok": true,
+            "url": "/native-two",
+            "paramsPresent": true,
+            "paramsNull": true,
+            "limitBits": null,
+            "dataPresent": false,
+            "data": null,
+            "headers": {
+              "X-Native": "two"
+            }
+          }
+        },
+        {
+          "input": "[\"/native-one\",{\"limit\":-0.0},{\"payload\":\"one\"},{\"X-Native\":\"one\"}]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::query_signing::HttpSigningRequest": {
+    "shape": "map",
+    "evidence": "Independently reviewed remote signing wire record. Concrete production object guard already exists and is retained. Native raw JSON witnesses assert actual fields, enum identity, baseURL spelling, optional omission versus explicit null and param limit signed-zero bits. Legacy Value parameters and opt-in QueryValue parameters keep their distinct production decoders; no reserialization of decoded owner supplies the observation.",
+    "entrypoints": [],
+    "sample": {
+      "id": "request-one",
+      "exchangeName": "binance",
+      "accountName": "native-account-one",
+      "config": {
+        "method": "PATCH",
+        "url": "/native-one",
+        "params": {
+          "limit": -0.0
+        },
+        "headers": {
+          "X-Native": "one"
+        },
+        "data": {
+          "payload": "one"
+        },
+        "baseURL": "https://one.invalid"
+      }
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let config=&row.config; let details=serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data,\"headers\":config.headers,\"method\":config.method,\"baseURL\":config.base_url}); serde_json::json!({\"ok\":true,\"id\":row.id,\"isBinance\":row.exchange_name==safe_cex_types::ExchangeName::Binance,\"accountName\":row.account_name,\"config\":details}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "id",
+        "isBinance",
+        "accountName",
+        "config"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"request-one\",\"exchangeName\":\"binance\",\"accountName\":\"native-account-one\",\"config\":{\"method\":\"PATCH\",\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"},\"baseURL\":\"https://one.invalid\"}}",
+          "output": {
+            "ok": true,
+            "id": "request-one",
+            "isBinance": true,
+            "accountName": "native-account-one",
+            "config": {
+              "ok": true,
+              "url": "/native-one",
+              "paramsPresent": true,
+              "paramsNull": false,
+              "limitBits": "9223372036854775808",
+              "dataPresent": true,
+              "data": {
+                "payload": "one"
+              },
+              "headers": {
+                "X-Native": "one"
+              },
+              "method": "PATCH",
+              "baseURL": "https://one.invalid"
+            }
+          }
+        },
+        {
+          "input": "{\"id\":\"request-two\",\"exchangeName\":\"kraken\",\"accountName\":null,\"config\":{\"method\":\"DELETE\",\"url\":\"/native-two\",\"params\":null,\"headers\":{\"X-Native\":\"two\"},\"baseURL\":\"https://two.invalid\"}}",
+          "output": {
+            "ok": true,
+            "id": "request-two",
+            "isBinance": false,
+            "accountName": null,
+            "config": {
+              "ok": true,
+              "url": "/native-two",
+              "paramsPresent": true,
+              "paramsNull": true,
+              "limitBits": null,
+              "dataPresent": false,
+              "data": null,
+              "headers": {
+                "X-Native": "two"
+              },
+              "method": "DELETE",
+              "baseURL": "https://two.invalid"
+            }
+          }
+        },
+        {
+          "input": "[\"request-one\",\"binance\",\"native-account-one\",{\"method\":\"PATCH\",\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"},\"baseURL\":\"https://one.invalid\"}]",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::query_signing::HttpSigningResponse": {
+    "shape": "map",
+    "evidence": "Independently reviewed remote signing wire record. Concrete production object guard already exists and is retained. Native raw JSON witnesses assert actual fields, enum identity, baseURL spelling, optional omission versus explicit null and param limit signed-zero bits. Legacy Value parameters and opt-in QueryValue parameters keep their distinct production decoders; no reserialization of decoded owner supplies the observation.",
+    "entrypoints": [],
+    "sample": {
+      "id": "response-one",
+      "config": {
+        "url": "/native-one",
+        "params": {
+          "limit": -0.0
+        },
+        "headers": {
+          "X-Native": "one"
+        },
+        "data": {
+          "payload": "one"
+        }
+      },
+      "error": null
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw signing wire fixture\")) { Ok(row)=>{ let details=row.config.as_ref().map(|config|serde_json::json!({\"ok\":true,\"url\":config.url,\"paramsPresent\":config.params.is_some(),\"paramsNull\":matches!(config.params.as_ref(),Some(safe_cex_types::QueryValue::Null)),\"limitBits\":config.params.as_ref().and_then(|v| match v {safe_cex_types::QueryValue::Object(map)=>map.get(\"limit\"),_=>None}).and_then(|v| match v {safe_cex_types::QueryValue::Number(n)=>Some(n.to_bits().to_string()),_=>None}),\"dataPresent\":config.data.is_some(),\"data\":config.data,\"headers\":config.headers})); serde_json::json!({\"ok\":true,\"id\":row.id,\"config\":details,\"error\":row.error}) },Err(_)=>serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "id",
+        "config",
+        "error"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"response-one\",\"config\":{\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"}},\"error\":null}",
+          "output": {
+            "ok": true,
+            "id": "response-one",
+            "config": {
+              "ok": true,
+              "url": "/native-one",
+              "paramsPresent": true,
+              "paramsNull": false,
+              "limitBits": "9223372036854775808",
+              "dataPresent": true,
+              "data": {
+                "payload": "one"
+              },
+              "headers": {
+                "X-Native": "one"
+              }
+            },
+            "error": null
+          }
+        },
+        {
+          "input": "{\"id\":\"response-two\",\"config\":{\"url\":\"/native-two\",\"params\":null,\"headers\":{\"X-Native\":\"two\"}},\"error\":\"native-error-two\"}",
+          "output": {
+            "ok": true,
+            "id": "response-two",
+            "config": {
+              "ok": true,
+              "url": "/native-two",
+              "paramsPresent": true,
+              "paramsNull": true,
+              "limitBits": null,
+              "dataPresent": false,
+              "data": null,
+              "headers": {
+                "X-Native": "two"
+              }
+            },
+            "error": "native-error-two"
+          }
+        },
+        {
+          "input": "[\"response-one\",{\"url\":\"/native-one\",\"params\":{\"limit\":-0.0},\"headers\":{\"X-Native\":\"one\"},\"data\":{\"payload\":\"one\"}},null]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"id\":\"without-config\"}",
+          "output": {
+            "ok": true,
+            "id": "without-config",
+            "config": null,
+            "error": null
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_transport::provider::NetworkFailure": {
+    "shape": "observed",
+    "evidence": "Actual originating network evidence constructor: native message/code fields and production retry disposition are observed independently, including cancellation/DNS refusals. This is not caller-supplied retry eligibility or a JSON wire decoder.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_code",
+          "signature": {
+            "inputs": [
+              [
+                "message",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "code",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Actual originating network evidence constructor: native message/code fields and production retry disposition are observed independently, including cancellation/DNS refusals. This is not caller-supplied retry eligibility or a JSON wire decoder."
+      }
+    ],
+    "call": "{ let row=$type::from_code($value[\"message\"].as_str().expect(\"message\").to_owned(),$value[\"code\"].as_str().map(str::to_owned)); serde_json::json!({\"message\":row.message,\"code\":row.code(),\"retryAllowed\":row.retry_allowed()}) }",
+    "cases": [
+      {
+        "input": {
+          "message": "native-reset",
+          "code": "ECONNRESET"
+        },
+        "output": {
+          "message": "native-reset",
+          "code": "ECONNRESET",
+          "retryAllowed": true
+        }
+      },
+      {
+        "input": {
+          "message": "native-cancel",
+          "code": "ERR_CANCELED"
+        },
+        "output": {
+          "message": "native-cancel",
+          "code": "ERR_CANCELED",
+          "retryAllowed": false
+        }
+      },
+      {
+        "input": {
+          "message": "native-dns",
+          "code": "ENOTFOUND"
+        },
+        "output": {
+          "message": "native-dns",
+          "code": "ENOTFOUND",
+          "retryAllowed": false
+        }
+      },
+      {
+        "input": {
+          "message": "native-absent",
+          "code": null
+        },
+        "output": {
+          "message": "native-absent",
+          "code": null,
+          "retryAllowed": false
+        }
+      }
+    ]
+  },
+  "safe_cex_transport::provider::RestFailure": {
+    "shape": "observed",
+    "evidence": "Refusal/transport diagnostic provenance constructors: the raw message constructor is executed, and from_transport maps an already typed TransportError/RestRequest. Native witnesses observe every optional provenance slot and typed originating-code/retry behavior; there is no refusal-as-network coercion.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "pre_transmit",
+          "signature": {
+            "inputs": [
+              [
+                "message",
+                {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "request",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestRequest",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "The raw message is retained in a pre-transmit refusal with no fabricated network/error/response/context provenance; inspect actual native fields.",
+        "call": "{ let request=crate::RestRequest {method:\"POST\".into(),url:$value[\"url\"].as_str().expect(\"url\").to_owned(),..Default::default()}; let row=$type::pre_transmit($value[\"message\"].as_str().expect(\"message\").to_owned(),request.clone()); let network=$type::from_transport(crate::TransportError::Network(crate::NetworkFailure::from_code(\"typed-network\".into(),$value[\"code\"].as_str().map(str::to_owned))),request); serde_json::json!({\"message\":row.message,\"url\":row.request.url,\"method\":row.request.method,\"code\":row.code,\"transport\":row.transport_error.is_some(),\"response\":row.response.is_some(),\"context\":row.context.is_some(),\"retry\":row.is_retryable_network(),\"fromTransportCode\":network.code,\"fromTransportRetry\":network.is_retryable_network(),\"fromTransportProvenance\":network.transport_error.is_some()}) }",
+        "cases": [
+          {
+            "input": {
+              "message": "refused-one",
+              "url": "/one",
+              "code": "ECONNRESET"
+            },
+            "output": {
+              "message": "refused-one",
+              "url": "/one",
+              "method": "POST",
+              "code": null,
+              "transport": false,
+              "response": false,
+              "context": false,
+              "retry": false,
+              "fromTransportCode": "ECONNRESET",
+              "fromTransportRetry": true,
+              "fromTransportProvenance": true
+            }
+          },
+          {
+            "input": {
+              "message": "refused-two",
+              "url": "/two",
+              "code": "ERR_CANCELED"
+            },
+            "output": {
+              "message": "refused-two",
+              "url": "/two",
+              "method": "POST",
+              "code": null,
+              "transport": false,
+              "response": false,
+              "context": false,
+              "retry": false,
+              "fromTransportCode": "ERR_CANCELED",
+              "fromTransportRetry": false,
+              "fromTransportProvenance": true
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "from_transport",
+          "signature": {
+            "inputs": [
+              [
+                "error",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::TransportError",
+                    "args": null
+                  }
+                }
+              ],
+              [
+                "request",
+                {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestRequest",
+                    "args": null
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "generic": "Self"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Maps a typed TransportError and an already constructed RestRequest; no serialized error input. The pre_transmit witness also executes this constructor with two genuine typed network codes and observes retained code/provenance/retry state."
+      }
+    ]
+  },
+  "safe_cex_transport::provider::TransformedData": {
+    "shape": "observed",
+    "evidence": "Borrowed getter for the actual post-transform data. Construct through the real RestBody transform and observe both the returned native Value and its referent identity, rather than serializing the provenance owner. These fixed object/string transform inputs do not claim every custom transform profile.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "value",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Borrowed getter for the actual post-transform data. Construct through the real RestBody transform and observe both the returned native Value and its referent identity, rather than serializing the provenance owner. These fixed object/string transform inputs do not claim every custom transform profile."
+      }
+    ],
+    "call": "{ let transformed=crate::RestBody::Untransformed($value.clone()).transform(None).expect(\"reviewed transform input\"); let crate::RestBody::Transformed(row)=transformed else {panic!(\"transform must produce native phase\")}; serde_json::json!({\"value\":row.value(),\"sameReference\":std::ptr::eq(row.value(),&row.value)}) }",
+    "cases": [
+      {
+        "input": {
+          "native": "object"
+        },
+        "output": {
+          "value": "{\"native\":\"object\"}",
+          "sameReference": true
+        }
+      },
+      {
+        "input": "native-string",
+        "output": {
+          "value": "native-string",
+          "sameReference": true
+        }
+      }
+    ]
   }
 }
