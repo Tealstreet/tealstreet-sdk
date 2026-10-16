@@ -165,3 +165,83 @@ restoration passes all four, with real production sources unchanged.
 This leaves 61 original Bitunix owners and 64 Blofin owners for subsequent
 review. Complete discovery, locals, features and WASM matrix coverage remain
 separate obligations; none of the 66 receipts is classification-only.
+
+## Concrete hosts and complete Bitunix discovery
+
+Three concrete Bitunix adapters now execute every inventoried raw-input method
+on the real BitunixVenue constructor. PlaceFrame observes case-sensitive matching,
+Unicode lowercase and UTF-16 output; BatchFrame observes property/own-key selection,
+nonmutating omission and actual POST/response data; CancelFrame observes actual
+POSTs and selected native Store order-status changes. The existing scripted
+runtime/transport fixture is included directly, with only its heading made
+include-compatible. No host receiver receives an exemption.
+
+Seven Blofin helpers observe encoded/native/transformed body provenance, exact
+configured REST requests, optional presence and supplied-value String decoding.
+Already-native strings remain data. Native helpers execute immediately-ready
+adapters through the actual production futures, including their explicit yields.
+
+Complete Bitunix discovery exposed ambiguous macro imports and two nested
+decoders. Exact type imports replace the history mapper glob; JSON macro calls
+use their canonical binding, while the ordinary adapter JSON function has a
+distinct import alias. The recursive query converter and event precision helper
+move unchanged to module scope and receive their own native contracts. Their
+actual QueryValue variants, nested fields/order, number bits and precision
+results are inspected directly. Only the obsolete block-local precision review
+is removed; no discovery or classification guard is broadened.
+
+After these structural changes, complete native/default inventory passes with
+five Deserialize and 196 other owners. This is discovery, not a complete runtime
+or matrix verdict. All twelve selected runtime owners pass after the changes.
+Four compiled controls invert concrete message matching, reparse an already-native
+body string, erase query number values and replace the nullish precision default.
+Each fails its native owner by value or bit observation and passes after exact
+restoration. Real production source bytes remain unchanged during controls.
+
+Of the original census, 58 Bitunix and 57 Blofin owners remain. Both newly lifted
+helper owners also have explicit native contracts. Features, locals and WASM
+matrix runtime coverage remain separate obligations.
+
+## API callbacks, stream dispatch and retained adapter hosts
+
+Another 24 owners have native/default contracts: sixteen Bitunix and eight
+Blofin. Every receipt executes production code; none is classification-only.
+
+Bitunix API witnesses observe native factory configuration, retry count,
+conditional transport installation and registration order. The registered
+request/response callbacks are actually invoked. Signing expectations use
+independent double-SHA256 calculations on explicit fixture plaintexts, preserving
+already-serialized body spaces, header positions, numeric variants and bits.
+Response cases retain original pointer identity and resend/dedupe/header/report
+order, including suppressed and falsy resend paths.
+
+Nine public websocket owners retain listener/super disposal order, per-step
+short circuits, cooldown timer identity and delay bits, ticker field-read order,
+individual number bits, missing-ticker guards, market-filter/map/track phases,
+open-time listener/timer order and all message routes. Kline callbacks assert
+that both handlers receive the same actual parsed Rc allocation. These are
+bounded host callbacks; real scheduling is not inferred.
+
+Concrete FillFrame, Session and Constructor methods use the existing native
+venue fixture. Their observations include actual GET requests, warning events,
+Store changes, read-result variants and socket tasks. The constructor's real
+scripted public socket emits price versus ticker subscriptions under secondary
+versus primary selection. The history query helper separately preserves optional
+zero values, field order and native number variants/bits. No receiver gains an
+exemption from these method witnesses.
+
+Blofin helpers retain emitted value pointer identity, missing/null differences,
+Error versus host-failure variants, warning severity and truthy response-message
+precedence. Book admission observes the actual borrowed payload and bid bits.
+Listener entry construction checks callback Rc identity and actually invokes the
+retained callback, alongside native subscription fields and key.
+
+All 24 selected runtime receipts pass with jobs1. Seven compiled copied-production
+controls change retry count, cooldown delay, Store market updates, secondary socket
+forwarding, query limit, warning text and timestamp admission. Each fails its named
+native value/bit observation; exact restoration passes all seven owners. Real
+production source bytes remain unchanged throughout the controls.
+
+These rows leave 42 original
+Bitunix owners and 49 Blofin owners for subsequent review. Complete-package
+runtime, local-owner and feature/WASM matrix gates remain separate obligations.

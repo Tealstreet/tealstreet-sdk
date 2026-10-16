@@ -2899,7 +2899,7 @@
   },
   {
     "function": "validate_account",
-    "body": "123af3ab633940d0",
+    "body": "865b3549d1e19a24",
     "reference": "crate :: history_rest :: validate_account",
     "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
   },
@@ -2917,7 +2917,7 @@
   },
   {
     "function": "fetch_historical_fills",
-    "body": "237523d368100a12",
+    "body": "d4f6be20a26d1e8a",
     "reference": "crate :: event_models :: fetch_historical_fills",
     "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
   },
@@ -3007,7 +3007,7 @@
   },
   {
     "function": "send_login",
-    "body": "7a23887ce5ab9e15",
+    "body": "342e0d85efe950b1",
     "reference": "Exchange :: name",
     "file": "safe-cex-venue-bitunix/src/sockets.rs"
   },
@@ -6034,6 +6034,54 @@
     "body": "93a0e61874b4305f",
     "reference": "socket_boundaries :: dispose",
     "file": "safe-cex-venue-okx/src/binding/typed_members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: runtime_actions :: dispose",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: runtime_actions :: start",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: trading_actions :: set_leverage",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: trading_actions :: set_all_leverage",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: runtime_actions :: update_order",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "68bd3ae95101fc92",
+    "reference": "crate :: trading_actions :: cancel_orders",
+    "file": "safe-cex-venue-orderly/src/binding/members.rs"
+  },
+  {
+    "function": "new",
+    "body": "1bd95ab145a6277e",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-orderly/src/native_exchange.rs"
+  },
+  {
+    "function": "drop",
+    "body": "515bd8a12d555002",
+    "call": "self . dispose ()",
+    "file": "safe-cex-venue-orderly/src/native_exchange.rs"
   },
   {
     "function": "sync",

@@ -78,6 +78,15 @@ pub struct MexcDependencies {
 
 /// Host inputs for Rust venue construction, requested once per constructed instance.
 pub trait RustVenueHost {
+    /// Per-name inputs for the six source Orderly subclasses.
+    fn orderly(
+        &self,
+        _: ExchangeName,
+    ) -> Result<safe_cex_venue_orderly::native_exchange::OrderlyDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Orderly dependencies were not supplied by this host",
+        ))
+    }
     fn kucoin_external_public_data(&self) -> Option<ExternalPublicDataFactory> {
         None
     }
@@ -255,6 +264,12 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Hyperliquidspot, hyperliquidspot_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
+    (ExchangeName::Kodiakfi, orderly_constructor),
+    (ExchangeName::Mode, orderly_constructor),
+    (ExchangeName::Salsadex, orderly_constructor),
+    (ExchangeName::TealstreetDex, orderly_constructor),
+    (ExchangeName::What, orderly_constructor),
+    (ExchangeName::Woofi, orderly_constructor),
     (ExchangeName::Lighter, lighter_constructor),
     (ExchangeName::LighterRobinhood, lighter_constructor),
     (ExchangeName::Kucoin, kucoin_constructor),
@@ -271,6 +286,17 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Woo, woo_constructor),
     (ExchangeName::Weex, weex_constructor),
 ];
+
+pub fn orderly_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.orderly(name.clone())?;
+        Ok(
+            safe_cex_venue_orderly::native_exchange::OrderlyExchange::new(
+                name, options, store, deps,
+            )?,
+        )
+    })
+}
 
 pub fn grvt_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {

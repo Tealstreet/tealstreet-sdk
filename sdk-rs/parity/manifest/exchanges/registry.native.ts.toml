@@ -358,33 +358,33 @@ note = "CHOSEN: native_woo selects the actual source module ./woo/woo.exchange a
 ts = "exchangeRegistry.kodiakfi"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_kodiakfi"
+rs = [ "safe-cex-registry/src/loaders.rs::native_kodiakfi", "safe-cex-registry/src/rust_venues.rs::orderly_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly" ]
 status = "divergent"
-note = "CHOSEN: native_kodiakfi selects the actual source module ./orderly/exchanges/kodiakfi/kodiakfi.exchange and export KodiakFIExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_kodiakfi. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::orderly_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly supply the selected family name, shared runtime, per-options transport and external-data provider for Rust construction. CHOSEN: native_kodiakfi selects the actual source module ./orderly/exchanges/kodiakfi/kodiakfi.exchange and export KodiakFIExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_kodiakfi. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.mode"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_mode"
+rs = [ "safe-cex-registry/src/loaders.rs::native_mode", "safe-cex-registry/src/rust_venues.rs::orderly_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly" ]
 status = "divergent"
-note = "CHOSEN: native_mode selects the actual source module ./orderly/exchanges/mode/mode.exchange and export MODEExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_mode. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::orderly_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly supply the selected family name, shared runtime, per-options transport and external-data provider for Rust construction. CHOSEN: native_mode selects the actual source module ./orderly/exchanges/mode/mode.exchange and export MODEExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_mode. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.salsadex"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_salsadex"
+rs = [ "safe-cex-registry/src/loaders.rs::native_salsadex", "safe-cex-registry/src/rust_venues.rs::orderly_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly" ]
 status = "divergent"
-note = "CHOSEN: native_salsadex selects the actual source module ./orderly/exchanges/salsadex/salsadex.exchange and export SalsaDEXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_salsadex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::orderly_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly supply the selected family name, shared runtime, per-options transport and external-data provider for Rust construction. CHOSEN: native_salsadex selects the actual source module ./orderly/exchanges/salsadex/salsadex.exchange and export SalsaDEXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_salsadex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.tealstreet-dex"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_tealstreet_dex"
+rs = [ "safe-cex-registry/src/loaders.rs::native_tealstreet_dex", "safe-cex-registry/src/rust_venues.rs::orderly_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly" ]
 status = "divergent"
-note = "CHOSEN: native_tealstreet_dex selects the actual source module ./orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange and export TealstreetDEXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_tealstreet_dex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::orderly_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly supply the selected family name, shared runtime, per-options transport and external-data provider for Rust construction. CHOSEN: native_tealstreet_dex selects the actual source module ./orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange and export TealstreetDEXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_tealstreet_dex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.txflow"
@@ -398,17 +398,17 @@ note = "API split: safe-cex-registry/src/rust_venues.rs::txflow_constructor and 
 ts = "exchangeRegistry.what"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_what"
+rs = [ "safe-cex-registry/src/loaders.rs::native_what", "safe-cex-registry/src/rust_venues.rs::orderly_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly" ]
 status = "divergent"
-note = "CHOSEN: native_what selects the actual source module ./orderly/exchanges/what/what.exchange and export WhatExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_what. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::orderly_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly supply the selected family name, shared runtime, per-options transport and external-data provider for Rust construction. CHOSEN: native_what selects the actual source module ./orderly/exchanges/what/what.exchange and export WhatExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_what. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.woofi"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_woofi"
+rs = [ "safe-cex-registry/src/loaders.rs::native_woofi", "safe-cex-registry/src/rust_venues.rs::orderly_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly" ]
 status = "divergent"
-note = "CHOSEN: native_woofi selects the actual source module ./orderly/exchanges/woofi/woofi.exchange and export WoofiExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_woofi. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::orderly_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::orderly supply the selected family name, shared runtime, per-options transport and external-data provider for Rust construction. CHOSEN: native_woofi selects the actual source module ./orderly/exchanges/woofi/woofi.exchange and export WoofiExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_woofi. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "getRegisteredExchangeNames"
