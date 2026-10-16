@@ -356,6 +356,18 @@ impl RustVenueHost for NativeVenueHost {
         )
     }
 
+    fn woo(&self) -> Result<safe_cex_venue_woo::WooDependencies, ExchangeError> {
+        Ok(safe_cex_venue_woo::WooDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                self.runtime.clone(),
+                (self.adapter)()?,
+                self.remote.clone(),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
+    }
+
     fn coinbase(&self) -> Result<safe_cex_venue_coinbase::CoinbaseDependencies, ExchangeError> {
         Ok(safe_cex_venue_coinbase::CoinbaseDependencies {
             runtime: self.runtime.clone(),

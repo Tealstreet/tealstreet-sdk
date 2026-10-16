@@ -86,7 +86,9 @@ through it. OKX-family, BloFin and Bitunix also share that hosted account for
 HTTP and private websocket auth. Bybit and Bybitdemo use the same hosted signer
 through their typed API factory and source receiver; the native HTTP witness is
 `tests/native_host_bybit.rs`, with no local credentials. Coinbase and Coinbase Spot use the same shared
-hosted signer for HTTP and native JWT websocket subscriptions. The JS host binds its exchange name during
+hosted signer for HTTP and native JWT websocket subscriptions. WOO is registered
+through its existing production binding and the same signed HTTP host; its local
+account-read test verifies the actual HMAC preimage. The JS host binds its exchange name during
 BaseExchange construction and injects the same signer into options and core
 availability; it refuses reuse for a different exchange. Bitunix retains the
 account name in its private auth request. Backpack still refuses hosted signing.
