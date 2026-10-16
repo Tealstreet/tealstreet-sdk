@@ -8,7 +8,9 @@ use safe_cex_exchange::{
     },
     runtime::{ExchangeError, LogSeverity},
 };
-use safe_cex_types::*;
+use safe_cex_types::{
+    Market, OHLCVOptions, Order, PlaceOrderOpts, Position, PositionMode, UpdateOrderOpts,
+};
 use std::rc::Rc;
 
 fn error(e: ExchangeError) -> Thrown {
