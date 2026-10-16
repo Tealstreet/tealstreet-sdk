@@ -46,3 +46,12 @@ fixtures capture dependency arguments; they do not prove networking or crypto
 primitive accuracy. Native runtime tests assert values, original handles and
 ordered effects before wire observations. Source mutation controls and compiled
 native mutations must fail named assertions before a passing gate is evidence.
+
+`native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
+Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,
+AccountFetch/OrderExecution and public/private stream bodies; it never evaluates
+TypeScript. The HTTP factory receives each client's own transport options.
+`tests/exchange_trait.rs` covers all 16 methods and V1/V3 signing; the inherited
+scheduleCancel rejection and declared uppercase public-trade side boundary remain.
+The registry supplies production native HTTP and gateway dependencies.
+See BINDING_GATES.md for compiled mutation controls and scoped verification.
