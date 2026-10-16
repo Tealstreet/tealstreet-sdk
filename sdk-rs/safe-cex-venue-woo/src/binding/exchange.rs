@@ -132,6 +132,31 @@ impl WooExchange {
     }
 }
 
+impl WooExchange {
+    fn listen<T: serde::de::DeserializeOwned + 'static>(
+        &self,
+        member: &'static str,
+        subject: Js,
+        callback: Rc<dyn Fn(T)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        let deliver = Js::function("", move |_, a| {
+            callback(to_typed(&a.into_iter().next().unwrap_or(Js::Undefined))?);
+            Ok(Js::Undefined)
+        });
+        let cleanup = self
+            .rt
+            .this
+            .call_method(member, vec![subject, deliver])
+            .map_err(err)?;
+        Ok(Box::new(move || {
+            if cleanup.is_callable() {
+                cleanup.call(Js::Undefined, vec![]).map_err(err)?;
+            }
+            Ok(())
+        }))
+    }
+}
+
 fn js<T: serde::Serialize>(value: &T) -> Result<Js, ExchangeError> {
     from_typed(value).map_err(err)
 }
@@ -262,6 +287,25 @@ impl Exchange for WooExchange {
             .call_method("afterMethodCalledInWorker", a)
             .map(|_| ())
             .map_err(err)
+    }
+    fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
+        let a = args!(js(&options));
+        self.invoke("fetchOHLCV", a)
+    }
+    // ts: WOOXExchange.listenOHLCV / listenOrderBook return the cleanup function.
+    fn listen_ohlcv(
+        &self,
+        options: OHLCVOptions,
+        callback: Rc<dyn Fn(Candle)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        self.listen("listenOHLCV", js(&options)?, callback)
+    }
+    fn listen_order_book(
+        &self,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        self.listen("listenOrderBook", js(&symbol)?, callback)
     }
     // ts: base.ts:989 — WOOXExchange inherits scheduleCancel, which rejects.
     fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
