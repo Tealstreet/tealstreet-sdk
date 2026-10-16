@@ -66221,5 +66221,1979 @@
       }
     ],
     "evidence": "Actual native WS login signing executes with bounded ready sync/sleep/sign callbacks. Local double-SHA256 expectations are authored independently with hashlib from explicit nonce/timestamp/key/trimmed-secret plaintext, including signed-zero timestamp text versus transmitted bits. Native request/frame property order, numeric versus string signature variants, remote signer Rc identity and report/no-send behavior retain error-over-present-signature source precedence (including falsy error text). Sync, sleep, sign, report and send failures remain distinct; concrete transport/signer implementations and arbitrary callbacks are separate owners."
+  },
+  "safe_cex_venue_bitunix::order_models::reject": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "reject",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "message",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "generic": "T"
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}let(venue,_,store,_)=harness::fixture();let events=std::rc::Rc::new(std::cell::RefCell::new(Vec::<serde_json::Value>::new()));let captured=events.clone();let fail=$value[\"listenerFail\"]==true;venue.base.on(\"error\",std::rc::Rc::new(move|name,payload|{captured.borrow_mut().push(serde_json::json!({\"event\":name,\"payload\":payload}));if fail{Err(safe_cex_exchange::runtime::ExchangeError::new(\"listener failed\"))}else{Ok(())}}));let mut host=venue.order_frame();let _=store;let result:Result<u64,crate::adapter::Fault>=$type(&mut host,$value[\"message\"].as_str().unwrap().to_owned());let returned=result.err().map(|e|e.0.message);let events=events.borrow().clone();serde_json::json!({\"returned\":returned,\"events\":events})}",
+    "cases": [
+      {
+        "input": {
+          "message": "Denied"
+        },
+        "output": {
+          "returned": "Denied",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Denied",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "message": ""
+        },
+        "output": {
+          "returned": "",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Unknown Exchange Error",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "message": "雪"
+        },
+        "output": {
+          "returned": "雪",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: 雪",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "message": "Denied",
+          "listenerFail": true
+        },
+        "output": {
+          "returned": "listener failed",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Denied",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "The actual generic rejection helper executes with the real production OrderFrame, constructed BitunixVenue and native BaseExchange error listener. Native error message and complete error event payload are observed, including empty/Unicode text and listener failure precedence before host error construction. Selected success type is u64; no arbitrary alternate host behavior is claimed."
+  },
+  "safe_cex_venue_bitunix::order_models::format_create_order": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "format_create_order",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "opts",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn observe(v:safe_cex_num::JsJsonValue)->serde_json::Value {use safe_cex_num::JsJsonValue as J;match v{J::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),J::Null=>serde_json::json!({\"kind\":\"null\"}),J::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),J::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),J::String(v)=>serde_json::json!({\"kind\":\"string\",\"value\":v}),J::Array(values)=>serde_json::json!({\"kind\":\"array\",\"values\":values.into_iter().map(observe).collect::<Vec<_>>()}),J::Object(values)=>serde_json::json!({\"kind\":\"object\",\"fields\":values.into_iter().map(|(key,value)|serde_json::json!({\"key\":key,\"value\":observe(value)})).collect::<Vec<_>>()}),J::BigInt(_)=>panic!(\"outside JSON fixture domain\")}}#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}let(venue,_,store,_)=harness::fixture();let events=std::rc::Rc::new(std::cell::RefCell::new(Vec::<serde_json::Value>::new()));let captured=events.clone();let fail=$value[\"listenerFail\"]==true;venue.base.on(\"error\",std::rc::Rc::new(move|name,payload|{captured.borrow_mut().push(serde_json::json!({\"event\":name,\"payload\":payload}));if fail{Err(safe_cex_exchange::runtime::ExchangeError::new(\"listener failed\"))}else{Ok(())}}));let mut host=venue.order_frame();if $value[\"position\"]==true{let mut positions=store.positions().to_vec();positions[0].contracts=2.0;positions[0].info=Some(serde_json::json!({\"positionId\":\"pos\"}));safe_cex_store::Store::update(store.as_ref(),safe_cex_store::StoreUpdate{positions:Some(positions),..Default::default()},false).unwrap();}let result=$type(&mut host,&$value[\"options\"]);let state=venue.state.borrow();let mut tif=state.order_tif_cache.iter().map(|(k,v)|(k.clone(),v.clone())).collect::<Vec<_>>();tif.sort();let mut reduce=state.order_reduce_only_cache.iter().map(|(k,v)|(k.clone(),*v)).collect::<Vec<_>>();reduce.sort();drop(state);let events=events.borrow().clone();match result{Ok(payloads)=>serde_json::json!({\"payloads\":payloads.into_iter().map(observe).collect::<Vec<_>>(),\"tif\":tif,\"reduce\":reduce,\"events\":events}),Err(error)=>serde_json::json!({\"error\":error.0.message,\"tif\":tif,\"reduce\":reduce,\"events\":events})}}",
+    "cases": [
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "buy",
+            "amount": 1.23456,
+            "price": 123.456,
+            "timeInForce": "ImmediateOrCancel",
+            "takeProfit": 150.123,
+            "tpTriggerType": "mark_price",
+            "stopLoss": 110.321,
+            "slTriggerType": "last_price"
+          }
+        },
+        "output": {
+          "payloads": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "qty",
+                  "value": {
+                    "kind": "string",
+                    "value": "1.235"
+                  }
+                },
+                {
+                  "key": "price",
+                  "value": {
+                    "kind": "string",
+                    "value": "123.5"
+                  }
+                },
+                {
+                  "key": "side",
+                  "value": {
+                    "kind": "string",
+                    "value": "BUY"
+                  }
+                },
+                {
+                  "key": "tradeSide",
+                  "value": {
+                    "kind": "string",
+                    "value": "OPEN"
+                  }
+                },
+                {
+                  "key": "orderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "LIMIT"
+                  }
+                },
+                {
+                  "key": "effect",
+                  "value": {
+                    "kind": "string",
+                    "value": "IOC"
+                  }
+                },
+                {
+                  "key": "clientId",
+                  "value": {
+                    "kind": "string",
+                    "value": "ts_fixture-nonce"
+                  }
+                },
+                {
+                  "key": "reduceOnly",
+                  "value": {
+                    "kind": "bool",
+                    "value": false
+                  }
+                },
+                {
+                  "key": "tpPrice",
+                  "value": {
+                    "kind": "string",
+                    "value": "150.123"
+                  }
+                },
+                {
+                  "key": "tpStopType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARK_PRICE"
+                  }
+                },
+                {
+                  "key": "tpOrderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARKET"
+                  }
+                },
+                {
+                  "key": "slPrice",
+                  "value": {
+                    "kind": "string",
+                    "value": "110.321"
+                  }
+                },
+                {
+                  "key": "slStopType",
+                  "value": {
+                    "kind": "string",
+                    "value": "LAST_PRICE"
+                  }
+                },
+                {
+                  "key": "slOrderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARKET"
+                  }
+                }
+              ]
+            }
+          ],
+          "tif": [
+            [
+              "ts_fixture-nonce",
+              "ImmediateOrCancel"
+            ]
+          ],
+          "reduce": [
+            [
+              "ts_fixture-nonce",
+              false
+            ]
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "market",
+            "side": "buy",
+            "amount": 1.23456,
+            "price": 123.456
+          }
+        },
+        "output": {
+          "payloads": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "qty",
+                  "value": {
+                    "kind": "string",
+                    "value": "1.235"
+                  }
+                },
+                {
+                  "key": "side",
+                  "value": {
+                    "kind": "string",
+                    "value": "BUY"
+                  }
+                },
+                {
+                  "key": "tradeSide",
+                  "value": {
+                    "kind": "string",
+                    "value": "OPEN"
+                  }
+                },
+                {
+                  "key": "orderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARKET"
+                  }
+                },
+                {
+                  "key": "effect",
+                  "value": {
+                    "kind": "string",
+                    "value": "GTC"
+                  }
+                },
+                {
+                  "key": "clientId",
+                  "value": {
+                    "kind": "string",
+                    "value": "ts_fixture-nonce"
+                  }
+                },
+                {
+                  "key": "reduceOnly",
+                  "value": {
+                    "kind": "bool",
+                    "value": false
+                  }
+                }
+              ]
+            }
+          ],
+          "tif": [],
+          "reduce": [
+            [
+              "ts_fixture-nonce",
+              false
+            ]
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "sell",
+            "amount": 1000,
+            "price": 1
+          }
+        },
+        "output": {
+          "payloads": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "qty",
+                  "value": {
+                    "kind": "string",
+                    "value": "500"
+                  }
+                },
+                {
+                  "key": "price",
+                  "value": {
+                    "kind": "string",
+                    "value": "1"
+                  }
+                },
+                {
+                  "key": "side",
+                  "value": {
+                    "kind": "string",
+                    "value": "SELL"
+                  }
+                },
+                {
+                  "key": "tradeSide",
+                  "value": {
+                    "kind": "string",
+                    "value": "OPEN"
+                  }
+                },
+                {
+                  "key": "orderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "LIMIT"
+                  }
+                },
+                {
+                  "key": "effect",
+                  "value": {
+                    "kind": "string",
+                    "value": "GTC"
+                  }
+                },
+                {
+                  "key": "clientId",
+                  "value": {
+                    "kind": "string",
+                    "value": "ts_fixture-nonce"
+                  }
+                },
+                {
+                  "key": "reduceOnly",
+                  "value": {
+                    "kind": "bool",
+                    "value": false
+                  }
+                }
+              ]
+            },
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "qty",
+                  "value": {
+                    "kind": "string",
+                    "value": "500"
+                  }
+                },
+                {
+                  "key": "price",
+                  "value": {
+                    "kind": "string",
+                    "value": "1"
+                  }
+                },
+                {
+                  "key": "side",
+                  "value": {
+                    "kind": "string",
+                    "value": "SELL"
+                  }
+                },
+                {
+                  "key": "tradeSide",
+                  "value": {
+                    "kind": "string",
+                    "value": "OPEN"
+                  }
+                },
+                {
+                  "key": "orderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "LIMIT"
+                  }
+                },
+                {
+                  "key": "effect",
+                  "value": {
+                    "kind": "string",
+                    "value": "GTC"
+                  }
+                },
+                {
+                  "key": "clientId",
+                  "value": {
+                    "kind": "string",
+                    "value": "ts_fixture-nonce"
+                  }
+                },
+                {
+                  "key": "reduceOnly",
+                  "value": {
+                    "kind": "bool",
+                    "value": false
+                  }
+                }
+              ]
+            }
+          ],
+          "tif": [],
+          "reduce": [
+            [
+              "ts_fixture-nonce",
+              false
+            ]
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "sell",
+            "amount": 1.23456,
+            "price": 123.456,
+            "reduceOnly": true
+          },
+          "position": true
+        },
+        "output": {
+          "payloads": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "qty",
+                  "value": {
+                    "kind": "string",
+                    "value": "1.235"
+                  }
+                },
+                {
+                  "key": "price",
+                  "value": {
+                    "kind": "string",
+                    "value": "123.5"
+                  }
+                },
+                {
+                  "key": "side",
+                  "value": {
+                    "kind": "string",
+                    "value": "SELL"
+                  }
+                },
+                {
+                  "key": "tradeSide",
+                  "value": {
+                    "kind": "string",
+                    "value": "CLOSE"
+                  }
+                },
+                {
+                  "key": "positionId",
+                  "value": {
+                    "kind": "string",
+                    "value": "pos"
+                  }
+                },
+                {
+                  "key": "orderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "LIMIT"
+                  }
+                },
+                {
+                  "key": "effect",
+                  "value": {
+                    "kind": "string",
+                    "value": "GTC"
+                  }
+                },
+                {
+                  "key": "clientId",
+                  "value": {
+                    "kind": "string",
+                    "value": "ts_fixture-nonce"
+                  }
+                },
+                {
+                  "key": "reduceOnly",
+                  "value": {
+                    "kind": "bool",
+                    "value": true
+                  }
+                }
+              ]
+            }
+          ],
+          "tif": [],
+          "reduce": [
+            [
+              "ts_fixture-nonce",
+              true
+            ]
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "NONE",
+            "type": "limit",
+            "side": "buy",
+            "amount": 1.23456,
+            "price": 123.456
+          }
+        },
+        "output": {
+          "error": "Market NONE not found",
+          "tif": [],
+          "reduce": [],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "trailing_stop_market",
+            "side": "buy",
+            "amount": 1.23456,
+            "price": 123.456
+          }
+        },
+        "output": {
+          "error": "Trailing stop loss is not supported",
+          "tif": [],
+          "reduce": [],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "side": "sell",
+            "amount": 1.23456,
+            "price": 123.456,
+            "reduceOnly": true
+          }
+        },
+        "output": {
+          "error": "No long position open for BTCUSDT - nothing to reduce",
+          "tif": [],
+          "reduce": [],
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: No long position open for BTCUSDT - nothing to reduce",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "Actual generic formatting uses the concrete native OrderFrame and existing venue/runtime/Store fixture, not a substitute model host. Complete native JsJsonValue payloads retain property order and string/bool variants, distinct fractional amount/price precision, raw TP/SL prices, market price omission, full two-payload splitting and reduce-only position ID. Native TIF/reduce caches and error events are inspected directly. The generated-client-ID path is selected; arbitrary caller ID shapes and other concrete formatting functions retain separate obligations."
+  },
+  "safe_cex_venue_bitunix::order_models::format_tpsl_order": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "format_tpsl_order",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "opts",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn observe(v:safe_cex_num::JsJsonValue)->serde_json::Value {use safe_cex_num::JsJsonValue as J;match v{J::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),J::Null=>serde_json::json!({\"kind\":\"null\"}),J::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),J::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),J::String(v)=>serde_json::json!({\"kind\":\"string\",\"value\":v}),J::Array(values)=>serde_json::json!({\"kind\":\"array\",\"values\":values.into_iter().map(observe).collect::<Vec<_>>()}),J::Object(values)=>serde_json::json!({\"kind\":\"object\",\"fields\":values.into_iter().map(|(key,value)|serde_json::json!({\"key\":key,\"value\":observe(value)})).collect::<Vec<_>>()}),J::BigInt(_)=>panic!(\"outside JSON fixture domain\")}}#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}let(venue,_,store,_)=harness::fixture();let events=std::rc::Rc::new(std::cell::RefCell::new(Vec::<serde_json::Value>::new()));let captured=events.clone();let fail=$value[\"listenerFail\"]==true;venue.base.on(\"error\",std::rc::Rc::new(move|name,payload|{captured.borrow_mut().push(serde_json::json!({\"event\":name,\"payload\":payload}));if fail{Err(safe_cex_exchange::runtime::ExchangeError::new(\"listener failed\"))}else{Ok(())}}));let mut host=venue.order_frame();if $value[\"position\"]!=false{let mut positions=store.positions().to_vec();positions[0].contracts=2.0;positions[0].info=Some(serde_json::json!({\"positionId\":\"pos\"}));safe_cex_store::Store::update(store.as_ref(),safe_cex_store::StoreUpdate{positions:Some(positions),..Default::default()},false).unwrap();}if $value[\"cache\"]==true{venue.state.borrow_mut().position_id_cache.insert(\"BTCUSDT:long\".into(),\"cached\".into());}if $value[\"opposite\"]==true{let orders:Vec<safe_cex_types::Order>=serde_json::from_value(serde_json::json!([{\"id\":\"sl\",\"status\":\"open\",\"symbol\":\"BTCUSDT\",\"type\":\"stop_market\",\"side\":\"sell\",\"price\":90.125,\"amount\":2,\"filled\":0,\"remaining\":2,\"reduceOnly\":true,\"lastUpdate\":1,\"slTriggerType\":\"last_price\",\"info\":{\"positionId\":\"pos\"}}])).unwrap();safe_cex_store::Store::update(store.as_ref(),safe_cex_store::StoreUpdate{orders:Some(orders),..Default::default()},false).unwrap();}let result=$type(&mut host,&$value[\"options\"]);let events=events.borrow().clone();match result{Ok(payloads)=>serde_json::json!({\"payloads\":payloads.into_iter().map(observe).collect::<Vec<_>>(),\"events\":events}),Err(error)=>serde_json::json!({\"error\":error.0.message,\"events\":events})}}",
+    "cases": [
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 1.23456,
+            "price": 123.456,
+            "tpTriggerType": "mark_price",
+            "slTriggerType": "last_price"
+          }
+        },
+        "output": {
+          "payloads": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "positionId",
+                  "value": {
+                    "kind": "string",
+                    "value": "pos"
+                  }
+                },
+                {
+                  "key": "tpPrice",
+                  "value": {
+                    "kind": "string",
+                    "value": "123.5"
+                  }
+                },
+                {
+                  "key": "tpStopType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARK_PRICE"
+                  }
+                },
+                {
+                  "key": "tpOrderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARKET"
+                  }
+                },
+                {
+                  "key": "tpQty",
+                  "value": {
+                    "kind": "string",
+                    "value": "1.235"
+                  }
+                }
+              ]
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "stop_market",
+            "side": "sell",
+            "amount": 1.23456,
+            "price": 123.456,
+            "tpTriggerType": "mark_price",
+            "slTriggerType": "last_price"
+          }
+        },
+        "output": {
+          "payloads": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "positionId",
+                  "value": {
+                    "kind": "string",
+                    "value": "pos"
+                  }
+                },
+                {
+                  "key": "slPrice",
+                  "value": {
+                    "kind": "string",
+                    "value": "123.5"
+                  }
+                },
+                {
+                  "key": "slStopType",
+                  "value": {
+                    "kind": "string",
+                    "value": "LAST_PRICE"
+                  }
+                },
+                {
+                  "key": "slOrderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARKET"
+                  }
+                },
+                {
+                  "key": "slQty",
+                  "value": {
+                    "kind": "string",
+                    "value": "1.235"
+                  }
+                }
+              ]
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 1.23456,
+            "price": 123.456,
+            "tpTriggerType": "mark_price",
+            "slTriggerType": "last_price"
+          },
+          "cache": true
+        },
+        "output": {
+          "payloads": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "positionId",
+                  "value": {
+                    "kind": "string",
+                    "value": "cached"
+                  }
+                },
+                {
+                  "key": "tpPrice",
+                  "value": {
+                    "kind": "string",
+                    "value": "123.5"
+                  }
+                },
+                {
+                  "key": "tpStopType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARK_PRICE"
+                  }
+                },
+                {
+                  "key": "tpOrderType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARKET"
+                  }
+                },
+                {
+                  "key": "tpQty",
+                  "value": {
+                    "kind": "string",
+                    "value": "1.235"
+                  }
+                }
+              ]
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 0,
+            "price": 123.456,
+            "tpTriggerType": "mark_price",
+            "slTriggerType": "last_price"
+          },
+          "opposite": true
+        },
+        "output": {
+          "payloads": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "positionId",
+                  "value": {
+                    "kind": "string",
+                    "value": "pos"
+                  }
+                },
+                {
+                  "key": "tpPrice",
+                  "value": {
+                    "kind": "string",
+                    "value": "123.5"
+                  }
+                },
+                {
+                  "key": "tpStopType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARK_PRICE"
+                  }
+                },
+                {
+                  "key": "slPrice",
+                  "value": {
+                    "kind": "string",
+                    "value": "90.125"
+                  }
+                },
+                {
+                  "key": "slStopType",
+                  "value": {
+                    "kind": "string",
+                    "value": "LAST_PRICE"
+                  }
+                },
+                {
+                  "key": "isPositionOrder",
+                  "value": {
+                    "kind": "bool",
+                    "value": true
+                  }
+                }
+              ]
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 0,
+            "price": 123.456,
+            "tpTriggerType": "mark_price",
+            "slTriggerType": "last_price"
+          },
+          "cache": true,
+          "opposite": true
+        },
+        "output": {
+          "payloads": [
+            {
+              "kind": "object",
+              "fields": [
+                {
+                  "key": "symbol",
+                  "value": {
+                    "kind": "string",
+                    "value": "BTCUSDT"
+                  }
+                },
+                {
+                  "key": "positionId",
+                  "value": {
+                    "kind": "string",
+                    "value": "cached"
+                  }
+                },
+                {
+                  "key": "tpPrice",
+                  "value": {
+                    "kind": "string",
+                    "value": "123.5"
+                  }
+                },
+                {
+                  "key": "tpStopType",
+                  "value": {
+                    "kind": "string",
+                    "value": "MARK_PRICE"
+                  }
+                },
+                {
+                  "key": "isPositionOrder",
+                  "value": {
+                    "kind": "bool",
+                    "value": true
+                  }
+                }
+              ]
+            }
+          ],
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 1.23456,
+            "price": 123.456,
+            "tpTriggerType": "mark_price",
+            "slTriggerType": "last_price"
+          },
+          "position": false
+        },
+        "output": {
+          "error": "No open long position found for BTCUSDT",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: No open long position found for BTCUSDT",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 1.23456,
+            "price": 0,
+            "tpTriggerType": "mark_price",
+            "slTriggerType": "last_price"
+          }
+        },
+        "output": {
+          "error": "Price is required for TP/SL orders",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Price is required for TP/SL orders",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "options": {
+            "symbol": "BTCUSDT",
+            "type": "take_profit_market",
+            "side": "sell",
+            "amount": 0,
+            "price": 0,
+            "tpTriggerType": "mark_price",
+            "slTriggerType": "last_price"
+          }
+        },
+        "output": {
+          "error": "Price is required for Position TP/SL orders",
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Price is required for Position TP/SL orders",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "Actual native OrderFrame/venue/Store hosts exercise partial TP and SL payloads and full-position TP updates. Complete native JsJsonValue fields retain separate amount/price precision and string/bool types; full-position updates preserve the unrelated SL raw price. Cached position ID precedes live info and prevents mismatched counterpart copying. Error events and original rejection messages remain distinct. This is a bounded concrete fixture profile, not arbitrary host callback coverage."
+  },
+  "safe_cex_venue_bitunix::order_models::append_leg": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "append_leg",
+      "signature": {
+        "inputs": [
+          [
+            "host",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "generic": "H"
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_num::json_stringify::JsJsonValue",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "order",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "update",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "market",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "changed_leg",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "leg",
+            {
+              "borrowed_ref": {
+                "lifetime": "'static",
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "position_order",
+            {
+              "primitive": "bool"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "H"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "H",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "safe_cex_venue_bitunix::order_models::OrderModelHost",
+                        "args": null
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn observe(v:safe_cex_num::JsJsonValue)->serde_json::Value {use safe_cex_num::JsJsonValue as J;match v{J::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),J::Null=>serde_json::json!({\"kind\":\"null\"}),J::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),J::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),J::String(v)=>serde_json::json!({\"kind\":\"string\",\"value\":v}),J::Array(values)=>serde_json::json!({\"kind\":\"array\",\"values\":values.into_iter().map(observe).collect::<Vec<_>>()}),J::Object(values)=>serde_json::json!({\"kind\":\"object\",\"fields\":values.into_iter().map(|(key,value)|serde_json::json!({\"key\":key,\"value\":observe(value)})).collect::<Vec<_>>()}),J::BigInt(_)=>panic!(\"outside JSON fixture domain\")}}#[allow(dead_code)]mod harness{extern crate self as safe_cex_venue_bitunix;include!(concat!(env!(\"CARGO_MANIFEST_DIR\"),\"/tests/support/venue_runtime.rs\"));}let(venue,_,store,_)=harness::fixture();let events=std::rc::Rc::new(std::cell::RefCell::new(Vec::<serde_json::Value>::new()));let captured=events.clone();let fail=$value[\"listenerFail\"]==true;venue.base.on(\"error\",std::rc::Rc::new(move|name,payload|{captured.borrow_mut().push(serde_json::json!({\"event\":name,\"payload\":payload}));if fail{Err(safe_cex_exchange::runtime::ExchangeError::new(\"listener failed\"))}else{Ok(())}}));let mut host=venue.order_frame();let _=store;let leg=if $value[\"leg\"]==\"sl\"{\"sl\"}else{\"tp\"};let changed=$value.get(\"changed\").and_then(|v|v.as_str()).unwrap_or(\"tp\");let mut payload=safe_cex_num::JsJsonValue::Object(vec![(\"keep\".into(),safe_cex_num::JsJsonValue::Bool(true))]);let result=$type(&mut host,&mut payload,&$value[\"order\"],&$value[\"update\"],&serde_json::json!({\"precision\":{\"amount\":0.001,\"price\":0.1}}),changed,leg,$value[\"positionOrder\"]==true);let events=events.borrow().clone();serde_json::json!({\"error\":result.err().map(|e|e.0.message),\"payload\":observe(payload),\"events\":events})}",
+    "cases": [
+      {
+        "input": {
+          "order": {
+            "id": "base",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "info": {
+              "tpPrice": 120.25,
+              "tpQty": 2.25,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 120.456,
+              "slPrice": 50.25,
+              "slQty": 2.5,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "market"
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "error": null,
+          "payload": {
+            "kind": "object",
+            "fields": [
+              {
+                "key": "keep",
+                "value": {
+                  "kind": "bool",
+                  "value": true
+                }
+              },
+              {
+                "key": "tpPrice",
+                "value": {
+                  "kind": "string",
+                  "value": "123.5"
+                }
+              },
+              {
+                "key": "tpStopType",
+                "value": {
+                  "kind": "string",
+                  "value": "MARK_PRICE"
+                }
+              },
+              {
+                "key": "tpQty",
+                "value": {
+                  "kind": "string",
+                  "value": "1.235"
+                }
+              },
+              {
+                "key": "tpOrderType",
+                "value": {
+                  "kind": "string",
+                  "value": "LIMIT"
+                }
+              },
+              {
+                "key": "tpOrderPrice",
+                "value": {
+                  "kind": "string",
+                  "value": "120.5"
+                }
+              }
+            ]
+          },
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "base",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "info": {
+              "tpPrice": 120.25,
+              "tpQty": 2.25,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 120.456,
+              "slPrice": 50.25,
+              "slQty": 2.5,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "market"
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          },
+          "leg": "sl",
+          "changed": "tp"
+        },
+        "output": {
+          "error": null,
+          "payload": {
+            "kind": "object",
+            "fields": [
+              {
+                "key": "keep",
+                "value": {
+                  "kind": "bool",
+                  "value": true
+                }
+              },
+              {
+                "key": "slPrice",
+                "value": {
+                  "kind": "string",
+                  "value": "50.25"
+                }
+              },
+              {
+                "key": "slStopType",
+                "value": {
+                  "kind": "string",
+                  "value": "LAST_PRICE"
+                }
+              },
+              {
+                "key": "slQty",
+                "value": {
+                  "kind": "string",
+                  "value": "2.5"
+                }
+              },
+              {
+                "key": "slOrderType",
+                "value": {
+                  "kind": "string",
+                  "value": "MARKET"
+                }
+              }
+            ]
+          },
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "base",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "info": {
+              "tpPrice": 120.25,
+              "tpQty": -1,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 120.456,
+              "slPrice": 50.25,
+              "slQty": 2.5,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "market"
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          },
+          "positionOrder": true
+        },
+        "output": {
+          "error": null,
+          "payload": {
+            "kind": "object",
+            "fields": [
+              {
+                "key": "keep",
+                "value": {
+                  "kind": "bool",
+                  "value": true
+                }
+              },
+              {
+                "key": "tpPrice",
+                "value": {
+                  "kind": "string",
+                  "value": "123.5"
+                }
+              },
+              {
+                "key": "tpStopType",
+                "value": {
+                  "kind": "string",
+                  "value": "MARK_PRICE"
+                }
+              }
+            ]
+          },
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "base",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "info": {}
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "error": null,
+          "payload": {
+            "kind": "object",
+            "fields": [
+              {
+                "key": "keep",
+                "value": {
+                  "kind": "bool",
+                  "value": true
+                }
+              }
+            ]
+          },
+          "events": []
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "base",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "info": {
+              "tpPrice": 120.25,
+              "tpQty": 2.25,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 120.456,
+              "slPrice": 50.25,
+              "slQty": 2.5,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "market"
+            }
+          },
+          "update": {
+            "price": 0
+          }
+        },
+        "output": {
+          "error": "Bitunix TP trigger price is invalid",
+          "payload": {
+            "kind": "object",
+            "fields": [
+              {
+                "key": "keep",
+                "value": {
+                  "kind": "bool",
+                  "value": true
+                }
+              }
+            ]
+          },
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Bitunix TP trigger price is invalid",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "base",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "info": {
+              "tpPrice": 120.25,
+              "tpQty": 2.25,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 120.456,
+              "slPrice": 50.25,
+              "slQty": 2.5,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "market"
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 0
+          }
+        },
+        "output": {
+          "error": "Bitunix TP quantity is invalid",
+          "payload": {
+            "kind": "object",
+            "fields": [
+              {
+                "key": "keep",
+                "value": {
+                  "kind": "bool",
+                  "value": true
+                }
+              },
+              {
+                "key": "tpPrice",
+                "value": {
+                  "kind": "string",
+                  "value": "123.5"
+                }
+              },
+              {
+                "key": "tpStopType",
+                "value": {
+                  "kind": "string",
+                  "value": "MARK_PRICE"
+                }
+              }
+            ]
+          },
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Bitunix TP quantity is invalid",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "order": {
+            "id": "base",
+            "symbol": "BTCUSDT",
+            "type": "limit",
+            "info": {
+              "tpPrice": 120.25,
+              "tpQty": 2.25,
+              "tpStopType": "MARK_PRICE",
+              "tpOrderType": "LIMIT",
+              "tpOrderPrice": 0,
+              "slPrice": 50.25,
+              "slQty": 2.5,
+              "slStopType": "LAST_PRICE",
+              "slOrderType": "market"
+            }
+          },
+          "update": {
+            "price": 123.456,
+            "amount": 1.23456
+          }
+        },
+        "output": {
+          "error": "Bitunix TP LIMIT execution price is invalid",
+          "payload": {
+            "kind": "object",
+            "fields": [
+              {
+                "key": "keep",
+                "value": {
+                  "kind": "bool",
+                  "value": true
+                }
+              },
+              {
+                "key": "tpPrice",
+                "value": {
+                  "kind": "string",
+                  "value": "123.5"
+                }
+              },
+              {
+                "key": "tpStopType",
+                "value": {
+                  "kind": "string",
+                  "value": "MARK_PRICE"
+                }
+              },
+              {
+                "key": "tpQty",
+                "value": {
+                  "kind": "string",
+                  "value": "1.235"
+                }
+              },
+              {
+                "key": "tpOrderType",
+                "value": {
+                  "kind": "string",
+                  "value": "LIMIT"
+                }
+              }
+            ]
+          },
+          "events": [
+            {
+              "event": "error",
+              "payload": [
+                "Exchange Error: Bitunix TP LIMIT execution price is invalid",
+                {
+                  "suppressConsoleLog": false
+                }
+              ]
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "Actual native amendment helper reads snapshots through the concrete production OrderFrame. Complete retained payloads observe trigger, quantity and LIMIT execution-price precision separately; unchanged opposite legs retain raw snapshot values. Position-level updates skip quantity/execution fields, absent snapshots leave the original payload intact, and invalid trigger/quantity/execution values retain their exact partial mutation and error-event order. Real snapshot decoder/Store bindings retain separate accepted obligations."
   }
 }
