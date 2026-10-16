@@ -522,7 +522,7 @@ lodash import rather than implementing a venue-local `times` policy.
 `tests/spot_binding.rs` exercises the trait, request category, caller-ID guard,
 public/private startup, Brazil local cancellation and disposal. The compiled
 `spot-binding-controls.py` runner disables 17 trait consumers one at a time;
-every control must fail a runtime assertion and the final five tests must pass.
+every control must fail a runtime assertion and the final six tests must pass. A further identity-field control removes only the early isSpot initializer and must fail the typed Spot flag assertion.
 The registry reuses its existing Bybit dependency/layers edge for Spot.
 
 The concrete private protocol now delivers frames through `WsProtocol::on_message`
@@ -531,10 +531,18 @@ clears recently-placed snapshot grace on sighting, maintains one canonical
 incremental-fill tracker per protocol, publishes terminal rows, and updates
 positions/balance in source order. Primary/Demo filter categories by the account
 switches. Dedicated Spot omits positions; dedicated Inverse preserves its
-qty/value fill pricing and [position, position] Store update pairs. Their
+qty/value fill pricing and [position, position] Store update pairs. The Spot constructor is now bound; dedicated Inverse and HyroTrader
 constructor/session bindings remain separately owned work. Execution and wallet
 topics are ignored in maintained TS and remain ignored here.
 `tests/private_event_delivery.rs` feeds the actual core socket pump. Its source
 oracle executes maintained handler, mapper, fill helper, selectors and Store
-bodies for 24 fixed compositions. `scripts/private-delivery-controls.py` proves
+bodies for 48 fixed compositions (primary/Spot, four flag modes, six scenes). `scripts/private-delivery-controls.py` proves
 six independent regressions fail and restores exact production bytes.
+
+The Spot constructor now uses the shared factory's source-field initializer, so
+its immutable typed base receives is_spot=true before publication. Its actual
+socket pump delivers only order frames and maintains one incremental-fill cache;
+private_event_delivery compares the actual Spot handler/mapOrder alongside the
+primary source bodies. Valid-array source cases are distinct from malformed-frame
+error coverage. The registry uses its existing Bybit host/dependency edge with the
+caller-owned limiter, including local and secretless hosted HTTP signing.

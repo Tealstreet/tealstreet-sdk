@@ -47,6 +47,11 @@ fn scripted(wire: &support::Wire) {
 fn spot_methods_use_spot_requests_and_inherited_refusals() {
     let h = support::harness_as(ExchangeName::Bybitspot, support::options(), scripted);
     assert_eq!(h.venue().class_name(), "BybitSpotExchange");
+    assert!(
+        h.venue().base().is_spot,
+        "Spot source flag reaches typed base"
+    );
+    assert!(!h.venue().base().is_demo);
     let markets = h.drive(h.venue().fetch_markets()).unwrap();
     assert_eq!(markets.len(), 1);
     assert_eq!(markets[0].is_spot, Some(true));

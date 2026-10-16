@@ -44,9 +44,15 @@ try:
         assert result.returncode == 101 and "panicked at" in result.stdout and "error[E" not in result.stdout, (name, result.stdout)
         print(name + ": compiled control caught", flush=True)
         source.write_text(original)
+    flag = '                    this.define("isSpot", Js::Bool(true))?;'
+    assert original.count(flag) == 1
+    source.write_text(original.replace(flag, ""))
+    result = run("source_is_spot")
+    assert result.returncode == 101 and "Spot source flag reaches typed base" in result.stdout and "panicked at" in result.stdout and "error[E" not in result.stdout, result.stdout
+    print("source_is_spot: compiled control caught", flush=True)
 finally:
     source.write_text(original)
 restored = run("restored")
 assert restored.returncode == 0 and "6 passed" in restored.stdout, restored.stdout
 assert source.read_text() == original
-print("17 method controls caught; restored 6 Spot E2Es pass.", flush=True)
+print("17 method + 1 identity-field controls caught; restored 6 Spot E2Es pass.", flush=True)
