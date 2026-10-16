@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
-rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs" ]
+rust_files = [ "safe-cex-venue-bybit/src/account_readers.rs", "safe-cex-venue-bybit/src/api_validation.rs", "safe-cex-venue-bybit/src/core_snapshot_readers.rs", "safe-cex-venue-bybit/src/exchange.rs", "safe-cex-venue-bybit/src/exchange_errors.rs", "safe-cex-venue-bybit/src/exchange_helpers.rs", "safe-cex-venue-bybit/src/exchange_state.rs", "safe-cex-venue-bybit/src/execution_guards.rs", "safe-cex-venue-bybit/src/failure_diagnostics.rs", "safe-cex-venue-bybit/src/history_mapping.rs", "safe-cex-venue-bybit/src/ledger_history.rs", "safe-cex-venue-bybit/src/local_order_reconciliation.rs", "safe-cex-venue-bybit/src/order_format.rs", "safe-cex-venue-bybit/src/position_controls.rs", "safe-cex-venue-bybit/src/primary_local_order_writes.rs", "safe-cex-venue-bybit/src/primary_order_lifecycle.rs", "safe-cex-venue-bybit/src/primary_startup.rs", "safe-cex-venue-bybit/src/private_snapshot_refresh.rs", "safe-cex-venue-bybit/src/public_data_recovery.rs", "safe-cex-venue-bybit/src/spot_order_writes.rs", "safe-cex-venue-bybit/src/stream_delegation.rs", "safe-cex-venue-bybit/src/ticker_readers.rs" ]
 
 [[symbol]]
 ts = "BYBIT_MARKETS_FAILURE_SENTRY_COOLDOWN_MS"
@@ -485,10 +485,10 @@ note = "CHOSEN: owned plain JSON and optional-value tuple results replace the so
 [[symbol]]
 ts = "BybitExchange.start"
 kind = "field-fn"
-layer = ""
-rs = ""
-status = "pending"
-note = ""
+layer = "adapted"
+rs = [ "safe-cex-venue-bybit/src/primary_startup.rs::start", "safe-cex-venue-bybit/src/primary_startup.rs::start_callback" ]
+status = "divergent"
+note = "CHOSEN: detached fetchAndCacheApiKeyInfo rejection. Source attaches an empty catch continuation and suppresses it; safe-cex-venue-bybit/src/primary_startup.rs::start_callback start_cache_failure sends the original rejected value to emitAndLogError and retains a reporter failure. Why mirroring would be worse: the cache fetch normally logs its own failures, so a rejection here means that logger itself rejected or a supplied method rejected directly, and silently dropping it leaves no visible outcome. Split: safe-cex-venue-bybit/src/primary_startup.rs::start retains the startup body (virtual-clock start, batchLimit, account-market overlay with disposal return, initExternalPublicData, cached public-only mode, eager margin probe and cache launch, markets-then plus raw tickers under Promise.all with post-market parseTickers ordering, probe warning or ready log, public-only loaded flags, credential guard, private socket, snapshots then tick); safe-cex-venue-bybit/src/primary_startup.rs::start_callback holds its lexical fee-overlay, markets-loaded, probe success/rejection and cache-failure callbacks over SnapshotHost. Unaccepted extraction checkpoint replayed from feat/rust-bybit-startup: no native oracle, mutation control or paired source/native witness exists yet for the body or the CHOSEN cache-failure path (see safe-cex-venue-bybit/GATE_EVIDENCE.md, Startup extraction checkpoint); concrete startup binding remains pending."
 
 [[symbol]]
 ts = "BybitExchange.fetchOrdersPositionsAndBalance"
