@@ -165,3 +165,39 @@ restoration passes all four, with real production sources unchanged.
 This leaves 61 original Bitunix owners and 64 Blofin owners for subsequent
 review. Complete discovery, locals, features and WASM matrix coverage remain
 separate obligations; none of the 66 receipts is classification-only.
+
+## Concrete hosts and complete Bitunix discovery
+
+Three concrete Bitunix adapters now execute every inventoried raw-input method
+on the real BitunixVenue constructor. PlaceFrame observes case-sensitive matching,
+Unicode lowercase and UTF-16 output; BatchFrame observes property/own-key selection,
+nonmutating omission and actual POST/response data; CancelFrame observes actual
+POSTs and selected native Store order-status changes. The existing scripted
+runtime/transport fixture is included directly, with only its heading made
+include-compatible. No host receiver receives an exemption.
+
+Seven Blofin helpers observe encoded/native/transformed body provenance, exact
+configured REST requests, optional presence and supplied-value String decoding.
+Already-native strings remain data. Native helpers execute immediately-ready
+adapters through the actual production futures, including their explicit yields.
+
+Complete Bitunix discovery exposed ambiguous macro imports and two nested
+decoders. Exact type imports replace the history mapper glob; JSON macro calls
+use their canonical binding, while the ordinary adapter JSON function has a
+distinct import alias. The recursive query converter and event precision helper
+move unchanged to module scope and receive their own native contracts. Their
+actual QueryValue variants, nested fields/order, number bits and precision
+results are inspected directly. Only the obsolete block-local precision review
+is removed; no discovery or classification guard is broadened.
+
+After these structural changes, complete native/default inventory passes with
+five Deserialize and 196 other owners. This is discovery, not a complete runtime
+or matrix verdict. All twelve selected runtime owners pass after the changes.
+Four compiled controls invert concrete message matching, reparse an already-native
+body string, erase query number values and replace the nullish precision default.
+Each fails its native owner by value or bit observation and passes after exact
+restoration. Real production source bytes remain unchanged during controls.
+
+Of the original census, 58 Bitunix and 57 Blofin owners remain. Both newly lifted
+helper owners also have explicit native contracts. Features, locals and WASM
+matrix runtime coverage remain separate obligations.

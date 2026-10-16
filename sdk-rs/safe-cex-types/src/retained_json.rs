@@ -135,6 +135,9 @@ impl<'de> Visitor<'de> for Capture {
     fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         f.write_str("JSON numeric input")
     }
+    fn visit_f64<E: de::Error>(self, v: f64) -> Result<Self::Value, E> {
+        BufferVisitor.visit_f64(v)
+    }
     fn visit_map<A: MapAccess<'de>>(self, mut map: A) -> Result<Self::Value, A::Error> {
         if map.next_key::<String>()?.as_deref() != Some(RAW_TOKEN) {
             return Err(de::Error::custom("missing raw JSON capture token"));

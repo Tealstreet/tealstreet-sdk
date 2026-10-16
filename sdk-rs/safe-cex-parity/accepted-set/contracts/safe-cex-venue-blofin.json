@@ -15963,5 +15963,1103 @@
       }
     ],
     "evidence": "This specific private lifecycle/read error constructor wraps the source message unchanged in its actual ServiceError::Input variant. Fixed String host errors and two independently chosen messages are observed directly; this is not a neighboring parser exemption."
+  },
+  "safe_cex_venue_blofin::order_services::body": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "body",
+      "signature": {
+        "inputs": [
+          [
+            "body",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestResponseBody",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let body=if $value[\"phase\"]==\"encoded\"{safe_cex_transport::RestResponseBody::Encoded($value[\"text\"].as_str().unwrap().as_bytes().to_vec())}else if $value[\"phase\"]==\"transformed\"{safe_cex_transport::RestResponseBody::Transformed($value[\"value\"].clone())}else{safe_cex_transport::RestResponseBody::Untransformed($value[\"value\"].clone())};match $type::<String>(&body){Ok(native)=>{let value=native.json();match value{serde_json::Value::Object(map)=>serde_json::json!({\"kind\":\"object\",\"numberBits\":map.get(\"n\").map(|n|format!(\"{:016x}\",n.as_f64().unwrap().to_bits())),\"falsePresent\":map.get(\"flag\")==Some(&serde_json::Value::Bool(false))}),serde_json::Value::String(text)=>serde_json::json!({\"kind\":\"string\",\"text\":text}),_=>panic!(\"unexpected native retained variant\")}},Err(_)=>serde_json::json!({\"error\":true})}}",
+    "cases": [
+      {
+        "input": {
+          "phase": "encoded",
+          "text": "{\"n\":1.25,\"flag\":false}"
+        },
+        "output": {
+          "kind": "object",
+          "numberBits": "3ff4000000000000",
+          "falsePresent": true
+        }
+      },
+      {
+        "input": {
+          "phase": "native",
+          "value": "{\"n\":1.25}"
+        },
+        "output": {
+          "kind": "string",
+          "text": "{\"n\":1.25}"
+        }
+      },
+      {
+        "input": {
+          "phase": "transformed",
+          "value": {
+            "n": 2.5,
+            "flag": false
+          }
+        },
+        "output": {
+          "kind": "object",
+          "numberBits": "4004000000000000",
+          "falsePresent": true
+        }
+      },
+      {
+        "input": {
+          "phase": "encoded",
+          "text": "not JSON"
+        },
+        "output": {
+          "error": true
+        }
+      }
+    ],
+    "evidence": "The actual order_services::body response-body bridge parses only Encoded JSON bytes, preserving already-native and transformed strings as data. Direct returned retained Value variants, false property presence and numeric bits distinguish body provenance; malformed encoded text refuses rather than being silently reinterpreted. Fixed String host errors do not classify neighboring functions."
+  },
+  "safe_cex_venue_blofin::reads::body": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "body",
+      "signature": {
+        "inputs": [
+          [
+            "body",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_transport::provider::RestResponseBody",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::tickers::TickerInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::reads::ReadError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{let body=if $value[\"phase\"]==\"encoded\"{safe_cex_transport::RestResponseBody::Encoded($value[\"text\"].as_str().unwrap().as_bytes().to_vec())}else if $value[\"phase\"]==\"transformed\"{safe_cex_transport::RestResponseBody::Transformed($value[\"value\"].clone())}else{safe_cex_transport::RestResponseBody::Untransformed($value[\"value\"].clone())};match $type::<String>(&body){Ok(native)=>{let value=native.retained();match value{serde_json::Value::Object(map)=>serde_json::json!({\"kind\":\"object\",\"numberBits\":map.get(\"n\").map(|n|format!(\"{:016x}\",n.as_f64().unwrap().to_bits())),\"falsePresent\":map.get(\"flag\")==Some(&serde_json::Value::Bool(false))}),serde_json::Value::String(text)=>serde_json::json!({\"kind\":\"string\",\"text\":text}),_=>panic!(\"unexpected native retained variant\")}},Err(_)=>serde_json::json!({\"error\":true})}}",
+    "cases": [
+      {
+        "input": {
+          "phase": "encoded",
+          "text": "{\"n\":1.25,\"flag\":false}"
+        },
+        "output": {
+          "kind": "object",
+          "numberBits": "3ff4000000000000",
+          "falsePresent": true
+        }
+      },
+      {
+        "input": {
+          "phase": "native",
+          "value": "{\"n\":1.25}"
+        },
+        "output": {
+          "kind": "string",
+          "text": "{\"n\":1.25}"
+        }
+      },
+      {
+        "input": {
+          "phase": "transformed",
+          "value": {
+            "n": 2.5,
+            "flag": false
+          }
+        },
+        "output": {
+          "kind": "object",
+          "numberBits": "4004000000000000",
+          "falsePresent": true
+        }
+      },
+      {
+        "input": {
+          "phase": "encoded",
+          "text": "not JSON"
+        },
+        "output": {
+          "error": true
+        }
+      }
+    ],
+    "evidence": "The actual reads::body response-body bridge parses only Encoded JSON bytes, preserving already-native and transformed strings as data. Direct returned retained Value variants, false property presence and numeric bits distinguish body provenance; malformed encoded text refuses rather than being silently reinterpreted. Fixed String host errors do not classify neighboring functions."
+  },
+  "safe_cex_venue_blofin::types::present": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "present",
+      "signature": {
+        "inputs": [
+          [
+            "d",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{match $type::<_,String>($value.clone()){Ok(value)=>serde_json::json!({\"present\":value.is_some(),\"text\":value}),Err(_)=>serde_json::json!({\"rejected\":true})}}",
+    "cases": [
+      {
+        "input": "first",
+        "output": {
+          "present": true,
+          "text": "first"
+        }
+      },
+      {
+        "input": "second",
+        "output": {
+          "present": true,
+          "text": "second"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "rejected": true
+        }
+      },
+      {
+        "input": 17,
+        "output": {
+          "rejected": true
+        }
+      }
+    ],
+    "evidence": "The exact generic present decoder is executed at T=String over the actual Value deserializer: a supplied valid string becomes Some, while null/wrong primitive refuses. Omitted field defaults belong to the enclosing wire records and cannot be manufactured by this supplied-value decoder. No other T or private helper is exempted."
+  },
+  "safe_cex_venue_blofin::order_services::request": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "request",
+      "signature": {
+        "inputs": [
+          [
+            "xhr",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "payload",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without external scheduling\")} struct Probe {seen:std::sync::Arc<std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>>,data:serde_json::Value} impl safe_cex_transport::RestAdapter for Probe {fn execute(&self,request:safe_cex_transport::RestRequest)->safe_cex_transport::RestFuture<'_,safe_cex_transport::RestResponse>{self.seen.lock().unwrap().push(request);let data=self.data.clone();Box::pin(async move{Ok(safe_cex_transport::RestResponse{status:200,reason:None,headers:Default::default(),body:safe_cex_transport::RestResponseBody::Untransformed(data)})})}}let seen=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));let xhr=Probe{seen:seen.clone(),data:$value[\"response\"].clone()};let native=run($type::<String>(&xhr,$value[\"method\"].as_str().unwrap(),\"MARKETS\",$value.get(\"params\").cloned(),$value.get(\"body\").cloned())).unwrap();let requests=seen.lock().unwrap();assert_eq!(requests.len(),1,\"exactly one actual configured adapter call\");let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(value)=>value.clone(),_=>panic!(\"source requests an untransformed payload\")});serde_json::json!({\"method\":request.method,\"url\":request.url,\"params\":request.params,\"paramsPresent\":request.params.is_some(),\"body\":body,\"bodyPresent\":request.body.is_some(),\"responseEcho\":native.json().get(\"echo\")})}",
+    "cases": [
+      {
+        "input": {
+          "method": "POST",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": {
+            "reduceOnly": false
+          },
+          "response": {
+            "echo": "first"
+          }
+        },
+        "output": {
+          "method": "POST",
+          "url": "/api/v1/market/instruments",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": {
+            "reduceOnly": false
+          },
+          "responseEcho": "first",
+          "paramsPresent": true,
+          "bodyPresent": true
+        }
+      },
+      {
+        "input": {
+          "method": "GET",
+          "response": {
+            "echo": false
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/api/v1/market/instruments",
+          "params": null,
+          "body": null,
+          "responseEcho": false,
+          "paramsPresent": false,
+          "bodyPresent": false
+        }
+      }
+    ],
+    "evidence": "The actual order_services::request configured REST helper executes against a bounded scripted RestAdapter, not a replacement response parser. Native request method, exact endpoint, optional params/body and returned retained payload are independently observed. Immediately-ready futures exercise any explicit yield before completion; real network timing and arbitrary host errors remain outside these native/default cases."
+  },
+  "safe_cex_venue_blofin::order_reads::get": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "xhr",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "url",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without external scheduling\")} struct Probe {seen:std::sync::Arc<std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>>,data:serde_json::Value} impl safe_cex_transport::RestAdapter for Probe {fn execute(&self,request:safe_cex_transport::RestRequest)->safe_cex_transport::RestFuture<'_,safe_cex_transport::RestResponse>{self.seen.lock().unwrap().push(request);let data=self.data.clone();Box::pin(async move{Ok(safe_cex_transport::RestResponse{status:200,reason:None,headers:Default::default(),body:safe_cex_transport::RestResponseBody::Untransformed(data)})})}}let seen=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));let xhr=Probe{seen:seen.clone(),data:$value[\"response\"].clone()};let native=run($type::<String>(&xhr,\"/native-reader\",$value[\"params\"].clone())).unwrap();let requests=seen.lock().unwrap();assert_eq!(requests.len(),1,\"exactly one actual configured adapter call\");let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(value)=>value.clone(),_=>panic!(\"source requests an untransformed payload\")});serde_json::json!({\"method\":request.method,\"url\":request.url,\"params\":request.params,\"paramsPresent\":request.params.is_some(),\"body\":body,\"bodyPresent\":request.body.is_some(),\"responseEcho\":native.json().get(\"echo\")})}",
+    "cases": [
+      {
+        "input": {
+          "params": {
+            "instId": "BTC"
+          },
+          "response": {
+            "echo": "first"
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/native-reader",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": null,
+          "responseEcho": "first",
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      },
+      {
+        "input": {
+          "params": null,
+          "response": {
+            "echo": false
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/native-reader",
+          "params": null,
+          "body": null,
+          "responseEcho": false,
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      }
+    ],
+    "evidence": "The actual order_reads::get configured REST helper executes against a bounded scripted RestAdapter, not a replacement response parser. Native request method, exact endpoint, optional params/body and returned retained payload are independently observed. Immediately-ready futures exercise any explicit yield before completion; real network timing and arbitrary host errors remain outside these native/default cases."
+  },
+  "safe_cex_venue_blofin::position_reads::get": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "xhr",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "endpoint",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "serde_json::value::Value",
+                "args": null
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without external scheduling\")} struct Probe {seen:std::sync::Arc<std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>>,data:serde_json::Value} impl safe_cex_transport::RestAdapter for Probe {fn execute(&self,request:safe_cex_transport::RestRequest)->safe_cex_transport::RestFuture<'_,safe_cex_transport::RestResponse>{self.seen.lock().unwrap().push(request);let data=self.data.clone();Box::pin(async move{Ok(safe_cex_transport::RestResponse{status:200,reason:None,headers:Default::default(),body:safe_cex_transport::RestResponseBody::Untransformed(data)})})}}let seen=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));let xhr=Probe{seen:seen.clone(),data:$value[\"response\"].clone()};let native=run($type::<String>(&xhr,\"MARKETS\",$value[\"params\"].clone())).unwrap();let requests=seen.lock().unwrap();assert_eq!(requests.len(),1,\"exactly one actual configured adapter call\");let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(value)=>value.clone(),_=>panic!(\"source requests an untransformed payload\")});serde_json::json!({\"method\":request.method,\"url\":request.url,\"params\":request.params,\"paramsPresent\":request.params.is_some(),\"body\":body,\"bodyPresent\":request.body.is_some(),\"responseEcho\":native.json().get(\"echo\")})}",
+    "cases": [
+      {
+        "input": {
+          "params": {
+            "instId": "BTC"
+          },
+          "response": {
+            "echo": "first"
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/api/v1/market/instruments",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": null,
+          "responseEcho": "first",
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      },
+      {
+        "input": {
+          "params": null,
+          "response": {
+            "echo": false
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/api/v1/market/instruments",
+          "params": null,
+          "body": null,
+          "responseEcho": false,
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      }
+    ],
+    "evidence": "The actual position_reads::get configured REST helper executes against a bounded scripted RestAdapter, not a replacement response parser. Native request method, exact endpoint, optional params/body and returned retained payload are independently observed. Immediately-ready futures exercise any explicit yield before completion; real network timing and arbitrary host errors remain outside these native/default cases."
+  },
+  "safe_cex_venue_blofin::rest_lifecycle::get": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get",
+      "signature": {
+        "inputs": [
+          [
+            "xhr",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "safe_cex_transport::provider::RestAdapter",
+                          "args": null
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "url",
+            {
+              "resolved_path": {
+                "path": "alloc::string::String",
+                "args": null
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::utility::UtilityInput",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_blofin::order_services::ServiceError",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(f:F)->F::Output{let mut f=std::pin::pin!(f);let mut cx=std::task::Context::from_waker(std::task::Waker::noop());for _ in 0..8{if let std::task::Poll::Ready(v)=f.as_mut().poll(&mut cx){return v;}}panic!(\"fixture must settle without external scheduling\")} struct Probe {seen:std::sync::Arc<std::sync::Mutex<Vec<safe_cex_transport::RestRequest>>>,data:serde_json::Value} impl safe_cex_transport::RestAdapter for Probe {fn execute(&self,request:safe_cex_transport::RestRequest)->safe_cex_transport::RestFuture<'_,safe_cex_transport::RestResponse>{self.seen.lock().unwrap().push(request);let data=self.data.clone();Box::pin(async move{Ok(safe_cex_transport::RestResponse{status:200,reason:None,headers:Default::default(),body:safe_cex_transport::RestResponseBody::Untransformed(data)})})}}let seen=std::sync::Arc::new(std::sync::Mutex::new(Vec::new()));let xhr=Probe{seen:seen.clone(),data:$value[\"response\"].clone()};let native=run($type::<String>(&xhr,\"/native-reader\".into(),$value.get(\"params\").cloned())).unwrap();let requests=seen.lock().unwrap();assert_eq!(requests.len(),1,\"exactly one actual configured adapter call\");let request=&requests[0];let body=request.body.as_ref().map(|body|match body{safe_cex_transport::RestBody::Untransformed(value)=>value.clone(),_=>panic!(\"source requests an untransformed payload\")});serde_json::json!({\"method\":request.method,\"url\":request.url,\"params\":request.params,\"paramsPresent\":request.params.is_some(),\"body\":body,\"bodyPresent\":request.body.is_some(),\"responseEcho\":native.json().get(\"echo\")})}",
+    "cases": [
+      {
+        "input": {
+          "params": {
+            "instId": "BTC"
+          },
+          "response": {
+            "echo": "first"
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/native-reader",
+          "params": {
+            "instId": "BTC"
+          },
+          "body": null,
+          "responseEcho": "first",
+          "paramsPresent": true,
+          "bodyPresent": false
+        }
+      },
+      {
+        "input": {
+          "response": {
+            "echo": false
+          }
+        },
+        "output": {
+          "method": "GET",
+          "url": "/native-reader",
+          "params": null,
+          "body": null,
+          "responseEcho": false,
+          "paramsPresent": false,
+          "bodyPresent": false
+        }
+      }
+    ],
+    "evidence": "The actual rest_lifecycle::get configured REST helper executes against a bounded scripted RestAdapter, not a replacement response parser. Native request method, exact endpoint, optional params/body and returned retained payload are independently observed. Immediately-ready futures exercise any explicit yield before completion; real network timing and arbitrary host errors remain outside these native/default cases."
   }
 }

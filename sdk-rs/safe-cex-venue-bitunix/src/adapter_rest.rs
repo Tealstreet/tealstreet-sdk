@@ -1,6 +1,9 @@
 //! REST reads, account writes and the start/tick session, bound to the ported bodies.
 use crate::{
-    adapter::{BitunixVenue, Fault, coercion, from_value, json, reason, to_value, units, utf8},
+    adapter::{
+        BitunixVenue, Fault, coercion, from_value, json as adapter_json, reason, to_value, units,
+        utf8,
+    },
     sockets::Socket,
 };
 use safe_cex_exchange::runtime::{ExchangeError, ExchangeFuture};
@@ -179,7 +182,7 @@ impl BitunixVenue {
     pub(crate) fn orders_from(&self, rows: Vec<JsJsonValue>) -> Result<Vec<Order>, ExchangeError> {
         let mut orders = Vec::new();
         for row in rows {
-            let value = json(&row)?;
+            let value = adapter_json(&row)?;
             match serde_json::from_value::<Order>(value.clone()) {
                 Ok(order) => orders.push(order),
                 Err(e) => self.log(
@@ -316,12 +319,14 @@ impl BitunixVenue {
                     e
                 },
                 |e| Ok(JsJsonValue::String(reason(e))),
-                |message| me.emit_error(&js_string(Some(&json(message)?)).map_err(coercion)?),
+                |message| {
+                    me.emit_error(&js_string(Some(&adapter_json(message)?)).map_err(coercion)?)
+                },
                 move || async move { balance.fetch_balance().await.map(|(b, _)| b) },
             )
             .await?;
             Ok(ValidateAccountResult {
-                error: from_value::<AccountValidationError>(json(&outcome.error)?)?,
+                error: from_value::<AccountValidationError>(adapter_json(&outcome.error)?)?,
                 balance: outcome.balance,
             })
         })
@@ -418,7 +423,7 @@ impl BitunixVenue {
             let rows = crate::event_models::fetch_historical_fills(&mut me.fill_frame(), &options)
                 .await
                 .map_err(|e| e.0)?;
-            rows.iter().map(|r| from_value(json(r)?)).collect()
+            rows.iter().map(|r| from_value(adapter_json(r)?)).collect()
         })
     }
     fn fill_frame(self: &Rc<Self>) -> FillFrame {

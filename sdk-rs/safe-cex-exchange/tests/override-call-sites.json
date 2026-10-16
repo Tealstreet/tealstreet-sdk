@@ -349,7 +349,7 @@
   },
   {
     "function": "facade",
-    "body": "35d694b8312ceda6",
+    "body": "c6140fadf0482da7",
     "call": "st . update_order (& id_of (& arg (& a , 0)) ? , & patch (& arg (& a , 1)) ?)",
     "file": "safe-cex-exchange/src/js_runtime/store.rs"
   },
@@ -2899,7 +2899,7 @@
   },
   {
     "function": "validate_account",
-    "body": "123af3ab633940d0",
+    "body": "865b3549d1e19a24",
     "reference": "crate :: history_rest :: validate_account",
     "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
   },
@@ -2917,7 +2917,7 @@
   },
   {
     "function": "fetch_historical_fills",
-    "body": "237523d368100a12",
+    "body": "d4f6be20a26d1e8a",
     "reference": "crate :: event_models :: fetch_historical_fills",
     "file": "safe-cex-venue-bitunix/src/adapter_rest.rs"
   },
@@ -3007,7 +3007,7 @@
   },
   {
     "function": "send_login",
-    "body": "7a23887ce5ab9e15",
+    "body": "342e0d85efe950b1",
     "reference": "Exchange :: name",
     "file": "safe-cex-venue-bitunix/src/sockets.rs"
   },

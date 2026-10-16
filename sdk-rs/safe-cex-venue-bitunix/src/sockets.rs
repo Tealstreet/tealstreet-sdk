@@ -1,6 +1,6 @@
 //! Public, futures and private Bitunix sockets on the shared BaseWebSocket runtime.
 use crate::{
-    adapter::{BitunixVenue, Fault, json, to_value, units, utf8},
+    adapter::{BitunixVenue, Fault, json as adapter_json, to_value, units, utf8},
     composition::{FuturesSocket, PrivateSocket, PublicSocket},
     session_control::{ConnectionHost, PrivateOpenHost, SocketKind, SocketListener},
 };
@@ -1558,7 +1558,7 @@ impl Socket {
                 || Ok(id.unique_id()),
                 |_| Ok(account_name.map_or(JsJsonValue::Undefined, JsJsonValue::String)),
                 |signer, payload| async move {
-                    let value = json(&payload).map_err(|e| e.message)?;
+                    let value = adapter_json(&payload).map_err(|e| e.message)?;
                     let request: safe_cex_types::ws_auth::WsAuthRequest =
                         serde_json::from_value(value).map_err(text)?;
                     let response = signer
@@ -1807,7 +1807,7 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
     }
     fn cache_tif(&mut self, client: &Value, tif: JsJsonValue) -> Result<(), Fault> {
         let client = js_string(Some(client))?;
-        let tif = js_string(Some(&json(&tif)?))?;
+        let tif = js_string(Some(&adapter_json(&tif)?))?;
         self.venue()?
             .state
             .borrow_mut()
@@ -1831,7 +1831,7 @@ impl crate::event_models::PrivateMessageHost for PrivateMessages {
     fn update_position_info(&mut self, position: &Value, info: JsJsonValue) -> Result<(), Fault> {
         let id = js_string(position.get("id"))?;
         let mut patch = serde_json::Map::new();
-        patch.insert("info".into(), json(&info)?);
+        patch.insert("info".into(), adapter_json(&info)?);
         Ok(self
             .venue()?
             .base

@@ -32,22 +32,45 @@ fn ids(value: &Js) -> Result<Vec<String>, Thrown> {
     Ok(out)
 }
 
-fn patch(value: &Js) -> Result<serde_json::Map<String, serde_json::Value>, Thrown> {
+fn json_patch(value: &Js) -> Result<serde_json::Map<String, serde_json::Value>, Thrown> {
     match to_json(value)? {
         serde_json::Value::Object(map) => Ok(map),
         _ => Ok(serde_json::Map::new()),
     }
 }
 
-// The nested option model is a native typed field, including nonfinite numbers.
-// Keep the existing JSON patch profile for the other, independently owned fields.
+// Scalar model numbers use the same native typed bridge as complete models.
+// Other fields retain their existing JSON admission and omission policy.
+fn patch(value: &Js) -> Result<ModelPatch, Thrown> {
+    if !matches!(value, Js::Object(_) | Js::Builtin(_)) || value.is_callable() {
+        return json_patch(value).map(ModelPatch::from);
+    }
+    let fields = Js::object(vec![]);
+    let mut numbers = vec![];
+    for (key, value) in value.own_entries()? {
+        let field = String::from_utf16_lossy(&key);
+        // `info` is explicitly opaque JSON, rather than a typed model number.
+        if field != "info" && matches!(value, Js::Number(_)) {
+            numbers.push((field, to_typed::<f64>(&value)?));
+        } else {
+            fields.define_key(&key, value)?;
+        }
+    }
+    let mut changes = ModelPatch::from(json_patch(&fields)?);
+    for (key, value) in numbers {
+        changes.set_number(key, value);
+    }
+    Ok(changes)
+}
+
+// Option terms are a nested native typed field, including nonfinite numbers.
 fn option_patch<T: serde::de::DeserializeOwned + Send + Sync + 'static>(
     value: &Js,
 ) -> Result<ModelPatch, Thrown> {
     let fields = value.spread_object()?;
     let option = fields.get("option")?;
     fields.delete(&super::value::utf16("option"));
-    let mut changes = ModelPatch::from(patch(&fields)?);
+    let mut changes = patch(&fields)?;
     if !option.is_undefined() {
         changes.set_native("option", to_typed::<T>(&option)?);
     }
@@ -284,7 +307,7 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
     method(
         "updateSocketHealth",
         Rc::new(|st, a| {
-            st.update_socket_health(&patch(&arg(&a, 0))?)
+            st.update_socket_health(&json_patch(&arg(&a, 0))?)
                 .map_err(mutation)?;
             Ok(Js::Undefined)
         }),

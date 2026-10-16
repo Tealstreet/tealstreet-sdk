@@ -789,7 +789,7 @@ test('Hyperliquid native field identity and NaN policy tests remain mandatory', 
 });
 
 test('Crypto Stark identity supplement runs actual SDK and native consumer', () => {
-  const oracle = readFileSync('sdk-rs/safe-cex-crypto/scripts/oracles.cjs', 'utf8');
+  const oracle = readFileSync(new URL('../safe-cex-crypto/scripts/oracles.cjs', import.meta.url), 'utf8');
   assert.match(oracle, /starknet\/domain-field-identities\.cjs/);
   assert.match(oracle, /'--test','field_identities'/);
 });
