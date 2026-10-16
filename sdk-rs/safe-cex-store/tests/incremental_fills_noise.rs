@@ -17,7 +17,7 @@ fn fill_increments_match_actual_typescript_at_venue_decimals() {
         vec![(1e-7, None), (3e-7, None)],
         vec![(1.5, Some(1e21)), (2.25, Some(3e21))],
         vec![(0.000001, None), (0.0000015, None)],
-        vec![(12345678.123456789, None), (12345678.987654321, None)],
+        vec![(12345678.12345679, None), (12345678.98765432, None)],
     ];
     let cleans = [
         83578.79999999999,
