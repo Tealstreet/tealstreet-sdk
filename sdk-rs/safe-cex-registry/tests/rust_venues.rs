@@ -997,21 +997,26 @@ fn okx_family_constructs_through_the_registry_and_reads_its_markets() {
 }
 
 #[test]
-fn rust_path_for_an_unbound_name_is_a_named_error_without_module_fallback() {
+fn unknown_name_is_rejected_before_registry_or_module_fallback() {
     let modules = Modules::default();
-    let error = match native_constructor(
-        ExchangeName::Grvt,
-        ConstructionPath::Rust,
-        &modules,
-        venues(),
-    ) {
-        Ok(_) => panic!("REGISTRY unbound rust path must fail"),
-        Err(error) => error,
-    };
-    assert_eq!(error.to_string(), "no Rust constructor for grvt");
+    let host = venues();
+    // ExchangeName is closed: a synthetic name fails at typed admission before
+    // either constructor route. Real venue additions cannot invalidate this gate.
+    let result = serde_json::from_value::<ExchangeName>(json!("__unbound_registry_control__"))
+        .map(|name| native_constructor(name, ConstructionPath::Rust, &modules, host.clone()));
+    let error = result.err().expect("unknown registry name must fail");
+    assert!(
+        error
+            .to_string()
+            .contains("unknown variant `__unbound_registry_control__`")
+    );
     assert!(
         modules.required.borrow().is_empty(),
         "REGISTRY no module-host fallback"
+    );
+    assert!(
+        host.calls.borrow().is_empty(),
+        "REGISTRY no venue inputs requested"
     );
 }
 
