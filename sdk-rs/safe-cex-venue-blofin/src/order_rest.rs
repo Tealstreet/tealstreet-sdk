@@ -1,5 +1,6 @@
 //! Order REST orchestration; construction and callback ownership belong to the host.
 use crate::{
+    modes::{AccountModes, apply_confirmed_margin_type},
     order_formatters::OrderPayload,
     order_services::{ServiceError, ServiceHost, body, code_ok, emit, request},
     types::USE_NON_BATCH_ENDPOINT_FOR_REDUCE_ONLY,
@@ -661,6 +662,7 @@ pub async fn cancel_orders<E: std::fmt::Display>(
 pub async fn change_margin_type<E>(
     isolated: bool,
     symbol: Option<&str>,
+    modes: &AccountModes,
     store: &dyn Store,
     xhr: &dyn RestAdapter,
     host: &WriteHost<'_, E>,
@@ -682,6 +684,17 @@ pub async fn change_margin_type<E>(
     if !code_ok(data)? {
         reject(host.service, data.get("msg"))?;
     }
+    let confirmed = match data
+        .get("data")
+        .and_then(|data| data.get("marginMode"))
+        .and_then(Value::as_str)
+    {
+        Some("isolated") => MarginType::Isolated,
+        Some("cross") => MarginType::Cross,
+        _ if isolated => MarginType::Isolated,
+        _ => MarginType::Cross,
+    };
+    apply_confirmed_margin_type(modes, store, confirmed).map_err(ServiceError::Store)?;
     (host.get_margin_type)(None, true).await?;
     if let Some(symbol) = symbol.filter(|s| !s.is_empty()) {
         let positions = (host.fetch_positions)(vec![symbol.into()]).await?;
