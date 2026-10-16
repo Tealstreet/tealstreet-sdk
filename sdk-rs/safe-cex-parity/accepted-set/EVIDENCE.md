@@ -400,3 +400,78 @@ JSON so integer-valued floats cannot be confused with JSON integer storage.
 CrossTradeStore now constrains its remote-derived decoder to object input;
 its existing native observations and the focused object/array regression retain
 the original map fields and reject positional arrays. No debt entry was added.
+
+
+## Per-crate contract storage cutover
+
+At source base `71107baba8`, the former
+`contracts.json` held 797 contracts. Those exact entries now occupy 16 compiler
+crate files in `contracts/`; no row, native adapter, signature, expected value or
+classification changed. `accepted-contract-files.mjs` supplies the complete
+merged object to the gate, local helper review, native helper controls and
+proposal helper. Existing explicit JSON fixture files remain supported.
+
+The executed test compared the COMPLETE original production object with the
+new loader using deep strict equality, including every adapter string and
+ordered array. Their recursively key-sorted semantic JSON SHA-256 both equal
+`b396f4a835ef661ae97f65ad883a2e64b4ba4aa21bdab8b4ba09f21c69a2eab9`.
+On this cutover commit, reproduce the comparison from Git history as follows
+(later reviewed contract additions naturally change the complete live set):
+
+```sh
+git show 71107baba8:sdk-rs/safe-cex-parity/accepted-set/contracts.json > /tmp/accepted-contracts-before-cutover.json
+node sdk-rs/safe-cex-parity/scripts/accepted-contract-files.test.mjs --legacy-contracts=/tmp/accepted-contracts-before-cutover.json
+```
+
+The permanent legacy fixture also checks exact values, adapter newlines,
+Unicode, negative zero and explicit-file compatibility. New directory controls
+refuse missing/malformed/empty inputs, misplaced or duplicated owners,
+unexpected files and symlink entries. Removing the namespace check or dropping
+an entry from the loaded set each fails its named assertion; restoration passes.
+The registered controls retain all earlier tests and mutations: 123 tests and
+144 mutations. Only the three new focused tests and two new mutations were
+executed for this storage change; the long full control suite was not repeated.
+
+All 23 focused loader/policy/local-helper/proposal tests and all 368 wiring tests
+pass. Fresh ordinary OKX compiler discovery remains 145 owners/four aliases;
+24 existing selected production witnesses loaded through the new directory pass
+with zero failed owners. Independently running the ordinary gate on the existing
+isolated fixture with a JSON file and with its per-crate directory produces
+exactly equal six native receipts (five runtime, one classification), zero
+failed owners in both runs. This proves loader compatibility, not workspace
+contract completion or any change to the standing ratchet.
+
+## GRVT fixed compiler alias identities
+
+Eleven finite entries in `generic-aliases.json` pin the actual GRVT declarations,
+including their original generic defaults and lifetimes. The selected arguments
+are explicit bool/bool pairs or bool, with static lifetimes for the three
+unsized FnMut aliases. Source defaults are neither deleted nor silently used as
+broader coverage. Every existing registry entry remains unchanged; the reviewed
+alias implementation and its caller, source, compiler-target and root guards
+are unchanged.
+
+Fresh pinned native/default compiler discovery on source base `71107baba8`
+reports 182 owners, 19 aliases and three construction obligations. All eleven
+new entries match that compiler's raw/expanded targets and original generics,
+and their roots are authenticated against its actual selected Cargo artifacts.
+Ordinary production policy routing chooses exactly the independently authored
+expected Rust types. One metadata-only native Rust compilation proves invariant
+type equality for all eleven aliases against the actual selected GRVT rmeta,
+with warnings denied; three unsized aliases use invariant function/pointer
+PhantomData. This is compiler identity evidence, not runtime decoder proof.
+
+All 21 focused reviewed/identity/callable/alias policy regressions pass. The
+actual eleven-entry compiler preflight additionally rejects changed source,
+raw/expanded targets, generics, caller redirects, missing Serde origins and
+unknown registry names. There is no new general generic-alias permission.
+
+AddedMarkets<bool> and JsResult<bool,bool> remain real decoders whose contracts
+and native value witnesses belong to the consumer review. Fields<bool> retains
+`Rc<RefCell<IndexMap<&'static str,bool>>>`: its static Deserialize bound compiles,
+and its DeserializeOwned bound is rejected as not general enough. The ordinary
+owned alias emitter therefore still refuses this owner; explicitly selecting
+the borrowed emitter compiles and hits its existing runtime refusal. Neither
+refusal is a passing native witness. Exact borrowed production-path support is
+separate work; no keys, dependencies, classification, runtime guard or standing
+debt changes in this registry addition.

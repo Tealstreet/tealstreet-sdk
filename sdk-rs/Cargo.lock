@@ -3982,6 +3982,7 @@ dependencies = [
  "safe-cex-venue-lighter",
  "safe-cex-venue-mexc",
  "safe-cex-venue-okx",
+ "safe-cex-venue-paradex",
  "safe-cex-venue-phemex",
  "safe-cex-venue-polymarket",
  "safe-cex-venue-txflow",
@@ -4382,11 +4383,17 @@ dependencies = [
 name = "safe-cex-venue-paradex"
 version = "0.1.0"
 dependencies = [
+ "num-bigint 0.4.6",
  "safe-cex-crypto",
+ "safe-cex-exchange",
  "safe-cex-num",
+ "safe-cex-store",
+ "safe-cex-transport",
  "safe-cex-types",
  "serde",
  "serde_json",
+ "starknet-core",
+ "starknet-crypto",
 ]
 
 [[package]]

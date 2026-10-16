@@ -113,6 +113,14 @@ pub trait RustVenueHost {
         ))
     }
 
+    fn paradex(
+        &self,
+    ) -> Result<safe_cex_venue_paradex::native_exchange::ParadexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Paradex dependencies were not supplied by this host",
+        ))
+    }
+
     fn phemex(
         &self,
     ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
@@ -255,6 +263,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
+    (ExchangeName::Paradex, paradex_constructor),
     (ExchangeName::Phemex, phemex_constructor),
     (ExchangeName::Polymarket, polymarket_constructor),
     (ExchangeName::Txflow, txflow_constructor),
@@ -662,6 +671,18 @@ pub fn apexomni_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
     ExchangeConstructor::new(move |name, options, store| {
         safe_cex_venue_apexomni::ApexOmniExchange::new(name, options, store, host.apexomni()?)
             .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
+}
+
+pub fn paradex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        safe_cex_venue_paradex::native_exchange::ParadexExchange::new(
+            name,
+            options,
+            store,
+            host.paradex()?,
+        )
+        .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
     })
 }
 

@@ -318,6 +318,13 @@ hosted signing. `native_host_asterdex` covers metadata, exact returned wire
 configuration and the key refusal; its four compiled controls live in
 `scripts/asterdex-hosted-controls.py`.
 
+Paradex's Rust entry calls `native_exchange::ParadexExchange::new` with shared
+runtime HTTP and external-data hosts. `native_host_paradex` constructs the
+production registry route over local HTTP and checks native amount/price steps,
+venue identity and source fetchMarkets Store purity. The native host explicitly
+refuses remoteSigner until the SDK account capability is bound; it never falls
+back to local credentials for a hosted account.
+
 Breakout Prop is the legacy DXtrade adapter, assembled through its existing
 constructor and ProductionHost rather than another venue's implementation.
 All 16 trait methods dispatch on shared js_runtime, including seven exact

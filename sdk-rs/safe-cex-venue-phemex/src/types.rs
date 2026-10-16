@@ -319,12 +319,89 @@ impl JsNumberOutput for PositionsResponse {
 /// Payload types must not declare their own `code` or `msg` fields. This is a
 /// caller precondition, not a runtime disjointness check: optional/defaulted
 /// overlaps and manually constructed duplicate metadata are unsupported.
-#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Serialize)]
 pub struct PhemexApiResponse<T> {
     pub code: f64,
     pub msg: String,
     #[serde(flatten)]
     pub payload: T,
+}
+impl<'de, T: Deserialize<'de>> Deserialize<'de> for PhemexApiResponse<T> {
+    fn deserialize<D: Deserializer<'de>>(d: D) -> Result<Self, D::Error> {
+        use serde::de::{DeserializeSeed, Error, IgnoredAny, MapAccess, Visitor, value};
+        use std::{fmt, marker::PhantomData};
+
+        // Forward payload fields to their original deserializer. Serde's derive
+        // for flatten first buffers them through Content, which sees lexical
+        // JSON numbers as maps under arbitrary_precision and loses typed f64s.
+        struct PayloadFields<A> {
+            map: A,
+            code: Option<f64>,
+            msg: Option<String>,
+        }
+        impl<'de, A: MapAccess<'de>> MapAccess<'de> for PayloadFields<A> {
+            type Error = A::Error;
+            fn next_key_seed<K: DeserializeSeed<'de>>(
+                &mut self,
+                seed: K,
+            ) -> Result<Option<K::Value>, Self::Error> {
+                while let Some(key) = self.map.next_key::<String>()? {
+                    match key.as_str() {
+                        "code" => {
+                            if self.code.is_some() {
+                                return Err(Error::duplicate_field("code"));
+                            }
+                            self.code = Some(self.map.next_value()?);
+                        }
+                        "msg" => {
+                            if self.msg.is_some() {
+                                return Err(Error::duplicate_field("msg"));
+                            }
+                            self.msg = Some(self.map.next_value()?);
+                        }
+                        _ => {
+                            return seed
+                                .deserialize(value::StringDeserializer::<A::Error>::new(key))
+                                .map(Some);
+                        }
+                    }
+                }
+                Ok(None)
+            }
+            fn next_value_seed<V: DeserializeSeed<'de>>(
+                &mut self,
+                seed: V,
+            ) -> Result<V::Value, Self::Error> {
+                self.map.next_value_seed(seed)
+            }
+        }
+        struct ResponseVisitor<T>(PhantomData<T>);
+        impl<'de, T: Deserialize<'de>> Visitor<'de> for ResponseVisitor<T> {
+            type Value = PhemexApiResponse<T>;
+            fn expecting(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
+                f.write_str("a Phemex response object")
+            }
+            fn visit_map<A: MapAccess<'de>>(self, map: A) -> Result<Self::Value, A::Error> {
+                let mut fields = PayloadFields {
+                    map,
+                    code: None,
+                    msg: None,
+                };
+                let payload = T::deserialize(value::MapAccessDeserializer::new(&mut fields))?;
+                // A custom payload may finish early. Still inspect metadata and
+                // consume the remaining original map, as the former derive did.
+                while fields.next_key::<IgnoredAny>()?.is_some() {
+                    fields.next_value::<IgnoredAny>()?;
+                }
+                Ok(PhemexApiResponse {
+                    code: fields.code.ok_or_else(|| Error::missing_field("code"))?,
+                    msg: fields.msg.ok_or_else(|| Error::missing_field("msg"))?,
+                    payload,
+                })
+            }
+        }
+        d.deserialize_map(ResponseVisitor(PhantomData))
+    }
 }
 impl<T: JsNumberOutput> JsNumberOutput for PhemexApiResponse<T> {
     fn check_number_output(&self) {
