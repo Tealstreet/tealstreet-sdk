@@ -6210,6 +6210,210 @@
     "file": "safe-cex-venue-txflow/src/exchange.rs"
   },
   {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "crate :: market_reads :: listen_ohlcv",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "crate :: market_reads :: listen_order_book",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "l :: validate_account",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "l :: get_account",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "l :: start",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "m :: fetch_markets",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "m :: fetch_tickers",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "m :: fetch_ohlcv",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "m :: fetch_public_trades",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "m :: fetch_historical_fills",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "r :: fetch_symbol_max_leverage",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "r :: fetch_leverage_for_symbol",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "r :: fetch_orders",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "crate :: income_reads :: fetch_income_history",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "crate :: income_reads :: fetch_income_history_range",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "t :: update_order",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "t :: fetch_positions",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "a :: cancel_orders",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "a :: cancel_symbol_orders",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "a :: cancel_all_orders",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "a :: update_symbol_metadata",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "a :: set_leverage",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "a :: change_margin_type",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "a :: change_position_mode",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "a :: nuke_positions",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "30b990225351ccfb",
+    "reference": "a :: nuke",
+    "file": "safe-cex-venue-weex/src/binding/classes.rs"
+  },
+  {
+    "function": "new",
+    "body": "7ec15446bf8ed778",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-weex/src/binding/exchange.rs"
+  },
+  {
+    "function": "new",
+    "body": "7ec15446bf8ed778",
+    "call": "venue . fetch_historical_fills (opts)",
+    "file": "safe-cex-venue-weex/src/binding/exchange.rs"
+  },
+  {
+    "function": "new",
+    "body": "7ec15446bf8ed778",
+    "call": "venue . fetch_income_history (opts)",
+    "file": "safe-cex-venue-weex/src/binding/exchange.rs"
+  },
+  {
+    "function": "new",
+    "body": "7ec15446bf8ed778",
+    "call": "venue . fetch_income_history_range (start , end , kind)",
+    "file": "safe-cex-venue-weex/src/binding/exchange.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "80bb9e04f69f6c43",
+    "reference": "feed :: dispose",
+    "file": "safe-cex-venue-weex/src/binding/socket_private.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "4d8d35d58d801ff5",
+    "reference": "crate :: public_feed :: listen_ohlcv",
+    "file": "safe-cex-venue-weex/src/binding/sockets.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "4d8d35d58d801ff5",
+    "reference": "crate :: public_feed :: listen_order_book",
+    "file": "safe-cex-venue-weex/src/binding/sockets.rs"
+  },
+  {
+    "function": "dispatch",
+    "body": "4d8d35d58d801ff5",
+    "reference": "crate :: public_feed :: dispose",
+    "file": "safe-cex-venue-weex/src/binding/sockets.rs"
+  },
+  {
     "function": "capabilities",
     "body": "7fd4da5365ca4436",
     "call": "venue . start ()",
