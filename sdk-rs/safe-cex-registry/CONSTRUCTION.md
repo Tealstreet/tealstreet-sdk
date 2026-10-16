@@ -23,8 +23,10 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     crate but less bound (13/16 and 9/16), so they join the table only when their
     own lane binds them.
 - **Dependencies:** `safe-cex-registry` gains direct dependencies on those venue
-  crates. That edge goes downward (registry is above venues in `layers.json`), so
-  it needs no exception.
+  crates. The edges go downward (registry is above venues), but layering alone
+  does not allow them: `layers.json` `registryConstructors` lists exactly the
+  table's venues. `layers:check` rejects an unlisted registry -> venue edge and
+  a listed venue with no live edge.
 - **The returned type is unchanged.** Each entry returns the existing
   `ExchangeConstructor`. Its factory keeps the signature
   `(ExchangeName, ExchangeOptions, Rc<dyn Store>) -> Result<Rc<dyn Exchange>, ExchangeError>`.
@@ -56,6 +58,8 @@ follow-up PR. Expected next: `binancepm`, `binancespot`, `bitget`, `okx`, `blofi
 Each follow-up does four things:
 - adds one `RUST_VENUES` entry;
 - adds its `RustVenueHost` method (with a dependencies struct if it needs one);
+- adds the venue to `registryConstructors.venues` in `sdk-rs/layers.json` —
+  `layers:check` rejects any registry -> venue edge that is not listed;
 - adds the literal to the membership test, plus a construction test that calls
   one trait method;
 - maps the new items as split members on that name's `exchangeRegistry.<name>`

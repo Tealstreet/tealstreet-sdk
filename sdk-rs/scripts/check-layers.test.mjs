@@ -197,8 +197,9 @@ for (const [from, to, reason] of [
   addEdge(metadata, from, to);
   assert.throws(() => validateLayers(policy, metadata), new RegExp(`(?:${reason} dependency: |dependency cycle: .*?)${from} -> ${to}`));
 });
-test('registry can construct venues and facade can depend on registry without exceptions', () => {
+test('registry can construct a listed venue and facade can depend on registry without exceptions', () => {
   const { policy, metadata } = inputs();
+  policy.registryConstructors.venues.push('safe-cex-venue-bybit');
   addEdge(metadata, 'safe-cex-registry', 'safe-cex-venue-bybit');
   addEdge(metadata, 'safe-cex', 'safe-cex-registry');
   assert.equal(validateLayers(policy, metadata), metadata.workspace_members.length);
@@ -210,9 +211,24 @@ test('moving registry back beside venues rejects its constructor dependency', ()
   // Core becomes adjacent after moving registry down; remove that now-stale skip.
   policy.exceptions = policy.exceptions.filter(edge => !(edge.from === 'safe-cex-registry' && edge.to === 'safe-cex-exchange'));
   policy.layers.find(layer => layer.name === 'venues').packages.push('safe-cex-registry');
+  // Its first real constructor-table edge is the one rejected.
+  assert.throws(() => validateLayers(policy, metadata), /lateral dependency: safe-cex-registry -> safe-cex-venue-backpack$/);
+});
+test('registry constructs only the listed venues', () => {
+  const { policy, metadata } = inputs();
+  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-backpack', 'safe-cex-venue-binance']);
   addEdge(metadata, 'safe-cex-registry', 'safe-cex-venue-bybit');
-  // The registry's real constructor-table edges (backpack, binance) may fail first.
-  assert.throws(() => validateLayers(policy, metadata), /lateral dependency: safe-cex-registry -> safe-cex-venue-/);
+  assert.throws(() => validateLayers(policy, metadata), /^AssertionError \[ERR_ASSERTION\]: unlisted registry constructor: safe-cex-registry -> safe-cex-venue-bybit$/);
+});
+test('removing a listed registry constructor rejects its live edge', () => {
+  const { policy, metadata } = inputs();
+  policy.registryConstructors.venues = policy.registryConstructors.venues.filter(venue => venue !== 'safe-cex-venue-backpack');
+  assert.throws(() => validateLayers(policy, metadata), /^AssertionError \[ERR_ASSERTION\]: unlisted registry constructor: safe-cex-registry -> safe-cex-venue-backpack$/);
+});
+test('a listed registry constructor without a live edge is stale', () => {
+  const { policy, metadata } = inputs();
+  policy.registryConstructors.venues.push('safe-cex-venue-okx');
+  assert.throws(() => validateLayers(policy, metadata), /stale registry constructor: safe-cex-registry -> safe-cex-venue-okx/);
 });
 test('venue cannot depend upward on constructor registry', () => {
   const { policy, metadata } = inputs();
