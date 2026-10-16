@@ -185,6 +185,22 @@ impl Wire {
             .unwrap()
             .insert(format!("{method} {path}"), body);
     }
+    /// Requests since the last call, as (METHOD, path, KC-API-KEY header).
+    pub fn take_keys(&self) -> Vec<(String, String, Option<String>)> {
+        self.requests
+            .lock()
+            .unwrap()
+            .drain(..)
+            .map(|r| {
+                let path = r.url.split('?').next().unwrap_or_default().to_owned();
+                (
+                    r.method.to_uppercase(),
+                    path,
+                    r.headers.get("KC-API-KEY").cloned(),
+                )
+            })
+            .collect()
+    }
     /// Requests since the last call, as (METHOD, path, params/body JSON).
     pub fn take(&self) -> Vec<(String, String, Value)> {
         self.requests
@@ -284,10 +300,22 @@ fn options() -> ExchangeOptions {
     .unwrap()
 }
 
+/// `options()` plus a configured read-only secondary key.
+pub fn secondary_options() -> ExchangeOptions {
+    serde_json::from_value(json!({
+        "key":"fixture-key","secret":"fixture-secret","passphrase":"fixture-pass",
+        "secondary_key":"secondary-key","secondary_secret":"secondary-secret",
+        "secondary_passphrase":"secondary-pass",
+        "extra":{"tickInterval":1.0e12}
+    }))
+    .unwrap()
+}
+
 #[allow(clippy::arc_with_non_send_sync)]
 fn parts(
     name: ExchangeName,
     runtime: &Rc<Runtime>,
+    options: ExchangeOptions,
 ) -> (Fixture, BaseExchangeParts, KucoinDependencies) {
     runtime.now.set(1_700_000_000_000.0);
     let store = Rc::new(DefaultStore::new());
@@ -322,17 +350,17 @@ fn parts(
         registry: Rc::new(safe_cex_transport::TransportRegistry::default()),
         clock,
         retry_clock: clock_rt,
-        external_public_data: None,
     };
     let parts = BaseExchangeParts {
         name,
-        options: options(),
+        options,
         store: store.clone(),
         settings: ExchangeSettings {
             supports_public_only: true,
             positions_supported: Some(true),
             ..Default::default()
         },
+        external_public_data: None,
     };
     (
         Fixture {
@@ -346,14 +374,22 @@ fn parts(
 }
 
 pub fn futures() -> (Rc<KucoinExchange>, Fixture) {
+    futures_with(options())
+}
+
+pub fn futures_with(options: ExchangeOptions) -> (Rc<KucoinExchange>, Fixture) {
     let runtime = Rc::new(Runtime::default());
-    let (fixture, parts, deps) = parts(ExchangeName::Kucoin, &runtime);
+    let (fixture, parts, deps) = parts(ExchangeName::Kucoin, &runtime, options);
     (KucoinExchange::new(parts, deps).unwrap(), fixture)
 }
 
 pub fn spot() -> (Rc<KucoinSpotExchange>, Fixture) {
+    spot_with(options())
+}
+
+pub fn spot_with(options: ExchangeOptions) -> (Rc<KucoinSpotExchange>, Fixture) {
     let runtime = Rc::new(Runtime::default());
-    let (fixture, parts, deps) = parts(ExchangeName::Kucoinspot, &runtime);
+    let (fixture, parts, deps) = parts(ExchangeName::Kucoinspot, &runtime, options);
     (KucoinSpotExchange::new(parts, deps).unwrap(), fixture)
 }
 

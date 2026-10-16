@@ -104,6 +104,21 @@ fn request(config: &Js) -> Result<RestRequest, Thrown> {
 }
 
 impl ApiHost {
+    /// A fresh client wire for `createAPI(options)`: each call owns its signer and adapter.
+    pub(crate) fn with_options(&self, options: ExchangeOptions) -> Rc<ApiHost> {
+        Rc::new_cyclic(|me| ApiHost {
+            me: me.clone(),
+            runtime: self.runtime.clone(),
+            options,
+            spot: self.spot,
+            http: self.http.clone(),
+            registry: self.registry.clone(),
+            clock: self.clock.clone(),
+            retry_clock: self.retry_clock.clone(),
+            api: RefCell::new(None),
+        })
+    }
+
     async fn api(self: Rc<Self>) -> Result<Rc<dyn RestAdapter>, Thrown> {
         if let Some(api) = self.api.borrow().clone() {
             return Ok(api);

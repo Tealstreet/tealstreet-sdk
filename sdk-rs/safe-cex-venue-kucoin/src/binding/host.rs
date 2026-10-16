@@ -4,7 +4,7 @@ use super::Shared;
 use crate::public_streams::StreamOps;
 use safe_cex_exchange::js_runtime::{
     promise::{Promise, await_js},
-    scope::{bound_member, scope_of},
+    scope::scope_of,
     value::{Js, Str, Thrown, arg},
 };
 use std::rc::{Rc, Weak};
@@ -103,26 +103,8 @@ fn items(v: &Js) -> Result<Vec<Js>, Thrown> {
         .ok_or_else(|| Thrown::type_error(&format!("{} is not iterable", v.to_display())))
 }
 
-/// Array.prototype.flat (depth 1), absent from the shared builtins.
-pub(crate) fn flat(v: &Js) -> Js {
-    let mut out = vec![];
-    for item in v.array_items().unwrap_or_default().into_iter().flatten() {
-        match item.array_items() {
-            Some(inner) => out.extend(inner.into_iter().flatten()),
-            None => out.push(item),
-        }
-    }
-    Js::array(out)
-}
-
-/// `value.member` as a bound callable, plus the members the shared builtins lack.
-pub(crate) fn member(value: &Js, key: &str) -> Result<Js, Thrown> {
-    if key == "flat" && value.is_array() {
-        let owner = value.clone();
-        return Ok(Js::function("flat", move |_, _| Ok(flat(&owner))));
-    }
-    bound_member(value, key)
-}
+/// `value.member` as a bound callable.
+pub(crate) use safe_cex_exchange::js_runtime::scope::bound_member as member;
 
 /// Resolve `this.a.b` against `receiver` or a module-scope `A.b` from globals;
 /// a callable last segment keeps its owner as receiver.

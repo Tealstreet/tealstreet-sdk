@@ -7,7 +7,7 @@ pub(crate) mod http;
 pub(crate) mod ops;
 
 use safe_cex_exchange::js_runtime::{scope::ScopeShared, value::Js};
-use std::cell::RefCell;
+use std::{cell::RefCell, rc::Rc};
 
 pub(crate) type Shared = ScopeShared<Extra>;
 
@@ -15,8 +15,7 @@ pub(crate) type Shared = ScopeShared<Extra>;
 pub(crate) struct Extra {
     /// Receiver -> object holding the base-class members a subclass field shadows.
     pub supers: RefCell<Vec<(Js, Js)>>,
-    /// JS emitter listener -> core listener id, for `emitter.off(event, fn)`.
-    pub listeners: RefCell<Vec<(String, Js, String)>>,
     pub parts: RefCell<Option<safe_cex_exchange::js_runtime::base_exchange::BaseExchangeParts>>,
-    pub external: Option<crate::kucoin_exchange::ExternalPublicDataFactory>,
+    /// Template the createAPI/createKucoinSpotAPI globals clone per options object.
+    pub api: Rc<http::ApiHost>,
 }

@@ -643,3 +643,94 @@ fn spot_binds_all_sixteen_defaults() {
     venue.dispose().unwrap();
     assert!(venue.base().is_disposed());
 }
+
+fn key_of(log: &[(String, String, Option<String>)], method: &str, path: &str) -> Option<String> {
+    log.iter()
+        .find(|(m, u, _)| m == method && u == path)
+        .unwrap_or_else(|| panic!("{method} {path} not sent: {log:?}"))
+        .2
+        .clone()
+}
+
+// ts: kucoin.exchange.ts:77 — `this.xhr = this.createXhrWithSecondaryKey(opts, createAPI, ...)`:
+// reads go to the secondary key, writes (xhr.post and unlimitedXHR) stay on the primary.
+#[test]
+fn futures_secondary_key_signs_reads_and_primary_signs_writes() {
+    let (venue, f) = support::futures_with(support::secondary_options());
+    let rt = &f.runtime;
+    let wire = &f.wire;
+    let venue: Rc<dyn Exchange> = venue;
+    futures_wire(wire);
+    drive(rt, venue.start()).unwrap();
+    let orders = drive(rt, venue.fetch_orders(None)).unwrap();
+    wire.take_keys();
+
+    wire.script(
+        "GET",
+        "/api/v1/user-info",
+        ok(json!({"userId":"user-1","subUserId":null,"referrerUserId":null})),
+    );
+    drive(rt, venue.get_account()).unwrap();
+    assert_eq!(
+        key_of(&wire.take_keys(), "GET", "/api/v1/user-info").as_deref(),
+        Some("secondary-key"),
+        "futures GET signed with the secondary key"
+    );
+
+    wire.script("POST", "/api/v2/changeCrossUserLeverage", ok(json!(true)));
+    drive(rt, venue.set_leverage("BTCUSDT".into(), 5.0, None)).unwrap();
+    let log = wire.take_keys();
+    assert_eq!(
+        key_of(&log, "GET", "/api/v1/positions").as_deref(),
+        Some("secondary-key"),
+        "futures xhr.get positions refresh on the secondary key"
+    );
+    assert_eq!(
+        key_of(&log, "POST", "/api/v2/changeCrossUserLeverage").as_deref(),
+        Some("fixture-key"),
+        "futures xhr.post signed with the primary key"
+    );
+
+    wire.script(
+        "DELETE",
+        "/api/v1/orders/o1",
+        ok(json!({"cancelledOrderIds":["o1"]})),
+    );
+    drive(rt, venue.cancel_orders(orders)).unwrap();
+    assert_eq!(
+        key_of(&wire.take_keys(), "DELETE", "/api/v1/orders/o1").as_deref(),
+        Some("fixture-key"),
+        "futures unlimitedXHR cancel signed with the primary key"
+    );
+}
+
+// ts: kucoinspot.exchange.ts:74 — the same split over createKucoinSpotAPI.
+#[test]
+fn spot_secondary_key_signs_reads_and_primary_signs_writes() {
+    let (venue, f) = support::spot_with(support::secondary_options());
+    let rt = &f.runtime;
+    let wire = &f.wire;
+    let venue: Rc<dyn Exchange> = venue;
+    spot_wire(wire);
+    drive(rt, venue.start()).unwrap();
+    wire.take_keys();
+
+    let orders = drive(rt, venue.fetch_orders(None)).unwrap();
+    assert_eq!(
+        key_of(&wire.take_keys(), "GET", "/api/v1/hf/orders/active/page").as_deref(),
+        Some("secondary-key"),
+        "spot GET signed with the secondary key"
+    );
+
+    wire.script(
+        "DELETE",
+        "/api/v1/hf/orders/s1",
+        ok(json!({"orderId":"s1"})),
+    );
+    drive(rt, venue.cancel_orders(orders)).unwrap();
+    assert_eq!(
+        key_of(&wire.take_keys(), "DELETE", "/api/v1/hf/orders/s1").as_deref(),
+        Some("fixture-key"),
+        "spot cancel signed with the primary key"
+    );
+}

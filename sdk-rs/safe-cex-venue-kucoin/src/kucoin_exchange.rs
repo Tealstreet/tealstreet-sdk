@@ -6,14 +6,14 @@ use safe_cex_exchange::{
         CapabilityBinding, ExchangeCapabilities, PlaceOrderBinding, PlaceOrdersBinding,
     },
     exchange::{BaseExchange, Exchange, ValidatedOrder},
-    external::ExternalPublicData,
     http::HttpClientOptions,
     js_runtime::{
         base_exchange::BaseExchangeParts,
         globals::{install_builtins, install_enums},
+        library::install_library,
         promise::await_js,
         scope::ScopeShared,
-        store,
+        sockets, store,
         value::{Js, Thrown, arg, from_typed, to_typed},
     },
     runtime::{ExchangeError, ExchangeFuture, ListenerCleanup},
@@ -24,9 +24,6 @@ use safe_cex_transport::{TransportRegistry, rate_limit::RateLimitClock};
 use safe_cex_types::*;
 use std::{cell::RefCell, rc::Rc};
 
-pub type ExternalPublicDataFactory =
-    Rc<dyn Fn(&ExchangeOptionsExternalPublicData) -> Rc<dyn ExternalPublicData>>;
-
 /// Host collaborators of both KuCoin classes.
 pub struct KucoinDependencies {
     pub runtime: Rc<dyn WsRuntime>,
@@ -35,8 +32,6 @@ pub struct KucoinDependencies {
     pub registry: Rc<TransportRegistry>,
     pub clock: VirtualClock,
     pub retry_clock: Rc<dyn RateLimitClock>,
-    /// Provider for `options.externalPublicData`; required when that option is set.
-    pub external_public_data: Option<ExternalPublicDataFactory>,
 }
 
 fn err(e: Thrown) -> ExchangeError {
@@ -61,23 +56,10 @@ fn assemble(
     deps: KucoinDependencies,
     spot: bool,
 ) -> Result<Assembly, ExchangeError> {
-    if parts.options.external_public_data.is_some() && deps.external_public_data.is_none() {
-        return Err(ExchangeError::new(
-            "KucoinExchange: externalPublicData is configured but no external public data provider was supplied",
-        ));
-    }
     parts.settings.client_order_id_rule = Some(globals::client_order_id_rule(spot));
     let name = js(&parts.name)?;
     let options = js(&parts.options)?;
     let store = store::facade(parts.store.clone());
-    {
-        let typed = parts.store.clone();
-        store.define_accessor(
-            "fetchedLeverage",
-            Some(Rc::new(move |_| from_typed(&*typed.fetched_leverage()))),
-            None,
-        );
-    }
     let http = Rc::new_cyclic(|me| ApiHost {
         me: me.clone(),
         runtime: deps.runtime.clone(),
@@ -95,25 +77,33 @@ fn assemble(
         let g = Js::object(vec![]);
         install_builtins(&g, weak.clone());
         install_enums(&g);
+        install_library(&g, weak.clone());
         if let Err(e) = globals::install(&g, weak.clone(), &runtime) {
             failure = Some(e);
         }
         ScopeShared::new(
             runtime.clone(),
-            http,
+            http.clone(),
             parts.store.clone(),
             g,
             Extra {
                 supers: RefCell::default(),
-                listeners: RefCell::default(),
                 parts: RefCell::new(None),
-                external: deps.external_public_data.clone(),
+                api: http,
             },
         )
     });
     if let Some(e) = failure {
         return Err(err(e));
     }
+    // The socket context exists only once the scope does.
+    shared
+        .globals
+        .define(
+            "BaseWebSocket",
+            sockets::base_websocket_class(&shared.sockets),
+        )
+        .map_err(err)?;
     *shared.extra.parts.borrow_mut() = Some(parts);
     let weak = Rc::downgrade(&shared);
     let class = define_classes(&weak, spot).map_err(err)?;
@@ -270,17 +260,16 @@ impl Drop for Core {
     fn drop(&mut self) {
         release(&self.this);
         self.shared.extra.supers.borrow_mut().clear();
-        self.shared.extra.listeners.borrow_mut().clear();
     }
 }
 
 pub struct KucoinExchange {
-    core: Core,
+    receiver: Core,
     capabilities: ExchangeCapabilities,
 }
 
 pub struct KucoinSpotExchange {
-    core: Core,
+    receiver: Core,
     capabilities: ExchangeCapabilities,
 }
 
@@ -291,10 +280,10 @@ impl KucoinExchange {
         deps: KucoinDependencies,
     ) -> Result<Rc<Self>, ExchangeError> {
         let venue = Rc::new(Self {
-            core: Core::new(parts, deps, false)?,
+            receiver: Core::new(parts, deps, false)?,
             capabilities: Self::capabilities_table(),
         });
-        venue.core.attach(venue.clone());
+        venue.receiver.attach(venue.clone());
         Ok(venue)
     }
     fn capabilities_table() -> ExchangeCapabilities {
@@ -314,10 +303,10 @@ impl KucoinSpotExchange {
         deps: KucoinDependencies,
     ) -> Result<Rc<Self>, ExchangeError> {
         let venue = Rc::new(Self {
-            core: Core::new(parts, deps, true)?,
+            receiver: Core::new(parts, deps, true)?,
             capabilities: Self::capabilities_table(),
         });
-        venue.core.attach(venue.clone());
+        venue.receiver.attach(venue.clone());
         Ok(venue)
     }
     fn capabilities_table() -> ExchangeCapabilities {
@@ -343,42 +332,42 @@ fn base(shared: &Shared) -> &BaseExchange {
 impl Exchange for KucoinExchange {
     type PlaceOpts = PlaceOrderOpts;
     fn base(&self) -> &BaseExchange {
-        base(&self.core.shared)
+        base(&self.receiver.shared)
     }
     fn capabilities(&self) -> &ExchangeCapabilities {
         &self.capabilities
     }
     // ts: KucoinExchange.dispose
     fn dispose(&self) -> Result<(), ExchangeError> {
-        self.core.dispose()
+        self.receiver.dispose()
     }
     // ts: KucoinExchange.placeOrder — its body's first statement is the
     // resolveCallerClientOrderId guard (order_lifecycle::place_order).
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
-        self.core
+        self.receiver
             .invoke("placeOrder", js(order.options()).map(|o| vec![o]))
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
-        self.core.invoke_unit("start", Ok(vec![]))
+        self.receiver.invoke_unit("start", Ok(vec![]))
     }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        self.core.invoke("getAccount", Ok(vec![]))
+        self.receiver.invoke("getAccount", Ok(vec![]))
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
-        self.core.invoke("validateAccount", Ok(vec![]))
+        self.receiver.invoke("validateAccount", Ok(vec![]))
     }
     fn fetch_positions(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Position>> {
-        self.core
+        self.receiver
             .invoke("fetchPositions", opt_js(symbols).map(|s| vec![s]))
     }
     fn fetch_orders(&self, _symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Order>> {
-        self.core.invoke("fetchOrders", Ok(vec![]))
+        self.receiver.invoke("fetchOrders", Ok(vec![]))
     }
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
-        self.core.invoke("fetchMarkets", Ok(vec![]))
+        self.receiver.invoke("fetchMarkets", Ok(vec![]))
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
-        self.core.invoke("fetchTickers", Ok(vec![]))
+        self.receiver.invoke("fetchTickers", Ok(vec![]))
     }
     // ts: base.ts:799 — KucoinExchange inherits fetchSymbolMaxLeverage, which rejects.
     fn fetch_symbol_max_leverage(&self, _symbol: String) -> ExchangeFuture<'_, f64> {
@@ -390,7 +379,7 @@ impl Exchange for KucoinExchange {
         leverage: f64,
         _side: Option<PositionSide>,
     ) -> ExchangeFuture<'_, ()> {
-        self.core.invoke_unit(
+        self.receiver.invoke_unit(
             "setLeverage",
             Ok(vec![Js::str(&symbol), Js::Number(leverage)]),
         )
@@ -400,29 +389,29 @@ impl Exchange for KucoinExchange {
         hedged: bool,
         _symbol: Option<String>,
     ) -> ExchangeFuture<'_, ()> {
-        self.core
+        self.receiver
             .invoke_unit("changePositionMode", Ok(vec![Js::Bool(hedged)]))
     }
     fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
-        self.core.invoke_unit(
+        self.receiver.invoke_unit(
             "changeMarginType",
             opt_js(symbol).map(|s| vec![Js::Bool(isolated), s]),
         )
     }
     fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
-        self.core
+        self.receiver
             .invoke("updateOrder", js(&options).map(|o| vec![o]))
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
-        self.core
+        self.receiver
             .invoke_unit("cancelOrders", js(&orders).map(|o| vec![o]))
     }
     fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
-        self.core
+        self.receiver
             .invoke_unit("cancelSymbolOrders", Ok(vec![Js::str(&symbol)]))
     }
     fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
-        self.core.invoke_unit("cancelAllOrders", Ok(vec![]))
+        self.receiver.invoke_unit("cancelAllOrders", Ok(vec![]))
     }
     // ts: base.ts:989 — KucoinExchange inherits scheduleCancel, which rejects.
     fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
@@ -437,7 +426,7 @@ impl Exchange for KucoinExchange {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
-        self.core
+        self.receiver
             .invoke("fetchOHLCV", js(&options).map(|o| vec![o]))
     }
     fn listen_ohlcv(
@@ -445,14 +434,14 @@ impl Exchange for KucoinExchange {
         options: OHLCVOptions,
         callback: Rc<dyn Fn(Candle)>,
     ) -> Result<ListenerCleanup, ExchangeError> {
-        self.core.listen("listenOHLCV", js(&options)?, callback)
+        self.receiver.listen("listenOHLCV", js(&options)?, callback)
     }
     fn listen_order_book(
         &self,
         symbol: String,
         callback: Rc<dyn Fn(OrderBook)>,
     ) -> Result<ListenerCleanup, ExchangeError> {
-        self.core
+        self.receiver
             .listen("listenOrderBook", Js::str(&symbol), callback)
     }
 }
@@ -460,46 +449,46 @@ impl Exchange for KucoinExchange {
 impl Exchange for KucoinSpotExchange {
     type PlaceOpts = PlaceOrderOpts;
     fn base(&self) -> &BaseExchange {
-        base(&self.core.shared)
+        base(&self.receiver.shared)
     }
     fn capabilities(&self) -> &ExchangeCapabilities {
         &self.capabilities
     }
     // ts: KucoinSpotExchange.dispose
     fn dispose(&self) -> Result<(), ExchangeError> {
-        self.core.dispose()
+        self.receiver.dispose()
     }
     // ts: KucoinSpotExchange.placeOrder — its body's first statement is the
     // resolveCallerClientOrderId guard (spot_bodies::place_order).
     fn place_order(&self, order: ValidatedOrder<Self>) -> ExchangeFuture<'_, Vec<String>> {
-        self.core
+        self.receiver
             .invoke("placeOrder", js(order.options()).map(|o| vec![o]))
     }
     fn start(&self) -> ExchangeFuture<'_, ()> {
-        self.core.invoke_unit("start", Ok(vec![]))
+        self.receiver.invoke_unit("start", Ok(vec![]))
     }
     fn get_account(&self) -> ExchangeFuture<'_, ExchangeAccount> {
-        self.core.invoke("getAccount", Ok(vec![]))
+        self.receiver.invoke("getAccount", Ok(vec![]))
     }
     fn validate_account(&self) -> ExchangeFuture<'_, ValidateAccountResult> {
-        self.core.invoke("validateAccount", Ok(vec![]))
+        self.receiver.invoke("validateAccount", Ok(vec![]))
     }
     fn fetch_positions(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Position>> {
-        self.core
+        self.receiver
             .invoke("fetchPositions", opt_js(symbols).map(|s| vec![s]))
     }
     fn fetch_orders(&self, symbols: Option<Vec<String>>) -> ExchangeFuture<'_, Vec<Order>> {
-        self.core
+        self.receiver
             .invoke("fetchOrders", opt_js(symbols).map(|s| vec![s]))
     }
     fn fetch_markets(&self) -> ExchangeFuture<'_, Vec<Market>> {
-        self.core.invoke("fetchMarkets", Ok(vec![]))
+        self.receiver.invoke("fetchMarkets", Ok(vec![]))
     }
     fn fetch_tickers(&self) -> ExchangeFuture<'_, Vec<Ticker>> {
-        self.core.invoke("fetchTickers", Ok(vec![]))
+        self.receiver.invoke("fetchTickers", Ok(vec![]))
     }
     fn fetch_symbol_max_leverage(&self, symbol: String) -> ExchangeFuture<'_, f64> {
-        self.core
+        self.receiver
             .invoke("fetchSymbolMaxLeverage", Ok(vec![Js::str(&symbol)]))
     }
     fn set_leverage(
@@ -508,37 +497,37 @@ impl Exchange for KucoinSpotExchange {
         leverage: f64,
         side: Option<PositionSide>,
     ) -> ExchangeFuture<'_, ()> {
-        self.core.invoke_unit(
+        self.receiver.invoke_unit(
             "setLeverage",
             opt_js(side).map(|s| vec![Js::str(&symbol), Js::Number(leverage), s]),
         )
     }
     fn change_position_mode(&self, hedged: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
-        self.core.invoke_unit(
+        self.receiver.invoke_unit(
             "changePositionMode",
             opt_js(symbol).map(|s| vec![Js::Bool(hedged), s]),
         )
     }
     fn change_margin_type(&self, isolated: bool, symbol: Option<String>) -> ExchangeFuture<'_, ()> {
-        self.core.invoke_unit(
+        self.receiver.invoke_unit(
             "changeMarginType",
             opt_js(symbol).map(|s| vec![Js::Bool(isolated), s]),
         )
     }
     fn update_order(&self, options: UpdateOrderOpts) -> ExchangeFuture<'_, Vec<String>> {
-        self.core
+        self.receiver
             .invoke("updateOrder", js(&options).map(|o| vec![o]))
     }
     fn cancel_orders(&self, orders: Vec<Order>) -> ExchangeFuture<'_, ()> {
-        self.core
+        self.receiver
             .invoke_unit("cancelOrders", js(&orders).map(|o| vec![o]))
     }
     fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
-        self.core
+        self.receiver
             .invoke_unit("cancelSymbolOrders", Ok(vec![Js::str(&symbol)]))
     }
     fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
-        self.core.invoke_unit("cancelAllOrders", Ok(vec![]))
+        self.receiver.invoke_unit("cancelAllOrders", Ok(vec![]))
     }
     // ts: base.ts:989 — KucoinSpotExchange inherits scheduleCancel, which rejects.
     fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
@@ -553,14 +542,14 @@ impl Exchange for KucoinSpotExchange {
         Box::pin(async { Err(ExchangeError::new("Not implemented")) })
     }
     fn fetch_ohlcv(&self, options: OHLCVOptions) -> ExchangeFuture<'_, Vec<Candle>> {
-        self.core
+        self.receiver
             .invoke("fetchOHLCV", js(&options).map(|o| vec![o]))
     }
     fn fetch_historical_fills(
         &self,
         options: ExecutionsOptions,
     ) -> ExchangeFuture<'_, Vec<Execution>> {
-        self.core
+        self.receiver
             .invoke("fetchHistoricalFills", js(&options).map(|o| vec![o]))
     }
     fn listen_ohlcv(
@@ -568,14 +557,14 @@ impl Exchange for KucoinSpotExchange {
         options: OHLCVOptions,
         callback: Rc<dyn Fn(Candle)>,
     ) -> Result<ListenerCleanup, ExchangeError> {
-        self.core.listen("listenOHLCV", js(&options)?, callback)
+        self.receiver.listen("listenOHLCV", js(&options)?, callback)
     }
     fn listen_order_book(
         &self,
         symbol: String,
         callback: Rc<dyn Fn(OrderBook)>,
     ) -> Result<ListenerCleanup, ExchangeError> {
-        self.core
+        self.receiver
             .listen("listenOrderBook", Js::str(&symbol), callback)
     }
 }

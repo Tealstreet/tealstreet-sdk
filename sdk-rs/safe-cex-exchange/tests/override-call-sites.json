@@ -3570,6 +3570,108 @@
     "file": "safe-cex-venue-kraken/src/trading.rs"
   },
   {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "accounts :: get_account",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "accounts :: validate_account",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: start",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: fetch_positions",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: fetch_markets",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: fetch_tickers",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "reads :: fetch_orders",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "bootstrap_reads :: fetch_ohlcv",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: cancel_all_orders",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: cancel_orders",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: cancel_symbol_orders",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: update_order",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: set_leverage",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: change_margin_type",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "order_control :: change_position_mode",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "socket_boundaries :: listen_ohlcv",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
+    "function": "native_member",
+    "body": "96393a1a105a0b30",
+    "reference": "socket_boundaries :: listen_order_book",
+    "file": "safe-cex-venue-kucoin/src/binding/futures.rs"
+  },
+  {
     "function": "initialize",
     "body": "7826b5c08aaacc66",
     "reference": "public_streams :: listen_ohlcv",
@@ -3580,6 +3682,36 @@
     "body": "7826b5c08aaacc66",
     "reference": "public_streams :: listen_order_book",
     "file": "safe-cex-venue-kucoin/src/futures_public_class.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "5e3acdf0e57ac1fa",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "4f7f655b25a08443",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
+  },
+  {
+    "function": "capabilities_table",
+    "body": "4f7f655b25a08443",
+    "call": "venue . fetch_historical_fills (opts)",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "395945738d607326",
+    "call": "self . receiver . dispose ()",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "395945738d607326",
+    "call": "self . receiver . dispose ()",
+    "file": "safe-cex-venue-kucoin/src/kucoin_exchange.rs"
   },
   {
     "function": "native_member",
