@@ -13,7 +13,8 @@ fn corpus() -> Vec<f64> {
         1000000000000005.0,
         1000000000000015.0,
         999999999999999.5,
-        9.999999999999999e22,
+        // The double nearest 1e23, which JavaScript prints as 9.999999999999999e+22.
+        1e23,
         1e21,
         1.5e-7,
         1e-7,
@@ -59,7 +60,11 @@ fn to_precision_matches_live_node_bits() {
         String::from_utf8_lossy(&output.stderr)
     );
     let source: Vec<String> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(source.len(), values.len() * precisions.len(), "source cardinality");
+    assert_eq!(
+        source.len(),
+        values.len() * precisions.len(),
+        "source cardinality"
+    );
     let mut compared = 0;
     for (i, value) in values.iter().enumerate() {
         for (j, precision) in precisions.iter().enumerate() {
@@ -74,7 +79,10 @@ fn to_precision_matches_live_node_bits() {
     }
     assert_eq!(compared, 4800, "executed comparisons");
     assert_eq!(js_to_precision(f64::NAN, 3.0).unwrap(), "NaN");
-    assert_eq!(js_to_precision(f64::NEG_INFINITY, 3.0).unwrap(), "-Infinity");
+    assert_eq!(
+        js_to_precision(f64::NEG_INFINITY, 3.0).unwrap(),
+        "-Infinity"
+    );
     assert!(js_to_precision(1.0, 0.0).is_err());
     assert!(js_to_precision(1.0, 101.0).is_err());
 }

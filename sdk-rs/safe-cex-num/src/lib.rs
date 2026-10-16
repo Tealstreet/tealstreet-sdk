@@ -94,7 +94,11 @@ pub fn js_to_precision(value: f64, precision: f64) -> Result<String, &'static st
     if !value.is_finite() {
         return Ok(js_number_string(value));
     }
-    let precision = if precision.is_nan() { 0.0 } else { precision.trunc() };
+    let precision = if precision.is_nan() {
+        0.0
+    } else {
+        precision.trunc()
+    };
     if !(1.0..=100.0).contains(&precision) {
         return Err("toPrecision() argument must be between 1 and 100");
     }
@@ -110,18 +114,32 @@ pub fn js_to_precision(value: f64, precision: f64) -> Result<String, &'static st
     let bits = value.abs().to_bits();
     let exponent = ((bits >> 52) & 0x7ff) as i64;
     let mantissa = (bits & ((1_u64 << 52) - 1)) | if exponent == 0 { 0 } else { 1_u64 << 52 };
-    let power = if exponent == 0 { -1074 } else { exponent - 1075 };
+    let power = if exponent == 0 {
+        -1074
+    } else {
+        exponent - 1075
+    };
     // |value| = num / den exactly.
     let (num, den) = if power >= 0 {
-        (BigUint::from(mantissa) << power as usize, BigUint::from(1_u32))
+        (
+            BigUint::from(mantissa) << power as usize,
+            BigUint::from(1_u32),
+        )
     } else {
-        (BigUint::from(mantissa), BigUint::from(1_u32) << (-power) as usize)
+        (
+            BigUint::from(mantissa),
+            BigUint::from(1_u32) << (-power) as usize,
+        )
     };
     let ten = BigUint::from(10_u32);
     let pow10 = |n: i64| ten.pow(n.unsigned_abs() as u32);
     // 10^e <= |value| < 10^(e+1), starting from the f64 estimate.
     let at_least = |e: i64| {
-        if e >= 0 { num >= &den * pow10(e) } else { &num * pow10(e) >= den }
+        if e >= 0 {
+            num >= &den * pow10(e)
+        } else {
+            &num * pow10(e) >= den
+        }
     };
     let mut e = value.abs().log10().floor() as i64;
     while !at_least(e) {
@@ -146,7 +164,11 @@ pub fn js_to_precision(value: f64, precision: f64) -> Result<String, &'static st
         e += 1;
     }
     let digits = n.to_string();
-    let mut text = if value < 0.0 { "-".to_owned() } else { String::new() };
+    let mut text = if value < 0.0 {
+        "-".to_owned()
+    } else {
+        String::new()
+    };
     if e < -6 || e >= p {
         text.push_str(&digits[..1]);
         if p > 1 {
