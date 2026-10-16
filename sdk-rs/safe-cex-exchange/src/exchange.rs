@@ -138,7 +138,6 @@ pub struct ExchangeSettings {
     pub tick_interval: Option<f64>,
     pub positions_supported: Option<bool>,
     pub supports_public_only: bool,
-    pub supports_executions_history: bool,
     pub client_order_id_rule: Option<ClientOrderIdRule>,
 }
 

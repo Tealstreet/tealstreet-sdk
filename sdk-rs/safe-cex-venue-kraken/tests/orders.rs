@@ -129,6 +129,7 @@ fn assert_order(native: &Order, expected: &Value) {
 }
 fn fallback(tag: &str, n: f64) -> Order {
     Order {
+        client_order_id: None,
         id: tag.into(),
         parent_id: None,
         status: OrderStatus::Open,

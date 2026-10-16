@@ -248,6 +248,7 @@ pub fn map_positions<E>(
             realized_pnl: None,
             margin_size: None,
             last_update: None,
+            option: None,
         });
     }
     Ok(out)

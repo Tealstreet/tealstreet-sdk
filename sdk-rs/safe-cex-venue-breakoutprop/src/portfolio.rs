@@ -87,6 +87,7 @@ pub fn format_open_positions(
             info: Some(raw["portfolios"][0]["positions"][index].clone()),
             realized_pnl: None,
             extra: None,
+            option: None,
         });
     }
     Ok(Some(positions))
@@ -176,6 +177,7 @@ pub fn format_positions(
             extra: None,
             realized_pnl: None,
             last_update: None,
+            option: None,
         });
     }
     Ok(positions)
@@ -225,6 +227,7 @@ pub fn format_orders(
             }
         };
         orders.push(Order {
+            client_order_id: None,
             id: order.order_code.clone(),
             status,
             symbol: order.instrument.clone(),
