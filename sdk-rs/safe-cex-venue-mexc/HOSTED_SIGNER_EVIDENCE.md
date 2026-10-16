@@ -67,3 +67,9 @@ audit 6/6; parity zero (7,459 rows / 17,198 public Rust items); layers 88/88;
 registry equivalence for all 48 ordered names plus the corruption/native-
 divergence control. No dependency edges, new public venue API or manifest
 classifications were introduced.
+
+After merging master4012effa81, all seven registry tests pass (MEXC hosted,
+local KuCoin/MEXC and both hosted KuCoin names). Refreshed parity remains zero:
+7,459 rows / 17,204 public Rust items. Frozen dependency installation passes.
+Only documentation needed conflict resolution; both families' hosted descriptions
+and all master production wiring were retained.
