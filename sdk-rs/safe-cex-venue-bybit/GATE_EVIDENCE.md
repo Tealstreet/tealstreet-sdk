@@ -3806,11 +3806,10 @@ Spot members are installed. Account validation keeps the primary consumer while
 selecting the existing derived validator for Spot. No delegation exemption is
 added, and foreign inventory rows are preserved.
 
-FINDING ddi2il-38 remains explicit: the shared public protocol's active-symbol
-selection, both live change callbacks and retained topic reconciliation are not
-wired yet. The public class/constructor rows remain pending. This facade/registry
-slice does not claim that public composition or the remaining Inverse/HyroTrader
-constructors.
+At the Spot checkpoint, FINDING ddi2il-38 recorded the unwired Spot active
+selector, change callbacks and retained topics. The separate public-topic
+checkpoint below repairs that composition. Remaining dedicated Inverse/HyroTrader
+constructors and unrelated public class members stay separate claims.
 
 Final scoped gates: native Bybit registry 3 passed (local/hosted signing and
 untouched demo origin), registry constructors 14 passed, core cancellation
@@ -3821,3 +3820,53 @@ with zero findings; extractor reports zero changed/added/orphaned. Registry-data
 and layers checks pass. The 1073 existing override entries are retained and the
 eight reviewed Bybit entries give a total of 1081; the incoming eight-row Binance
 repair is the owner's commit 04bfb16ccf, not an independent reclassification.
+
+
+## Concrete public ticker subscriptions (ddi2il-38)
+
+Production checkpoint `1fb65d0b57`, with witnesses/manifests in `eaad2472d4`.
+`PublicProtocol` now composes the existing topic and lifecycle bodies through
+`ws_public/topics.rs`. Source policy differs deliberately: primary linear and
+inverse sockets subscribe every non-option market in their category, while Spot
+calls its live parent selector and retains the union of previous/desired topics.
+The primary class has no active-symbol callback. Spot registers that callback in
+construction before any dial; all profiles replace their own markets callback
+on open. Source duplicate market additions and absence of unsubscribe are kept.
+The canonical subscribe and Spot market-addition bodies now execute their first
+send and sleep factory eagerly, preserving first-chunk/ping/later-chunk order.
+Core owns the remaining tails; listener/tail captures keep the venue/socket weak.
+
+Four concrete tests in `public_topic_binding` pass. Two assert physical wire
+frames for primary category/option filtering and Spot pre-dial, live/offline
+active changes, reopen retention, duplicate market additions and disposal. A
+third runs exactly 24 maintained-source constructor/handler/parent-selector
+compositions (three connection profiles by eight initial active states), with
+15 snapshots each and independently counted native executions: 360 snapshots.
+The fourth disposes during each pending initial-subscription/market-addition tail
+and requires no later send or retained venue. Malformed executable market objects
+are outside this typed native Market emitter profile; the full public OHLCV,
+order-book and recovery-timer class bindings remain pending.
+
+`scripts/public-topic-controls.py` compiled six production faults: omitted initial
+sync, missing constructor active registration, missing live active send, missing
+markets registration, discarded retained topics, and reversed primary option
+filtering. Every fault failed its named runtime assertion; compilation failures
+were rejected. Exact production bytes were restored and the positive tests pass.
+The initial-sync fault is caught by the source-composition test (the standalone
+Spot scenario had already synchronized its topics before open). The original
+public_ticker_topics/public_ws_lifecycle live helper targets also pass, separately
+from these actual facade consumers. The integrated include-ignored run passes
+primary binding 22 (including 92 actual-source order-write cases), private delivery
+6 (including 48 source compositions), Spot binding 6 and both live public helper
+targets. Shared cancellation inventory is 6 passed/one export ignored; override
+contract is 5 passed/one existing live inventory ignored. Bybit host all-targets
+and wasm library clippy pass. Global parity is zero (7459 rows/17162 public items);
+extractor check reports zero changed/added/orphaned manifests.
+
+The override inventory retains all 1101 incoming rows and adds one reviewed
+Bybit reference, `self.topics.dispose()` inside `PublicProtocol::dispose`: the
+core protocol cleanup calls the source Spot active-listener removal before core
+socket cleanup, with no BaseExchange dispatch bypass. Six existing Spot helper
+references keep identical targets; their enclosing installer fingerprint changes
+from `d269ecf6e0eb661f` to `0858624e3dde1a3b` solely because the two source selector
+members are installed there. No foreign row or delegation exemption is changed.
