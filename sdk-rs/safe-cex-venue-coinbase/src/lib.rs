@@ -1,4 +1,5 @@
 //! Coinbase Advanced Trade and inert Starbase parity port.
+mod binding;
 pub mod decimal;
 pub mod exchange_lifecycle;
 pub mod json_key_scanner;
@@ -39,3 +40,5 @@ pub mod classes;
 pub mod order_edit;
 
 pub mod class_methods;
+
+pub use binding::exchange::{CoinbaseDependencies, CoinbaseExchange};

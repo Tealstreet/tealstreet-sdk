@@ -84,7 +84,8 @@ function reviewedWalk(result) {
   const value = JSON.parse(result.stdout);
   assert.equal(value.auditedCallableRows, 262, 'independent reviewed root floor');
   assert.equal(value.matchedSourceDeclarations, 262, 'independent source declaration floor');
-  assert.equal(value.portedCallableRows, 248, 'current ported cohort excludes fourteen acknowledged findings');
+  assert.equal(value.portedCallableRows, 246, 'current ported cohort excludes fourteen findings and two reviewed primitive choices');
+  assert.deepEqual(value.reviewedCryptoChoiceRoots.sort(), ['getSigningKey', 'sign'], 'both primitive choices retain notification review');
   assert.deepEqual(value.injectedCallableProperties.sort(), [
     'CoinbaseStarbaseAuthSession#clock', 'CoinbaseStarbaseAuthSession#createCdpJwt',
     'CoinbaseStarbaseJsonRpcClient#transport', 'CoinbaseStarbaseWebsocketSessionController#replaySubscriptions',
@@ -136,6 +137,12 @@ test('a same-length reviewed-root replacement cannot erase a ported callable', (
   review.roots.find((row) => row.review === 'ported').name = 'missingCallable';
   assert.equal(review.roots.length, 262, 'same-length mutation keeps independent corpus length');
   control({ review }, (result) => failsNamed(result, 'every ported callable has notification review coverage'));
+});
+test('a crypto choice cannot erase or reclassify another audited root', () => {
+  const review = JSON.parse(fs.readFileSync(reviewFile, 'utf8'));
+  review.roots.find((row) => row.name === 'CoinbaseExchange.tick').review = 'crypto-choice';
+  control({ review }, (result) => failsNamed(result, 'only reviewed crypto roots use crypto-choice: CoinbaseExchange.tick'));
+  reviewedWalk(child(gateFile));
 });
 test('an unaudited new direct Store writer is refused', () => {
   const original = "const sourceText = (url) => fs.readFileSync(url, 'utf8');";
