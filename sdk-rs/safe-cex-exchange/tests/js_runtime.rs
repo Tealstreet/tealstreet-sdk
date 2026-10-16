@@ -22,6 +22,7 @@ struct Runtime {
     clock: std::cell::Cell<f64>,
     wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
+    exceptions: RefCell<Vec<(String, Value)>>,
     hold_sleep: std::cell::Cell<bool>,
     headers_capable: std::cell::Cell<bool>,
     dials: RefCell<
@@ -68,7 +69,11 @@ impl ExchangeRuntime for Runtime {
     fn random(&self) -> f64 {
         0.5
     }
-    fn report_exception(&self, _: &ExchangeError, _: &Value) {}
+    fn report_exception(&self, error: &ExchangeError, context: &Value) {
+        self.exceptions
+            .borrow_mut()
+            .push((error.to_string(), context.clone()));
+    }
     fn report_raw_exception(&self, _: &Value, _: &Value) {}
     fn execute_worker_request(&self, _: Value) -> ExchangeFuture<'static, Value> {
         Box::pin(async { Ok(Value::Null) })
@@ -3361,3 +3366,6 @@ fn disposed_assignment_matches_actual_venue_cleanup_sequence() {
 
 #[path = "support/js_websocket_options.rs"]
 mod ws_options;
+
+#[path = "support/js_socket_dispose.rs"]
+mod socket_dispose;
