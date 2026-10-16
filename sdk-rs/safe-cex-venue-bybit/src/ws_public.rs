@@ -327,12 +327,29 @@ mod tests;
 
 /// BybitPublicWebsocket for the `bybit` connection: the linear socket, and the
 /// inverse socket when inverse markets are enabled.
+mod topics;
+
 pub(crate) struct PublicProtocol {
     pub parent: std::rc::Weak<crate::exchange::BybitExchange>,
     pub runtime: Rc<dyn safe_cex_exchange::websocket::WsRuntime>,
     pub category: &'static str,
+    topics: topics::PublicTopics,
 }
 impl PublicProtocol {
+    pub(crate) fn new(
+        parent: std::rc::Weak<crate::exchange::BybitExchange>,
+        runtime: Rc<dyn safe_cex_exchange::websocket::WsRuntime>,
+        category: &'static str,
+        base: &safe_cex_exchange::exchange::BaseExchange,
+    ) -> Self {
+        let topics = topics::PublicTopics::new(parent.clone(), runtime.clone(), category, base);
+        Self {
+            parent,
+            runtime,
+            category,
+            topics,
+        }
+    }
     // ts: BybitPublicWebsocket constructor `messageHandlers` — tickers and pong.
     pub(crate) fn register_handlers(socket: &Rc<BaseWebSocket>) {
         let store_socket = Rc::downgrade(socket);
@@ -390,57 +407,16 @@ impl safe_cex_exchange::websocket::WsProtocol for PublicProtocol {
             },
         )
     }
-    // ts: BybitPublicWebsocket.onOpen — one tickers topic per market of this category.
+    // The source has category-wide primary sockets and active-symbol Spot sockets.
     fn on_open(
         &self,
         socket: Rc<BaseWebSocket>,
     ) -> safe_cex_exchange::runtime::ExchangeFuture<'static, ()> {
-        let result = (|| -> Result<(), ExchangeError> {
-            if socket.is_disposed() {
-                return Ok(());
-            }
-            let linear = self.category == "linear";
-            let topics: Vec<String> = socket
-                .store()
-                .markets()
-                .iter()
-                .filter(|m| {
-                    m.option.is_none()
-                        && (self.category == "spot"
-                            || ((m.quote == "USDT" || m.quote == "USDC") == linear))
-                })
-                .map(|m| format!("tickers.{}", m.symbol))
-                .collect();
-            // subscribe(): the first chunk goes out now, each later one 10ms after the last.
-            let mut frames = topics
-                .chunks(10)
-                .map(|chunk| json!({"op": "subscribe", "args": chunk}).to_string())
-                .collect::<Vec<_>>()
-                .into_iter();
-            if let Some(first) = frames.next() {
-                socket.send(&first)?;
-                let rest: Vec<String> = frames.collect();
-                let runtime = self.runtime.clone();
-                let sender = Rc::downgrade(&socket);
-                socket.start_message_operation(async move {
-                    runtime.sleep(10).await?;
-                    for frame in rest {
-                        let Some(socket) = sender.upgrade() else {
-                            return Ok(());
-                        };
-                        socket.send(&frame)?;
-                        runtime.sleep(10).await?;
-                    }
-                    Ok(())
-                });
-            }
-            ping(&socket)?;
-            if self.runtime.enable_reconnecting() {
-                socket.emit_ws_reconnected()?;
-            }
-            Ok(())
-        })();
+        let result = self.topics.on_open(socket);
         Box::pin(async move { result })
+    }
+    fn dispose(&self) {
+        self.topics.dispose();
     }
     fn on_message(
         &self,

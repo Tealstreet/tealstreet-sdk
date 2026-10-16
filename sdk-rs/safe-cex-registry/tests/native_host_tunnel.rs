@@ -1,4 +1,4 @@
-//! tealstreetTunnel on the production native host: Binance REST goes over the HOW
+//! tealstreetTunnel on the production native host: Binance/Phemex REST uses HOW
 //! tunnel (rpc.http frames) to a local tradetunnel, authenticated with the account's
 //! proxy token, and never reaches the venue origin directly.
 #![cfg(not(target_arch = "wasm32"))]
@@ -256,5 +256,109 @@ fn binance_rest_runs_over_the_tealstreet_tunnel_with_the_proxy_token() {
             "tunnel-verified HMAC over the params sent"
         );
         exchange.dispose().expect("dispose");
+    });
+}
+
+#[test]
+fn phemex_rest_runs_over_the_tealstreet_tunnel_with_signed_account_query() {
+    run_local(async {
+        let listener = TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let origin = format!("ws://{}", listener.local_addr().unwrap());
+        let tunnel = Rc::new(Tunnel::default());
+        tokio::task::spawn_local(serve_tunnel(
+            listener,
+            Rc::new(|request| match request.path.as_str() {
+                "/public/products" => Some(json!({"data":{"perpProductsV2":[{
+                    "symbol":"BTCUSDT","type":"PerpetualV2","baseCurrency":"BTC",
+                    "quoteCurrency":"USDT","settleCurrency":"USDT","qtyStepSize":"0.003",
+                    "tickSize":"0.25","maxOrderQtyRq":"100","maxLeverage":"50"
+                }]}})),
+                "/g-accounts/accountPositions" => Some(json!({"code":0,"data":{
+                    "account":{"userID":123,"accountBalanceRv":"1000","totalUsedBalanceRv":"200"},
+                    "positions":[]
+                }})),
+                _ => None,
+            }),
+            tunnel.clone(),
+        ));
+        let runtime = native_tealstreet_runtime_with(
+            Rc::new(|| Box::pin(async { Ok(TOKEN.to_owned()) })),
+            Rc::new(LocalTunnel {
+                inner: NativeTunnelHost,
+                origin,
+            }),
+        );
+        let h = venue_harness(
+            safe_cex_types::ExchangeName::Phemex,
+            Rc::new(|_| None),
+            json!({"key":"native-key","secret":SECRET,"tealstreetTunnel":true}),
+            None,
+            runtime,
+        )
+        .await;
+        let markets = h
+            .exchange
+            .fetch_markets()
+            .await
+            .expect("Phemex tunneled markets");
+        assert_eq!(markets.len(), 1);
+        assert_eq!(
+            (markets[0].precision.amount, markets[0].precision.price),
+            (0.003, 0.25)
+        );
+        assert!(
+            h.store.markets().is_empty(),
+            "fetchMarkets is pure over tunnel"
+        );
+        let account = h
+            .exchange
+            .get_account()
+            .await
+            .expect("Phemex tunneled account");
+        assert_eq!(serde_json::to_value(account).unwrap()["userId"], "123");
+        assert!(
+            h.seen.borrow().is_empty(),
+            "no Phemex request reaches direct venue origin"
+        );
+        assert!(!tunnel.tokens.borrow().is_empty());
+        assert!(tunnel.tokens.borrow().iter().all(|token| token == TOKEN));
+        let requests = tunnel.seen.borrow();
+        assert_eq!(
+            requests.len(),
+            2,
+            "both Phemex reads use actual rpc.http frames"
+        );
+        assert!(
+            requests
+                .iter()
+                .any(|request| request.path == "/public/products")
+        );
+        let request = requests
+            .iter()
+            .find(|r| r.path == "/g-accounts/accountPositions")
+            .unwrap();
+        assert_eq!(request.method, "GET");
+        assert_eq!(request.query, "currency=USDT");
+        assert_eq!(request.headers["x-phemex-access-token"], "native-key");
+        let expiry = &request.headers["x-phemex-request-expiry"];
+        let payload = format!("/g-accounts/accountPositionscurrency=USDT{expiry}");
+        let mut mac = Hmac::<sha2::Sha256>::new_from_slice(SECRET.as_bytes()).unwrap();
+        mac.update(payload.as_bytes());
+        let signature: String = mac
+            .finalize()
+            .into_bytes()
+            .iter()
+            .map(|b| format!("{b:02x}"))
+            .collect();
+        assert_eq!(request.headers["x-phemex-request-signature"], signature);
+        assert!(
+            tunnel
+                .frames
+                .borrow()
+                .iter()
+                .all(|frame| frame.get("format").is_none()),
+            "Phemex uses the source default adapter variant"
+        );
+        h.exchange.dispose().expect("dispose Phemex tunnel account");
     });
 }

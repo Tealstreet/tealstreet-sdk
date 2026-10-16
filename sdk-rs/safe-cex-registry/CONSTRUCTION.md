@@ -293,9 +293,9 @@ account's hosted signer and external-public-data provider to the venue binding.
 
 Phemex constructs through `phemex_constructor` and the production shared Js HTTP
 host, including hosted signing and the external-public-data gateway. Native host
-callers supply the shared limiter as for other venues. Phemex currently refuses
-`tealstreetTunnel` when no transport installer is supplied; the native host has
-no Phemex tunnel installer. `tests/native_host_phemex.rs` verifies real local HTTP
+callers supply the shared limiter as for other venues. For `tealstreetTunnel`,
+the native host installs the actual provider-selected default adapter through the
+shared Js HTTP factory. `tests/native_host_phemex.rs` verifies real local HTTP
 market precision/read purity and signed account-query bytes through the registry.
 
 
@@ -305,3 +305,9 @@ production registry route over local HTTP and checks native amount/price steps,
 venue identity and source fetchMarkets Store purity. The native host explicitly
 refuses remoteSigner until the SDK account capability is bound; it never falls
 back to local credentials for a hosted account.
+
+`tests/native_host_tunnel.rs` also reads Phemex public products and a signed
+account query over an authenticated local tradetunnel, with no direct HTTP.
+The independent query HMAC, distinct precision steps and default frame format
+are checked. `scripts/phemex-tunnel-controls.py` proves missing/no-op native
+provider mutations compile and fail this witness, then restores exact bytes.
