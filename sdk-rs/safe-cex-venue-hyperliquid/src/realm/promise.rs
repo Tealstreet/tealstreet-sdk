@@ -3,7 +3,10 @@
 //! CHOSEN: reactions run as runtime tasks, not on a V8 microtask queue, so
 //! settlement order between unrelated promises can differ from Node. Ordering
 //! within one async body is preserved because each await resumes in sequence.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{Kind, PromiseCell, PromiseState, Thrown, Value},
+};
 use std::{
     cell::RefCell,
     future::Future,

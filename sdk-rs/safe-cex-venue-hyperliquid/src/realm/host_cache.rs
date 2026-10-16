@@ -4,7 +4,11 @@
 //! that exchange's own code but not across exchange instances. Native hosts
 //! have no BroadcastChannel or sessionStorage, so the cache is memory-only,
 //! which is the source's own behavior in a worker without those globals.
-use super::{Realm, host_core::js, value::*};
+use super::{
+    Realm,
+    host_core::js,
+    value::{Kind, PropKey, Value},
+};
 use crate::{
     cache_runtime::{self, CacheModule, CacheRuntimeHost, Callback},
     spot_json::JsString,
