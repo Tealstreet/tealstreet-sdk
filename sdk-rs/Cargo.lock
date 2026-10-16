@@ -3978,6 +3978,7 @@ dependencies = [
  "safe-cex-venue-okx",
  "safe-cex-venue-orderly",
  "safe-cex-venue-polymarket",
+ "safe-cex-venue-woo",
  "serde",
  "serde_json",
  "sha2 0.10.9",
