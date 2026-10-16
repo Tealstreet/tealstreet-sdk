@@ -1,22 +1,22 @@
 [file]
 ts = "packages/lighter-sdk/src/client/transaction-client.ts"
-rust_files = [ "safe-cex-venue-lighter/src/transaction_client_helpers.rs", "safe-cex-venue-lighter/src/transaction_client_types.rs", "safe-cex-venue-lighter/src/transaction_builders.rs", "safe-cex-venue-lighter/src/transaction_signing.rs", "safe-cex-venue-lighter/src/transaction_promise.rs", "safe-cex-venue-lighter/src/transaction_client.rs" ]
+rust_files = [ "safe-cex-venue-lighter/src/transaction_client_helpers.rs", "safe-cex-venue-lighter/src/transaction_client_types.rs", "safe-cex-venue-lighter/src/transaction_builders.rs", "safe-cex-venue-lighter/src/transaction_signing.rs", "safe-cex-venue-lighter/src/transaction_client.rs" ]
 
 [[symbol]]
 ts = "CreateOrderParams"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderParams"
+rs = [ "safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderParams", "safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderKind", "safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderKind::as_str", "safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderTimeInForce", "safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderTimeInForce::as_str" ]
 status = "ported"
-note = "Native value-level parameter type: unrestricted BigInt and binary64 fields, exact closed literal unions and optional effective values. UTF16 L1 signatures preserve lone units; margin-mode literal 0 retains negative-zero bits. The live source schema and test-only tagged native carrier witness decoded field identities and Clone before builder use. No JSON codec is claimed for source bigint interfaces, which JSON.stringify cannot encode. Class state, nonce allocation, signing and HTTP methods are tracked separately."
+note = "Native value-level parameter type: unrestricted BigInt and binary64 fields, exact closed literal unions and optional effective values. UTF16 L1 signatures preserve lone units; margin-mode literal 0 retains negative-zero bits. The live source schema and test-only tagged native carrier witness decoded field identities and Clone before builder use. No JSON codec is claimed for source bigint interfaces, which JSON.stringify cannot encode. Class state, nonce allocation, signing and HTTP methods are tracked separately. Split member `safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderKind`. Closed literal union of the orderType field. Split member `safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderKind::as_str`. Yields the exact orderType literal text consumed by mapOrderTypeValue and mapTimeInForceValue. Split member `safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderTimeInForce`. Closed literal union of the timeInForce field. Split member `safe-cex-venue-lighter/src/transaction_client_types.rs::CreateOrderTimeInForce::as_str`. Yields the exact timeInForce literal text consumed by mapTimeInForceValue."
 
 [[symbol]]
 ts = "LighterGroupedOrderType"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_client_types.rs::LighterGroupedOrderType"
+rs = [ "safe-cex-venue-lighter/src/transaction_client_types.rs::LighterGroupedOrderType", "safe-cex-venue-lighter/src/transaction_client_types.rs::LighterGroupedOrderType::value" ]
 status = "ported"
-note = "Native value-level parameter type: unrestricted BigInt and binary64 fields, exact closed literal unions and optional effective values. UTF16 L1 signatures preserve lone units; margin-mode literal 0 retains negative-zero bits. The live source schema and test-only tagged native carrier witness decoded field identities and Clone before builder use. No JSON codec is claimed for source bigint interfaces, which JSON.stringify cannot encode. Class state, nonce allocation, signing and HTTP methods are tracked separately."
+note = "Native value-level parameter type: unrestricted BigInt and binary64 fields, exact closed literal unions and optional effective values. UTF16 L1 signatures preserve lone units; margin-mode literal 0 retains negative-zero bits. The live source schema and test-only tagged native carrier witness decoded field identities and Clone before builder use. No JSON codec is claimed for source bigint interfaces, which JSON.stringify cannot encode. Class state, nonce allocation, signing and HTTP methods are tracked separately. Split member `safe-cex-venue-lighter/src/transaction_client_types.rs::LighterGroupedOrderType::value`. Yields the numeric literal 1, 2 or 3 written as the groupingType field by buildCreateGroupedOrdersData."
 
 [[symbol]]
 ts = "CreateGroupedOrdersParams"
@@ -46,9 +46,9 @@ note = "Native value-level parameter type: unrestricted BigInt and binary64 fiel
 ts = "UpdateLeverageParams"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_client_types.rs::UpdateLeverageParams"
+rs = [ "safe-cex-venue-lighter/src/transaction_client_types.rs::UpdateLeverageParams", "safe-cex-venue-lighter/src/transaction_client_types.rs::MarginMode", "safe-cex-venue-lighter/src/transaction_client_types.rs::MarginMode::new", "safe-cex-venue-lighter/src/transaction_client_types.rs::MarginMode::value" ]
 status = "ported"
-note = "Native value-level parameter type: unrestricted BigInt and binary64 fields, exact closed literal unions and optional effective values. UTF16 L1 signatures preserve lone units; margin-mode literal 0 retains negative-zero bits. The live source schema and test-only tagged native carrier witness decoded field identities and Clone before builder use. No JSON codec is claimed for source bigint interfaces, which JSON.stringify cannot encode. Class state, nonce allocation, signing and HTTP methods are tracked separately."
+note = "Native value-level parameter type: unrestricted BigInt and binary64 fields, exact closed literal unions and optional effective values. UTF16 L1 signatures preserve lone units; margin-mode literal 0 retains negative-zero bits. The live source schema and test-only tagged native carrier witness decoded field identities and Clone before builder use. No JSON codec is claimed for source bigint interfaces, which JSON.stringify cannot encode. Class state, nonce allocation, signing and HTTP methods are tracked separately. Split member `safe-cex-venue-lighter/src/transaction_client_types.rs::MarginMode`. Closed 0 or 1 numeric literal union of the marginMode field, retaining negative-zero bits. Split member `safe-cex-venue-lighter/src/transaction_client_types.rs::MarginMode::new`. Admits only the 0 and 1 marginMode literal domain. Split member `safe-cex-venue-lighter/src/transaction_client_types.rs::MarginMode::value`. Yields the marginMode number written by buildUpdateLeverageData."
 
 [[symbol]]
 ts = "ApproveIntegratorParams"
@@ -62,9 +62,9 @@ note = "Native value-level parameter type: unrestricted BigInt and binary64 fiel
 ts = "TransactionClient"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient"
+rs = [ "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient", "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::cached_nonce" ]
 status = "divergent"
-note = "CHOSEN: the native client deliberately owns parameter records and batch vectors, giving callers predictable Rust ownership. TypeScript retains mutable caller aliases across awaits; mutations after invocation (and dynamic batch edits) can change built/sent DTOs there while native inputs are snapshots. This applies transitively to submit wrappers too. Native microtask promises preserve eager lock reservation, FIFO await continuations, detached execution, finally release, opaque host errors, mutable DTO/array fulfillment identity and readonly primitive fulfillment. The live source oracle records the caller-mutation survivor at getCreateOrderTransaction (source price99 versus native2401); no full JavaScript Promise runtime, thenable assimilation, unhandled-rejection reporting, overridden callback-factory throwing, HTTP implementation, WASM lifecycle or cryptographic arithmetic is claimed."
+note = "CHOSEN: the native client deliberately owns parameter records and batch vectors, giving callers predictable Rust ownership. TypeScript retains mutable caller aliases across awaits; mutations after invocation (and dynamic batch edits) can change built/sent DTOs there while native inputs are snapshots. This applies transitively to submit wrappers too. Native microtask promises preserve eager lock reservation, FIFO await continuations, detached execution, finally release, opaque host errors, mutable DTO/array fulfillment identity and readonly primitive fulfillment. The live source oracle records the caller-mutation survivor at getCreateOrderTransaction (source price99 versus native2401); no full JavaScript Promise runtime, thenable assimilation, unhandled-rejection reporting, overridden callback-factory throwing, HTTP implementation, WASM lifecycle or cryptographic arithmetic is claimed. Split member `safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::cached_nonce`. Read accessor over the private cachedNonce field the class body allocates in getNextNonce and clears in resetNonce."
 
 [[symbol]]
 ts = "TransactionClient.constructor"
@@ -142,9 +142,9 @@ note = "Pure helper extracted as a free function; transaction construction, nonc
 ts = "TransactionClient#buildCreateOrderData"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_builders.rs::build_create_order_data"
+rs = [ "safe-cex-venue-lighter/src/transaction_builders.rs::build_create_order_data", "safe-cex-venue-lighter/src/transaction_builders.rs::CreateOrderData", "safe-cex-venue-lighter/src/transaction_builders.rs::CreateOrderDataBuildOptions" ]
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_create_order_data`."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_create_order_data`. Split member `safe-cex-venue-lighter/src/transaction_builders.rs::CreateOrderData`. Named struct for the inline object this body returns. Split member `safe-cex-venue-lighter/src/transaction_builders.rs::CreateOrderDataBuildOptions`. Named struct for the optional expiredAt and defaultOrderExpiry options this body reads."
 
 [[symbol]]
 ts = "TransactionClient#buildCreateOrderL2AttributesData"
@@ -222,9 +222,9 @@ note = "Pure unsigned builder/validator extracted with explicit context and cloc
 ts = "TransactionClient#buildUpdateLeverageData"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_builders.rs::build_update_leverage_data"
+rs = [ "safe-cex-venue-lighter/src/transaction_builders.rs::build_update_leverage_data", "safe-cex-venue-lighter/src/transaction_builders.rs::UpdateLeverageData" ]
 status = "ported"
-note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_update_leverage_data`."
+note = "Pure unsigned builder/validator extracted with explicit context and clock access at original Date.now call sites. Native outputs, typed errors, validation ordering and decoded preimage words precede returned-string comparisons against actual source execution. Shared Number/BigInt conversion preserves source rounding and errors; no new validation is inferred from field comments. Grouping/margin inputs retain their source declared literal domain. Transfer keeps the legacy minimum-width radix-16 string format, including negative, nonfinite, fractional and oversized values. Class state, nonce allocation, grouped crypto aggregation, signing and submission orchestration are tracked separately. Concrete HTTP/WASM/crypto host integration is not claimed here. Rename target: `safe-cex-venue-lighter/src/transaction_builders.rs::build_update_leverage_data`. Split member `safe-cex-venue-lighter/src/transaction_builders.rs::UpdateLeverageData`. Named struct for the inline object this body returns."
 
 [[symbol]]
 ts = "TransactionClient#buildApproveIntegratorData"
@@ -318,9 +318,9 @@ note = "CHOSEN: the native client deliberately owns parameter records and batch 
 ts = "TransactionClient.getAuthToken"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_auth_token"
+rs = [ "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_auth_token", "safe-cex-venue-lighter/src/transaction_signing.rs::AuthTokenEncoding", "safe-cex-venue-lighter/src/transaction_signing.rs::get_auth_token", "safe-cex-venue-lighter/src/transaction_signing.rs::get_auth_token_with_encoding" ]
 status = "ported"
-note = "Native TransactionClient method over explicit microtask/HTTP/crypto hosts. Eager invocation, deferred fulfillment observers, FIFO nonce cache allocation and finally release match the source; dropping the observer does not cancel queued work. Primitive results are readonly shared values; mutable DTO/array results preserve reference identity. Source-backed tests directly assert native values and call arguments/order with independent 41 public cases and 7 nonce scenarios. Host HTTP and crypto implementations remain separate dependencies; this is not full JavaScript Promise-runtime interoperability. CORRECTED: the formerly synchronous free-body target is now adopted through an eager settled/rejected native Promise with deferred observers. Encoder availability is read after first readiness and message construction; readiness disabling the encoders is witnessed before any hash/sign call."
+note = "Native TransactionClient method over explicit microtask/HTTP/crypto hosts. Eager invocation, deferred fulfillment observers, FIFO nonce cache allocation and finally release match the source; dropping the observer does not cancel queued work. Primitive results are readonly shared values; mutable DTO/array results preserve reference identity. Source-backed tests directly assert native values and call arguments/order with independent 41 public cases and 7 nonce scenarios. Host HTTP and crypto implementations remain separate dependencies; this is not full JavaScript Promise-runtime interoperability. CORRECTED: the formerly synchronous free-body target is now adopted through an eager settled/rejected native Promise with deferred observers. Encoder availability is read after first readiness and message construction; readiness disabling the encoders is witnessed before any hash/sign call. Split member `safe-cex-venue-lighter/src/transaction_signing.rs::AuthTokenEncoding`. Models the TextEncoder, Buffer or unavailable encoder branch that getAuthToken reaches through utf8ToHex, including the no-encoder error. Split member `safe-cex-venue-lighter/src/transaction_signing.rs::get_auth_token`. Composes the readiness check, deadline:accountIndex:apiKeyIndex message, padded utf8 hex and signature for a fixed encoder availability. Split member `safe-cex-venue-lighter/src/transaction_signing.rs::get_auth_token_with_encoding`. Implements the getAuthToken body with encoder availability resolved after the first readiness call, as TransactionClient::get_auth_token invokes it."
 
 [[symbol]]
 ts = "TransactionClient.resetNonce"
@@ -334,25 +334,25 @@ note = "Native TransactionClient method over explicit microtask/HTTP/crypto host
 ts = "TransactionClient.getAccountIndex"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_account_index"
+rs = [ "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_account_index", "safe-cex-venue-lighter/src/transaction_builders.rs::get_account_index" ]
 status = "ported"
-note = "Native TransactionClient method over explicit microtask/HTTP/crypto hosts. Eager invocation, deferred fulfillment observers, FIFO nonce cache allocation and finally release match the source; dropping the observer does not cancel queued work. Primitive results are readonly shared values; mutable DTO/array results preserve reference identity. Source-backed tests directly assert native values and call arguments/order with independent 41 public cases and 7 nonce scenarios. Host HTTP and crypto implementations remain separate dependencies; this is not full JavaScript Promise-runtime interoperability."
+note = "Native TransactionClient method over explicit microtask/HTTP/crypto hosts. Eager invocation, deferred fulfillment observers, FIFO nonce cache allocation and finally release match the source; dropping the observer does not cancel queued work. Primitive results are readonly shared values; mutable DTO/array results preserve reference identity. Source-backed tests directly assert native values and call arguments/order with independent 41 public cases and 7 nonce scenarios. Host HTTP and crypto implementations remain separate dependencies; this is not full JavaScript Promise-runtime interoperability. Split member `safe-cex-venue-lighter/src/transaction_builders.rs::get_account_index`. Build-context port of the same accountIndex read."
 
 [[symbol]]
 ts = "TransactionClient.getApiKeyIndex"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_api_key_index"
+rs = [ "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_api_key_index", "safe-cex-venue-lighter/src/transaction_builders.rs::get_api_key_index" ]
 status = "ported"
-note = "Native TransactionClient method over explicit microtask/HTTP/crypto hosts. Eager invocation, deferred fulfillment observers, FIFO nonce cache allocation and finally release match the source; dropping the observer does not cancel queued work. Primitive results are readonly shared values; mutable DTO/array results preserve reference identity. Source-backed tests directly assert native values and call arguments/order with independent 41 public cases and 7 nonce scenarios. Host HTTP and crypto implementations remain separate dependencies; this is not full JavaScript Promise-runtime interoperability."
+note = "Native TransactionClient method over explicit microtask/HTTP/crypto hosts. Eager invocation, deferred fulfillment observers, FIFO nonce cache allocation and finally release match the source; dropping the observer does not cancel queued work. Primitive results are readonly shared values; mutable DTO/array results preserve reference identity. Source-backed tests directly assert native values and call arguments/order with independent 41 public cases and 7 nonce scenarios. Host HTTP and crypto implementations remain separate dependencies; this is not full JavaScript Promise-runtime interoperability. Split member `safe-cex-venue-lighter/src/transaction_builders.rs::get_api_key_index`. Build-context port of the same apiKeyIndex read."
 
 [[symbol]]
 ts = "TransactionClient.getChainId"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_chain_id"
+rs = [ "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClient::get_chain_id", "safe-cex-venue-lighter/src/transaction_builders.rs::get_chain_id" ]
 status = "ported"
-note = "Native TransactionClient method over explicit microtask/HTTP/crypto hosts. Eager invocation, deferred fulfillment observers, FIFO nonce cache allocation and finally release match the source; dropping the observer does not cancel queued work. Primitive results are readonly shared values; mutable DTO/array results preserve reference identity. Source-backed tests directly assert native values and call arguments/order with independent 41 public cases and 7 nonce scenarios. Host HTTP and crypto implementations remain separate dependencies; this is not full JavaScript Promise-runtime interoperability."
+note = "Native TransactionClient method over explicit microtask/HTTP/crypto hosts. Eager invocation, deferred fulfillment observers, FIFO nonce cache allocation and finally release match the source; dropping the observer does not cancel queued work. Primitive results are readonly shared values; mutable DTO/array results preserve reference identity. Source-backed tests directly assert native values and call arguments/order with independent 41 public cases and 7 nonce scenarios. Host HTTP and crypto implementations remain separate dependencies; this is not full JavaScript Promise-runtime interoperability. Split member `safe-cex-venue-lighter/src/transaction_builders.rs::get_chain_id`. Build-context port of the same chainId read."
 
 [[symbol]]
 ts = "TransactionClient.submitCreateOrder"

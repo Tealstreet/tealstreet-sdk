@@ -14,9 +14,9 @@ note = "Native value-level declaration: UTF16 strings/record keys, full binary64
 ts = "AccountLimits"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountLimits"
+rs = [ "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountLimits", "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountRateLimits" ]
 status = "ported"
-note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim. Split member `safe-cex-venue-lighter/src/sdk_account_api.rs::AccountRateLimits`. Named struct for the inline rateLimits object."
 
 [[symbol]]
 ts = "AccountMetadata"
@@ -86,9 +86,9 @@ note = "Native value-level declaration: UTF16 strings/record keys, full binary64
 ts = "PnL"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::PnL"
+rs = [ "safe-cex-venue-lighter/src/sdk_account_api.rs::PnL", "safe-cex-venue-lighter/src/sdk_account_api.rs::PnLSummary" ]
 status = "ported"
-note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim."
+note = "Native value-level declaration: UTF16 strings/record keys, full binary64 including signed zero/nonfinite, optional effective fields, unrestricted generic metadata, and ordered child arrays. Actual source AST checks exact fields including rateLimits/PnL summary;39 decoded native records pin all fields with distinct values, asymmetric duplicate children and fixed counts. No JSON codec, HTTP decoding, JS aliases/reflection/property enumeration claim. Split member `safe-cex-venue-lighter/src/sdk_account_api.rs::PnLSummary`. Named struct for the optional inline summary object."
 
 [[symbol]]
 ts = "GetLiquidationsOptions"

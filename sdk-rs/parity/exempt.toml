@@ -7220,3 +7220,1607 @@ reason = "Rust-only boxed future/result carrier for host asynchronous loader ope
 [[exempt]]
 rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeLoopFn"
 reason = "Rust-only owned callback carrier for the host loop scheduler's anonymous asynchronous function argument; no standalone TypeScript declaration. Loop behavior remains in its mapped operations. Accepted-set alias identity and raw-construction probes remain mandatory. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::AccountAccessCall"
+reason = "Named captured-callee/constructor shape for the individually mapped LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization bodies; carries callee and receiver identity with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::AccountAccessCall::call"
+reason = "Required member of the captured-callee shape (actual JS Call/Construct with original throws) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::AccountAccessCall::construct"
+reason = "Required member of the captured-callee shape (actual JS Call/Construct with original throws) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost"
+reason = "Host capability trait binding live owner, Get/Set, callee capture, literals, throws and Promise realm for LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::await_value"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::get"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::global"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::literal"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::member"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::owner"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::resolve_return"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::runtime"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::set"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_access.rs::ExchangeAccountAccessHost::throw_value"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, literal, throw, await or async-return realm primitive) used by LighterExchange#extractAccountFromResponse, #fetchParsedAccountLookup, #ensureAccountIndex, #getValidatedApiKeyIndex, #warmupSignerRuntime, .getAccount, .getPrivateWsAccountIndex, .getPrivateWsApiKeyIndex and LighterExchange.constructor client initialization. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_cache.rs::AccountCacheHost"
+reason = "Host capability trait extending TradingHost with Promise binding and JS arithmetic/relational operators for LighterExchange#fetchAccountSnapshot and #fetchAccountLimits; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_cache.rs::AccountCacheHost::add"
+reason = "Explicit realm primitive (Promise value binding or full ECMAScript add/subtract/less-than) used by LighterExchange#fetchAccountSnapshot and #fetchAccountLimits. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_cache.rs::AccountCacheHost::less"
+reason = "Explicit realm primitive (Promise value binding or full ECMAScript add/subtract/less-than) used by LighterExchange#fetchAccountSnapshot and #fetchAccountLimits. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_cache.rs::AccountCacheHost::promise_value"
+reason = "Explicit realm primitive (Promise value binding or full ECMAScript add/subtract/less-than) used by LighterExchange#fetchAccountSnapshot and #fetchAccountLimits. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_cache.rs::AccountCacheHost::subtract"
+reason = "Explicit realm primitive (Promise value binding or full ECMAScript add/subtract/less-than) used by LighterExchange#fetchAccountSnapshot and #fetchAccountLimits. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_lookup.rs::AccountLookupHost"
+reason = "Host capability trait extending TradingHost with array spread and GetIterator for LighterExchange#fetchAccountFromL1AddressLookup and #fetchAccountInfo; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_lookup.rs::AccountLookupHost::append_spread"
+reason = "Explicit language primitive (array SpreadElement, GetIterator, IteratorStepValue or IteratorClose) used by LighterExchange#fetchAccountFromL1AddressLookup and #fetchAccountInfo. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_lookup.rs::AccountLookupHost::iterator"
+reason = "Explicit language primitive (array SpreadElement, GetIterator, IteratorStepValue or IteratorClose) used by LighterExchange#fetchAccountFromL1AddressLookup and #fetchAccountInfo. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_lookup.rs::AccountLookupIterator"
+reason = "Iterator record shape (IteratorStepValue/IteratorClose) for the for-of loops in LighterExchange#fetchAccountFromL1AddressLookup and #fetchAccountInfo; no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_lookup.rs::AccountLookupIterator::close"
+reason = "Explicit language primitive (array SpreadElement, GetIterator, IteratorStepValue or IteratorClose) used by LighterExchange#fetchAccountFromL1AddressLookup and #fetchAccountInfo. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_account_lookup.rs::AccountLookupIterator::next"
+reason = "Explicit language primitive (array SpreadElement, GetIterator, IteratorStepValue or IteratorClose) used by LighterExchange#fetchAccountFromL1AddressLookup and #fetchAccountInfo. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_batch_placement.rs::BatchBinary"
+reason = "Operator selector for the JS binary-operator realm primitive used by LighterExchange.placeOrders; no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_batch_placement.rs::BatchPlacementHost"
+reason = "Host capability trait extending TradingHost with JS operators and for-of iteration for LighterExchange.placeOrders; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_batch_placement.rs::BatchPlacementHost::binary"
+reason = "Explicit language primitive (JS binary operator or for-of iteration with IteratorClose) used by LighterExchange.placeOrders. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_batch_placement.rs::BatchPlacementHost::for_each"
+reason = "Explicit language primitive (JS binary operator or for-of iteration with IteratorClose) used by LighterExchange.placeOrders. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_batch_placement.rs::BatchVisitor"
+reason = "Type alias for the for-of loop-body callback shape used by LighterExchange.placeOrders; no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ClassConstructor"
+reason = "Type alias for the derived-constructor callable shape passed to create_derived_class, serving the LighterExchange class and LighterExchange.constructor rows; no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts"
+reason = "Host capability trait binding per-invocation owner contexts (access, lookup, cache, trading, errors, markets, placement, mapping and helper hosts) for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::access"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::batch_placement"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::cache"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::errors"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::fills"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::initialization"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::live_helpers"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::lookup"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::markets"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::ohlcv"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::order_actions"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::order_mapping"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::order_snapshot"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::positions"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::promise_value"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::reconciliation"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::single_placement"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassContexts::trading"
+reason = "Required context constructor or Promise binding binding the live owner to a body host for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm"
+reason = "Realm capability trait for JS class construction, descriptors, arrows, bindings and base construction used by the LighterExchange class and LighterExchange.constructor rows; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm::array_literal"
+reason = "Explicit realm primitive (class creation, descriptor definition, arrow binding, lexical binding, array literal or base construction) used by the LighterExchange class and LighterExchange.constructor rows. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm::arrow"
+reason = "Explicit realm primitive (class creation, descriptor definition, arrow binding, lexical binding, array literal or base construction) used by the LighterExchange class and LighterExchange.constructor rows. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm::binding_value"
+reason = "Explicit realm primitive (class creation, descriptor definition, arrow binding, lexical binding, array literal or base construction) used by the LighterExchange class and LighterExchange.constructor rows. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm::construct_base"
+reason = "Explicit realm primitive (class creation, descriptor definition, arrow binding, lexical binding, array literal or base construction) used by the LighterExchange class and LighterExchange.constructor rows. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm::create_derived_class"
+reason = "Explicit realm primitive (class creation, descriptor definition, arrow binding, lexical binding, array literal or base construction) used by the LighterExchange class and LighterExchange.constructor rows. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm::define_data"
+reason = "Explicit realm primitive (class creation, descriptor definition, arrow binding, lexical binding, array literal or base construction) used by the LighterExchange class and LighterExchange.constructor rows. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm::define_prototype_method"
+reason = "Explicit realm primitive (class creation, descriptor definition, arrow binding, lexical binding, array literal or base construction) used by the LighterExchange class and LighterExchange.constructor rows. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm::finish_class_binding"
+reason = "Explicit realm primitive (class creation, descriptor definition, arrow binding, lexical binding, array literal or base construction) used by the LighterExchange class and LighterExchange.constructor rows. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeClassRealm::install_module_helper"
+reason = "Explicit realm primitive (class creation, descriptor definition, arrow binding, lexical binding, array literal or base construction) used by the LighterExchange class and LighterExchange.constructor rows. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::MethodMetadata"
+reason = "Named name/length/async record returned by ExchangeMethod::metadata for the LighterExchange class and LighterExchange.constructor rows plus every individually mapped LighterExchange field-fn and method row; no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ModuleHelper"
+reason = "Callable selector for the five individually mapped module const-fn rows parseLighterMarketSymbol, isLighterPerpMarket, getLighterMarketLeverageMax, parseLighterMarginFractionRatio and normalizeLighterStopSlippagePct; no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_class.rs::ModuleHelper::invoke"
+reason = "Pure dispatch from the module helper callable to the individually mapped parseLighterMarketSymbol, isLighterPerpMarket, getLighterMarketLeverageMax, parseLighterMarginFractionRatio and normalizeLighterStopSlippagePct bodies. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_constructor.rs::ExchangeConstructorHost"
+reason = "Host capability trait adding exact super construction and derived instance-element initialization for LighterExchange.constructor; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_constructor.rs::ExchangeConstructorHost::super_and_instance_elements"
+reason = "Explicit language primitive performing super(...) and derived instance-element initialization for LighterExchange.constructor, with original receiver/newTarget and throws. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ErrorRecoveryCall"
+reason = "Named captured-callee shape for the individually mapped LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError bodies; no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ErrorRecoveryCall::call"
+reason = "Required member of the captured-callee shape (actual JS Call with original throws) used by LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ExchangeErrorRecoveryHost"
+reason = "Host capability trait binding live owner, Get/Set, callee capture, instanceof, regex test and template coercion for LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ExchangeErrorRecoveryHost::get"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, Error instanceof, timeout regex test or template ToString) used by LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ExchangeErrorRecoveryHost::global"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, Error instanceof, timeout regex test or template ToString) used by LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ExchangeErrorRecoveryHost::instance_of_error"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, Error instanceof, timeout regex test or template ToString) used by LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ExchangeErrorRecoveryHost::member"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, Error instanceof, timeout regex test or template ToString) used by LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ExchangeErrorRecoveryHost::owner"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, Error instanceof, timeout regex test or template ToString) used by LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ExchangeErrorRecoveryHost::set"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, Error instanceof, timeout regex test or template ToString) used by LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ExchangeErrorRecoveryHost::template_string"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, Error instanceof, timeout regex test or template ToString) used by LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_error_recovery.rs::ExchangeErrorRecoveryHost::timeout_regex_test"
+reason = "Explicit imported capability (JS Get/Set, global/member capture, Error instanceof, timeout regex test or template ToString) used by LighterExchange.getAccountRateLimitGuidanceMessage, #normalizeSignerErrorMessage, #extractOrderErrorMessage, #isTransientLighterRestTransportError and #handlePrivateSnapshotFetchError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::FillBinary"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange.fetchHistoricalFills body; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::FillVisitor"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange.fetchHistoricalFills body; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::HistoricalFillsHost"
+reason = "Host capability trait for the mapped LighterExchange.fetchHistoricalFills body; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::HistoricalFillsHost::binary"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchHistoricalFills body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::HistoricalFillsHost::for_each"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchHistoricalFills body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::HistoricalFillsHost::promise_value"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchHistoricalFills body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::HistoricalFillsHost::regex"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchHistoricalFills body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::HistoricalFillsHost::require_options_binding"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchHistoricalFills body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_historical_fills.rs::HistoricalFillsHost::spread"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchHistoricalFills body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::LiveHelperHost"
+reason = "Host capability trait for the 42 individually mapped LighterExchange live helper bodies (parseAccountIndex, resolvePositionLiquidationPrice, snapToLeverageTier and siblings); it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::LiveHelperHost::class_constructor"
+reason = "Required realm/JS language operation of the host capability trait used by the 42 individually mapped LighterExchange live helper bodies (parseAccountIndex, resolvePositionLiquidationPrice, snapToLeverageTier and siblings); host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::LiveHelperHost::define_data"
+reason = "Required realm/JS language operation of the host capability trait used by the 42 individually mapped LighterExchange live helper bodies (parseAccountIndex, resolvePositionLiquidationPrice, snapToLeverageTier and siblings); host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::LiveHelperHost::global_value"
+reason = "Required realm/JS language operation of the host capability trait used by the 42 individually mapped LighterExchange live helper bodies (parseAccountIndex, resolvePositionLiquidationPrice, snapToLeverageTier and siblings); host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::LiveHelperHost::less_than"
+reason = "Required realm/JS language operation of the host capability trait used by the 42 individually mapped LighterExchange live helper bodies (parseAccountIndex, resolvePositionLiquidationPrice, snapToLeverageTier and siblings); host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::LiveHelperHost::negate"
+reason = "Required realm/JS language operation of the host capability trait used by the 42 individually mapped LighterExchange live helper bodies (parseAccountIndex, resolvePositionLiquidationPrice, snapToLeverageTier and siblings); host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::ForOfBody"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange.fetchMarkets, fetchMarketsHelper, #fetchLighterMarketRows, fetchOrders, fetchRawBalance, mapPosition and #resolvePositionLeverage bodies; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::ForOfStep"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange.fetchMarkets, fetchMarketsHelper, #fetchLighterMarketRows, fetchOrders, fetchRawBalance, mapPosition and #resolvePositionLeverage bodies; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::MarketReadHost"
+reason = "Host capability trait for the mapped LighterExchange.fetchMarkets, fetchMarketsHelper, #fetchLighterMarketRows, fetchOrders, fetchRawBalance, mapPosition and #resolvePositionLeverage bodies; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::MarketReadHost::add"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchMarkets, fetchMarketsHelper, #fetchLighterMarketRows, fetchOrders, fetchRawBalance, mapPosition and #resolvePositionLeverage bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::MarketReadHost::for_of"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchMarkets, fetchMarketsHelper, #fetchLighterMarketRows, fetchOrders, fetchRawBalance, mapPosition and #resolvePositionLeverage bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::MarketReadHost::function_value"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchMarkets, fetchMarketsHelper, #fetchLighterMarketRows, fetchOrders, fetchRawBalance, mapPosition and #resolvePositionLeverage bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::MarketReadHost::number_power"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchMarkets, fetchMarketsHelper, #fetchLighterMarketRows, fetchOrders, fetchRawBalance, mapPosition and #resolvePositionLeverage bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_market_reads.rs::MarketReadHost::spread_override"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchMarkets, fetchMarketsHelper, #fetchLighterMarketRows, fetchOrders, fetchRawBalance, mapPosition and #resolvePositionLeverage bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost"
+reason = "Host capability trait for the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::add"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::call_value"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::divide"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::greater"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::interval_binding"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::less"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::less_equal"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::multiply"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::promise_value"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::regexp"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::self_function"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::spread_override"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvHost::subtract"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_ohlcv.rs::OhlcvSelfCallback"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange.fetchOHLCV, #fetchLatestOhlcvWithSharedFallback, listenOHLCV and listenOrderBook bodies; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost"
+reason = "Host capability trait for the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::call_spread"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::define_data"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::divide"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::greater"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::greater_equal"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::has"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::iterator"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::less_equal"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::multiply"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::object_binding_pair"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::promise_value"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::spread"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionHost::subtract"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionIterator"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionIterator::close_throw"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_actions.rs::OrderActionIterator::next"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange#normalizePlaceOrderErrorMessage, #placeOrdersSequentially, updateOrder and cancelOrders bodies to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMapBinary"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMapIterator"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMapIterator::close_return"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMapIterator::close_throw"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMapIterator::next"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMappingHost"
+reason = "Host capability trait for the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMappingHost::binary"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMappingHost::copy_data_properties"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMappingHost::iterator"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_mapping.rs::OrderMappingHost::regex_literal"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.mapOrder body and the live helpers built on OrderMappingHost; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::CancelledOrderEntries"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange#fetchOrdersOnce body to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::CancelledOrderEntries::close_on_throw"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange#fetchOrdersOnce body to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::CancelledOrderEntries::next_entry"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange#fetchOrdersOnce body to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::CandidateVisitor"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange#fetchOrdersOnce body; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost"
+reason = "Host capability trait for the mapped LighterExchange#fetchOrdersOnce body; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::cancelled_entries"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::global_value"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::greater_or_equal"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::greater_than"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::has_key"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::instance_of"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::promise_value"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::regex"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::subtract"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_order_snapshot.rs::OrderSnapshotHost::visit_until"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange#fetchOrdersOnce body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_positions.rs::PositionForIn"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange.fetchPositions body to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_positions.rs::PositionForIn::next_key"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange.fetchPositions body to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_positions.rs::PositionReadHost"
+reason = "Host capability trait for the mapped LighterExchange.fetchPositions body; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_positions.rs::PositionReadHost::assign_index"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchPositions body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_positions.rs::PositionReadHost::for_in"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchPositions body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_positions.rs::PositionReadHost::spread_array"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.fetchPositions body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::ReconciliationCallback"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange tick, dispose, fetchBalance, fetchAndSetBalance, fetchAndSetPrivateSnapshot, fetchAndSetPrivateSnapshotHelper, getPrivateWsAuthToken and #syncLeverageFromExchange bodies; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::ReconciliationHost"
+reason = "Host capability trait for the mapped LighterExchange tick, dispose, fetchBalance, fetchAndSetBalance, fetchAndSetPrivateSnapshot, fetchAndSetPrivateSnapshotHelper, getPrivateWsAuthToken and #syncLeverageFromExchange bodies; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::ReconciliationHost::array"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange tick, dispose, fetchBalance, fetchAndSetBalance, fetchAndSetPrivateSnapshot, fetchAndSetPrivateSnapshotHelper, getPrivateWsAuthToken and #syncLeverageFromExchange bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::ReconciliationHost::callback"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange tick, dispose, fetchBalance, fetchAndSetBalance, fetchAndSetPrivateSnapshot, fetchAndSetPrivateSnapshotHelper, getPrivateWsAuthToken and #syncLeverageFromExchange bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::ReconciliationHost::error_value"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange tick, dispose, fetchBalance, fetchAndSetBalance, fetchAndSetPrivateSnapshot, fetchAndSetPrivateSnapshotHelper, getPrivateWsAuthToken and #syncLeverageFromExchange bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::ReconciliationHost::pair"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange tick, dispose, fetchBalance, fetchAndSetBalance, fetchAndSetPrivateSnapshot, fetchAndSetPrivateSnapshotHelper, getPrivateWsAuthToken and #syncLeverageFromExchange bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::ReconciliationHost::spread_override"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange tick, dispose, fetchBalance, fetchAndSetBalance, fetchAndSetPrivateSnapshot, fetchAndSetPrivateSnapshotHelper, getPrivateWsAuthToken and #syncLeverageFromExchange bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_reconciliation.rs::ReconciliationHost::template_string"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange tick, dispose, fetchBalance, fetchAndSetBalance, fetchAndSetPrivateSnapshot, fetchAndSetPrivateSnapshotHelper, getPrivateWsAuthToken and #syncLeverageFromExchange bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::RuntimeInitializationHost"
+reason = "Host capability trait for the mapped LighterExchange.changeAccountTier, #ensureSignerAdapter, validateAccount and start bodies; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::RuntimeInitializationHost::add"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.changeAccountTier, #ensureSignerAdapter, validateAccount and start bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::RuntimeInitializationHost::promise_value"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.changeAccountTier, #ensureSignerAdapter, validateAccount and start bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::RuntimeInitializationHost::second_binding"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.changeAccountTier, #ensureSignerAdapter, validateAccount and start bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs::RuntimeInitializationHost::spread_override"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.changeAccountTier, #ensureSignerAdapter, validateAccount and start bodies; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::PlacementBinary"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange.placeOrder body; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::PlacementIterator"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange.placeOrder body to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::PlacementIterator::close_throw"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange.placeOrder body to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::PlacementIterator::next"
+reason = "Native iterator/entry-cursor capability used by the mapped LighterExchange.placeOrder body to preserve IteratorStep and IteratorClose semantics; no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::PlacementVisitor"
+reason = "Named inline operator selector or callback/loop-step shape for the mapped LighterExchange.placeOrder body; the loop or operator body logic stays in those mapped Rust bodies, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::SinglePlacementHost"
+reason = "Host capability trait for the mapped LighterExchange.placeOrder body; it declares required realm/JS language operations only and adds no independent venue behavior or TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::SinglePlacementHost::binary"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.placeOrder body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::SinglePlacementHost::call_spread"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.placeOrder body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::SinglePlacementHost::define_data"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.placeOrder body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::SinglePlacementHost::for_each"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.placeOrder body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::SinglePlacementHost::iterator"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.placeOrder body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::SinglePlacementHost::set_index"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.placeOrder body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_single_placement.rs::SinglePlacementHost::spread_object"
+reason = "Required realm/JS language operation of the host capability trait used by the mapped LighterExchange.placeOrder body; host implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_state.rs::PositionFinder"
+reason = "Receiver-bound Array.find capability for this.positions.find in the mapped LighterExchange#getCurrentMarginModeForSymbol and LighterExchange#getCurrentLeverageForSymbol bodies; host array iteration stays outside the body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_state.rs::PositionFinder::find"
+reason = "Receiver-bound Array.find capability for this.positions.find in the mapped LighterExchange#getCurrentMarginModeForSymbol and LighterExchange#getCurrentLeverageForSymbol bodies; host array iteration stays outside the body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_state.rs::StateCall"
+reason = "Captured callee/receiver capability for the live Map, Math, Number, Boolean and owner calls made by the mapped LighterExchange placed-order hint, account tier, margin mode, leverage and reconciliation-skip bodies in exchange_state.rs. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_state.rs::StateCall::call"
+reason = "Captured callee/receiver capability for the live Map, Math, Number, Boolean and owner calls made by the mapped LighterExchange placed-order hint, account tier, margin mode, leverage and reconciliation-skip bodies in exchange_state.rs. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_state.rs::StateCallKind"
+reason = "Selector naming which captured callee ExchangeStateHost::callable returns for the mapped LighterExchange placed-order hint, account tier, margin mode, leverage and reconciliation-skip bodies. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::TradingCallback"
+reason = "Type alias for the native closure shape passed to TradingHost::function by the mapped LighterExchange partner-approval, margin-refresh and cancelSymbolOrders bodies. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::TradingHost"
+reason = "Native receiver for the mapped LighterExchange trading preflight bodies in exchange_trading_preflight.rs; it carries no state or logic of its own and adds no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::TradingHost::constant"
+reason = "Explicit imported capability used by the mapped LighterExchange trading preflight bodies (partner attribution checks, margin refresh, reduce-only assertion, conditional price, setLeverage, changeMarginType, cancelSymbolOrders); host realm/store/constant access remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::TradingHost::error_value"
+reason = "Explicit imported capability used by the mapped LighterExchange trading preflight bodies (partner attribution checks, margin refresh, reduce-only assertion, conditional price, setLeverage, changeMarginType, cancelSymbolOrders); host realm/store/constant access remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::TradingHost::function"
+reason = "Explicit imported capability used by the mapped LighterExchange trading preflight bodies (partner attribution checks, margin refresh, reduce-only assertion, conditional price, setLeverage, changeMarginType, cancelSymbolOrders); host realm/store/constant access remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::TradingHost::index"
+reason = "Explicit imported capability used by the mapped LighterExchange trading preflight bodies (partner attribution checks, margin refresh, reduce-only assertion, conditional price, setLeverage, changeMarginType, cancelSymbolOrders); host realm/store/constant access remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::TradingHost::template_string"
+reason = "Explicit imported capability used by the mapped LighterExchange trading preflight bodies (partner attribution checks, margin refresh, reduce-only assertion, conditional price, setLeverage, changeMarginType, cancelSymbolOrders); host realm/store/constant access remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/http_models.rs::Utf16Record"
+reason = "Type alias for the UTF-16-keyed ordered record used for headers, details, metadata and query params across the mapped http-types, AccountApi, OrderApi and TransactionApi rows. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountGet"
+reason = "Explicit imported capability used by the mapped AccountApi, CandlestickApi, FundingApi and InfoApi method bodies for client.get access and ECMAScript property/error/await semantics; host HTTP and realm behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountGet::call"
+reason = "Explicit imported capability used by the mapped AccountApi, CandlestickApi, FundingApi and InfoApi method bodies for client.get access and ECMAScript property/error/await semantics; host HTTP and realm behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountHttpClient"
+reason = "Explicit imported capability used by the mapped AccountApi, CandlestickApi, FundingApi and InfoApi method bodies for client.get access and ECMAScript property/error/await semantics; host HTTP and realm behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountHttpClient::get_callback"
+reason = "Explicit imported capability used by the mapped AccountApi, CandlestickApi, FundingApi and InfoApi method bodies for client.get access and ECMAScript property/error/await semantics; host HTTP and realm behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountObject"
+reason = "Realm value carrier shared by the mapped Lighter SDK client and LighterExchange bodies; models JS values, ToBoolean and nullish checks only. No independent venue algorithm and no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountObject::get"
+reason = "Realm value carrier shared by the mapped Lighter SDK client and LighterExchange bodies; models JS values, ToBoolean and nullish checks only. No independent venue algorithm and no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountRequestConfig"
+reason = "Named inline { params } request config shape passed to client.get by the mapped AccountApi, CandlestickApi, FundingApi and InfoApi method bodies. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountSemantics"
+reason = "Explicit imported capability used by the mapped AccountApi, CandlestickApi, FundingApi and InfoApi method bodies for client.get access and ECMAScript property/error/await semantics; host HTTP and realm behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountSemantics::error_message"
+reason = "Explicit imported capability used by the mapped AccountApi, CandlestickApi, FundingApi and InfoApi method bodies for client.get access and ECMAScript property/error/await semantics; host HTTP and realm behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountSemantics::get_property"
+reason = "Explicit imported capability used by the mapped AccountApi, CandlestickApi, FundingApi and InfoApi method bodies for client.get access and ECMAScript property/error/await semantics; host HTTP and realm behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountSemantics::resolve_return"
+reason = "Explicit imported capability used by the mapped AccountApi, CandlestickApi, FundingApi and InfoApi method bodies for client.get access and ECMAScript property/error/await semantics; host HTTP and realm behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountValue"
+reason = "Realm value carrier shared by the mapped Lighter SDK client and LighterExchange bodies; models JS values, ToBoolean and nullish checks only. No independent venue algorithm and no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountValue::is_nullish"
+reason = "Realm value carrier shared by the mapped Lighter SDK client and LighterExchange bodies; models JS values, ToBoolean and nullish checks only. No independent venue algorithm and no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_account_api.rs::AccountValue::truthy"
+reason = "Realm value carrier shared by the mapped Lighter SDK client and LighterExchange bodies; models JS values, ToBoolean and nullish checks only. No independent venue algorithm and no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::AccessCall"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::AccessCall::call"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost"
+reason = "Native receiver for the nine mapped LighterApiClient access bodies in sdk_http_access.rs; it carries no state or logic of its own and adds no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost::config"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost::empty_array"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost::http_callback"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost::interceptors"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost::property"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost::push_callback"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost::runtime"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost::semantics"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpAccessHost::set_property"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpCall"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpCall::call"
+reason = "Explicit imported capability used by the mapped LighterApiClient get/post/put/delete, interceptor and config accessor bodies in sdk_http_access.rs; Axios instance, config and runtime behavior remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_http_access.rs::HttpVerb"
+reason = "Selector for which captured Axios method the mapped LighterApiClient.get, post, put and delete bodies call. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_key_management.rs::KeyInput"
+reason = "Named inline string | Buffer | Uint8Array parameter shape for the mapped normalizePrivateKey and normalizePublicKey bodies. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_market_api.rs::MarketApiErrors"
+reason = "Explicit imported capability that constructs LighterApiError for the mapped CandlestickApi.getCandlesticks, CandlestickApi.getFundings, FundingApi.getFundingRates and InfoApi.getWithdrawalDelay bodies; the error class itself stays outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_market_api.rs::MarketApiErrors::construct"
+reason = "Explicit imported capability that constructs LighterApiError for the mapped CandlestickApi.getCandlesticks, CandlestickApi.getFundings, FundingApi.getFundingRates and InfoApi.getWithdrawalDelay bodies; the error class itself stays outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderQuerySemantics"
+reason = "Explicit imported toString capability used by the mapped OrderApi.getAccountActiveOrders, getAccountInactiveOrders, getOrderBooks, getOrderBookDetails, getRecentTrades and getTrades bodies for query parameter coercion. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderQuerySemantics::to_string_method"
+reason = "Explicit imported toString capability used by the mapped OrderApi.getAccountActiveOrders, getAccountInactiveOrders, getOrderBooks, getOrderBookDetails, getRecentTrades and getTrades bodies for query parameter coercion. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::SortOrder"
+reason = "Named inline asc | desc sortOrder literal union shared by the mapped GetInactiveOrdersOptions and GetTradesOptions rows. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::SortOrder::as_str"
+reason = "Named inline asc | desc sortOrder literal union shared by the mapped GetInactiveOrdersOptions and GetTradesOptions rows. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_transaction_api.rs::DepositStatus"
+reason = "Named inline pending | confirming | completed | failed status literal union shared by the mapped Deposit and GetDepositHistoryOptions rows. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_transaction_api.rs::DepositStatus::as_str"
+reason = "Named inline pending | confirming | completed | failed status literal union shared by the mapped Deposit and GetDepositHistoryOptions rows. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_validation.rs::ValidationFailure"
+reason = "Error carrier for the mapped validate* function bodies in sdk_validation.rs, distinguishing ValidationError from builtin BigInt and host-thrown errors. No independent venue algorithm and no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_validation.rs::ValidationResult"
+reason = "Type alias for the void-or-throw return shape of the mapped validate* function bodies in sdk_validation.rs. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_validation.rs::ValidationValue"
+reason = "Realm value carrier for the unknown/any inputs of the mapped validate* function bodies in sdk_validation.rs; models JS primitives and typeof only. No independent venue algorithm and no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/sdk_validation.rs::ValidationValue::type_of"
+reason = "Realm value carrier for the unknown/any inputs of the mapped validate* function bodies in sdk_validation.rs; models JS primitives and typeof only. No independent venue algorithm and no TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_builders.rs::ExpiringTransactionData"
+reason = "Named inline { messageHex, expiredAt } return shape of the mapped TransactionClient#buildCancelOrderData and TransactionClient#buildApproveIntegratorData bodies. No additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_builders.rs::TransactionBuildContext"
+reason = "State carrier for the chainId, accountIndex, apiKeyIndex and clock fields the mapped TransactionClient build* bodies read from this; it adds no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_builders.rs::TransactionBuildError"
+reason = "Error carrier for the plain Error throws of the mapped TransactionClient build* and validateCreateGroupedOrdersParams bodies. No independent venue algorithm and no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionApi"
+reason = "Host HTTP capability trait standing in for the LighterApiClient httpClient that TransactionClient.getNextNonce, submitCreateOrder, submitCreateOrders, submitCreateGroupedOrders, submitCancelOrder, submitTransfer, submitUpdateLeverage and submitApproveIntegrator call; the HTTP implementation is mapped separately and the trait adds no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionApi::get_next_nonce"
+reason = "Explicit imported LighterApiClient capability called by the mapped TransactionClient nonce and submit bodies (getNextNonce and the submit wrappers); host HTTP implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionApi::send_raw_tx"
+reason = "Explicit imported LighterApiClient capability called by the mapped TransactionClient nonce and submit bodies (getNextNonce and the submit wrappers); host HTTP implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionApi::send_raw_tx_batch"
+reason = "Explicit imported LighterApiClient capability called by the mapped TransactionClient nonce and submit bodies (getNextNonce and the submit wrappers); host HTTP implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionClientConfig"
+reason = "Named inline constructor config shape for the mapped TransactionClient.constructor body (httpClient, crypto, chainId, privateKey, accountIndex, apiKeyIndex) plus the explicit runtime host; no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_client.rs::TransactionRef"
+reason = "Identity-retaining named argument shape for the AnyTxInfo value that the mapped TransactionClient submit bodies pass to httpClient.sendRawTx; it adds no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::NativePromise"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::NativePromise::pending"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::NativePromise::settled"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::NativePromise::subscribe"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::ObjectPromise"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::ObjectResolver"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::PromiseResolver"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::PromiseResolver::settle"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::PromiseResolver::settle_shared"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::PromiseResult"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::Shared"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::shared"
+reason = "Promise primitive: eager detached native promise over a host FIFO microtask queue that carries the async results of the mapped TransactionClient bodies (getNextNonce, the get*Transaction builders, getAuthToken and the submit wrappers); no TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::TransactionRuntime"
+reason = "Host runtime capability trait (microtask queue, Date.now clock, ambient UTF-8 encoder availability) used by the mapped TransactionClient async bodies and getAuthToken; no independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::TransactionRuntime::auth_token_encoding"
+reason = "Explicit imported runtime capability used by the mapped TransactionClient async bodies and getAuthToken; host queue, clock and encoder implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::TransactionRuntime::enqueue_microtask"
+reason = "Explicit imported runtime capability used by the mapped TransactionClient async bodies and getAuthToken; host queue, clock and encoder implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_promise.rs::TransactionRuntime::now_millis"
+reason = "Explicit imported runtime capability used by the mapped TransactionClient async bodies and getAuthToken; host queue, clock and encoder implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::CryptoCallResult"
+reason = "Named callback return shape for PoseidonCrypto calls ({error} result versus thrown value) consumed by the mapped TransactionClient#signTransaction, #signCreateOrderTransaction and #buildCreateGroupedOrdersData bodies; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::CryptoFailure"
+reason = "Named callback return shape for PoseidonCrypto calls ({error} result versus thrown value) consumed by the mapped TransactionClient#signTransaction, #signCreateOrderTransaction and #buildCreateGroupedOrdersData bodies; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::Fp5Callback"
+reason = "Type alias for the extracted poseidon2HashFp5 callable invoked by the mapped TransactionClient#signCreateOrderTransaction body; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::GroupedOrdersData"
+reason = "Named inline return shape of the mapped TransactionClient#buildCreateGroupedOrdersData body, consumed by getCreateGroupedOrdersTransaction; no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::HostThrownValue"
+reason = "Realm primitive that retains an arbitrary host exception by identity so the mapped TransactionClient signing, nonce and submit bodies rethrow the original value; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::HostThrownValue::new"
+reason = "Realm primitive that retains an arbitrary host exception by identity so the mapped TransactionClient signing, nonce and submit bodies rethrow the original value; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::HostThrownValue::ptr_eq"
+reason = "Realm primitive that retains an arbitrary host exception by identity so the mapped TransactionClient signing, nonce and submit bodies rethrow the original value; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::HostThrownValue::value"
+reason = "Realm primitive that retains an arbitrary host exception by identity so the mapped TransactionClient signing, nonce and submit bodies rethrow the original value; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::SignedTransactionData"
+reason = "Named inline return shape ({signature, txHash}) of the mapped TransactionClient#signTransaction and #signCreateOrderTransaction bodies; no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::SigningResult"
+reason = "Type alias for the rejection-carrying result of the mapped TransactionClient builder, signing and async bodies; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::TransactionSigningError"
+reason = "Rejection value carrier (generated Error or retained host throw) for the mapped TransactionClient builder, signing and async bodies; no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::TransactionCrypto"
+reason = "Host capability trait for the external @tealstreet/poseidon-crypto PoseidonCrypto dependency used by the mapped TransactionClient#signTransaction, #signCreateOrderTransaction, #buildCreateGroupedOrdersData and getAuthToken bodies; cryptographic arithmetic is outside this port and the trait adds no venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::TransactionCrypto::fp5_callback"
+reason = "Explicit imported PoseidonCrypto capability called by the mapped TransactionClient signing, grouped-order and getAuthToken bodies; WASM and cryptographic implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::TransactionCrypto::is_ready"
+reason = "Explicit imported PoseidonCrypto capability called by the mapped TransactionClient signing, grouped-order and getAuthToken bodies; WASM and cryptographic implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::TransactionCrypto::poseidon2_hash"
+reason = "Explicit imported PoseidonCrypto capability called by the mapped TransactionClient signing, grouped-order and getAuthToken bodies; WASM and cryptographic implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::TransactionCrypto::poseidon2_two_to_one"
+reason = "Explicit imported PoseidonCrypto capability called by the mapped TransactionClient signing, grouped-order and getAuthToken bodies; WASM and cryptographic implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/transaction_signing.rs::TransactionCrypto::schnorr_sign"
+reason = "Explicit imported PoseidonCrypto capability called by the mapped TransactionClient signing, grouped-order and getAuthToken bodies; WASM and cryptographic implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::PrivateRecoveryHost"
+reason = "Native receiver host trait for the eight individually mapped private-stream recovery bodies (LighterPrivateWebsocket#stopDiagnosticsLoop, #clearStreamRecoveryReconnectTimeout, #clearRateLimitResubscribeTimeout, #scheduleRateLimitResubscribe, #scheduleStreamRecoveryReconnectFallback, #maybeRecoverPrivateStream, #noteAccountStreamActivity and dispose); owner fields, clock, timers and socket implementation stay with the host. No independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::PrivateRecoveryHost::boolean"
+reason = "Explicit imported owner-field, clock or timer capability used by the mapped LighterPrivateWebsocket recovery and dispose bodies; host socket/timer implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::PrivateRecoveryHost::capture"
+reason = "Explicit imported owner-field, clock or timer capability used by the mapped LighterPrivateWebsocket recovery and dispose bodies; host socket/timer implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::PrivateRecoveryHost::capture_set_timeout"
+reason = "Explicit imported owner-field, clock or timer capability used by the mapped LighterPrivateWebsocket recovery and dispose bodies; host socket/timer implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::PrivateRecoveryHost::now"
+reason = "Explicit imported owner-field, clock or timer capability used by the mapped LighterPrivateWebsocket recovery and dispose bodies; host socket/timer implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::PrivateRecoveryHost::number"
+reason = "Explicit imported owner-field, clock or timer capability used by the mapped LighterPrivateWebsocket recovery and dispose bodies; host socket/timer implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::PrivateRecoveryHost::set_number"
+reason = "Explicit imported owner-field, clock or timer capability used by the mapped LighterPrivateWebsocket recovery and dispose bodies; host socket/timer implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::PrivateRecoveryHost::set_timer"
+reason = "Explicit imported owner-field, clock or timer capability used by the mapped LighterPrivateWebsocket recovery and dispose bodies; host socket/timer implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::PrivateRecoveryHost::timer"
+reason = "Explicit imported owner-field, clock or timer capability used by the mapped LighterPrivateWebsocket recovery and dispose bodies; host socket/timer implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::RecoveryCall"
+reason = "Named captured-callee callback shape used by the mapped private-stream recovery bodies (LighterPrivateWebsocket#stopDiagnosticsLoop, #clearStreamRecoveryReconnectTimeout, #clearRateLimitResubscribeTimeout, #scheduleRateLimitResubscribe, #scheduleStreamRecoveryReconnectFallback, #maybeRecoverPrivateStream, #noteAccountStreamActivity and dispose) to preserve source receiver and call-order semantics; no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::RecoveryCall::call"
+reason = "Named captured-callee callback shape used by the mapped private-stream recovery bodies (LighterPrivateWebsocket#stopDiagnosticsLoop, #clearStreamRecoveryReconnectTimeout, #clearRateLimitResubscribeTimeout, #scheduleRateLimitResubscribe, #scheduleStreamRecoveryReconnectFallback, #maybeRecoverPrivateStream, #noteAccountStreamActivity and dispose) to preserve source receiver and call-order semantics; no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::RecoveryCallback"
+reason = "Named captured-callee callback shape used by the mapped private-stream recovery bodies (LighterPrivateWebsocket#stopDiagnosticsLoop, #clearStreamRecoveryReconnectTimeout, #clearRateLimitResubscribeTimeout, #scheduleRateLimitResubscribe, #scheduleStreamRecoveryReconnectFallback, #maybeRecoverPrivateStream, #noteAccountStreamActivity and dispose) to preserve source receiver and call-order semantics; no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::RecoveryTimerCall"
+reason = "Named captured-callee callback shape used by the mapped private-stream recovery bodies (LighterPrivateWebsocket#stopDiagnosticsLoop, #clearStreamRecoveryReconnectTimeout, #clearRateLimitResubscribeTimeout, #scheduleRateLimitResubscribe, #scheduleStreamRecoveryReconnectFallback, #maybeRecoverPrivateStream, #noteAccountStreamActivity and dispose) to preserve source receiver and call-order semantics; no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::RecoveryTimerCall::call"
+reason = "Named captured-callee callback shape used by the mapped private-stream recovery bodies (LighterPrivateWebsocket#stopDiagnosticsLoop, #clearStreamRecoveryReconnectTimeout, #clearRateLimitResubscribeTimeout, #scheduleRateLimitResubscribe, #scheduleStreamRecoveryReconnectFallback, #maybeRecoverPrivateStream, #noteAccountStreamActivity and dispose) to preserve source receiver and call-order semantics; no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateStreamWarningParams"
+reason = "Named getter-aware parameter shape for the mapped LighterPrivateWebsocket#getPrivateStreamErrorWarningMessage body (isPolicyRestriction, isRateLimit, errorMessage reads); no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateStreamWarningParams::error_message"
+reason = "Named getter-aware parameter shape for the mapped LighterPrivateWebsocket#getPrivateStreamErrorWarningMessage body (isPolicyRestriction, isRateLimit, errorMessage reads); no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateStreamWarningParams::policy_restriction"
+reason = "Named getter-aware parameter shape for the mapped LighterPrivateWebsocket#getPrivateStreamErrorWarningMessage body (isPolicyRestriction, isRateLimit, errorMessage reads); no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateStreamWarningParams::rate_limit"
+reason = "Named getter-aware parameter shape for the mapped LighterPrivateWebsocket#getPrivateStreamErrorWarningMessage body (isPolicyRestriction, isRateLimit, errorMessage reads); no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningFlags"
+reason = "Owner-flag read capability (useReadonlyFallback, readonlyFallbackFailures) for the mapped LighterPrivateWebsocket#shouldUseGeorestrictedConnectivityWarning and #getPrivateStreamErrorWarningMessage bodies; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningFlags::readonly_failures"
+reason = "Owner-flag read capability (useReadonlyFallback, readonlyFallbackFailures) for the mapped LighterPrivateWebsocket#shouldUseGeorestrictedConnectivityWarning and #getPrivateStreamErrorWarningMessage bodies; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningFlags::readonly_fallback"
+reason = "Owner-flag read capability (useReadonlyFallback, readonlyFallbackFailures) for the mapped LighterPrivateWebsocket#shouldUseGeorestrictedConnectivityWarning and #getPrivateStreamErrorWarningMessage bodies; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost"
+reason = "Native receiver host trait for the individually mapped private-stream warning bodies (LighterPrivateWebsocket#getRateLimitWarningMessage, #getReadonlyFallbackWarningKey, #emitReadonlyFallbackWarning, #isWsProxyRouteEnabled, #shouldUseGeorestrictedConnectivityWarning and #getPrivateStreamErrorWarningMessage); parent emitter, logger, clock and route resolution stay with the host. No independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::account_index"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::emit_warning"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::log_warning"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::network"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::now_ms"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::rate_limit_guidance"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::resolve_private_host"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::supports_ws_proxy"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::testnet_option"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningHost::ws_route_option"
+reason = "Explicit imported parent/clock/route capability used by the mapped LighterPrivateWebsocket warning bodies; host emitter, logger and transport-routing implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningState"
+reason = "State carrier for the LighterPrivateWebsocket readonly-fallback and rate-limit fields read and written by the mapped #notePrivateStreamRateLimitError, #clearPrivateStreamRateLimitErrorState, #shouldUseGeorestrictedConnectivityWarning and #getPrivateStreamErrorWarningMessage bodies; it adds no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::ReadonlyWarningTimes"
+reason = "Type alias for the class-wide static readonlyFallbackWarningAtByAccount map read and written by the mapped LighterPrivateWebsocket#emitReadonlyFallbackWarning body; no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupArrayAccess"
+reason = "Explicit ECMAScript record/array/Object.values access capability used by the mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); host object semantics remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupArrayAccess::for_each"
+reason = "Explicit ECMAScript record/array/Object.values access capability used by the mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); host object semantics remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupArrayAccess::length"
+reason = "Explicit ECMAScript record/array/Object.values access capability used by the mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); host object semantics remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupRecordAccess"
+reason = "Explicit ECMAScript record/array/Object.values access capability used by the mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); host object semantics remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupRecordAccess::delete"
+reason = "Explicit ECMAScript record/array/Object.values access capability used by the mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); host object semantics remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupRecordAccess::get"
+reason = "Explicit ECMAScript record/array/Object.values access capability used by the mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); host object semantics remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupRecordAccess::values"
+reason = "Explicit ECMAScript record/array/Object.values access capability used by the mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); host object semantics remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupValuesCall"
+reason = "Explicit ECMAScript record/array/Object.values access capability used by the mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); host object semantics remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupValuesCall::for_of"
+reason = "Explicit ECMAScript record/array/Object.values access capability used by the mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); host object semantics remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::CleanupRecord"
+reason = "Field selector naming the LighterPublicWebsocket timeout and REST-fallback record fields touched by the mapped cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); no additional TypeScript symbol and no independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::PublicCleanupHost"
+reason = "Native receiver host trait for the individually mapped public-stream cleanup bodies (LighterPublicWebsocket#clearOhlcvNoDataTimeout, #clearOrderBookStaleTimeout, #clearOrderBookInitialDataTimeout, #clearAllOrderBookInitialDataTimeouts, #clearAllOrderBookStaleTimeouts, #stopOrderBookRestFallback, #stopAllOrderBookRestFallback and #clearPendingSubscribeTimeouts); owner records, pending subscriptions and global timers stay with the host. No independent venue behavior."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::PublicCleanupHost::clear_interval"
+reason = "Explicit imported owner-field or global timer capability used by the mapped LighterPublicWebsocket cleanup bodies; host timer and object implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::PublicCleanupHost::clear_timeout"
+reason = "Explicit imported owner-field or global timer capability used by the mapped LighterPublicWebsocket cleanup bodies; host timer and object implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::PublicCleanupHost::object_values_callback"
+reason = "Explicit imported owner-field or global timer capability used by the mapped LighterPublicWebsocket cleanup bodies; host timer and object implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::PublicCleanupHost::pending_subscriptions"
+reason = "Explicit imported owner-field or global timer capability used by the mapped LighterPublicWebsocket cleanup bodies; host timer and object implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::PublicCleanupHost::record"
+reason = "Explicit imported owner-field or global timer capability used by the mapped LighterPublicWebsocket cleanup bodies; host timer and object implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::PublicCleanupHost::replace_empty_pending_subscriptions"
+reason = "Explicit imported owner-field or global timer capability used by the mapped LighterPublicWebsocket cleanup bodies; host timer and object implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_cleanup.rs::PublicCleanupHost::replace_empty_record"
+reason = "Explicit imported owner-field or global timer capability used by the mapped LighterPublicWebsocket cleanup bodies; host timer and object implementation remain outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost"
+reason = "Native host capability trait or callee/receiver call shape for the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost::capture"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost::capture_timer"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost::flag"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost::performance_now"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost::ping_payload"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost::set_flag"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost::set_value"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost::value"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::PublicReadinessHost::virtual_now"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::ReadinessCall"
+reason = "Native host capability trait or callee/receiver call shape for the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::ReadinessCall::call"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::ReadinessCallback"
+reason = "Named inline arrow callback shape passed to setTimeout/setInterval by armTickerRestFallbackWatchdog and startTickerRestFallback; no separately named TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::ReadinessTimerCall"
+reason = "Native host capability trait or callee/receiver call shape for the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_readiness.rs::ReadinessTimerCall::call"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket readiness bodies (syncTickerRestFallbackToPriceHydration, primeTickerRestFallback, clear/armTickerRestFallbackWatchdog, start/stopTickerRestFallback, onOpen, ping); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost"
+reason = "Native host capability trait or callee/receiver call shape for the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::delete"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::for_of"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::get"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::global"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::interval"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::less_than"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::literal"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::member"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::owner"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::PublicSubscriptionHost::set"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::SubscriptionCall"
+reason = "Native host capability trait or callee/receiver call shape for the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::SubscriptionCall::call"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::SubscriptionCallback"
+reason = "Named inline arrow callback shape passed to setInterval by startOrderBookRestFallback; no separately named TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::SubscriptionTimer"
+reason = "Native host capability trait or callee/receiver call shape for the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_subscriptions.rs::SubscriptionTimer::call"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the eight mapped LighterPublicWebsocket subscription bodies (isWsProxyRouteEnabled, connectAndSubscribe, onMarketsChanged, sendPayload, syncBboTickerTopics, handleTickersEvent, isOrderBookRestFallbackCoolingDown, startOrderBookRestFallback); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost"
+reason = "Native host capability trait or callee/receiver call shape for the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::array_first"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::capture"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::capture_entries"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::capture_timeout"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::capture_values"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::flag"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::literal"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::markets_by_symbol"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::now"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::number"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::property"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::record"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::replace_empty"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::set_flag"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::PublicWatchdogHost::set_number"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogCall"
+reason = "Native host capability trait or callee/receiver call shape for the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogCall::call"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogCallback"
+reason = "Named inline arrow callback shape passed to setTimeout by armOrderBookStaleTimeout and armOhlcvNoDataTimeout; no separately named TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogEntriesCall"
+reason = "Native host capability trait or callee/receiver call shape for the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogEntriesCall::for_of"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogOptions"
+reason = "Named inline parameter shape for the opts { symbol, interval } argument of the mapped LighterPublicWebsocket.maybeRecoverOhlcvStream body; live getter capability, no separately named TypeScript declaration."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogOptions::interval"
+reason = "Live opts.interval getter capability of the named inline parameter shape for the mapped LighterPublicWebsocket.maybeRecoverOhlcvStream body; no independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogOptions::symbol"
+reason = "Live opts.symbol getter capability of the named inline parameter shape for the mapped LighterPublicWebsocket.maybeRecoverOhlcvStream body; no independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogRecord"
+reason = "Selector naming the owner record fields (topics, handlers, stale/no-data timeouts, recovery attempts) read and replaced by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); state carrier with no TypeScript symbol or venue logic."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogRecordAccess"
+reason = "Native host capability trait or callee/receiver call shape for the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogRecordAccess::delete"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogRecordAccess::get"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogRecordAccess::set"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogTimerCall"
+reason = "Native host capability trait or callee/receiver call shape for the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogTimerCall::call"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogValuesCall"
+reason = "Native host capability trait or callee/receiver call shape for the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); carries live JS owner/timer/callee bindings with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-lighter/src/ws_public_watchdogs.rs::WatchdogValuesCall::for_of"
+reason = "Explicit imported capability (owner property/flag/timer/callee/iterator/literal/clock host) used by the seven mapped LighterPublicWebsocket watchdog bodies (armOrderBookStaleTimeout, armExistingOrderBookTimeouts, armOhlcvNoDataTimeout, armExistingOhlcvNoDataTimeouts, attemptOhlcvRecovery, maybeRecoverOhlcvStream, dispose); host runtime implementation remains outside this body port. No independent venue algorithm."

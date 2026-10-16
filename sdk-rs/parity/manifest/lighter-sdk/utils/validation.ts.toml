@@ -78,9 +78,9 @@ note = "Source-ordered validation decisions over native JS primitive tags, unbou
 ts = "validateOrderParams"
 kind = "function"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_validation.rs::validate_order_params"
+rs = [ "safe-cex-venue-lighter/src/sdk_validation.rs::validate_order_params", "safe-cex-venue-lighter/src/sdk_validation.rs::OrderParamsReader", "safe-cex-venue-lighter/src/sdk_validation.rs::OrderParamsReader::get", "safe-cex-venue-lighter/src/sdk_validation.rs::ValidationValue::truthy" ]
 status = "ported"
-note = "Source-ordered validation decisions over native JS primitive tags, unbounded BigInt, full binary64 and UTF16 strings. Order getters are read at every source access; clock/getter exceptions retain identity. Live source oracle floor: 310 scalar cases and 44 getter scenarios. ValidationError object reflection/stack is separately FORCED divergent; browser HtmlDda has an explicit native tag but no browser oracle proof."
+note = "Source-ordered validation decisions over native JS primitive tags, unbounded BigInt, full binary64 and UTF16 strings. Order getters are read at every source access; clock/getter exceptions retain identity. Live source oracle floor: 310 scalar cases and 44 getter scenarios. ValidationError object reflection/stack is separately FORCED divergent; browser HtmlDda has an explicit native tag but no browser oracle proof. Split member `safe-cex-venue-lighter/src/sdk_validation.rs::OrderParamsReader`. Property-read capability for the params fields this body checks. Split member `safe-cex-venue-lighter/src/sdk_validation.rs::OrderParamsReader::get`. Reads each params field in source order with original exceptions. Split member `safe-cex-venue-lighter/src/sdk_validation.rs::ValidationValue::truthy`. ToBoolean for the falsy-field and postOnly/reduceOnly checks in this body."
 
 [[symbol]]
 ts = "validatePrivateKey"

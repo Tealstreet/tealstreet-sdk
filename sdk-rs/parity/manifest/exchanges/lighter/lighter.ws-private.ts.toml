@@ -38,9 +38,9 @@ note = "Reads deployment network before receiver-bound account-index call, conca
 ts = "LighterPrivateWebsocket#emitReadonlyFallbackWarning"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::emit_readonly_fallback_warning"
+rs = [ "safe-cex-venue-lighter/src/ws_private_warnings.rs::emit_readonly_fallback_warning", "safe-cex-venue-lighter/src/ws_private_warnings.rs::GEORESTRICTED_MESSAGE" ]
 status = "ported"
-note = "Reads virtual clock before key; uses caller-supplied class-wide shared account map, JS numeric lastWarningAt||0 including NaN/negativezero, strict cooldown boundary, set before optional Warning log then forced-toast emit. Message is the source readonly constant, initialized once and never assigned by source; reflective overrides of that readonly field are outside this body contract. Native timestamps/text/effect order and map state after throws asserted; full websocket owner remains pending. Rename target: `safe-cex-venue-lighter/src/ws_private_warnings.rs::emit_readonly_fallback_warning`."
+note = "Reads virtual clock before key; uses caller-supplied class-wide shared account map, JS numeric lastWarningAt||0 including NaN/negativezero, strict cooldown boundary, set before optional Warning log then forced-toast emit. Message is the source readonly constant, initialized once and never assigned by source; reflective overrides of that readonly field are outside this body contract. Native timestamps/text/effect order and map state after throws asserted; full websocket owner remains pending. Rename target: `safe-cex-venue-lighter/src/ws_private_warnings.rs::emit_readonly_fallback_warning`. Split member `safe-cex-venue-lighter/src/ws_private_warnings.rs::GEORESTRICTED_MESSAGE`. Module constant LIGHTER_GEORESTRICTED_DEGRADED_CONNECTIVITY_MESSAGE emitted as the warning text, also returned by getPrivateStreamErrorWarningMessage."
 
 [[symbol]]
 ts = "LighterPrivateWebsocket.isReadonlyFallbackActive"

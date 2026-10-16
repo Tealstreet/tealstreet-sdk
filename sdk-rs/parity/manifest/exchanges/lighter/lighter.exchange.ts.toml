@@ -1,70 +1,70 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/lighter/lighter.exchange.ts"
-rust_files = [ "safe-cex-venue-lighter/src/exchange_account_access.rs", "safe-cex-venue-lighter/src/exchange_account_cache.rs", "safe-cex-venue-lighter/src/exchange_account_lookup.rs", "safe-cex-venue-lighter/src/exchange_batch_placement.rs", "safe-cex-venue-lighter/src/exchange_class.rs", "safe-cex-venue-lighter/src/exchange_constructor.rs", "safe-cex-venue-lighter/src/exchange_error_recovery.rs", "safe-cex-venue-lighter/src/exchange_historical_fills.rs", "safe-cex-venue-lighter/src/exchange_live_helpers.rs", "safe-cex-venue-lighter/src/exchange_market_reads.rs", "safe-cex-venue-lighter/src/exchange_ohlcv.rs", "safe-cex-venue-lighter/src/exchange_order_actions.rs", "safe-cex-venue-lighter/src/exchange_order_mapping.rs", "safe-cex-venue-lighter/src/exchange_order_snapshot.rs", "safe-cex-venue-lighter/src/exchange_positions.rs", "safe-cex-venue-lighter/src/exchange_reconciliation.rs", "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs", "safe-cex-venue-lighter/src/exchange_single_placement.rs", "safe-cex-venue-lighter/src/exchange_state.rs", "safe-cex-venue-lighter/src/exchange_trading_preflight.rs" ]
+rust_files = [ "safe-cex-venue-lighter/src/exchange_account_access.rs", "safe-cex-venue-lighter/src/exchange_account_cache.rs", "safe-cex-venue-lighter/src/exchange_account_lookup.rs", "safe-cex-venue-lighter/src/exchange_batch_placement.rs", "safe-cex-venue-lighter/src/exchange_class.rs", "safe-cex-venue-lighter/src/exchange_constructor.rs", "safe-cex-venue-lighter/src/exchange_error_recovery.rs", "safe-cex-venue-lighter/src/exchange_historical_fills.rs", "safe-cex-venue-lighter/src/exchange_live_helpers.rs", "safe-cex-venue-lighter/src/exchange_market_reads.rs", "safe-cex-venue-lighter/src/exchange_ohlcv.rs", "safe-cex-venue-lighter/src/exchange_order_actions.rs", "safe-cex-venue-lighter/src/exchange_order_mapping.rs", "safe-cex-venue-lighter/src/exchange_order_snapshot.rs", "safe-cex-venue-lighter/src/exchange_positions.rs", "safe-cex-venue-lighter/src/exchange_reconciliation.rs", "safe-cex-venue-lighter/src/exchange_runtime_initialization.rs", "safe-cex-venue-lighter/src/exchange_single_placement.rs", "safe-cex-venue-lighter/src/exchange_state.rs", "safe-cex-venue-lighter/src/exchange_trading_preflight.rs", "safe-cex-venue-lighter/src/exchange_helpers.rs" ]
 
 [[symbol]]
 ts = "parseLighterMarketSymbol"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_lighter_market_symbol"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_lighter_market_symbol", "safe-cex-venue-lighter/src/exchange_helpers.rs::parse_lighter_market_symbol" ]
 status = "ported"
-note = "Live symbol includes/split/destructuring, known-quote callback and slicing preserve the default and original quote values. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live symbol includes/split/destructuring, known-quote callback and slicing preserve the default and original quote values. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::parse_lighter_market_symbol`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "isLighterPerpMarket"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_lighter_perp_market"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_lighter_perp_market", "safe-cex-venue-lighter/src/exchange_helpers.rs::is_lighter_perp_market" ]
 status = "ported"
-note = "Live nullish market-type reads, captured String, lowercase and strict active/non-spot tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live nullish market-type reads, captured String, lowercase and strict active/non-spot tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::is_lighter_perp_market`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "getLighterMarketLeverageMax"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_lighter_market_leverage_max"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_lighter_market_leverage_max", "safe-cex-venue-lighter/src/exchange_helpers.rs::get_lighter_market_leverage_max" ]
 status = "ported"
-note = "Captured Number.parseFloat/String, ordered four alias reads and source finite/positive/default50 policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Captured Number.parseFloat/String, ordered four alias reads and source finite/positive/default50 policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::get_lighter_market_leverage_max`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "parseLighterMarginFractionRatio"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_lighter_margin_fraction_ratio"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_lighter_margin_fraction_ratio", "safe-cex-venue-lighter/src/exchange_helpers.rs::parse_lighter_margin_fraction_ratio" ]
 status = "ported"
-note = "Captured Number.parseFloat/String with source positive, greater-than100 and greater-than1 branches. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Captured Number.parseFloat/String with source positive, greater-than100 and greater-than1 branches. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::parse_lighter_margin_fraction_ratio`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "normalizeLighterStopSlippagePct"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::normalize_lighter_stop_slippage_pct"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::normalize_lighter_stop_slippage_pct", "safe-cex-venue-lighter/src/exchange_helpers.rs::normalize_lighter_stop_slippage_pct" ]
 status = "ported"
-note = "Live String/trim/Number.parseFloat calls preserve source negative rejection and maximum50 clamp. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md."
+note = "Live String/trim/Number.parseFloat calls preserve source negative rejection and maximum50 clamp. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::normalize_lighter_stop_slippage_pct`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_class.rs::LighterExchange"
+rs = [ "safe-cex-venue-lighter/src/exchange_class.rs::LighterExchange", "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeMethod", "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeMethod::invoke", "safe-cex-venue-lighter/src/exchange_class.rs::ExchangeMethod::metadata", "safe-cex-venue-lighter/src/exchange_class.rs::LighterExchange::define", "safe-cex-venue-lighter/src/exchange_class.rs::LighterExchange::initialize_fields" ]
 status = "ported"
-note = "Rust class definition, exact derived-field sequencing and sealed direct body bindings; inherited construction and language representation use required realm operations. Structural census and bounded native composition proof are separate; sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+note = "Rust class definition, exact derived-field sequencing and sealed direct body bindings; inherited construction and language representation use required realm operations. Structural census and bounded native composition proof are separate; sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Split member `safe-cex-venue-lighter/src/exchange_class.rs::ExchangeMethod`. Sealed selector for every class field-fn and prototype method body bound by the class definition. Split member `safe-cex-venue-lighter/src/exchange_class.rs::ExchangeMethod::invoke`. Sealed direct dispatch from each class method callable to its Rust body with the traced owner. Split member `safe-cex-venue-lighter/src/exchange_class.rs::ExchangeMethod::metadata`. Source name, length and async flag for each class method callable. Split member `safe-cex-venue-lighter/src/exchange_class.rs::LighterExchange::define`. Class definition: installs the five module helpers, creates the derived class, prototype mapPosition/mapOrder and static cooldown/leverage-tier fields. Split member `safe-cex-venue-lighter/src/exchange_class.rs::LighterExchange::initialize_fields`. Derived instance-field initializers in source order, including state defaults, Map allocations and bound arrow field-fns."
 
 [[symbol]]
 ts = "LighterExchange.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_constructor.rs::construct_exchange_body"
+rs = [ "safe-cex-venue-lighter/src/exchange_constructor.rs::construct_exchange_body", "safe-cex-venue-lighter/src/exchange_class.rs::LighterExchange::construct", "safe-cex-venue-lighter/src/exchange_constructor.rs::initialize_exchange_clients" ]
 status = "ported"
-note = "Constructor remainder after required exact base construction and derived instance-element initialization; live imported constructors, original aliases, client re-reads and partial failures. Native source-backed floor28 through iteration27. Full class composition, base/field initialization, callable replacement/receiver/newTarget identities remain unproved by this fixture; separate bounded class-composition witnesses are tracked on LighterExchange. Rename target: `safe-cex-venue-lighter/src/exchange_constructor.rs::construct_exchange_body`."
+note = "Constructor remainder after required exact base construction and derived instance-element initialization; live imported constructors, original aliases, client re-reads and partial failures. Native source-backed floor28 through iteration27. Full class composition, base/field initialization, callable replacement/receiver/newTarget identities remain unproved by this fixture; separate bounded class-composition witnesses are tracked on LighterExchange. Rename target: `safe-cex-venue-lighter/src/exchange_constructor.rs::construct_exchange_body`. Split member `safe-cex-venue-lighter/src/exchange_class.rs::LighterExchange::construct`. Class constructor binding: base construction, derived field initialization, then the constructor client-initialization body. Split member `safe-cex-venue-lighter/src/exchange_constructor.rs::initialize_exchange_clients`. Constructor statements after super and field initialization: deployment profile, SDK client, OrderApi, CandlestickApi and both websocket constructions with live re-reads."
 
 [[symbol]]
 ts = "LighterExchange#parseAccountIndex"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_account_index"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_account_index", "safe-cex-venue-lighter/src/exchange_helpers.rs::parse_account_index" ]
 status = "ported"
-note = "Captured BigInt before String, nullish guard and caught original coercion/call failures. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_account_index`."
+note = "Captured BigInt before String, nullish guard and caught original coercion/call failures. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_account_index`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::parse_account_index`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#rememberPlacedOrderHint"
@@ -86,9 +86,9 @@ note = "Live id guard, original Map value, wall-clock age and strict expiry/curr
 ts = "LighterExchange#inferStopLossTypeFromReduceOnlyLimit"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::infer_stop_loss_type_from_reduce_only_limit"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::infer_stop_loss_type_from_reduce_only_limit", "safe-cex-venue-lighter/src/exchange_helpers.rs::infer_stop_loss_type_from_reduce_only_limit" ]
 status = "ported"
-note = "Reads the live ticker store, retains limit/reduce-only/finite-positive guards and mark/last/index candidate order with inclusive loss-side ties. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::infer_stop_loss_type_from_reduce_only_limit`."
+note = "Reads the live ticker store, retains limit/reduce-only/finite-positive guards and mark/last/index candidate order with inclusive loss-side ties. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::infer_stop_loss_type_from_reduce_only_limit`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::infer_stop_loss_type_from_reduce_only_limit`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#extractAccountFromResponse"
@@ -134,9 +134,9 @@ note = "Captures imported parser before owner options/key getters; preserves ord
 ts = "LighterExchange#extractL1AddressCandidate"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::extract_l1_address_candidate"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::extract_l1_address_candidate", "safe-cex-venue-lighter/src/exchange_helpers.rs::extract_l1_address_candidate" ]
 status = "ported"
-note = "Live trim, imported full-address predicate and original regex/match/index operations. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::extract_l1_address_candidate`."
+note = "Live trim, imported full-address predicate and original regex/match/index operations. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::extract_l1_address_candidate`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::extract_l1_address_candidate`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#fetchAccountInfo"
@@ -158,9 +158,9 @@ note = "Live recent snapshot and in-flight version guards preserve repeated owne
 ts = "LighterExchange#rememberRecentAccountSnapshot"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::remember_recent_account_snapshot", "safe-cex-venue-lighter/src/exchange_state.rs::remember_recent_account_snapshot", "safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::cache_version", "safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::set_recent_snapshot", "safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::virtual_now" ]
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::remember_recent_account_snapshot", "safe-cex-venue-lighter/src/exchange_state.rs::remember_recent_account_snapshot", "safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::cache_version", "safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::set_recent_snapshot", "safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::virtual_now", "safe-cex-venue-lighter/src/exchange_state.rs::RecentAccountSnapshot" ]
 status = "ported"
-note = "Strict version equality before clock/allocation; the stored snapshot retains the original payload alias. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Class dispatch uses safe-cex-venue-lighter/src/exchange_live_helpers.rs::remember_recent_account_snapshot . The retained standalone typed adapter and its host capabilities are separate native entry points, not dependencies of the class live body. Standalone adapter evidence: Strict binary64 version comparison before virtual clock; fresh snapshot retains original value identity and fetchVersion, with fallible owner setter. Live native oracle; this standalone fixture did not exercise the complete exchange lifecycle. API split: safe-cex-venue-lighter/src/exchange_state.rs::remember_recent_account_snapshot retains the operation body; shared declarations safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::cache_version safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::set_recent_snapshot safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::virtual_now supply the strict cache-version guard, virtual timestamp and fresh retained snapshot assignment. These are consumed host capabilities, not a claim of completed runtime assembly."
+note = "Strict version equality before clock/allocation; the stored snapshot retains the original payload alias. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Class dispatch uses safe-cex-venue-lighter/src/exchange_live_helpers.rs::remember_recent_account_snapshot . The retained standalone typed adapter and its host capabilities are separate native entry points, not dependencies of the class live body. Standalone adapter evidence: Strict binary64 version comparison before virtual clock; fresh snapshot retains original value identity and fetchVersion, with fallible owner setter. Live native oracle; this standalone fixture did not exercise the complete exchange lifecycle. API split: safe-cex-venue-lighter/src/exchange_state.rs::remember_recent_account_snapshot retains the operation body; shared declarations safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::cache_version safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::set_recent_snapshot safe-cex-venue-lighter/src/exchange_state.rs::ExchangeStateHost::virtual_now supply the strict cache-version guard, virtual timestamp and fresh retained snapshot assignment. These are consumed host capabilities, not a claim of completed runtime assembly. Split member `safe-cex-venue-lighter/src/exchange_state.rs::RecentAccountSnapshot`. Named record for the fetchedAt, cacheVersion and value object this body stores as the recent account snapshot."
 
 [[symbol]]
 ts = "LighterExchange.invalidateAccountSnapshotCache"
@@ -198,9 +198,9 @@ note = "Source fee short circuit, eager limits fetch/queued await with best-effo
 ts = "LighterExchange#ensurePartnerAttributionApproved"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::ensure_partner_attribution_approved"
+rs = [ "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::ensure_partner_attribution_approved", "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::TradingHost::array" ]
 status = "ported"
-note = "Fee guard and eager snapshot request with allowRecent=true; best-effort lookup catch ends before approval logic. Actual array test, fresh empty fallback, captured integrator index toString and clock, native some callback with source nullish aliases, String.trim, Number/isFinite and strict expiry>now. Emits then throws missing-approval constant; native callback outcomes/record schema checked. Full array/UTF16/Symbol/property/coercion/Promise hosts required; fixture string-key domain only. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::ensure_partner_attribution_approved`."
+note = "Fee guard and eager snapshot request with allowRecent=true; best-effort lookup catch ends before approval logic. Actual array test, fresh empty fallback, captured integrator index toString and clock, native some callback with source nullish aliases, String.trim, Number/isFinite and strict expiry>now. Emits then throws missing-approval constant; native callback outcomes/record schema checked. Full array/UTF16/Symbol/property/coercion/Promise hosts required; fixture string-key domain only. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::ensure_partner_attribution_approved`. Split member `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::TradingHost::array`. Creates the empty-array fallback when account.approved_integrators is not an array."
 
 [[symbol]]
 ts = "LighterExchange.getAccountRateLimitGuidanceMessage"
@@ -238,33 +238,33 @@ note = "Actual Error global/instanceof host, live truthiness message Get then in
 ts = "LighterExchange#isWasmRuntimeIssueMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_wasm_runtime_issue_message"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_wasm_runtime_issue_message", "safe-cex-venue-lighter/src/exchange_helpers.rs::is_wasm_runtime_issue_message" ]
 status = "ported"
-note = "Live lowercase and ordered substring short circuits. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_wasm_runtime_issue_message`."
+note = "Live lowercase and ordered substring short circuits. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_wasm_runtime_issue_message`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::is_wasm_runtime_issue_message`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#shouldShortCircuitSignerRetry"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_short_circuit_signer_retry"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_short_circuit_signer_retry", "safe-cex-venue-lighter/src/exchange_error_recovery.rs::should_short_circuit_signer_retry" ]
 status = "ported"
-note = "Clock before captured issue helper and message; conditional readiness call, then live less-than retry-until comparison. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_short_circuit_signer_retry`."
+note = "Clock before captured issue helper and message; conditional readiness call, then live less-than retry-until comparison. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_short_circuit_signer_retry`. Split member `safe-cex-venue-lighter/src/exchange_error_recovery.rs::should_short_circuit_signer_retry`. Typed-Number error-recovery-host port of this row body (clock read, WASM issue check, retry-block state and warning cooldown) over ExchangeErrorRecoveryHost."
 
 [[symbol]]
 ts = "LighterExchange#getSignerRetryBlockMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_signer_retry_block_message"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_signer_retry_block_message", "safe-cex-venue-lighter/src/exchange_error_recovery.rs::get_signer_retry_block_message" ]
 status = "ported"
-note = "Captured Math.max, live subtraction, issue/readiness short circuit and source repeated message/template reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_signer_retry_block_message`."
+note = "Captured Math.max, live subtraction, issue/readiness short circuit and source repeated message/template reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_signer_retry_block_message`. Split member `safe-cex-venue-lighter/src/exchange_error_recovery.rs::get_signer_retry_block_message`. Typed-Number error-recovery-host port of this row body (clock read, WASM issue check, retry-block state and warning cooldown) over ExchangeErrorRecoveryHost."
 
 [[symbol]]
 ts = "LighterExchange#warnSignerUnavailable"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::warn_signer_unavailable"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::warn_signer_unavailable", "safe-cex-venue-lighter/src/exchange_error_recovery.rs::warn_signer_unavailable" ]
 status = "ported"
-note = "Live arithmetic and lexical class cooldown read; timestamp assignment precedes captured log with the original message and imported severity. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::warn_signer_unavailable`."
+note = "Live arithmetic and lexical class cooldown read; timestamp assignment precedes captured log with the original message and imported severity. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::warn_signer_unavailable`. Split member `safe-cex-venue-lighter/src/exchange_error_recovery.rs::warn_signer_unavailable`. Typed-Number error-recovery-host port of this row body (clock read, WASM issue check, retry-block state and warning cooldown) over ExchangeErrorRecoveryHost."
 
 [[symbol]]
 ts = "LighterExchange#ensureSignerAdapter"
@@ -310,9 +310,9 @@ note = "Concurrent signer warmup and market load, repeated external-path await, 
 ts = "LighterExchange#getInitialTickDelay"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_initial_tick_delay"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_initial_tick_delay", "safe-cex-venue-lighter/src/exchange_helpers.rs::get_initial_tick_delay" ]
 status = "ported"
-note = "Calls the bound owner tick interval once, then source positive guard and Math.min cap. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_initial_tick_delay`."
+note = "Calls the bound owner tick interval once, then source positive guard and Math.min cap. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_initial_tick_delay`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::get_initial_tick_delay`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange.fetchAndSetPrivateSnapshot"
@@ -366,33 +366,33 @@ note = "Undefined-only options default, captured snapshot/options call and await
 ts = "LighterExchange#parseMarginMode"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_margin_mode"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_margin_mode", "safe-cex-venue-lighter/src/exchange_helpers.rs::parse_margin_mode" ]
 status = "ported"
-note = "Strict numeric/string0-or1 tests followed by live String/lowercase and source cross/isolated branches without trimming. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_margin_mode`."
+note = "Strict numeric/string0-or1 tests followed by live String/lowercase and source cross/isolated branches without trimming. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::parse_margin_mode`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::parse_margin_mode`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#marginModeToMarginType"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_mode_to_margin_type"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_mode_to_margin_type", "safe-cex-venue-lighter/src/exchange_helpers.rs::margin_mode_to_margin_type" ]
 status = "ported"
-note = "Strict mode1 test and live imported MarginType result. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_mode_to_margin_type`."
+note = "Strict mode1 test and live imported MarginType result. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_mode_to_margin_type`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::margin_mode_to_margin_type`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#marginTypeToMarginMode"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_type_to_margin_mode"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_type_to_margin_mode", "safe-cex-venue-lighter/src/exchange_helpers.rs::margin_type_to_margin_mode" ]
 status = "ported"
-note = "Strict live imported isolated-type comparison and numeric0-or1 result. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_type_to_margin_mode`."
+note = "Strict live imported isolated-type comparison and numeric0-or1 result. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::margin_type_to_margin_mode`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::margin_type_to_margin_mode`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#getMarketConfiguredMarginMode"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_market_configured_margin_mode"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_market_configured_margin_mode", "safe-cex-venue-lighter/src/exchange_helpers.rs::get_market_configured_margin_mode" ]
 status = "ported"
-note = "Live optional info, captured owner parser and four nullish configuration spellings. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_market_configured_margin_mode`."
+note = "Live optional info, captured owner parser and four nullish configuration spellings. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_market_configured_margin_mode`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::get_market_configured_margin_mode`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#getCurrentMarginModeForSymbol"
@@ -406,9 +406,9 @@ note = "Live cached, active-position, configured-market, first-position and defa
 ts = "LighterExchange#getCurrentLeverageForSymbol"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_current_leverage_for_symbol"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_current_leverage_for_symbol", "safe-cex-venue-lighter/src/exchange_state.rs::get_current_leverage_for_symbol" ]
 status = "ported"
-note = "Live exposure/fallback finds, nullish leverage rereads, market/default fallback, nested min/max and current-class tier snap. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_current_leverage_for_symbol`."
+note = "Live exposure/fallback finds, nullish leverage rereads, market/default fallback, nested min/max and current-class tier snap. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_current_leverage_for_symbol`. Split member `safe-cex-venue-lighter/src/exchange_state.rs::get_current_leverage_for_symbol`. ExchangeStateHost-bound port of the same exposure/fallback finds, market/default leverage fallback, min/max clamp and tier snap."
 
 [[symbol]]
 ts = "LighterExchange.fetchPositions"
@@ -486,9 +486,9 @@ note = "Actual method body with required realm bindings; bounded native witness 
 ts = "LighterExchange#getOhlcvFallbackKey"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_ohlcv_fallback_key"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_ohlcv_fallback_key", "safe-cex-venue-lighter/src/exchange_helpers.rs::get_ohlcv_fallback_key" ]
 status = "ported"
-note = "Live symbol/interval Get and template substitution preserve the literal colon and native UTF16 output. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_ohlcv_fallback_key`."
+note = "Live symbol/interval Get and template substitution preserve the literal colon and native UTF16 output. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_ohlcv_fallback_key`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::get_ohlcv_fallback_key`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#fetchLatestOhlcvWithSharedFallback"
@@ -542,25 +542,25 @@ note = "Exact helper delegation: capture imported toLighterApiKeyIndexString bef
 ts = "LighterExchange#getReduceOnlyClosingPositionSide"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_reduce_only_closing_position_side"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_reduce_only_closing_position_side", "safe-cex-venue-lighter/src/exchange_helpers.rs::get_reduce_only_closing_position_side" ]
 status = "ported"
-note = "Strict live Buy comparison selects the imported Short or Long value. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_reduce_only_closing_position_side`."
+note = "Strict live Buy comparison selects the imported Short or Long value. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_reduce_only_closing_position_side`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::get_reduce_only_closing_position_side`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#hasOpenReduceOnlyTargetPosition"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::has_open_reduce_only_target_position"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::has_open_reduce_only_target_position", "safe-cex-venue-lighter/src/exchange_helpers.rs::has_open_reduce_only_target_position" ]
 status = "ported"
-note = "Undefined-only positions default reads the owner store; actual some callback uses exact symbol/side and positive contracts. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::has_open_reduce_only_target_position`."
+note = "Undefined-only positions default reads the owner store; actual some callback uses exact symbol/side and positive contracts. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::has_open_reduce_only_target_position`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::has_open_reduce_only_target_position`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#buildNoPositionReduceOnlyMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_no_position_reduce_only_message"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_no_position_reduce_only_message", "safe-cex-venue-lighter/src/exchange_helpers.rs::build_no_position_reduce_only_message" ]
 status = "ported"
-note = "Live template substitutions and exact closing-side label. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_no_position_reduce_only_message`."
+note = "Live template substitutions and exact closing-side label. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_no_position_reduce_only_message`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::build_no_position_reduce_only_message`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#isTransientLighterRestTransportError"
@@ -590,41 +590,41 @@ note = "Original string fast path, actual Error instanceof and repeated message 
 ts = "LighterExchange#isRateLimitOrderError"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_rate_limit_order_error"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_rate_limit_order_error", "safe-cex-venue-lighter/src/exchange_helpers.rs::is_rate_limit_order_error" ]
 status = "ported"
-note = "Captured Number before status reads, then String/code/lowercase/message evaluation and ordered405/429/phrase tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_rate_limit_order_error`."
+note = "Captured Number before status reads, then String/code/lowercase/message evaluation and ordered405/429/phrase tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_rate_limit_order_error`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::is_rate_limit_order_error`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#isInvalidMarginModeOrderError"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_invalid_margin_mode_order_error"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_invalid_margin_mode_order_error", "safe-cex-venue-lighter/src/exchange_helpers.rs::is_invalid_margin_mode_order_error" ]
 status = "ported"
-note = "Live nested code precedence and captured String/lowercase/message calls before21613/phrase tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_invalid_margin_mode_order_error`."
+note = "Live nested code precedence and captured String/lowercase/message calls before21613/phrase tests. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_invalid_margin_mode_order_error`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::is_invalid_margin_mode_order_error`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#isPartnerAttributionTierOrderError"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_tier_order_error"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_tier_order_error", "safe-cex-venue-lighter/src/exchange_helpers.rs::is_partner_attribution_tier_order_error" ]
 status = "ported"
-note = "Captures the imported rejection helper before ordered nested code reads and the fresh code/message argument. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_tier_order_error`."
+note = "Captures the imported rejection helper before ordered nested code reads and the fresh code/message argument. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_tier_order_error`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::is_partner_attribution_tier_order_error`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#isPartnerAttributionApprovalMissingOrderError"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_approval_missing_order_error"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_approval_missing_order_error", "safe-cex-venue-lighter/src/exchange_helpers.rs::is_partner_attribution_approval_missing_order_error" ]
 status = "ported"
-note = "Captures the imported rejection helper before ordered nested code reads and the fresh code/message argument. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_approval_missing_order_error`."
+note = "Captures the imported rejection helper before ordered nested code reads and the fresh code/message argument. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::is_partner_attribution_approval_missing_order_error`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::is_partner_attribution_approval_missing_order_error`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#buildInvalidMarginModeOrderMessage"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_invalid_margin_mode_order_message"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_invalid_margin_mode_order_message", "safe-cex-venue-lighter/src/exchange_helpers.rs::build_invalid_margin_mode_order_message" ]
 status = "ported"
-note = "Reads the owner market table and configured-mode helper, retaining exact symbol and source generic/default wording. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_invalid_margin_mode_order_message`."
+note = "Reads the owner market table and configured-mode helper, retaining exact symbol and source generic/default wording. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::build_invalid_margin_mode_order_message`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::build_invalid_margin_mode_order_message`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#refreshMarginModeStateAfterInvalidOrder"
@@ -654,41 +654,41 @@ note = "Source limit/Boolean reduceOnly guard, first cached target check, fetch/
 ts = "LighterExchange#getOrderMinimumViolationReasons"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_order_minimum_violation_reasons"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_order_minimum_violation_reasons", "safe-cex-venue-lighter/src/exchange_helpers.rs::get_order_minimum_violation_reasons" ]
 status = "ported"
-note = "Live arithmetic/comparisons, base-before-quote templates and actual filter(Boolean)/join calls. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_order_minimum_violation_reasons`."
+note = "Live arithmetic/comparisons, base-before-quote templates and actual filter(Boolean)/join calls. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_order_minimum_violation_reasons`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::get_order_minimum_violation_reasons`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#getPositivePriceCandidate"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_positive_price_candidate"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_positive_price_candidate", "safe-cex-venue-lighter/src/exchange_helpers.rs::get_positive_price_candidate" ]
 status = "ported"
-note = "Fresh rest array and native callback retain first finite strictly positive Number policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_positive_price_candidate`."
+note = "Fresh rest array and native callback retain first finite strictly positive Number policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::get_positive_price_candidate`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::get_positive_price_candidate`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#resolveMarketOrderReferencePrice"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_market_order_reference_price"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_market_order_reference_price", "safe-cex-venue-lighter/src/exchange_helpers.rs::resolve_market_order_reference_price" ]
 status = "ported"
-note = "Reads the live ticker store using the original symbol; preserves candidate priority and both original constructed Errors. Native surrogate store-key and Error-message witnesses close the earlier typed-adapter choice; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_market_order_reference_price`."
+note = "Reads the live ticker store using the original symbol; preserves candidate priority and both original constructed Errors. Native surrogate store-key and Error-message witnesses close the earlier typed-adapter choice; sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_market_order_reference_price`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::resolve_market_order_reference_price`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#resolveStopSlippagePct"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_stop_slippage_pct"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_stop_slippage_pct", "safe-cex-venue-lighter/src/exchange_helpers.rs::resolve_stop_slippage_pct" ]
 status = "ported"
-note = "Captures each local normalization helper before live order/options reads; nullish fallback preserves zero. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_stop_slippage_pct`."
+note = "Captures each local normalization helper before live order/options reads; nullish fallback preserves zero. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_stop_slippage_pct`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::resolve_stop_slippage_pct`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#resolveConditionalExecutionPrice"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_conditional_execution_price"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_conditional_execution_price", "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::resolve_conditional_execution_price" ]
 status = "ported"
-note = "Live stop-slippage call and arithmetic, captures adjust before owner precision-table/key reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_conditional_execution_price`."
+note = "Live stop-slippage call and arithmetic, captures adjust before owner precision-table/key reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_conditional_execution_price`. Split member `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::resolve_conditional_execution_price`. TradingHost-bound port of the slippage multiplier, side check and adjust to market price precision."
 
 [[symbol]]
 ts = "LighterExchange.placeOrder"
@@ -702,9 +702,9 @@ note = "Rust preparation, lot splitting and merging, submission/error recovery, 
 ts = "LighterExchange#shouldUseBatchedCreateOrders"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_use_batched_create_orders"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_use_batched_create_orders", "safe-cex-venue-lighter/src/exchange_helpers.rs::should_use_batched_create_orders" ]
 status = "ported"
-note = "Live length/index/every operations preserve same-symbol limit-only, reduce-only, stop/take-profit and finite-positive-price policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_use_batched_create_orders`."
+note = "Live length/index/every operations preserve same-symbol limit-only, reduce-only, stop/take-profit and finite-positive-price policy. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::should_use_batched_create_orders`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::should_use_batched_create_orders`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange#placeOrdersSequentially"
@@ -750,17 +750,17 @@ note = "Captures actual orders.filter and creates fresh native strict-symbol cal
 ts = "LighterExchange#snapToLeverageTier"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::snap_to_leverage_tier"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::snap_to_leverage_tier", "safe-cex-venue-lighter/src/exchange_helpers.rs::snap_to_leverage_tier" ]
 status = "ported"
-note = "Reads the lexical class mutable tier array, preserves source first-tier ties and IteratorClose on body throws. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::snap_to_leverage_tier`."
+note = "Reads the lexical class mutable tier array, preserves source first-tier ties and IteratorClose on body throws. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::snap_to_leverage_tier`. Split member `safe-cex-venue-lighter/src/exchange_helpers.rs::snap_to_leverage_tier`. Typed native port of this row body, exercised by the live_exchange_helpers TypeScript oracle test alongside the live-value implementation."
 
 [[symbol]]
 ts = "LighterExchange.setLeverage"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::set_leverage"
+rs = [ "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::set_leverage", "safe-cex-venue-lighter/src/exchange_trading_preflight.rs::set_leverage_value" ]
 status = "ported"
-note = "Live market lookup and original Error guards, signer await, captured Number.parseInt/String and finite check, Math capture/order and source clamped leverage/tier/mode calls. Native marketId/leverage/marginMode record before signed update; unsupported/restricted/fraction catch precedence, mandatory sync before rethrow and success Info log. Native payload schema/numbers, original throws, UTF16 warning/error and completion verified; actual signer/network/JS/Promise integration separate. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::set_leverage`."
+note = "Live market lookup and original Error guards, signer await, captured Number.parseInt/String and finite check, Math capture/order and source clamped leverage/tier/mode calls. Native marketId/leverage/marginMode record before signed update; unsupported/restricted/fraction catch precedence, mandatory sync before rethrow and success Info log. Native payload schema/numbers, original throws, UTF16 warning/error and completion verified; actual signer/network/JS/Promise integration separate. Rename target: `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::set_leverage`. Split member `safe-cex-venue-lighter/src/exchange_trading_preflight.rs::set_leverage_value`. Live-argument entry point holding the whole setLeverage body; set_leverage delegates to it with a numeric input."
 
 [[symbol]]
 ts = "LighterExchange.changeMarginType"
@@ -790,9 +790,9 @@ note = "Live limits optional/falsy defaults, fresh three-candidate Array and req
 ts = "LighterExchange#resolvePositionLiquidationPrice"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_position_liquidation_price"
+rs = [ "safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_position_liquidation_price", "safe-cex-venue-lighter/src/exchange_market_reads.rs::resolve_position_liquidation_price" ]
 status = "ported"
-note = "Live Number.parseFloat/String/v calls, raw-profit-mode guards, source isolated formula and allocated/maintenance fallbacks with repeated market.info reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_position_liquidation_price`."
+note = "Live Number.parseFloat/String/v calls, raw-profit-mode guards, source isolated formula and allocated/maintenance fallbacks with repeated market.info reads. Bounded native class-composition witnesses and remaining runtime limits: sdk-rs/safe-cex-venue-lighter/GATE_EVIDENCE.md. Rename target: `safe-cex-venue-lighter/src/exchange_live_helpers.rs::resolve_position_liquidation_price`. Split member `safe-cex-venue-lighter/src/exchange_market_reads.rs::resolve_position_liquidation_price`. Typed MarketReadHost form of the same body: raw liquidationPrice parse, profit-mode guard, allocated or notional/leverage margin fallback, maintenance fraction from position or market.info, and the long/short derived price formula."
 
 [[symbol]]
 ts = "LighterExchange.mapPosition"

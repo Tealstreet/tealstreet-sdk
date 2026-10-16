@@ -22,33 +22,33 @@ note = "MIXED: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for ma
 ts = "OrderBooksResponse"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_order_api.rs::OrderBooksResponse"
+rs = [ "safe-cex-venue-lighter/src/sdk_order_api.rs::OrderBooksResponse", "safe-cex-venue-lighter/src/sdk_order_api.rs::ApiOrderBook" ]
 status = "divergent"
-note = "MIXED: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for materialized strings including captured unknown extras. CHOSEN whole-record bounded capture: root extra accepts 126 arrays, inline child extra 124 and nested level extra 122; the next depth is refused while Node accepts 140. Shared bounded numeric capture avoids a venue-local unbounded decoder and is a policy choice, not a Rust limitation. Required map-only objects, source field identities, ordered and duplicated typed arrays and six bare/shared raw, owned and borrowed numeric entry paths are witnessed by the selected-source order-books oracle. Numeric fields remain unrestricted binary64. UTF16 length and code-unit witnesses cover representable strings and raw-only lone-surrogate refusals. Live corpus content is pinned independently of runtime metadata with replacement, reordering and same-length encoded-surrogate controls. Ordinary OrderApi method bodies are tracked separately; getOrderBookOrders and whole class coverage remain pending; selected-program diagnostics do not claim the whole SDK compiles."
+note = "MIXED: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for materialized strings including captured unknown extras. CHOSEN whole-record bounded capture: root extra accepts 126 arrays, inline child extra 124 and nested level extra 122; the next depth is refused while Node accepts 140. Shared bounded numeric capture avoids a venue-local unbounded decoder and is a policy choice, not a Rust limitation. Required map-only objects, source field identities, ordered and duplicated typed arrays and six bare/shared raw, owned and borrowed numeric entry paths are witnessed by the selected-source order-books oracle. Numeric fields remain unrestricted binary64. UTF16 length and code-unit witnesses cover representable strings and raw-only lone-surrogate refusals. Live corpus content is pinned independently of runtime metadata with replacement, reordering and same-length encoded-surrogate controls. Ordinary OrderApi method bodies are tracked separately; getOrderBookOrders and whole class coverage remain pending; selected-program diagnostics do not claim the whole SDK compiles. Split member `safe-cex-venue-lighter/src/sdk_order_api.rs::ApiOrderBook`. Named struct for the inline orderBooks array element."
 
 [[symbol]]
 ts = "OrderBookOrdersResponse"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_order_api.rs::OrderBookOrdersResponse"
+rs = [ "safe-cex-venue-lighter/src/sdk_order_api.rs::OrderBookOrdersResponse", "safe-cex-venue-lighter/src/sdk_order_api.rs::ApiOrderBookOrderLevel" ]
 status = "divergent"
-note = "MIXED: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for materialized strings including captured unknown extras. CHOSEN whole-record bounded capture: root extra accepts 126 arrays, inline child extra 124 and nested level extra 122; the next depth is refused while Node accepts 140. Shared bounded numeric capture avoids a venue-local unbounded decoder and is a policy choice, not a Rust limitation. Required map-only objects, source field identities, ordered and duplicated typed arrays and six bare/shared raw, owned and borrowed numeric entry paths are witnessed by the selected-source order-books oracle. Numeric fields remain unrestricted binary64. UTF16 length and code-unit witnesses cover representable strings and raw-only lone-surrogate refusals. Live corpus content is pinned independently of runtime metadata with replacement, reordering and same-length encoded-surrogate controls. Ordinary OrderApi method bodies are tracked separately; getOrderBookOrders and whole class coverage remain pending; selected-program diagnostics do not claim the whole SDK compiles."
+note = "MIXED: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for materialized strings including captured unknown extras. CHOSEN whole-record bounded capture: root extra accepts 126 arrays, inline child extra 124 and nested level extra 122; the next depth is refused while Node accepts 140. Shared bounded numeric capture avoids a venue-local unbounded decoder and is a policy choice, not a Rust limitation. Required map-only objects, source field identities, ordered and duplicated typed arrays and six bare/shared raw, owned and borrowed numeric entry paths are witnessed by the selected-source order-books oracle. Numeric fields remain unrestricted binary64. UTF16 length and code-unit witnesses cover representable strings and raw-only lone-surrogate refusals. Live corpus content is pinned independently of runtime metadata with replacement, reordering and same-length encoded-surrogate controls. Ordinary OrderApi method bodies are tracked separately; getOrderBookOrders and whole class coverage remain pending; selected-program diagnostics do not claim the whole SDK compiles. Split member `safe-cex-venue-lighter/src/sdk_order_api.rs::ApiOrderBookOrderLevel`. Named struct for the inline bids and asks array element."
 
 [[symbol]]
 ts = "OrderBookDetailsResponse"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_order_api.rs::OrderBookDetailsResponse"
+rs = [ "safe-cex-venue-lighter/src/sdk_order_api.rs::OrderBookDetailsResponse", "safe-cex-venue-lighter/src/sdk_order_api.rs::ApiOrderBookDetails" ]
 status = "divergent"
-note = "MIXED: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for materialized strings including captured unknown extras. CHOSEN whole-record bounded capture: root extra accepts 126 arrays, inline child extra 124 and nested level extra 122; the next depth is refused while Node accepts 140. Shared bounded numeric capture avoids a venue-local unbounded decoder and is a policy choice, not a Rust limitation. Required map-only objects, source field identities, ordered and duplicated typed arrays and six bare/shared raw, owned and borrowed numeric entry paths are witnessed by the selected-source order-books oracle. Numeric fields remain unrestricted binary64. UTF16 length and code-unit witnesses cover representable strings and raw-only lone-surrogate refusals. Live corpus content is pinned independently of runtime metadata with replacement, reordering and same-length encoded-surrogate controls. Ordinary OrderApi method bodies are tracked separately; getOrderBookOrders and whole class coverage remain pending; selected-program diagnostics do not claim the whole SDK compiles."
+note = "MIXED: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary for materialized strings including captured unknown extras. CHOSEN whole-record bounded capture: root extra accepts 126 arrays, inline child extra 124 and nested level extra 122; the next depth is refused while Node accepts 140. Shared bounded numeric capture avoids a venue-local unbounded decoder and is a policy choice, not a Rust limitation. Required map-only objects, source field identities, ordered and duplicated typed arrays and six bare/shared raw, owned and borrowed numeric entry paths are witnessed by the selected-source order-books oracle. Numeric fields remain unrestricted binary64. UTF16 length and code-unit witnesses cover representable strings and raw-only lone-surrogate refusals. Live corpus content is pinned independently of runtime metadata with replacement, reordering and same-length encoded-surrogate controls. Ordinary OrderApi method bodies are tracked separately; getOrderBookOrders and whole class coverage remain pending; selected-program diagnostics do not claim the whole SDK compiles. Split member `safe-cex-venue-lighter/src/sdk_order_api.rs::ApiOrderBookDetails`. Named struct for the inline details array element."
 
 [[symbol]]
 ts = "ApiTrade"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::ApiTrade"
+rs = [ "safe-cex-venue-lighter/src/sdk_order_queries.rs::ApiTrade", "safe-cex-venue-lighter/src/sdk_order_queries.rs::TradeSide", "safe-cex-venue-lighter/src/sdk_order_queries.rs::TradeSide::as_str" ]
 status = "ported"
-note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim."
+note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::TradeSide`. Enum for the buy and sell side literal union. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::TradeSide::as_str`. Returns the exact side literal string for each variant."
 
 [[symbol]]
 ts = "TradesResponse"
@@ -70,9 +70,9 @@ note = "Native value-level declaration with arbitrary UTF16 strings, full binary
 ts = "ExchangeStats"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::ExchangeStats"
+rs = [ "safe-cex-venue-lighter/src/sdk_order_queries.rs::ExchangeStats", "safe-cex-venue-lighter/src/sdk_order_queries.rs::MarketStats" ]
 status = "ported"
-note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim."
+note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::MarketStats`. Named struct for the inline marketStats array element."
 
 [[symbol]]
 ts = "ExchangeStatsResponse"
@@ -86,25 +86,25 @@ note = "Native value-level declaration with arbitrary UTF16 strings, full binary
 ts = "GetInactiveOrdersOptions"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::GetInactiveOrdersOptions"
+rs = [ "safe-cex-venue-lighter/src/sdk_order_queries.rs::GetInactiveOrdersOptions", "safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy", "safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy::as_str" ]
 status = "ported"
-note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim."
+note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy`. Enum for the createdAt, updatedAt and price sortBy literal union. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy::as_str`. Returns the exact sortBy literal string for each variant."
 
 [[symbol]]
 ts = "GetTradesOptions"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::GetTradesOptions"
+rs = [ "safe-cex-venue-lighter/src/sdk_order_queries.rs::GetTradesOptions", "safe-cex-venue-lighter/src/sdk_order_queries.rs::TradesSortBy", "safe-cex-venue-lighter/src/sdk_order_queries.rs::TradesSortBy::as_str" ]
 status = "ported"
-note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim."
+note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::TradesSortBy`. Enum for the timestamp and price sortBy literal union. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::TradesSortBy::as_str`. Returns the exact sortBy literal string for each variant."
 
 [[symbol]]
 ts = "OrderApi"
 kind = "class"
-layer = ""
-rs = ""
-status = "pending"
-note = "PENDING: native partial OrderApi constructor and seven ordinary method bodies exist in sdk_order_queries; raw getOrderBookOrders config-spread/response fallback and complete class coverage remain unimplemented. Constructor and individual implemented methods are mapped separately."
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderApi"
+status = "divergent"
+note = "CHOSEN: native class carries explicit client, FIFO runtime, property/return-resolution and toString hosts instead of JS ambient context and reflected prototype surface. Constructor and seven method bodies live on safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderApi; getOrderBookOrders is ported separately as safe-cex-lighter-sdk/src/api_reads.rs::get_order_book_orders. Class JS reflection is not claimed."
 
 [[symbol]]
 ts = "OrderApi.constructor"
