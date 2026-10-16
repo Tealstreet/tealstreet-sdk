@@ -10,12 +10,26 @@ pub enum OkxRegion {
     Okx,
     Okxeu,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 enum RegionWire {
     #[serde(rename = "okx")]
     Okx,
     #[serde(rename = "okxeu")]
     Okxeu,
+}
+#[derive(Deserialize)]
+#[serde(remote = "RegionWire")]
+enum RegionWireSchema {
+    #[serde(rename = "okx")]
+    Okx,
+    #[serde(rename = "okxeu")]
+    Okxeu,
+}
+impl<'de> Deserialize<'de> for RegionWire {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        RegionWireSchema::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(value))
+    }
 }
 impl From<OkxRegion> for RegionWire {
     fn from(value: OkxRegion) -> Self {
@@ -42,12 +56,28 @@ pub enum OkxInstrumentType {
     Swap,
     Futures,
 }
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize)]
 enum InstrumentWire {
     #[serde(rename = "SWAP")]
     Swap,
     #[serde(rename = "FUTURES")]
     Futures,
+}
+#[derive(Deserialize)]
+#[serde(remote = "InstrumentWire")]
+enum InstrumentWireSchema {
+    #[serde(rename = "SWAP")]
+    Swap,
+    #[serde(rename = "FUTURES")]
+    Futures,
+}
+impl<'de> Deserialize<'de> for InstrumentWire {
+    fn deserialize<D: serde::Deserializer<'de>>(deserializer: D) -> Result<Self, D::Error> {
+        let value = String::deserialize(deserializer)?;
+        InstrumentWireSchema::deserialize(serde::de::value::StringDeserializer::<D::Error>::new(
+            value,
+        ))
+    }
 }
 impl From<OkxInstrumentType> for InstrumentWire {
     fn from(value: OkxInstrumentType) -> Self {
@@ -228,6 +258,90 @@ mod accepted_inventory {
             option unit unit_struct newtype_struct seq tuple tuple_struct map struct identifier ignored_any
         }
     }
+    fn prove_private_wire<T: for<'de> Deserialize<'de> + Serialize>(
+        name: &str,
+        literals: &[&str],
+        native_variant: impl Fn(&T) -> &'static str,
+    ) {
+        for &literal in literals {
+            let value = serde_json::json!(literal);
+            let text = serde_json::to_string(&value).unwrap();
+            let decoded = [
+                serde_json::from_value::<T>(value.clone()).unwrap(),
+                T::deserialize(&value).unwrap(),
+                <T as Deserialize>::deserialize(value.clone()).unwrap(),
+                serde_json::from_str::<T>(&text).unwrap(),
+            ];
+            for decoded in decoded {
+                assert_eq!(native_variant(&decoded), literal, "{name} native variant");
+                assert_eq!(serde_json::to_value(&decoded).unwrap(), value);
+            }
+            let tagged = serde_json::json!({literal: null});
+            assert!(
+                serde_json::from_value::<T>(tagged.clone()).is_err(),
+                "{name} tagged owned shape"
+            );
+            assert!(
+                T::deserialize(&tagged).is_err(),
+                "{name} tagged borrowed shape"
+            );
+            assert!(
+                <T as Deserialize>::deserialize(tagged.clone()).is_err(),
+                "{name} tagged qualified shape"
+            );
+            assert!(
+                serde_json::from_str::<T>(&tagged.to_string()).is_err(),
+                "{name} tagged text shape"
+            );
+            for invalid in [
+                serde_json::json!([]),
+                serde_json::json!([literal]),
+                serde_json::json!(null),
+                serde_json::json!(true),
+                serde_json::json!(1),
+                serde_json::json!(format!(" {literal}")),
+                serde_json::json!(format!("{literal} ")),
+                serde_json::json!(format!("\u{feff}{literal}")),
+                serde_json::json!(format!("{literal}__unknown")),
+            ] {
+                assert!(
+                    T::deserialize(&invalid).is_err(),
+                    "{name} invalid spelling/shape"
+                );
+            }
+            for case in [literal.to_uppercase(), literal.to_lowercase()] {
+                if !literals.contains(&case.as_str()) {
+                    assert!(T::deserialize(serde_json::json!(case)).is_err());
+                }
+            }
+        }
+    }
+    #[test]
+    fn private_wire_region_rejects_tagged_maps() {
+        let native = |value: &RegionWire| match value {
+            RegionWire::Okx => "okx",
+            RegionWire::Okxeu => "okxeu",
+        };
+        prove_private_wire::<RegionWire>("RegionWire", &["okx", "okxeu"], native);
+        assert_eq!(native(&RegionWire::from(OkxRegion::Okx)), "okx");
+        assert_eq!(native(&RegionWire::from(OkxRegion::Okxeu)), "okxeu");
+    }
+    #[test]
+    fn private_wire_instrument_rejects_tagged_maps() {
+        let native = |value: &InstrumentWire| match value {
+            InstrumentWire::Swap => "SWAP",
+            InstrumentWire::Futures => "FUTURES",
+        };
+        prove_private_wire::<InstrumentWire>("InstrumentWire", &["SWAP", "FUTURES"], native);
+        assert_eq!(
+            native(&InstrumentWire::from(OkxInstrumentType::Swap)),
+            "SWAP"
+        );
+        assert_eq!(
+            native(&InstrumentWire::from(OkxInstrumentType::Futures)),
+            "FUTURES"
+        );
+    }
     #[test]
     #[ignore = "requires live TypeScript oracle; mandatory in CI"]
     fn derived_accepted_sets_match_typescript() {
@@ -245,12 +359,12 @@ mod accepted_inventory {
         );
         let expected: serde_json::Value = serde_json::from_slice(&oracle.stdout).unwrap();
         let mut inventory = Inventory::default();
-        let _ = RegionWire::deserialize(&mut inventory);
+        let _ = RegionWireSchema::deserialize(&mut inventory);
         assert_eq!(
             serde_json::json!(inventory.0.unwrap()),
             expected["OkxRegion"]
         );
-        let _ = InstrumentWire::deserialize(&mut inventory);
+        let _ = InstrumentWireSchema::deserialize(&mut inventory);
         assert_eq!(
             serde_json::json!(inventory.0.unwrap()),
             expected["OkxInstrumentType"]

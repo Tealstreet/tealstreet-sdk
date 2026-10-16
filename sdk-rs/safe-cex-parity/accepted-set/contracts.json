@@ -134017,5 +134017,165 @@
         "where_predicates": []
       }
     }
+  },
+  "safe_cex_venue_okx::types::RegionWire": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/okx/okx.types.ts:8-9 defines the exact literal unions. This actual private serialization-wire owner independently requires String admission and delegates only admitted strings to its private remote schema. Every literal is matched to its native variant; all tagged-null variants refuse. Existing Serialize and typed From mappings remain covered by native owner tests. No outer-owner or private-helper exemption.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_venue_okx::types::OkxRegion",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Maps an already typed OkxRegion variant into its private serialization wire variant; no raw input is decoded by From."
+      }
+    ],
+    "literals": [
+      "okx",
+      "okxeu"
+    ],
+    "observation": {
+      "call": "match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"variant\":match decoded {$type::Okx => \"okx\", $type::Okxeu => \"okxeu\"}}), Err(_) => serde_json::json!({\"ok\":false}) }",
+      "cases": [
+        {
+          "input": "okx",
+          "output": {
+            "ok": true,
+            "variant": "okx"
+          }
+        },
+        {
+          "input": "okxeu",
+          "output": {
+            "ok": true,
+            "variant": "okxeu"
+          }
+        },
+        {
+          "input": {
+            "okx": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "okxeu": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "unknown",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_okx::types::InstrumentWire": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/exchanges/okx/okx.types.ts:8-9 defines the exact literal unions. This actual private serialization-wire owner independently requires String admission and delegates only admitted strings to its private remote schema. Every literal is matched to its native variant; all tagged-null variants refuse. Existing Serialize and typed From mappings remain covered by native owner tests. No outer-owner or private-helper exemption.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_venue_okx::types::OkxInstrumentType",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "typed",
+        "reason": "Maps an already typed OkxInstrumentType variant into its private serialization wire variant; no raw input is decoded by From."
+      }
+    ],
+    "literals": [
+      "SWAP",
+      "FUTURES"
+    ],
+    "observation": {
+      "call": "match serde_json::from_value::<$type>($value.clone()) { Ok(decoded) => serde_json::json!({\"ok\":true,\"variant\":match decoded {$type::Swap => \"SWAP\", $type::Futures => \"FUTURES\"}}), Err(_) => serde_json::json!({\"ok\":false}) }",
+      "cases": [
+        {
+          "input": "SWAP",
+          "output": {
+            "ok": true,
+            "variant": "SWAP"
+          }
+        },
+        {
+          "input": "FUTURES",
+          "output": {
+            "ok": true,
+            "variant": "FUTURES"
+          }
+        },
+        {
+          "input": {
+            "SWAP": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "FUTURES": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "unknown",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }
