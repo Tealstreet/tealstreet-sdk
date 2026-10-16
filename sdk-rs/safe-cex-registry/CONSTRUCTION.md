@@ -298,6 +298,12 @@ the native host installs the actual provider-selected default adapter through th
 shared Js HTTP factory. `tests/native_host_phemex.rs` verifies real local HTTP
 market precision/read purity and signed account-query bytes through the registry.
 
+`tests/native_host_tunnel.rs` also reads Phemex public products and a signed
+account query over an authenticated local tradetunnel, with no direct HTTP.
+The independent query HMAC, distinct precision steps and default frame format
+are checked. `scripts/phemex-tunnel-controls.py` proves missing/no-op native
+provider mutations compile and fail this witness, then restores exact bytes.
+
 
 Paradex's Rust entry calls `native_exchange::ParadexExchange::new` with shared
 runtime HTTP and external-data hosts. `native_host_paradex` constructs the
@@ -305,9 +311,3 @@ production registry route over local HTTP and checks native amount/price steps,
 venue identity and source fetchMarkets Store purity. The native host explicitly
 refuses remoteSigner until the SDK account capability is bound; it never falls
 back to local credentials for a hosted account.
-
-`tests/native_host_tunnel.rs` also reads Phemex public products and a signed
-account query over an authenticated local tradetunnel, with no direct HTTP.
-The independent query HMAC, distinct precision steps and default frame format
-are checked. `scripts/phemex-tunnel-controls.py` proves missing/no-op native
-provider mutations compile and fail this witness, then restores exact bytes.

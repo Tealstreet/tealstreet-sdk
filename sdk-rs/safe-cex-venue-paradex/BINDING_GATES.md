@@ -97,7 +97,7 @@ findings over 7,459 rows and 17,187 public items; layers pass 88/88.
 
 Final post-merge checks also pass eight constructed tests, strict venue host
 all-target and WASM library lint, and venue/registry formatting. Global selected
-trait declarations pass 30/31: the sole unrelated GRVT CompositionHost floor is
-22 against its recorded 21; the maintained checker accepts every selected family.
-The overseer has this foreign census failure. Extractor check remains zero
+trait declarations now pass 31/31 after merging master bc9f062226, which fixes
+the formerly stale GRVT floor. The refreshed Paradex registry witness and
+all-feature/ignored override contract pass 1/1 and 6/6 respectively. Extractor check remains zero
 changed/added/orphaned manifests after the merge.
