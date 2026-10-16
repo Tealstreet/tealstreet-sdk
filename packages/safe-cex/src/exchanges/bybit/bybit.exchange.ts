@@ -805,10 +805,21 @@ export class BybitExchange extends BaseExchange {
   private applyLocalOrderUpdateAfterRestWrite = (order: Order, update: Partial<Order>) => {
     if (!this.shouldUseLocalRestOrderLifecycleFallback()) return;
 
+    const amended = typeof update.amount === 'number';
+    const remainingNative = amended
+      ? Math.max(0, update.amount! - (order.filled || 0))
+      : (order.extra?.remainingNative ?? order.remaining);
+    // Inverse rows hold `remaining` in the coin at the order price, so a price-only amend changes it too.
+    const units = isBybitInverseSymbol(order.symbol)
+      ? this.remainingInStoreUnits(order.symbol, remainingNative, update.price ?? order.price)
+      : amended
+        ? { remaining: remainingNative }
+        : {};
     const nextOrder: Order = {
       ...order,
       ...update,
-      ...(typeof update.amount === 'number' ? { remaining: Math.max(0, update.amount - (order.filled || 0)) } : {}),
+      ...units,
+      ...('extra' in units && units.extra ? { extra: { ...order.extra, ...units.extra } } : {}),
       lastUpdate: virtualClock.getCurrentTimeMs(),
     };
 

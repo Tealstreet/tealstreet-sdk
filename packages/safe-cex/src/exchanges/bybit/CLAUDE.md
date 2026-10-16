@@ -1741,9 +1741,10 @@ either toggle into the web or mobile account form without a product decision.
   (`fetchCategoryRowsOrKeep`), so one bad poll neither wipes them nor jumps the balance.
 - **Known gaps, all opt-in only:** UTA 1.0 accounts (status 3/4) are not excluded, though
   their inverse sits in the CONTRACT wallet, so `total` comes out low by the inverse PnL;
-  a Brazil-account amend writes `remaining` in USD (`applyLocalOrderUpdateAfterRestWrite`
-  skips `remainingInStoreUnits`); account-wide order history lists linear then inverse
-  rather than newest first.
+  account-wide order history lists linear then inverse rather than newest first.
+- **Brazil local order rows convert inverse amends** through `remainingInStoreUnits`, as
+  `bybitinverse` does: `remaining` in the coin at the (new) price, USD contracts in
+  `extra.remainingNative`. Gated by `bybit.brazil-inverse-amend.test.ts`.
 
 ## Testing / Validation
 
