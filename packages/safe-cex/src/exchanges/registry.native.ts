@@ -58,6 +58,7 @@ export const exchangeRegistry: Record<ExchangeName, ExchangeLoader> = {
   'tealstreet-dex': load(
     () => require('./orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange').TealstreetDEXExchange,
   ),
+  txflow: load(() => require('./txflow/txflow.exchange').TxFlowExchange),
   what: load(() => require('./orderly/exchanges/what/what.exchange').WhatExchange),
   woofi: load(() => require('./orderly/exchanges/woofi/woofi.exchange').WoofiExchange),
 };

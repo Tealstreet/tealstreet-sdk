@@ -2207,6 +2207,47 @@ exports[`transport adapter selection per exchange > tealstreet-dex 1`] = `
 }
 `;
 
+exports[`transport adapter selection per exchange > txflow 1`] = `
+{
+  "private direct": {
+    "xhr": "default https://rpc.txflow.com",
+  },
+  "private proxy+tunnel-JA": {
+    "xhr": "default https://rpc.txflow.com",
+  },
+  "private proxy+tunnel-SG": {
+    "xhr": "default https://rpc.txflow.com",
+  },
+  "private proxy-JA": {
+    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
+  },
+  "private proxy-SG": {
+    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
+  },
+  "private tunnel-only": {
+    "xhr": "default https://rpc.txflow.com",
+  },
+  "public direct": {
+    "xhr": "default https://rpc.txflow.com",
+  },
+  "public proxy+tunnel-JA": {
+    "xhr": "default https://rpc.txflow.com",
+  },
+  "public proxy+tunnel-SG": {
+    "xhr": "default https://rpc.txflow.com",
+  },
+  "public proxy-JA": {
+    "xhr": "default https://fsjnpy143pbz.jp.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
+  },
+  "public proxy-SG": {
+    "xhr": "default https://fsjnpy143pbz.asia.tealstreet.io/api/exchange_proxy/https://rpc.txflow.com",
+  },
+  "public tunnel-only": {
+    "xhr": "default https://rpc.txflow.com",
+  },
+}
+`;
+
 exports[`transport adapter selection per exchange > weex 1`] = `
 {
   "private direct": {
