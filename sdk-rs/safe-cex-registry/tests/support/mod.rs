@@ -4,10 +4,13 @@
 use futures_util::{SinkExt, StreamExt};
 use safe_cex_exchange::{
     native::NativeRuntime,
-    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
+    runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask, RemoteSigner},
     websocket::{WebSocketConnectionOptions, WsRuntime, WsSocket},
 };
-use safe_cex_registry::{native_host::native_venue_host_with, rust_venues::rust_constructor};
+use safe_cex_registry::{
+    native_host::{native_venue_host_signed, native_venue_host_with},
+    rust_venues::rust_constructor,
+};
 use safe_cex_store::Store;
 use safe_cex_transport::{
     RestAdapter, RestFuture, RestRequest, RestResponse, TransportProvider, native::ReqwestAdapter,
@@ -337,6 +340,14 @@ pub async fn binance_harness(extra: Handler) -> Harness {
     binance_harness_with(extra, json!({"key":"native-key","secret":SECRET})).await
 }
 pub async fn binance_harness_with(extra: Handler, options: Value) -> Harness {
+    binance_harness_on(extra, options, None).await
+}
+/// As `binance_harness_with`, signing through a hosted remote signer when one is given.
+pub async fn binance_harness_on(
+    extra: Handler,
+    options: Value,
+    signer: Option<(Rc<dyn RemoteSigner>, Option<String>)>,
+) -> Harness {
     let http = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let ws = TcpListener::bind("127.0.0.1:0").await.unwrap();
     let http_origin = format!("http://{}", http.local_addr().unwrap());
@@ -358,11 +369,12 @@ pub async fn binance_harness_with(extra: Handler, options: Value) -> Harness {
             origin: http_origin.clone(),
         }) as Arc<dyn RestAdapter>)
     });
-    let constructor = rust_constructor(
-        &ExchangeName::Binance,
-        native_venue_host_with(host, adapters),
-    )
-    .expect("binance is a Rust-constructed venue");
+    let host = match signer {
+        Some((signer, account)) => native_venue_host_signed(host, adapters, signer, account),
+        None => native_venue_host_with(host, adapters),
+    };
+    let constructor = rust_constructor(&ExchangeName::Binance, host)
+        .expect("binance is a Rust-constructed venue");
     let options = serde_json::from_value(options).unwrap();
     let store: Rc<dyn Store> = Rc::new(safe_cex_store::store::DefaultStore::new());
     let exchange = constructor

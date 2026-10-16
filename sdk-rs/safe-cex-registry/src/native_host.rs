@@ -11,7 +11,7 @@ use crate::{
 use safe_cex_exchange::{
     exchange::BaseExchange,
     external::ExternalPublicData,
-    runtime::{ExchangeTask, ListenerCleanup, LogSeverity},
+    runtime::{ExchangeTask, ListenerCleanup, LogSeverity, RemoteSigner},
     websocket::{WsEvent, WsSocket},
 };
 use safe_cex_exchange::{native::native_runtime, runtime::ExchangeError, websocket::WsRuntime};
@@ -31,9 +31,11 @@ use std::{
 };
 
 pub type AdapterFactory = Rc<dyn Fn() -> Result<Arc<dyn RestAdapter>, ExchangeError>>;
+type HostedSigner = (Rc<dyn RemoteSigner>, Option<String>);
 pub struct NativeVenueHost {
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
+    remote: Option<HostedSigner>,
 }
 /// Direct transport and real HTTP, as `directTransport` is the TypeScript default.
 pub fn native_venue_host() -> Rc<NativeVenueHost> {
@@ -51,7 +53,25 @@ pub fn native_venue_host_with(
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
 ) -> Rc<NativeVenueHost> {
-    Rc::new(NativeVenueHost { runtime, adapter })
+    Rc::new(NativeVenueHost {
+        runtime,
+        adapter,
+        remote: None,
+    })
+}
+/// One account's host whose requests sign through a hosted `remoteSigner`
+/// (exchange-server's browser relay) under `account_name`; no secret is held.
+pub fn native_venue_host_signed(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: AdapterFactory,
+    signer: Rc<dyn RemoteSigner>,
+    account_name: Option<String>,
+) -> Rc<NativeVenueHost> {
+    Rc::new(NativeVenueHost {
+        runtime,
+        adapter,
+        remote: Some((signer, account_name)),
+    })
 }
 impl RustVenueHost for NativeVenueHost {
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError> {
@@ -59,9 +79,15 @@ impl RustVenueHost for NativeVenueHost {
             self.runtime.clone(),
             (self.adapter)()?,
             gateway_factory(self.runtime.clone()),
+            self.remote.clone(),
         ))
     }
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for backpack on the native host",
+            ));
+        }
         let inputs = safe_cex_venue_backpack::native_host::native_inputs(
             self.runtime.clone(),
             (self.adapter)()?,
