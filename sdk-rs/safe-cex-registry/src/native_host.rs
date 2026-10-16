@@ -223,6 +223,39 @@ impl RustVenueHost for NativeVenueHost {
     fn hosted_signer(&self) -> Option<HostedSigner> {
         self.remote.clone()
     }
+    #[expect(clippy::arc_with_non_send_sync)]
+    fn breakoutprop(
+        &self,
+        options: &safe_cex_types::ExchangeOptions,
+    ) -> Result<safe_cex_venue_breakoutprop::host::BreakoutDependencies, ExchangeError> {
+        if self.remote.is_some() || options.remote_signer.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for Breakout Prop DXtrade login on the native host",
+            ));
+        }
+        let installed = Rc::new(Cell::new(false));
+        let install = installed.clone();
+        Ok(safe_cex_venue_breakoutprop::host::BreakoutDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                Arc::new(BreakoutRest {
+                    runtime: self.runtime.clone(),
+                    adapter: self.adapter.clone(),
+                    options: options.clone(),
+                    installed,
+                }),
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            install_transport: Rc::new(move |_| {
+                install.set(true);
+                Ok(())
+            }),
+            // The shared native JS realm explicitly uses UTC for local dates.
+            // Embeddings with another timezone supply their own dependency.
+            local_to_utc: Rc::new(|ms| ms),
+        })
+    }
     fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
         if self.remote.is_some() {
             return Err(ExchangeError::new(
@@ -410,6 +443,47 @@ impl RestAdapter for AsterRest {
                 Some(&self.runtime.transport()),
                 safe_cex_transport::RestAdapterVariant::Default,
             );
+            request.base_url = None;
+            client.execute(request).await
+        })
+    }
+}
+
+// DXtrade installs its tunnel adapter only at the source factory hook. The
+// final request keeps source auth headers and the transport-resolved baseURL.
+struct BreakoutRest {
+    runtime: Rc<dyn WsRuntime>,
+    adapter: AdapterFactory,
+    options: safe_cex_types::ExchangeOptions,
+    installed: Rc<Cell<bool>>,
+}
+impl RestAdapter for BreakoutRest {
+    fn execute(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        Box::pin(async move {
+            let client = native_client(
+                &self.runtime,
+                &self.adapter,
+                safe_cex_types::ExchangeName::Breakoutprop,
+                &self.options,
+                request.clone(),
+                None,
+                None,
+            )
+            .map_err(|error| {
+                safe_cex_transport::RestFailure::pre_transmit(error.message, request.clone())
+            })?;
+            if self.installed.get() {
+                safe_cex_exchange::http::install_transport_adapter(
+                    &client,
+                    &safe_cex_transport::TransportRegistry::default(),
+                    &self.options,
+                    Some(&self.runtime.transport()),
+                    safe_cex_transport::RestAdapterVariant::Default,
+                );
+            }
             request.base_url = None;
             client.execute(request).await
         })

@@ -134,9 +134,9 @@ note = "CHOSEN: native_blofin selects the actual source module ./blofin/blofin.e
 ts = "exchangeRegistry.breakoutprop"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_breakoutprop"
+rs = [ "safe-cex-registry/src/loaders.rs::native_breakoutprop", "safe-cex-registry/src/rust_venues.rs::breakoutprop_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::breakoutprop" ]
 status = "divergent"
-note = "CHOSEN: native_breakoutprop selects the actual source module ./breakoutprop/breakoutprop.exchange and export BreakoutpropExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_breakoutprop. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_breakoutprop selects the actual source module ./breakoutprop/breakoutprop.exchange and export BreakoutpropExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. The opt-in Rust constructor now constructs the existing DXtrade lifecycle through ProductionHost on shared js_runtime; the default remains module-host. Native HTTP preserves session headers and options-aware transport; hosted remoteSigner login refuses visibly. The native JS realm explicitly uses UTC for offset-less legacy dates; other embeddings supply local_to_utc. tests/native_host_breakoutprop.rs proves actual login, startup, reads, placement and cancellation over loopback HTTP. Renamed to safe-cex-registry/src/loaders.rs::native_breakoutprop. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members `safe-cex-registry/src/rust_venues.rs::breakoutprop_constructor` and `safe-cex-registry/src/rust_venues.rs::RustVenueHost::breakoutprop`."
 
 [[symbol]]
 ts = "exchangeRegistry.bybit"

@@ -111,3 +111,10 @@ via `hyperliquid_rate_limiter()` and forwards it through `NativeAccountSpec`;
 never create a fresh budget per hosted account. The Hyperliquid adapter preserves
 the transport-resolved baseURL, repeat query serialization, hosted action signing
 and info skip-signing. Its local HTTP proof is `tests/native_host_hyperliquid.rs`.
+
+Breakout Prop constructs its DXtrade API/session/polling lifecycle through shared
+js_runtime. The native host preserves the selected transport and source session
+headers; remoteSigner DXtrade login refuses visibly. The native date realm is
+explicitly UTC for offset-less legacy timestamps, while embedding hosts supply
+their own local_to_utc policy. native_host_breakoutprop.rs proves actual native
+HTTP login/startup/reads/placement/cancellation with no websocket dial.

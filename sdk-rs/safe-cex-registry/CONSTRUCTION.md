@@ -1,7 +1,7 @@
 # Rust venue construction through the registry
 
 Status: implemented for `asterdex`, `backpack`, `bingx`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`),
+`bitgetusdc`), `bitunix`, `blofin`, `breakoutprop`, the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
@@ -203,3 +203,11 @@ separate from the venue's local-key signing interceptor.
 trait methods over local reqwest HTTP, verifies signed action/nonce bytes on the
 server, and checks both network origins, proxy preservation, info bypass, repeat
 query encoding and limiter identity across separate account hosts.
+
+Breakout Prop is the legacy DXtrade adapter, assembled through its existing
+constructor and ProductionHost rather than another venue's implementation.
+All 16 trait methods dispatch on shared js_runtime, including seven exact
+inherited source rejections. Native HTTP preserves DXAPI headers and the
+transport-resolved baseURL; tunnel installation follows the source hook.
+Hosted login refuses visibly. Native offset-less dates use an explicit UTC
+realm; embeddings with other timezone policies supply local_to_utc.

@@ -82,6 +82,14 @@ pub trait RustVenueHost {
             "BingX dependencies are unavailable on this host",
         ))
     }
+    fn breakoutprop(
+        &self,
+        _options: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_breakoutprop::host::BreakoutDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Breakout Prop dependencies are unavailable on this host",
+        ))
+    }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
@@ -121,6 +129,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Breakoutprop, breakoutprop_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
@@ -347,5 +356,19 @@ pub fn bingx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         safe_cex_venue_bingx::BingxExchange::new(name, options, store, host.bingx()?)
             .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
+}
+
+/// Construct DXtrade with the same shared core and source API/polling lifecycle.
+pub fn breakoutprop_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.breakoutprop(&options)?;
+        safe_cex_venue_breakoutprop::lifecycle::BreakoutpropExchange::new(
+            safe_cex_venue_breakoutprop::host::ProductionHost::new(deps),
+            name,
+            options,
+            store,
+        )
+        .map(|exchange| exchange as Rc<dyn safe_cex_exchange::exchange::Exchange>)
     })
 }
