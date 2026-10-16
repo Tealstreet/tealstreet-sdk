@@ -784,6 +784,7 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Okxdemo,
             ExchangeName::Okxeu,
             ExchangeName::Okxeudemo,
+            ExchangeName::Paradex,
             ExchangeName::Phemex,
             ExchangeName::Polymarket,
             ExchangeName::Txflow,
