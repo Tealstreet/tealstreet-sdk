@@ -1,5 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.constants.ts"
+rust_files = [ "safe-cex-venue-hyperliquid/src/spot_constants.rs" ]
 
 [[symbol]]
 ts = "singularSubscriptionTypes"
