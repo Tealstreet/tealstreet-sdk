@@ -1,5 +1,9 @@
 //! Hyperliquid module helpers the class bodies import, bound to their ports.
-use super::{Realm, host_core::js, value::*};
+use super::{
+    Realm,
+    host_core::js,
+    value::{Thrown, Value},
+};
 use crate::{
     constants::{self, HyperliquidBuilderConfig, HyperliquidBuilderProvider},
     exchange_helpers, income, json_boundaries, market_helpers, order_inference, rate_limit,

@@ -1,0 +1,4353 @@
+{
+  "safe_cex_venue_hyperliquid::cloid::is_hyperliquid_cloid": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_hyperliquid_cloid",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Validates the exact lowercase 128-bit cloid spelling; this bool-returning string recognizer is still an input decoder. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::is_hyperliquid_cloid($value.as_str().unwrap())) }",
+    "cases": [
+      {
+        "input": "0x0123456789abcdef0123456789abcdef",
+        "output": true
+      },
+      {
+        "input": "0x0123456789ABCDEF0123456789ABCDEF",
+        "output": false
+      },
+      {
+        "input": "0x00000000000000000000000000000000",
+        "output": true
+      },
+      {
+        "input": "0x0000",
+        "output": false
+      },
+      {
+        "input": " 0x0123456789abcdef0123456789abcdef",
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::cloid::read_hyperliquid_cloid": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "read_hyperliquid_cloid",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Decodes unknown JSON to an optional valid cloid; null/missing/non-string values are separate from valid lowercase strings. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ let value = if $value[\"missing\"] == true { None } else { $value.get(\"value\") }; serde_json::json!(super::read_hyperliquid_cloid(value)) }",
+    "cases": [
+      {
+        "input": {
+          "value": "0x0123456789abcdef0123456789abcdef"
+        },
+        "output": "0x0123456789abcdef0123456789abcdef"
+      },
+      {
+        "input": {
+          "value": "0x00000000000000000000000000000000"
+        },
+        "output": "0x00000000000000000000000000000000"
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "missing": true
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": 17
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": "0x0123456789ABCDEF0123456789ABCDEF"
+        },
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::cloid::number": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Shared JS Number coercion over an optional captured JSON field; undefined differs from null and arrays coerce through source primitive rules. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. NaN alone is canonicalized; finite, infinite and signed-zero bits remain exact. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ let value = if $value[\"missing\"] == true { None } else { $value.get(\"value\") }; match super::number(value) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",if number.is_nan() { 0x7ff8000000000000u64 } else { number.to_bits() })}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error}) } }",
+    "cases": [
+      {
+        "input": {
+          "missing": true
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "-0"
+        },
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": "0x10"
+        },
+        "output": {
+          "ok": true,
+          "bits": "4030000000000000"
+        }
+      },
+      {
+        "input": {
+          "value": [
+            true
+          ]
+        },
+        "output": {
+          "ok": true,
+          "bits": "7ff8000000000000"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::cloid::property": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "property",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": "'a",
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "borrowed_ref": {
+                                    "lifetime": "'a",
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Projects a property without converting missing to null; null/undefined receivers throw before later placement record fields. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ let receiver = if $value[\"missing\"] == true { None } else { $value.get(\"value\") }; match super::property(receiver,$value[\"key\"].as_str().unwrap()) { Ok(value) => serde_json::json!({\"ok\":true,\"present\":value.is_some(),\"value\":value}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error}) } }",
+    "cases": [
+      {
+        "input": {
+          "value": {
+            "x": 17
+          },
+          "key": "x"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": 17
+        }
+      },
+      {
+        "input": {
+          "value": {
+            "x": null
+          },
+          "key": "x"
+        },
+        "output": {
+          "ok": true,
+          "present": true,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "value": {},
+          "key": "x"
+        },
+        "output": {
+          "ok": true,
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "value": null,
+          "key": "x"
+        },
+        "output": {
+          "ok": false,
+          "error": "Cannot read properties of null (reading 'x')"
+        }
+      },
+      {
+        "input": {
+          "missing": true,
+          "key": "x"
+        },
+        "output": {
+          "ok": false,
+          "error": "Cannot read properties of undefined (reading 'x')"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::cloid::format_hyperliquid_cloid": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "format_hyperliquid_cloid",
+      "signature": {
+        "inputs": [
+          [
+            "bytes",
+            {
+              "array": {
+                "type": {
+                  "primitive": "u8"
+                },
+                "len": "16"
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Consumes an already-typed fixed [u8;16] and writes the lowercase 0x-prefixed encoding in byte order. It interprets no JSON/text and exposes no acceptance/validation branch. Caller randomness and cloid validation belong to separate APIs.",
+    "evidence": "Reviewed cloid.rs formatter and source mintHyperliquidCloid byte loop. Native cloid tests exercise exact byte ordering and output spelling. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit."
+  },
+  "safe_cex_venue_hyperliquid::spot_json::string_token": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "string_token",
+      "signature": {
+        "inputs": [
+          [
+            "token",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "u16"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Consumes a JSON string token already syntax-validated by RawValue. Escaped UTF-16 code units remain separate, including lone surrogates; no UTF-8 String replacement. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ match super::string_token($value.as_str().unwrap()) { Ok(units) => serde_json::json!({\"ok\":true,\"units\":units}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error}) } }",
+    "cases": [
+      {
+        "input": "\"ascii\"",
+        "output": {
+          "ok": true,
+          "units": [
+            97,
+            115,
+            99,
+            105,
+            105
+          ]
+        }
+      },
+      {
+        "input": "\"\\ud800\"",
+        "output": {
+          "ok": true,
+          "units": [
+            55296
+          ]
+        }
+      },
+      {
+        "input": "\"😀\"",
+        "output": {
+          "ok": true,
+          "units": [
+            55357,
+            56832
+          ]
+        }
+      },
+      {
+        "input": "\"\\n\"",
+        "output": {
+          "ok": true,
+          "units": [
+            10
+          ]
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": false,
+          "error": "expected a JSON string"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::spot_json::number_token": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "number_token",
+      "signature": {
+        "inputs": [
+          [
+            "token",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": "'static",
+                        "is_mutable": false,
+                        "type": {
+                          "primitive": "str"
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Consumes a syntax-validated JSON number lexeme, then applies binary64 conversion; source -0 and overflow remain observable before JSON. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ match super::number_token($value.as_str().unwrap()) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits())}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error}) } }",
+    "cases": [
+      {
+        "input": "0",
+        "output": {
+          "ok": true,
+          "bits": "0000000000000000"
+        }
+      },
+      {
+        "input": "-0",
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "1.25",
+        "output": {
+          "ok": true,
+          "bits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": "1e400",
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": false,
+          "error": "expected a JSON number"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::spot_json::number": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "number",
+      "signature": {
+        "inputs": [
+          [
+            "decoder",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "RawValue numeric field decoder retains the original JSON token; present_number wraps successful numbers in Some and does not turn null into absence. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ let mut decoder = serde_json::Deserializer::from_str($value.as_str().unwrap()); match super::number(&mut decoder) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": "1.25",
+        "output": {
+          "ok": true,
+          "bits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": "-0",
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "1e400",
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "\"7\"",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::spot_json::present_number": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "present_number",
+      "signature": {
+        "inputs": [
+          [
+            "decoder",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "primitive": "f64"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "RawValue numeric field decoder retains the original JSON token; present_number wraps successful numbers in Some and does not turn null into absence. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ let mut decoder = serde_json::Deserializer::from_str($value.as_str().unwrap()); match super::present_number(&mut decoder) { Ok(number) => serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",number.expect(\"present number\").to_bits())}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": "1.25",
+        "output": {
+          "ok": true,
+          "bits": "3ff4000000000000"
+        }
+      },
+      {
+        "input": "-0",
+        "output": {
+          "ok": true,
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": "1e400",
+        "output": {
+          "ok": true,
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "\"7\"",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::spot_json::number_pair": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "number_pair",
+      "signature": {
+        "inputs": [
+          [
+            "decoder",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "array": {
+                        "type": {
+                          "primitive": "f64"
+                        },
+                        "len": "2"
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Decodes exactly two raw numeric elements; the fixed array length is semantic, while each numeric token preserves binary64 and sign. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ let mut decoder = serde_json::Deserializer::from_str($value.as_str().unwrap()); match super::number_pair(&mut decoder) { Ok(pair) => serde_json::json!({\"ok\":true,\"bits\":pair.map(|number|format!(\"{:016x}\",number.to_bits()))}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": "[1.25,-0]",
+        "output": {
+          "ok": true,
+          "bits": [
+            "3ff4000000000000",
+            "8000000000000000"
+          ]
+        }
+      },
+      {
+        "input": "[1e400,2.5]",
+        "output": {
+          "ok": true,
+          "bits": [
+            "7ff0000000000000",
+            "4004000000000000"
+          ]
+        }
+      },
+      {
+        "input": "[1]",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "[1,2,3]",
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::spot_json::present": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "present",
+      "signature": {
+        "inputs": [
+          [
+            "decoder",
+            {
+              "generic": "D"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "generic": "T"
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "qualified_path": {
+                        "name": "Error",
+                        "args": null,
+                        "self_type": {
+                          "generic": "D"
+                        },
+                        "trait": {
+                          "path": "",
+                          "args": null
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'de",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "D",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserializer",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "T",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "serde_core::de::Deserialize",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "lifetime": "'de"
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "evidence": "The generic present-field wrapper executes the supplied Deserialize and returns Some on success; this witness deliberately fixes T to the actual retained JsString, not every possible T. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ let mut decoder = serde_json::Deserializer::from_str($value.as_str().unwrap()); match super::present::<_,super::JsString>(&mut decoder) { Ok(value) => serde_json::json!({\"ok\":true,\"units\":value.expect(\"present string\").0}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": "\"one\"",
+        "output": {
+          "ok": true,
+          "units": [
+            111,
+            110,
+            101
+          ]
+        }
+      },
+      {
+        "input": "\"\\ud800\"",
+        "output": {
+          "ok": true,
+          "units": [
+            55296
+          ]
+        }
+      },
+      {
+        "input": "null",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::spot_json::object_fields": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "object_fields",
+      "signature": {
+        "inputs": [
+          [
+            "token",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "known",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "borrowed_ref": {
+                      "lifetime": null,
+                      "is_mutable": false,
+                      "type": {
+                        "primitive": "str"
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Filters a validated raw object to known canonical fields, preserves each key first insertion, takes the last duplicate value, and leaves numeric lexemes/unknown UTF-16 keys raw. Reviewed the concrete Rust body and corresponding Hyperliquid TS/input contract. Floating observations use exact binary64 bits before JSON. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ let known:Vec<_> = $value[\"known\"].as_array().unwrap().iter().map(|v|v.as_str().unwrap()).collect(); match super::object_fields($value[\"raw\"].as_str().unwrap(),&known) { Ok(raw) => serde_json::json!({\"ok\":true,\"raw\":raw}), Err(error) => serde_json::json!({\"ok\":false,\"error\":error}) } }",
+    "cases": [
+      {
+        "input": {
+          "raw": "{\"b\":2,\"a\":1,\"b\":3,\"ignored\":4}",
+          "known": [
+            "a",
+            "b"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "raw": "{\"b\":3,\"a\":1}"
+        }
+      },
+      {
+        "input": {
+          "raw": "{\"\\ud800\":7,\"a\":-0,\"b\":1e400}",
+          "known": [
+            "a",
+            "b"
+          ]
+        },
+        "output": {
+          "ok": true,
+          "raw": "{\"a\":-0,\"b\":1e400}"
+        }
+      },
+      {
+        "input": {
+          "raw": "[1,2]",
+          "known": [
+            "a"
+          ]
+        },
+        "output": {
+          "ok": false,
+          "error": "expected a spot object record"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::js_string": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "js_string",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Interprets an already captured JSON value as the local JS diagnostic String conversion, including recursive array joining and null holes. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::js_string($value)) }",
+    "cases": [
+      {
+        "input": null,
+        "output": "null"
+      },
+      {
+        "input": false,
+        "output": "false"
+      },
+      {
+        "input": 1.25,
+        "output": "1.25"
+      },
+      {
+        "input": {
+          "x": 1
+        },
+        "output": "[object Object]"
+      },
+      {
+        "input": [
+          null,
+          [
+            1,
+            null,
+            2
+          ],
+          {}
+        ],
+        "output": ",1,,2,[object Object]"
+      },
+      {
+        "input": "plain",
+        "output": "plain"
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::describe_response": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "describe_response",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Builds the source JSON.stringify diagnostic for captured acyclic JSON; canonical numeric keys are ordered before insertion-order string keys. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::describe_response($value)) }",
+    "cases": [
+      {
+        "input": null,
+        "output": "null"
+      },
+      {
+        "input": "plain",
+        "output": "\"plain\""
+      },
+      {
+        "input": [
+          1,
+          false,
+          null
+        ],
+        "output": "[1,false,null]"
+      },
+      {
+        "input": {
+          "b": 1,
+          "2": "two",
+          "1": "one",
+          "01": "zero-one",
+          "4294967295": "max"
+        },
+        "output": "{\"1\":\"one\",\"2\":\"two\",\"b\":1,\"01\":\"zero-one\",\"4294967295\":\"max\"}"
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::nonempty": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "nonempty",
+      "signature": {
+        "inputs": [
+          [
+            "v",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Decodes optional error content; missing/null/empty string are absent while false/zero stringify to nonempty text. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ let v=if $value[\"missing\"]==true {None} else {$value.get(\"value\")}; serde_json::json!(super::nonempty(v)) }",
+    "cases": [
+      {
+        "input": {
+          "missing": true
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": ""
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": "false"
+      },
+      {
+        "input": {
+          "value": 0
+        },
+        "output": "0"
+      },
+      {
+        "input": {
+          "value": []
+        },
+        "output": "[]"
+      },
+      {
+        "input": {
+          "value": "  "
+        },
+        "output": "  "
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::response_data": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "response_data",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": null,
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "serde_json::value::Value",
+                            "args": null
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Only the nested response.data object is admitted; arrays and null cannot act as this record. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::response_data($value)) }",
+    "cases": [
+      {
+        "input": {
+          "response": {
+            "data": {
+              "id": 3
+            }
+          }
+        },
+        "output": {
+          "id": 3
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "id": 4
+          }
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "response": {
+            "data": []
+          }
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "response": {
+            "data": null
+          }
+        },
+        "output": null
+      },
+      {
+        "input": [],
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::statuses": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "statuses",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "borrowed_ref": {
+                        "lifetime": null,
+                        "is_mutable": false,
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::vec::Vec",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Selects an actual nested statuses array before a root fallback, preserving empty nested arrays rather than truthy fallback. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::statuses($value)) }",
+    "cases": [
+      {
+        "input": {
+          "response": {
+            "data": {
+              "statuses": []
+            }
+          },
+          "statuses": [
+            1
+          ]
+        },
+        "output": []
+      },
+      {
+        "input": {
+          "response": {
+            "data": {
+              "statuses": "invalid"
+            }
+          },
+          "statuses": [
+            "waitingForFill"
+          ]
+        },
+        "output": [
+          "waitingForFill"
+        ]
+      },
+      {
+        "input": {
+          "response": {
+            "data": {
+              "statuses": [
+                {
+                  "filled": {
+                    "oid": 3
+                  }
+                }
+              ]
+            }
+          },
+          "statuses": [
+            4
+          ]
+        },
+        "output": [
+          {
+            "filled": {
+              "oid": 3
+            }
+          }
+        ]
+      },
+      {
+        "input": {
+          "statuses": {}
+        },
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::extract_hyperliquid_response_error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "extract_hyperliquid_response_error",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Decodes venue error precedence: root error, root err status, nested err status, nested status.error, then stable de-duplicated status errors. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::extract_hyperliquid_response_error($value)) }",
+    "cases": [
+      {
+        "input": {
+          "error": "top",
+          "status": "err",
+          "response": "other"
+        },
+        "output": "top"
+      },
+      {
+        "input": {
+          "error": false,
+          "status": "err"
+        },
+        "output": "false"
+      },
+      {
+        "input": {
+          "status": "err",
+          "response": ""
+        },
+        "output": "Hyperliquid API rejected the request"
+      },
+      {
+        "input": {
+          "response": {
+            "data": {
+              "status": "err",
+              "response": {
+                "code": 7
+              }
+            }
+          }
+        },
+        "output": "{\"code\":7}"
+      },
+      {
+        "input": {
+          "response": {
+            "data": {
+              "status": {
+                "error": "nested"
+              },
+              "statuses": [
+                {
+                  "error": "late"
+                }
+              ]
+            }
+          }
+        },
+        "output": "nested"
+      },
+      {
+        "input": {
+          "statuses": [
+            {
+              "error": "first"
+            },
+            {
+              "error": "first"
+            },
+            {
+              "error": "second"
+            },
+            null
+          ]
+        },
+        "output": "first, second"
+      },
+      {
+        "input": {
+          "statuses": [
+            {},
+            "waitingForFill"
+          ]
+        },
+        "output": null
+      },
+      {
+        "input": [],
+        "output": null
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::is_only_hyperliquid_terminal_cancel_error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_only_hyperliquid_terminal_cancel_error",
+      "signature": {
+        "inputs": [
+          [
+            "message",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Recognizes only terminal cancel misses after optional period/asset suffix and punctuation/JS whitespace removal; additional errors must refuse. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::is_only_hyperliquid_terminal_cancel_error($value.as_str().unwrap())) }",
+    "cases": [
+      {
+        "input": "Order was never placed, already canceled, or filled",
+        "output": true
+      },
+      {
+        "input": "Order was never placed, already canceled, or filled. asset=12, order was never placed, already canceled, or filled.",
+        "output": true
+      },
+      {
+        "input": "﻿Order was never placed, already canceled, or filled .",
+        "output": true
+      },
+      {
+        "input": "Order was never placed, already canceled, or filled asset=x",
+        "output": false
+      },
+      {
+        "input": "Order was never placed, already canceled, or filled, insufficient funds",
+        "output": false
+      },
+      {
+        "input": "",
+        "output": false
+      },
+      {
+        "input": "already canceled",
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::parse_hyperliquid_order_response": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_hyperliquid_order_response",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_hyperliquid::order_response::ParsedHyperliquidOrderResponse",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_hyperliquid::order_response::HyperliquidOrderResponseError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Interprets statuses after error extraction, distinguishes venue/coercion/unreadable errors, retains order-id order and trigger flag; nonempty resting wins before filled. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ match super::parse_hyperliquid_order_response($value) { Ok(v)=>serde_json::json!({\"ok\":true,\"ids\":v.order_ids,\"trigger\":v.waiting_for_trigger}),Err(super::HyperliquidOrderResponseError::Venue(v))=>serde_json::json!({\"ok\":false,\"kind\":\"venue\",\"message\":v}),Err(super::HyperliquidOrderResponseError::Unreadable(v))=>serde_json::json!({\"ok\":false,\"kind\":\"unreadable\",\"message\":v.message}),Err(super::HyperliquidOrderResponseError::Coercion(v))=>serde_json::json!({\"ok\":false,\"kind\":\"coercion\",\"name\":v.name,\"message\":v.message}) } }",
+    "cases": [
+      {
+        "input": {
+          "statuses": [
+            {
+              "resting": {
+                "oid": 17
+              },
+              "filled": {
+                "oid": 99
+              }
+            },
+            "waitingForFill",
+            "waitingForTrigger",
+            {
+              "filled": {
+                "oid": false
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": true,
+          "ids": [
+            "17",
+            "false"
+          ],
+          "trigger": true
+        }
+      },
+      {
+        "input": {
+          "response": {
+            "data": {
+              "statuses": [
+                "waitingForFill"
+              ]
+            }
+          }
+        },
+        "output": {
+          "ok": true,
+          "ids": [],
+          "trigger": false
+        }
+      },
+      {
+        "input": {
+          "error": "denied",
+          "statuses": []
+        },
+        "output": {
+          "ok": false,
+          "kind": "venue",
+          "message": "denied"
+        }
+      },
+      {
+        "input": null,
+        "output": {
+          "ok": false,
+          "kind": "unreadable",
+          "message": "Hyperliquid API returned an empty order response body"
+        }
+      },
+      {
+        "input": {
+          "statuses": []
+        },
+        "output": {
+          "ok": false,
+          "kind": "unreadable",
+          "message": "Hyperliquid order response missing statuses: {\"statuses\":[]}"
+        }
+      },
+      {
+        "input": {
+          "statuses": [
+            7
+          ]
+        },
+        "output": {
+          "ok": false,
+          "kind": "unreadable",
+          "message": "Hyperliquid order response contained unsupported status: 7"
+        }
+      },
+      {
+        "input": {
+          "statuses": [
+            {}
+          ]
+        },
+        "output": {
+          "ok": false,
+          "kind": "unreadable",
+          "message": "Hyperliquid order response contained unrecognized status: {}"
+        }
+      },
+      {
+        "input": {
+          "statuses": [
+            {
+              "resting": {
+                "oid": {
+                  "toString": 7
+                }
+              },
+              "filled": {
+                "oid": 9
+              }
+            }
+          ]
+        },
+        "output": {
+          "ok": false,
+          "kind": "coercion",
+          "name": "TypeError",
+          "message": "Cannot convert object to primitive value"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::hyperliquid_order_response_has_waiting_for_trigger": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "hyperliquid_order_response_has_waiting_for_trigger",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Recognizes exact deferred string values in selected statuses, without truthiness or object-string coercion. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::hyperliquid_order_response_has_waiting_for_trigger($value)) }",
+    "cases": [
+      {
+        "input": {
+          "statuses": [
+            "waitingForTrigger"
+          ]
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "statuses": [
+            "waitingForFill"
+          ]
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "statuses": [
+            {
+              "status": "waitingForTrigger"
+            },
+            "other"
+          ]
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "response": {
+            "data": {
+              "statuses": []
+            }
+          },
+          "statuses": [
+            "waitingForTrigger"
+          ]
+        },
+        "output": false
+      },
+      {
+        "input": null,
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::hyperliquid_order_response_has_deferred_order_status": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "hyperliquid_order_response_has_deferred_order_status",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Recognizes exact deferred string values in selected statuses, without truthiness or object-string coercion. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::hyperliquid_order_response_has_deferred_order_status($value)) }",
+    "cases": [
+      {
+        "input": {
+          "statuses": [
+            "waitingForTrigger"
+          ]
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "statuses": [
+            "waitingForFill"
+          ]
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "statuses": [
+            {
+              "status": "waitingForTrigger"
+            },
+            "other"
+          ]
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "response": {
+            "data": {
+              "statuses": []
+            }
+          },
+          "statuses": [
+            "waitingForTrigger"
+          ]
+        },
+        "output": false
+      },
+      {
+        "input": null,
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::order_response::signed_body": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "signed_body",
+      "signature": {
+        "inputs": [
+          [
+            "body",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Interprets the captured signature field with JS truthiness to classify signed response handling; an object signature is truthy and empty text is false. Reviewed the Rust body and hyperliquid.order-response.ts or the signed-response caller. JSON-owned values retain the declared UTF-8/snapshot boundary. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "call": "{ serde_json::json!(super::signed_body($value)) }",
+    "cases": [
+      {
+        "input": {},
+        "output": false
+      },
+      {
+        "input": {
+          "signature": null
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "signature": ""
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "signature": 0
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "signature": {}
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "signature": []
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "signature": "sig"
+        },
+        "output": true
+      }
+    ]
+  },
+  "safe_cex_venue_hyperliquid::signing::CancelOrderResponseData": {
+    "shape": "map",
+    "sample": {
+      "statuses": [
+        "success",
+        "already-filled"
+      ]
+    },
+    "entrypoints": [],
+    "evidence": "The innermost cancellation result requires an object owning a string statuses vector; empty and two-element lists are distinct. Reviewed hyperliquid.signing.ts CancelOrderResponse lines214-222 and the corresponding concrete Rust OnlyMap visitor plus private remote companion. Existing map admission is retained. Native fields are read directly, not through a serialized round trip; complete declaration-order arrays and text arrays must refuse. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "statuses",
+        "count"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"count\":v.statuses.len(),\"statuses\":v.statuses}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "statuses": [
+              "success",
+              "already-filled"
+            ]
+          },
+          "output": {
+            "ok": true,
+            "statuses": [
+              "success",
+              "already-filled"
+            ],
+            "count": 2
+          }
+        },
+        {
+          "input": {
+            "statuses": []
+          },
+          "output": {
+            "ok": true,
+            "statuses": [],
+            "count": 0
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"statuses\":[\"success\",\"already-filled\"]}"
+          },
+          "output": {
+            "ok": true,
+            "statuses": [
+              "success",
+              "already-filled"
+            ],
+            "count": 2
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            [
+              "success",
+              "already-filled"
+            ]
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[[\"success\",\"already-filled\"]]"
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::signing::CancelOrderResponseBody": {
+    "shape": "map",
+    "sample": {
+      "type": "cancel",
+      "data": {
+        "statuses": [
+          "success",
+          "already-filled"
+        ]
+      }
+    },
+    "entrypoints": [],
+    "evidence": "The response body requires independent type text and data wrapper before statuses decoding. Reviewed hyperliquid.signing.ts CancelOrderResponse lines214-222 and the corresponding concrete Rust OnlyMap visitor plus private remote companion. Existing map admission is retained. Native fields are read directly, not through a serialized round trip; complete declaration-order arrays and text arrays must refuse. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "type",
+        "statuses"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"type\":v.r#type,\"statuses\":v.data.statuses}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "type": "cancel",
+            "data": {
+              "statuses": [
+                "success",
+                "already-filled"
+              ]
+            }
+          },
+          "output": {
+            "ok": true,
+            "type": "cancel",
+            "statuses": [
+              "success",
+              "already-filled"
+            ]
+          }
+        },
+        {
+          "input": {
+            "type": "cancelByCloid",
+            "data": {
+              "statuses": []
+            }
+          },
+          "output": {
+            "ok": true,
+            "type": "cancelByCloid",
+            "statuses": []
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"type\":\"cancel\",\"data\":{\"statuses\":[\"success\",\"already-filled\"]}}"
+          },
+          "output": {
+            "ok": true,
+            "type": "cancel",
+            "statuses": [
+              "success",
+              "already-filled"
+            ]
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "cancel",
+            {
+              "statuses": [
+                "success",
+                "already-filled"
+              ]
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"cancel\",{\"statuses\":[\"success\",\"already-filled\"]}]"
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::signing::CancelOrderResponse": {
+    "shape": "map",
+    "sample": {
+      "status": "ok",
+      "response": {
+        "type": "cancel",
+        "data": {
+          "statuses": [
+            "success",
+            "already-filled"
+          ]
+        }
+      }
+    },
+    "entrypoints": [],
+    "evidence": "The root cancellation response retains outer status separately from response type and ordered statuses. Reviewed hyperliquid.signing.ts CancelOrderResponse lines214-222 and the corresponding concrete Rust OnlyMap visitor plus private remote companion. Existing map admission is retained. Native fields are read directly, not through a serialized round trip; complete declaration-order arrays and text arrays must refuse. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "status",
+        "type",
+        "statuses"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"status\":v.status,\"type\":v.response.r#type,\"statuses\":v.response.data.statuses}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "status": "ok",
+            "response": {
+              "type": "cancel",
+              "data": {
+                "statuses": [
+                  "success",
+                  "already-filled"
+                ]
+              }
+            }
+          },
+          "output": {
+            "ok": true,
+            "status": "ok",
+            "type": "cancel",
+            "statuses": [
+              "success",
+              "already-filled"
+            ]
+          }
+        },
+        {
+          "input": {
+            "status": "err",
+            "response": {
+              "type": "cancelByCloid",
+              "data": {
+                "statuses": []
+              }
+            }
+          },
+          "output": {
+            "ok": true,
+            "status": "err",
+            "type": "cancelByCloid",
+            "statuses": []
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"status\":\"ok\",\"response\":{\"type\":\"cancel\",\"data\":{\"statuses\":[\"success\",\"already-filled\"]}}}"
+          },
+          "output": {
+            "ok": true,
+            "status": "ok",
+            "type": "cancel",
+            "statuses": [
+              "success",
+              "already-filled"
+            ]
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "ok",
+            {
+              "type": "cancel",
+              "data": {
+                "statuses": [
+                  "success",
+                  "already-filled"
+                ]
+              }
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"ok\",{\"type\":\"cancel\",\"data\":{\"statuses\":[\"success\",\"already-filled\"]}}]"
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::spot_json::JsString": {
+    "shape": "union",
+    "entrypoints": [],
+    "evidence": "The tuple stores UTF-16 code units of a JSON string, including lone surrogates on raw text, rather than accepting its internal Vec representation. Reviewed the full concrete Rust decoder, raw-token helper and corresponding TS declaration. Value ingress here is the serde_json raw-token reserialization boundary; raw-text cases separately retain duplicate keys, UTF-16 escapes and numeric lexemes. Existing shape/front-door guards are retained. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "units",
+        "length"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"length\":v.0.len(),\"units\":v.0}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": "ab",
+          "output": {
+            "ok": true,
+            "units": [
+              97,
+              98
+            ],
+            "length": 2
+          }
+        },
+        {
+          "input": "😀",
+          "output": {
+            "ok": true,
+            "units": [
+              55357,
+              56832
+            ],
+            "length": 2
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "\"\\ud800\""
+          },
+          "output": {
+            "ok": true,
+            "units": [
+              55296
+            ],
+            "length": 1
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            97,
+            98
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "positive": [
+      "ab",
+      "😀"
+    ],
+    "negative": [
+      null,
+      7,
+      [],
+      {}
+    ]
+  },
+  "safe_cex_venue_hyperliquid::spot_json::Number": {
+    "shape": "union",
+    "entrypoints": [],
+    "evidence": "The private newtype delegates to the raw JSON number token decoder; it admits numeric tokens, including overflow/signed-zero text, with no coercion of strings or arrays. Reviewed the full concrete Rust decoder, raw-token helper and corresponding TS declaration. Value ingress here is the serde_json raw-token reserialization boundary; raw-text cases separately retain duplicate keys, UTF-16 escapes and numeric lexemes. Existing shape/front-door guards are retained. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "bits",
+        "negative"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"bits\":format!(\"{:016x}\",v.0.to_bits()),\"negative\":v.0.is_sign_negative()}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": 1.25,
+          "output": {
+            "ok": true,
+            "bits": "3ff4000000000000",
+            "negative": false
+          }
+        },
+        {
+          "input": -2.5,
+          "output": {
+            "ok": true,
+            "bits": "c004000000000000",
+            "negative": true
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "-0"
+          },
+          "output": {
+            "ok": true,
+            "bits": "8000000000000000",
+            "negative": true
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "1e400"
+          },
+          "output": {
+            "ok": true,
+            "bits": "7ff0000000000000",
+            "negative": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "7",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "positive": [
+      1.25,
+      -2.5
+    ],
+    "negative": [
+      null,
+      "7",
+      [],
+      {}
+    ]
+  },
+  "safe_cex_venue_hyperliquid::json_models::CacheOrderType": {
+    "shape": "union",
+    "entrypoints": [],
+    "evidence": "The cache order discriminator recognizes the six shared TS OrderType string tags; native variants remain distinct and tagged-object enum encodings refuse. Reviewed the full concrete Rust decoder, raw-token helper and corresponding TS declaration. Value ingress here is the serde_json raw-token reserialization boundary; raw-text cases separately retain duplicate keys, UTF-16 escapes and numeric lexemes. Existing shape/front-door guards are retained. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "rank"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"variant\":format!(\"{:?}\",v),\"rank\":match v {super::CacheOrderType::Market=>0,super::CacheOrderType::Limit=>1,super::CacheOrderType::Conditional=>2,super::CacheOrderType::StopLoss=>3,super::CacheOrderType::TakeProfit=>4,super::CacheOrderType::TrailingStopLoss=>5}}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": "market",
+          "output": {
+            "ok": true,
+            "variant": "Market",
+            "rank": 0
+          }
+        },
+        {
+          "input": "limit",
+          "output": {
+            "ok": true,
+            "variant": "Limit",
+            "rank": 1
+          }
+        },
+        {
+          "input": "conditional",
+          "output": {
+            "ok": true,
+            "variant": "Conditional",
+            "rank": 2
+          }
+        },
+        {
+          "input": "stop_market",
+          "output": {
+            "ok": true,
+            "variant": "StopLoss",
+            "rank": 3
+          }
+        },
+        {
+          "input": "take_profit_market",
+          "output": {
+            "ok": true,
+            "variant": "TakeProfit",
+            "rank": 4
+          }
+        },
+        {
+          "input": "trailing_stop_market",
+          "output": {
+            "ok": true,
+            "variant": "TrailingStopLoss",
+            "rank": 5
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "LIMIT",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "market": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "limit": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "conditional": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "stop_market": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "take_profit_market": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "trailing_stop_market": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "\"market\""
+          },
+          "output": {
+            "ok": true,
+            "variant": "Market",
+            "rank": 0
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "\"limit\""
+          },
+          "output": {
+            "ok": true,
+            "variant": "Limit",
+            "rank": 1
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "\"conditional\""
+          },
+          "output": {
+            "ok": true,
+            "variant": "Conditional",
+            "rank": 2
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "\"stop_market\""
+          },
+          "output": {
+            "ok": true,
+            "variant": "StopLoss",
+            "rank": 3
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "\"take_profit_market\""
+          },
+          "output": {
+            "ok": true,
+            "variant": "TakeProfit",
+            "rank": 4
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "\"trailing_stop_market\""
+          },
+          "output": {
+            "ok": true,
+            "variant": "TrailingStopLoss",
+            "rank": 5
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{}"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"market\": null}"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"limit\": null}"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"conditional\": null}"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"stop_market\": null}"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"take_profit_market\": null}"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"trailing_stop_market\": null}"
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "positive": [
+      "market",
+      "limit",
+      "conditional",
+      "stop_market",
+      "take_profit_market",
+      "trailing_stop_market"
+    ],
+    "negative": [
+      null,
+      7,
+      [],
+      {}
+    ]
+  },
+  "safe_cex_venue_hyperliquid::json_models::HyperliquidFastAssetCtx": {
+    "shape": "map",
+    "entrypoints": [],
+    "evidence": "Optional markPx/midPx retain absence separately from present UTF-16 strings; present null refuses. Reviewed the full concrete Rust decoder, raw-token helper and corresponding TS declaration. Value ingress here is the serde_json raw-token reserialization boundary; raw-text cases separately retain duplicate keys, UTF-16 escapes and numeric lexemes. Existing shape/front-door guards are retained. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "mark",
+        "mid"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"mark\":v.mark_px.map(|x|x.0),\"mid\":v.mid_px.map(|x|x.0)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "markPx": "12.5",
+            "midPx": "12.25"
+          },
+          "output": {
+            "ok": true,
+            "mark": [
+              49,
+              50,
+              46,
+              53
+            ],
+            "mid": [
+              49,
+              50,
+              46,
+              50,
+              53
+            ]
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "mark": null,
+            "mid": null
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"markPx\":\"\\ud800\",\"ignored\":\"\\ud800\"}"
+          },
+          "output": {
+            "ok": true,
+            "mark": [
+              55296
+            ],
+            "mid": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "12.5",
+            "12.25"
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "markPx": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "midPx": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "sample": {
+      "markPx": "12.5",
+      "midPx": "12.25"
+    }
+  },
+  "safe_cex_venue_hyperliquid::json_models::PrePlacementEntry": {
+    "shape": "map",
+    "entrypoints": [],
+    "evidence": "Pre-placement cache entries require type/price/amount/timestamp, and optional cloid is absent-or-string, not nullable. Reviewed the full concrete Rust decoder, raw-token helper and corresponding TS declaration. Value ingress here is the serde_json raw-token reserialization boundary; raw-text cases separately retain duplicate keys, UTF-16 escapes and numeric lexemes. Existing shape/front-door guards are retained. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "kind",
+        "price",
+        "amount",
+        "timestamp",
+        "cloid"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"kind\":match v.r#type {super::CacheOrderType::Market=>\"Market\",super::CacheOrderType::Limit=>\"Limit\",super::CacheOrderType::Conditional=>\"Conditional\",super::CacheOrderType::StopLoss=>\"StopLoss\",super::CacheOrderType::TakeProfit=>\"TakeProfit\",super::CacheOrderType::TrailingStopLoss=>\"TrailingStopLoss\"},\"price\":format!(\"{:016x}\",v.price.to_bits()),\"amount\":format!(\"{:016x}\",v.amount.to_bits()),\"timestamp\":format!(\"{:016x}\",v.timestamp.to_bits()),\"cloid\":v.cloid.map(|x|x.0)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "type": "limit",
+            "price": 1.25,
+            "amount": 2.5,
+            "timestamp": 7.5
+          },
+          "output": {
+            "ok": true,
+            "kind": "Limit",
+            "price": "3ff4000000000000",
+            "amount": "4004000000000000",
+            "timestamp": "401e000000000000",
+            "cloid": null
+          }
+        },
+        {
+          "input": {
+            "type": "stop_market",
+            "price": -2.5,
+            "amount": 4.25,
+            "timestamp": 9.5,
+            "cloid": "c1"
+          },
+          "output": {
+            "ok": true,
+            "kind": "StopLoss",
+            "price": "c004000000000000",
+            "amount": "4011000000000000",
+            "timestamp": "4023000000000000",
+            "cloid": [
+              99,
+              49
+            ]
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"type\":\"market\",\"price\":-0,\"amount\":1e400,\"timestamp\":2.5}"
+          },
+          "output": {
+            "ok": true,
+            "kind": "Market",
+            "price": "8000000000000000",
+            "amount": "7ff0000000000000",
+            "timestamp": "4004000000000000",
+            "cloid": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "limit",
+            1.25,
+            2.5,
+            7.5,
+            "c1"
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "type": "limit",
+            "price": 1.25,
+            "amount": 2.5,
+            "timestamp": 7.5,
+            "cloid": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "type": "limit",
+            "price": 1.25,
+            "timestamp": 7.5
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "sample": {
+      "type": "limit",
+      "price": 1.25,
+      "amount": 2.5,
+      "timestamp": 7.5
+    }
+  },
+  "safe_cex_venue_hyperliquid::json_models::PendingOrderEntry": {
+    "shape": "map",
+    "entrypoints": [],
+    "evidence": "Pending cache entries require a closed shared order kind and independent price/timestamp numeric tokens. Reviewed the full concrete Rust decoder, raw-token helper and corresponding TS declaration. Value ingress here is the serde_json raw-token reserialization boundary; raw-text cases separately retain duplicate keys, UTF-16 escapes and numeric lexemes. Existing shape/front-door guards are retained. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "kind",
+        "price",
+        "timestamp"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"kind\":match v.r#type {super::CacheOrderType::Market=>\"Market\",super::CacheOrderType::Limit=>\"Limit\",super::CacheOrderType::Conditional=>\"Conditional\",super::CacheOrderType::StopLoss=>\"StopLoss\",super::CacheOrderType::TakeProfit=>\"TakeProfit\",super::CacheOrderType::TrailingStopLoss=>\"TrailingStopLoss\"},\"price\":format!(\"{:016x}\",v.price.to_bits()),\"timestamp\":format!(\"{:016x}\",v.timestamp.to_bits())}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "type": "conditional",
+            "price": 1.25,
+            "timestamp": 7.5
+          },
+          "output": {
+            "ok": true,
+            "kind": "Conditional",
+            "price": "3ff4000000000000",
+            "timestamp": "401e000000000000"
+          }
+        },
+        {
+          "input": {
+            "type": "take_profit_market",
+            "price": -2.5,
+            "timestamp": 9.5
+          },
+          "output": {
+            "ok": true,
+            "kind": "TakeProfit",
+            "price": "c004000000000000",
+            "timestamp": "4023000000000000"
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"type\":\"limit\",\"price\":-0,\"timestamp\":1e400}"
+          },
+          "output": {
+            "ok": true,
+            "kind": "Limit",
+            "price": "8000000000000000",
+            "timestamp": "7ff0000000000000"
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            "conditional",
+            1.25,
+            7.5
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "type": "limit",
+            "price": 1.25
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "sample": {
+      "type": "conditional",
+      "price": 1.25,
+      "timestamp": 7.5
+    }
+  },
+  "safe_cex_venue_hyperliquid::json_models::AgentWalletCreationResult": {
+    "shape": "map",
+    "entrypoints": [],
+    "evidence": "Wallet creation result requires boolean success and message; the address/key outputs are individually optional strings, with present null rejected. Reviewed the full concrete Rust decoder, raw-token helper and corresponding TS declaration. Value ingress here is the serde_json raw-token reserialization boundary; raw-text cases separately retain duplicate keys, UTF-16 escapes and numeric lexemes. Existing shape/front-door guards are retained. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "success",
+        "message",
+        "address",
+        "key"
+      ],
+      "call": "{ match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"success\":v.success,\"message\":v.message.0,\"address\":v.agent_address.map(|x|x.0),\"key\":v.agent_private_key.map(|x|x.0)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "success": true,
+            "message": "created",
+            "agentAddress": "fixture-address",
+            "agentPrivateKey": "fixture-key"
+          },
+          "output": {
+            "ok": true,
+            "success": true,
+            "message": [
+              99,
+              114,
+              101,
+              97,
+              116,
+              101,
+              100
+            ],
+            "address": [
+              102,
+              105,
+              120,
+              116,
+              117,
+              114,
+              101,
+              45,
+              97,
+              100,
+              100,
+              114,
+              101,
+              115,
+              115
+            ],
+            "key": [
+              102,
+              105,
+              120,
+              116,
+              117,
+              114,
+              101,
+              45,
+              107,
+              101,
+              121
+            ]
+          }
+        },
+        {
+          "input": {
+            "success": false,
+            "message": "refused"
+          },
+          "output": {
+            "ok": true,
+            "success": false,
+            "message": [
+              114,
+              101,
+              102,
+              117,
+              115,
+              101,
+              100
+            ],
+            "address": null,
+            "key": null
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": [
+            true,
+            "created",
+            "fixture-address",
+            "fixture-key"
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "success": false,
+            "message": "refused",
+            "agentAddress": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "success": false,
+            "message": "refused",
+            "agentPrivateKey": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "sample": {
+      "success": true,
+      "message": "created",
+      "agentAddress": "fixture-address",
+      "agentPrivateKey": "fixture-key"
+    }
+  },
+  "safe_cex_venue_hyperliquid::json_values::JsonValue": {
+    "shape": "json",
+    "entrypoints": [],
+    "evidence": "This retained raw JSON value admits all six JSON kinds, preserving native numbers/UTF-16 and first-insertion/last-value object ordering rather than serde Value spelling. Reviewed complete json_values.rs implementations and the source any-valued/string-valued index-signature declarations in hyperliquidspot.types.ts and fast-asset-ctxs.ts. Expected native tags, UTF-16 units, ordered entries and number bits are independently authored. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "kind",
+        "native"
+      ],
+      "call": "{ fn native(value:&super::JsonValue)->serde_json::Value {match value {super::JsonValue::Null=>serde_json::json!([\"null\"]),super::JsonValue::Bool(v)=>serde_json::json!([\"bool\",v]),super::JsonValue::Number(v)=>serde_json::json!([\"number\",format!(\"{:016x}\",v.to_bits())]),super::JsonValue::String(v)=>serde_json::json!([\"string\",v.0]),super::JsonValue::Array(v)=>serde_json::json!([\"array\",v.iter().map(native).collect::<Vec<_>>()]),super::JsonValue::Object(v)=>serde_json::json!([\"object\",v.0.iter().map(|(k,v)|serde_json::json!([k.0,native(v)])).collect::<Vec<_>>()])}} match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"kind\":native(&v)[0],\"native\":native(&v)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": null,
+          "output": {
+            "ok": true,
+            "kind": "null",
+            "native": [
+              "null"
+            ]
+          }
+        },
+        {
+          "input": true,
+          "output": {
+            "ok": true,
+            "kind": "bool",
+            "native": [
+              "bool",
+              true
+            ]
+          }
+        },
+        {
+          "input": 1.25,
+          "output": {
+            "ok": true,
+            "kind": "number",
+            "native": [
+              "number",
+              "3ff4000000000000"
+            ]
+          }
+        },
+        {
+          "input": "x",
+          "output": {
+            "ok": true,
+            "kind": "string",
+            "native": [
+              "string",
+              [
+                120
+              ]
+            ]
+          }
+        },
+        {
+          "input": [
+            null,
+            false
+          ],
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "native": [
+              "array",
+              [
+                [
+                  "null"
+                ],
+                [
+                  "bool",
+                  false
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "input": {
+            "x": "y"
+          },
+          "output": {
+            "ok": true,
+            "kind": "object",
+            "native": [
+              "object",
+              [
+                [
+                  [
+                    120
+                  ],
+                  [
+                    "string",
+                    [
+                      121
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"x\":1,\"x\":-0,\"2\":1e400,\"s\":\"\\ud800\"}"
+          },
+          "output": {
+            "ok": true,
+            "kind": "object",
+            "native": [
+              "object",
+              [
+                [
+                  [
+                    50
+                  ],
+                  [
+                    "number",
+                    "7ff0000000000000"
+                  ]
+                ],
+                [
+                  [
+                    120
+                  ],
+                  [
+                    "number",
+                    "8000000000000000"
+                  ]
+                ],
+                [
+                  [
+                    115
+                  ],
+                  [
+                    "string",
+                    [
+                      55296
+                    ]
+                  ]
+                ]
+              ]
+            ]
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::json_values::JsonContainer": {
+    "shape": "union",
+    "entrypoints": [],
+    "evidence": "TS any-valued string-index signatures admit arrays as well as object snapshots; primitives refuse while each contained JSON value retains its own native tag. Reviewed complete json_values.rs implementations and the source any-valued/string-valued index-signature declarations in hyperliquidspot.types.ts and fast-asset-ctxs.ts. Expected native tags, UTF-16 units, ordered entries and number bits are independently authored. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "kind",
+        "entries"
+      ],
+      "call": "{ fn native(value:&super::JsonValue)->serde_json::Value {match value {super::JsonValue::Null=>serde_json::json!([\"null\"]),super::JsonValue::Bool(v)=>serde_json::json!([\"bool\",v]),super::JsonValue::Number(v)=>serde_json::json!([\"number\",format!(\"{:016x}\",v.to_bits())]),super::JsonValue::String(v)=>serde_json::json!([\"string\",v.0]),super::JsonValue::Array(v)=>serde_json::json!([\"array\",v.iter().map(native).collect::<Vec<_>>()]),super::JsonValue::Object(v)=>serde_json::json!([\"object\",v.0.iter().map(|(k,v)|serde_json::json!([k.0,native(v)])).collect::<Vec<_>>()])}} match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"kind\":match &v {super::JsonContainer::Object(_)=>\"object\",super::JsonContainer::Array(_)=>\"array\"},\"entries\":match &v {super::JsonContainer::Object(v)=>v.0.iter().map(|(k,v)|serde_json::json!([k.0,native(v)])).collect::<Vec<_>>(),super::JsonContainer::Array(v)=>v.iter().map(native).collect::<Vec<_>>()}}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "x": false
+          },
+          "output": {
+            "ok": true,
+            "kind": "object",
+            "entries": [
+              [
+                [
+                  120
+                ],
+                [
+                  "bool",
+                  false
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "input": [
+            null,
+            1.25
+          ],
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "entries": [
+              [
+                "null"
+              ],
+              [
+                "number",
+                "3ff4000000000000"
+              ]
+            ]
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[-0,1e400,\"\\ud800\"]"
+          },
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "entries": [
+              [
+                "number",
+                "8000000000000000"
+              ],
+              [
+                "number",
+                "7ff0000000000000"
+              ],
+              [
+                "string",
+                [
+                  55296
+                ]
+              ]
+            ]
+          }
+        },
+        {
+          "input": 7,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "x",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "positive": [
+      {},
+      [],
+      {
+        "x": false
+      },
+      [
+        null,
+        1.25
+      ]
+    ],
+    "negative": [
+      null,
+      7,
+      "x",
+      false
+    ]
+  },
+  "safe_cex_venue_hyperliquid::json_values::JsonObject": {
+    "shape": "map",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "get",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "key",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "slice": {
+                        "primitive": "u16"
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "generic": "T"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "typed",
+        "reason": "Compares an already-typed UTF-16 key against decoded dictionary entries and borrows the stored T; it parses no raw JSON/text or value. Native observations additionally exercise present and absent lookup at T=JsString."
+      }
+    ],
+    "evidence": "The generic object snapshot is witnessed at the actual string-valued dictionary instantiation JsonObject<JsString>. Last duplicates replace before typed value decoding; get compares an already typed UTF-16 key and returns the stored reference. Reviewed complete json_values.rs implementations and the source any-valued/string-valued index-signature declarations in hyperliquidspot.types.ts and fast-asset-ctxs.ts. Expected native tags, UTF-16 units, ordered entries and number bits are independently authored. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "keys",
+        "values",
+        "x"
+      ],
+      "call": "{  match if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())} {Ok(v)=>serde_json::json!({\"ok\":true,\"keys\":v.0.iter().map(|(k,_)|&k.0).collect::<Vec<_>>(),\"values\":v.0.iter().map(|(_,v)|&v.0).collect::<Vec<_>>(),\"x\":v.get(&[120]).map(|v|&v.0)}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "x": "one"
+          },
+          "output": {
+            "ok": true,
+            "keys": [
+              [
+                120
+              ]
+            ],
+            "values": [
+              [
+                111,
+                110,
+                101
+              ]
+            ],
+            "x": [
+              111,
+              110,
+              101
+            ]
+          }
+        },
+        {
+          "input": {
+            "a": "b"
+          },
+          "output": {
+            "ok": true,
+            "keys": [
+              [
+                97
+              ]
+            ],
+            "values": [
+              [
+                98
+              ]
+            ],
+            "x": null
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"x\":false,\"2\":\"two\",\"x\":\"\\ud800\",\"01\":\"leading\"}"
+          },
+          "output": {
+            "ok": true,
+            "keys": [
+              [
+                50
+              ],
+              [
+                120
+              ],
+              [
+                48,
+                49
+              ]
+            ],
+            "values": [
+              [
+                116,
+                119,
+                111
+              ],
+              [
+                55296
+              ],
+              [
+                108,
+                101,
+                97,
+                100,
+                105,
+                110,
+                103
+              ]
+            ],
+            "x": [
+              55296
+            ]
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "x": 7
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "sample": {
+      "x": "one"
+    },
+    "instantiation": "JsonObject<crate::spot_json::JsString>"
+  },
+  "safe_cex_venue_hyperliquid::cloid::HyperliquidPlacementRecord": {
+    "shape": "map",
+    "sample": {
+      "type": "limit",
+      "price": 1.25,
+      "side": "buy",
+      "amount": 2.5,
+      "reduceOnly": true,
+      "timeInForce": "PostOnly",
+      "symbol": "BTCUSD",
+      "placedAt": 9001.5
+    },
+    "entrypoints": [],
+    "evidence": "TS hyperliquid.cloid.ts55-64 declares seven required fields and optional nonnull timeInForce. The concrete owner uses the existing object guard, private remote schema, present-field adapter and JsNumberInput capture. Native tests first measured complete-array admission, present-null admission and overflow refusal, then passed after repair. Independent observations compare actual enum variants, field values, optional presence and binary64 bits; complete valid positional arrays refuse. Serialization names/optional omission remain unchanged. The shared 128-level capture and scalar-Unicode symbol boundaries remain declared in crate guidance. Direct native tests of production code passed this owner's independently authored cases. The suite covered 37 owners, 248 cases and one typed formatter witness. Exact compiler APIs match fresh discovery. Package, dependency and matrix obligations remain open; helper and generic scope remain explicit.",
+    "nativeObservation": {
+      "nativeFields": [
+        "kind",
+        "priceBits",
+        "side",
+        "amountBits",
+        "reduceOnly",
+        "timeInForce",
+        "symbol",
+        "placedAtBits"
+      ],
+      "call": "{ let decoded=if let Some(text)=$value.get(\"_rawJson\").and_then(serde_json::Value::as_str) {serde_json::from_str::<$type>(text)} else {serde_json::from_value::<$type>($value.clone())}; match decoded {Ok(v)=>serde_json::json!({\"ok\":true,\"kind\":format!(\"{:?}\",v.r#type),\"priceBits\":format!(\"{:016x}\",v.price.to_bits()),\"side\":format!(\"{:?}\",v.side),\"amountBits\":format!(\"{:016x}\",v.amount.to_bits()),\"reduceOnly\":v.reduce_only,\"timeInForce\":v.time_in_force.map(|t|format!(\"{:?}\",t)),\"symbol\":v.symbol,\"placedAtBits\":format!(\"{:016x}\",v.placed_at.to_bits())}),Err(_)=>serde_json::json!({\"ok\":false})} }",
+      "cases": [
+        {
+          "input": {
+            "type": "limit",
+            "price": 1.25,
+            "side": "buy",
+            "amount": 2.5,
+            "reduceOnly": true,
+            "timeInForce": "PostOnly",
+            "symbol": "BTCUSD",
+            "placedAt": 9001.5
+          },
+          "output": {
+            "ok": true,
+            "kind": "Limit",
+            "priceBits": "3ff4000000000000",
+            "side": "Buy",
+            "amountBits": "4004000000000000",
+            "reduceOnly": true,
+            "timeInForce": "PostOnly",
+            "symbol": "BTCUSD",
+            "placedAtBits": "40c194c000000000"
+          }
+        },
+        {
+          "input": {
+            "type": "market",
+            "price": -0.0,
+            "side": "sell",
+            "amount": 0.125,
+            "reduceOnly": false,
+            "symbol": "雪/ETH",
+            "placedAt": 0
+          },
+          "output": {
+            "ok": true,
+            "kind": "Market",
+            "priceBits": "8000000000000000",
+            "side": "Sell",
+            "amountBits": "3fc0000000000000",
+            "reduceOnly": false,
+            "timeInForce": null,
+            "symbol": "雪/ETH",
+            "placedAtBits": "0000000000000000"
+          }
+        },
+        {
+          "input": [
+            "limit",
+            1.25,
+            "buy",
+            2.5,
+            true,
+            "PostOnly",
+            "BTCUSD",
+            9001.5
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "[\"limit\", 1.25, \"buy\", 2.5, true, \"PostOnly\", \"BTCUSD\", 9001.5]"
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "type": "limit",
+            "price": 1.25,
+            "side": "buy",
+            "amount": 2.5,
+            "reduceOnly": true,
+            "timeInForce": null,
+            "symbol": "BTCUSD",
+            "placedAt": 9001.5
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "type": "limit",
+            "price": "1.25",
+            "side": "buy",
+            "amount": 2.5,
+            "reduceOnly": true,
+            "timeInForce": "PostOnly",
+            "symbol": "BTCUSD",
+            "placedAt": 9001.5
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "_rawJson": "{\"type\":\"market\",\"price\":1e400,\"side\":\"sell\",\"amount\":-0,\"reduceOnly\":false,\"symbol\":\"BTCUSD\",\"placedAt\":9007199254740993}"
+          },
+          "output": {
+            "ok": true,
+            "kind": "Market",
+            "priceBits": "7ff0000000000000",
+            "side": "Sell",
+            "amountBits": "8000000000000000",
+            "reduceOnly": false,
+            "timeInForce": null,
+            "symbol": "BTCUSD",
+            "placedAtBits": "4340000000000000"
+          }
+        }
+      ]
+    }
+  }
+}

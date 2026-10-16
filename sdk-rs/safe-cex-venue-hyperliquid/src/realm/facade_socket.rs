@@ -6,7 +6,10 @@
 //! this bridge forwards to those listeners and to the instance's own
 //! `connectAndSubscribe`/`ping`. CHOSEN: `close` listeners are not invoked —
 //! the Rust core runs the close/reconnect path the base `onClose` would.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{FunctionData, Kind, NativeConstruct, ObjectData, Prop, PropKey, Slot, Thrown, Value},
+};
 use safe_cex_exchange::{
     exchange::BaseExchange,
     runtime::{ExchangeError, ExchangeFuture},

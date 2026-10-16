@@ -1,6 +1,9 @@
 //! Small shared utility imports (lodash, utils/*, json-parse), implemented over
 //! realm values because several mutate or return their argument's identity.
-use super::{Realm, value::*};
+use super::{
+    Realm,
+    value::{PropKey, Value},
+};
 
 fn arg(args: &[Value], i: usize) -> Value {
     args.get(i).cloned().unwrap_or(Value::Undefined)
