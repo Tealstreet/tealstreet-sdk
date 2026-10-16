@@ -323,6 +323,22 @@ status = "divergent"
 note = "CHOSEN: explicit synchronous logging callback replaces this-bound emission. UTF-8 category inputs exclude lone UTF-16 surrogates; ExchangeError retains name/message/metadata but excludes JS stack and thrown object identity. Host logging failure propagates before the venue error. Linear returns USDT only; other categories log and fail. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_get_settle_coins_for_category."
 
 [[symbol]]
+ts = "HyrotraderExchange.optionsEnabled"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "HyrotraderExchange.inverseEnabled"
+kind = "method"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "HyrotraderExchange.requiresOrderLinkId"
 kind = "method"
 layer = "adapted"

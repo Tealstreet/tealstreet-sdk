@@ -11,6 +11,14 @@ status = "ported"
 note = "Function-for-function native arithmetic/type adapter from the actual script-api-core order source. Native numeric bits/fields are compared in order_policy or order_policy_market before any wire view; independent corpus dimensions and compiled named mutation failures cover the slice. TypeScript Number truthiness and source rounding/fallback order are retained."
 
 [[symbol]]
+ts = "assertMinimumPrice"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "amountStep"
 kind = "const-fn"
 layer = "adapted"
