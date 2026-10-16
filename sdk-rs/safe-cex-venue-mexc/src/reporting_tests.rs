@@ -207,9 +207,9 @@ fn mexc_raw_reporting_preserves_values_and_unwinds_before_fallback() {
                     },
                 });
                 let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
-                exchange.base=BaseExchange::new(ExchangeName::Mexc,
+                exchange.base=Rc::new(BaseExchange::new(ExchangeName::Mexc,
                     serde_json::from_value(json!({"key":"key","secret":"secret","testnet":false,"publicDataOnly":false})).unwrap(),
-                    store.clone(),runtime.clone(),ExchangeSettings::default());
+                    store.clone(),runtime.clone(),ExchangeSettings::default()));
                 exchange.xhr = failure.clone();
                 let events = Rc::new(RefCell::new(Vec::<Value>::new()));
                 let observed = events.clone();
@@ -456,13 +456,13 @@ fn mexc_raw_reporting_listener_failure_prevents_fallback() {
                 },
             });
             let mut exchange = venue(Rc::new(DefaultStore::new()), 100., false);
-            exchange.base = BaseExchange::new(
+            exchange.base = Rc::new(BaseExchange::new(
                 ExchangeName::Mexc,
                 serde_json::from_value(json!({"key":"key","secret":"secret"})).unwrap(),
                 store.clone(),
                 runtime.clone(),
                 ExchangeSettings::default(),
-            );
+            ));
             exchange.xhr = failure.clone();
             let mut original = ExchangeError::new("listener failed");
             original.code = Some(json!("LISTENER"));

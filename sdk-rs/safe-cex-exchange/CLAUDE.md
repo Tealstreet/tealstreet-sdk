@@ -903,6 +903,16 @@ The exchanges-level audit and retained options gap are tracked in
 entrypoints execute their initial source calls before returning their futures;
 caller-drop and reporting choices cite MANIFEST-SPEC.md#exchange-runtime-callback-choice.
 
+The shared JS runtime supplies `Function.prototype.bind` for venue callbacks,
+retaining the target receiver and prepending bound arguments even when the result
+is rebound or called by an array helper. Own function properties take precedence.
+`JSON.stringify` supports callable replacers: `toJSON` runs first with the actual
+property key, then the replacer receives the live holder, key and value, including
+the root and array holes. Traversal captures keys/array length before reading
+individual values, so earlier callbacks can change later siblings. Unreplaced
+BigInt and circular structures throw; replacers can convert or omit them.
+Array replacer lists and indentation remain outside this runtime surface.
+
 ## Native host (`native` feature)
 
 `native::native_runtime()` is the production `ExchangeRuntime` + `WsRuntime` on a
