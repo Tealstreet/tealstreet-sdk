@@ -51,11 +51,12 @@ Exact-byte restoration passed all eleven owners again, with zero failed owners
 and zero classification-only receipts. All 173 maintained-source shape
 observations also passed before baseline, mutation and restoration.
 
-Master `68336bf3f5` is integrated; all 38 existing Aster contracts are preserved
-beside these eleven additions. The final native refresh passed eleven runtime
-owners with zero failures/classifications. The frozen install, script syntax and
-whitespace checks passed; `parity:check` passed 7,459 rows and 17,206 public Rust
-items with zero findings. Decision PR #360 remains separate pending integration.
+Master `68af3fa734` is integrated after decision PR #360 merged. All 46 existing
+Aster contracts are preserved beside these eleven additions (57 total). The
+fresh native refresh passed eleven runtime owners with zero failures or
+classifications. The frozen install and whitespace checks passed;
+`parity:check` passed 7,459 rows and 17,214 public Rust items with zero findings.
+The selected enum bodies and native probe emitter remain unchanged.
 
 The scope is the selected native/default enum owners under the canonical
 [string boundary](../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary) and
