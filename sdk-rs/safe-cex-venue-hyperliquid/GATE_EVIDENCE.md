@@ -1361,3 +1361,33 @@ After reviewing the final combined journal/external-data body, only those two
 fingerprints changed to `f16535160061e222`; the same test passes (1/1). No inventory
 regeneration or blanket delegation was used. This final body differs from the
 external-data-only master body's fingerprint because it also binds journal folding.
+
+## 2026-10-17 — raw socket close preserves forceClosed
+
+The production family BaseWebSocket facade now forwards source `ws.close()` to
+shared `BaseWebSocket::close_current_websocket()` from merged #227. It previously
+called `force_close()`, incorrectly changing the superclass forceClosed flag.
+The source private perpetual socket's `dispose` calls stopPingLoop and raw close,
+without super.dispose or forceClose (`hyperliquid.ws-private.ts`).
+
+`realm::socket_tests::private_no_super_dispose_closes_wire_without_force_closing_base`
+constructs the production Hyperliquid exchange and invokes its actual private
+socket methods through the family realm. The compiled old bridge closed the wire
+but failed the direct native forceClosed assertion. After the transport-only
+cutover, the wire closes once and native forceClosed/parent-disposal stay false.
+The independent `tests/private-close-source.cjs` executes the actual source class,
+checks those same observations, and rejects a source forceClose mutation. Its
+control runs inside the maintained native test. No test transport flags stand in
+for the production BaseWebSocket state.
+
+The existing `base_websocket_class` inventory pin is reviewed and updated from
+98b2e6c011ff88a4 to4a6e54ae7b9b544a. The inventoried h.socket.dispose call is
+unchanged and remains the explicit superclass socket path; only raw close changes.
+The inventory is reconciled manually, with other lanes' rows retained.
+
+Measured close-fix validation: production realm test1/1 (with actual-source
+mutation control), core binding18/18, native/private-class source target1/1 with
+60 source cases, strict native all-target Clippy and wasm32 library Clippy pass,
+scoped formatting passes, parity0 (7459 rows,17146 public items). The full global
+override guard's inherited eight Binance pins are repaired by author PR#235;
+that repair is inherited separately before marking this change ready.

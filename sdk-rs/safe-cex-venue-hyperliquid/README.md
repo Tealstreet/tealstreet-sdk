@@ -46,3 +46,10 @@ Preserved source quirks include scientific-exponent zero stripping in floatToWir
 short-vault right-padding and absolute exchange URL retry classification. Fixtures
 and historical controls remain intact. Local delivery requires formatting, locked
 workspace build and workspace host clippy; central wasm/wiring gates are separate.
+
+The family socket facade maps source `ws.close()` to the shared transport-only
+`close_current_websocket()` API. It closes the current native/relay connection
+while preserving `forceClosed`, generation and superclass resources. The private
+perpetual socket's source `dispose` has no super call; the production realm
+regression checks its wire close and unchanged force/parent-disposal flags against
+the actual TypeScript class, including a failing forceClose source mutation.
