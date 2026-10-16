@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "161 production creator candidates discovered across all potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "167 production creator candidates discovered across all potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -123,12 +123,26 @@
         "async-block",
         "async-block",
         "async-block",
+        "async-block",
+        "async-block",
+        "async-block",
         "async-block"
       ],
-      "producer_sha256": "af92b2262176a88f1b2acfa65eb54addffaa2f8f2db052b97169006469315b47",
+      "producer_sha256": "c5eb68753939ff552794cebee964a5435e51b3b3aea650af1e7ec7b679f0a776",
       "classification": "delegated",
       "delegate": "registered concrete capability callback / BaseExchange validated placement",
       "reason": "default owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
+    },
+    {
+      "owner": "src/capabilities.rs::ExchangeCapabilities::fetch_account_greeks",
+      "boundaries": [
+        "future-signature",
+        "future-return"
+      ],
+      "producer_sha256": "45725ebdfcc2d3036d3e9f0b740b9395e1c44861b7d69f3ca328940a3a3a51d4",
+      "classification": "delegated",
+      "delegate": "registered concrete capability callback / BaseExchange validated placement",
+      "reason": "fetch_account_greeks owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
     },
     {
       "owner": "src/capabilities.rs::ExchangeCapabilities::fetch_closed_pnl",
@@ -184,6 +198,28 @@
       "classification": "delegated",
       "delegate": "registered concrete capability callback / BaseExchange validated placement",
       "reason": "fetch_income_history_range owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
+    },
+    {
+      "owner": "src/capabilities.rs::ExchangeCapabilities::fetch_option_chain",
+      "boundaries": [
+        "future-signature",
+        "future-return"
+      ],
+      "producer_sha256": "5582418492bf446c036c63f2efc77c0d3b0abeab9edc38c165dbe6a4140137e7",
+      "classification": "delegated",
+      "delegate": "registered concrete capability callback / BaseExchange validated placement",
+      "reason": "fetch_option_chain owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
+    },
+    {
+      "owner": "src/capabilities.rs::ExchangeCapabilities::fetch_option_expiries",
+      "boundaries": [
+        "future-signature",
+        "future-return"
+      ],
+      "producer_sha256": "ee568e26352cc8e5b4694f602f6871f9a9e05bd3f06c0dd1fbbb6e310e3eb452",
+      "classification": "delegated",
+      "delegate": "registered concrete capability callback / BaseExchange validated placement",
+      "reason": "fetch_option_expiries owns the callback/validated request projection; pending business lifetime belongs to the invoked callback rather than a second binding-owned registry."
     },
     {
       "owner": "src/capabilities.rs::PlaceOrderBinding as Default::default",
@@ -912,6 +948,17 @@
       "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
     },
     {
+      "owner": "src/exchange.rs::Exchange::fetch_account_greeks",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block"
+      ],
+      "producer_sha256": "01adc0a524df523c4fecd5026c624c3e60bb8bb990c7c23632469eeef78daed0",
+      "classification": "immediate",
+      "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
+    },
+    {
       "owner": "src/exchange.rs::Exchange::fetch_and_set_orders",
       "boundaries": [
         "future-signature",
@@ -1034,6 +1081,28 @@
         "async-block"
       ],
       "producer_sha256": "b8ef1f80fc7d7d209b4e7276690a62cdb96f7e25a1953898b8f2e029ac09fc55",
+      "classification": "immediate",
+      "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
+    },
+    {
+      "owner": "src/exchange.rs::Exchange::fetch_option_chain",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block"
+      ],
+      "producer_sha256": "f9ca26dd9bbf07542c7274b26ba3d659e157b68d2faf92bacd7c8dd84261924b",
+      "classification": "immediate",
+      "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
+    },
+    {
+      "owner": "src/exchange.rs::Exchange::fetch_option_expiries",
+      "boundaries": [
+        "future-signature",
+        "future-return",
+        "async-block"
+      ],
+      "producer_sha256": "d06617b246f23727e93e72afd8ce7812d5c9ffa78ccb5a1936d8b220ecc246fd",
       "classification": "immediate",
       "reason": "Trait default returns an immediate result/error or a ready local future; no registration or reserved lifecycle state."
     },
