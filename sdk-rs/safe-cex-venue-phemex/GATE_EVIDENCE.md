@@ -1120,8 +1120,8 @@ capabilities and its mapped-key corpus is explicitly limited to exact keys.
 Twelve non-decoder helpers have direct native unit witnesses and twelve
 compiling named-failure/exact-restoration controls, including three new outbound
 controls in scripts/outbound-contract-controls.py. Three guard-only record
-controls prove complete valid arrays fail after widening and pass after exact
-restoration. The direct-envelope old-derive numeric control remains in #280.
+controls compile after widening, fail the named complete-array rejection
+assertion, and pass after exact restoration. The direct-envelope old-derive numeric control remains in #280.
 Two typed initializer classifications have separately executed source/native
 constructor witnesses. The Api construction record reviews only shared-handle
 Clone capability and makes no executed clone or method-decoding claim.
