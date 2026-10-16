@@ -3,6 +3,7 @@
 //! The venue's method bodies are generic over JS host traits; this realm is
 //! their production host. Builtins live on intrinsic prototypes, module
 //! imports in an explicit table, and native resources behind host objects.
+pub mod ccxt;
 pub mod convert;
 pub mod core;
 pub mod json;
@@ -17,9 +18,11 @@ pub mod facade_rest;
 pub mod facade_socket;
 pub mod facade_store;
 pub mod imports;
+pub mod imports_utils;
 mod host_classes;
 mod host_core;
 mod host_leaves;
+mod host_startup;
 
 use crate::spot_json::JsString;
 use safe_cex_exchange::runtime::ExchangeRuntime;
@@ -56,6 +59,8 @@ pub struct State {
     pub reported: RefCell<Vec<Obj>>,
     /// Module-level values whose identity must be stable across reads.
     pub singletons: RefCell<HashMap<&'static str, Value>>,
+    /// The last property read that produced undefined, named in "is not a function".
+    pub last_missing: RefCell<Option<String>>,
 }
 
 /// Cloning shares the realm; `lexical` is the class binding a method body sees.
@@ -106,6 +111,7 @@ impl Realm {
                 imports: RefCell::default(),
                 reported: RefCell::default(),
                 singletons: RefCell::default(),
+                last_missing: RefCell::default(),
             }),
             lexical: None,
         };

@@ -162,6 +162,31 @@ impl Host {
         }
         panic!("scripted host did not settle");
     }
+    /// Jump the clock to the earliest pending timer and fire it; false if none.
+    pub fn fire_next_timer(&self) -> bool {
+        let next = self
+            .timers
+            .borrow()
+            .iter()
+            .filter(|(_, f)| !f.get())
+            .map(|(t, _)| *t)
+            .fold(f64::INFINITY, f64::min);
+        if !next.is_finite() {
+            return false;
+        }
+        self.now.set(self.now.get().max(next));
+        for (t, f) in self.timers.borrow().iter() {
+            if *t <= next {
+                f.set(true);
+            }
+        }
+        self.timers.borrow_mut().retain(|(_, f)| !f.get());
+        for (_, flag) in self.jobs.borrow().iter() {
+            flag.0.store(true, Ordering::SeqCst);
+        }
+        self.settle();
+        true
+    }
     /// Advance the virtual clock by `ms`, firing due timers, settling between each.
     pub fn advance(&self, ms: f64) {
         let target = self.now.get() + ms;
@@ -200,6 +225,9 @@ impl Host {
                 return v;
             }
             self.settle();
+            if !flag.0.swap(false, Ordering::SeqCst) && !self.fire_next_timer() {
+                panic!("future is blocked with no runnable job or pending timer");
+            }
         }
         panic!("future did not resolve on the scripted host");
     }

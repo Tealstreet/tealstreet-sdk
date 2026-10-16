@@ -187,6 +187,7 @@ impl Realm {
             }
             current = o.borrow().proto.clone();
         }
+        *self.state.last_missing.borrow_mut() = key.units().map(String::from_utf16_lossy);
         Ok(Value::Undefined)
     }
     /// Strict-mode `o[key] = value`.
@@ -474,6 +475,10 @@ impl Realm {
                         "Class constructor {} cannot be invoked without 'new'",
                         String::from_utf16_lossy(&func.name.0)
                     ),
+                    None if matches!(f, Value::Undefined) => match self.state.last_missing.borrow().as_deref() {
+                        Some(name) => format!("{name} is not a function"),
+                        None => "undefined is not a function".into(),
+                    },
                     None => format!("{f:?} is not a function"),
                 };
                 Err(self.type_error(&name))

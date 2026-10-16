@@ -58,3 +58,42 @@ fn fetch_orders_reads_frontend_open_orders() {
     assert!(orders.is_empty());
     assert_eq!(f.routes.count("info:frontendOpenOrders"), 1);
 }
+
+fn venue_routes() -> Vec<(&'static str, Value)> {
+    let ctx = |mark: &str| {
+        json!({"funding":"0.0000125","openInterest":"100.5","prevDayPx":"60000.0","dayNtlVlm":"1000000.0",
+               "premium":"0.0001","oraclePx":mark,"markPx":mark,"midPx":mark,"impactPxs":[mark,mark],"dayBaseVlm":"16.4"})
+    };
+    vec![
+        (
+            "info:metaAndAssetCtxs",
+            json!([
+                {"universe":[{"name":"BTC","szDecimals":5,"maxLeverage":40},{"name":"ETH","szDecimals":4,"maxLeverage":25}]},
+                [ctx("61000.0"), ctx("3000.0")]
+            ]),
+        ),
+        ("info:perpDexs", json!([null])),
+        ("info:userFees", json!({"userCrossRate":"0.00035","userAddRate":"0.0001"})),
+        ("info:maxBuilderFee", json!(10)),
+        ("info:userAbstraction", json!("default")),
+        (
+            "info:clearinghouseState",
+            json!({"marginSummary":{"accountValue":"1000.0","totalNtlPos":"0.0","totalRawUsd":"1000.0","totalMarginUsed":"0.0"},
+                   "crossMarginSummary":{"accountValue":"1000.0","totalNtlPos":"0.0","totalRawUsd":"1000.0","totalMarginUsed":"0.0"},
+                   "crossMaintenanceMarginUsed":"0.0","withdrawable":"1000.0","assetPositions":[],"time":1700000000000u64}),
+        ),
+        ("info:frontendOpenOrders", json!([])),
+    ]
+}
+
+#[test]
+fn start_loads_markets_balance_and_dials_both_sockets() {
+    let f = fixture(venue_routes());
+    let result = f.host.block_on(f.exchange.start());
+    f.host.settle();
+    assert!(result.is_ok(), "start: {result:?}; reports {:?}", f.host.reports.borrow());
+    let store = f.exchange.base().store.clone();
+    assert_eq!(store.markets().len(), 2, "core perp markets loaded");
+    assert!(store.loaded().markets && store.loaded().tickers, "loaded flags {:?}", *store.loaded());
+    assert_eq!(f.host.sockets.borrow().len(), 2, "public and private sockets dialed");
+}

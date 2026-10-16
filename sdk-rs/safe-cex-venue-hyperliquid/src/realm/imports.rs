@@ -88,6 +88,27 @@ pub fn bind(realm: &Realm) {
     realm.bind_import("virtualClock", clock);
 
     bind_cloid(realm);
+    bind_startup(realm);
+    super::imports_utils::bind(realm);
+    super::ccxt::bind(realm);
+}
+
+/// Imported async helpers return a promise over the ported body.
+fn bind_startup(realm: &Realm) {
+    realm.bind_import(
+        "fetchCoreMetaAndAssetCtxsWithFallback",
+        realm.native("fetchCoreMetaAndAssetCtxsWithFallback", 1, |r, _, a| {
+            let observer = crate::market_startup::fetch_core_meta_and_asset_ctxs_with_fallback(r.clone(), arg(a, 0));
+            Ok(r.spawn_value(Box::pin(observer)))
+        }),
+    );
+    realm.bind_import(
+        "fetchHip3MetaAndAssetCtxsWithRetry",
+        realm.native("fetchHip3MetaAndAssetCtxsWithRetry", 1, |r, _, a| {
+            let observer = crate::market_startup::fetch_hip3_meta_and_asset_ctxs_with_retry(r.clone(), arg(a, 0));
+            Ok(r.spawn_value(Box::pin(observer)))
+        }),
+    );
 }
 
 fn bind_cloid(realm: &Realm) {

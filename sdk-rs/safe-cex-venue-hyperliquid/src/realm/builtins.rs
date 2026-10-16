@@ -1370,6 +1370,20 @@ fn then(r: &mut Realm, this: &Value, fulfilled: Value, rejected: Value) -> Resul
     })))
 }
 
+/// Settles with the first input to settle, in input order on ties.
+struct Race(Vec<super::promise::ValueFuture>);
+impl std::future::Future for Race {
+    type Output = Result<Value, Thrown>;
+    fn poll(mut self: std::pin::Pin<&mut Self>, cx: &mut std::task::Context<'_>) -> std::task::Poll<Self::Output> {
+        for f in self.0.iter_mut() {
+            if let std::task::Poll::Ready(v) = f.as_mut().poll(cx) {
+                return std::task::Poll::Ready(v);
+            }
+        }
+        std::task::Poll::Pending
+    }
+}
+
 fn install_promise(realm: &mut Realm) {
     let p = realm.intrinsics().promise_proto.clone();
     def(realm, &p, "then", 2, |r, this, args| then(r, this, arg(args, 0), arg(args, 1)));
@@ -1451,6 +1465,11 @@ fn install_promise(realm: &mut Realm) {
             }
             Ok(realm.new_array(out))
         })))
+    });
+    def(realm, &c, "race", 1, |r, _, args| {
+        let items = r.collect_iterable(&arg(args, 0))?;
+        let futures: Vec<_> = items.into_iter().map(|v| r.await_value(v)).collect();
+        Ok(r.spawn_value(Box::pin(Race(futures))))
     });
     realm.set_global("Promise", promise);
 }

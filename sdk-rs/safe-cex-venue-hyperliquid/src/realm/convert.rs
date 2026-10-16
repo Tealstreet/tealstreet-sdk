@@ -166,6 +166,18 @@ impl Realm {
     }
     /// Binary operators by source spelling.
     pub fn binary(&mut self, op: &str, a: &Value, b: &Value) -> Result<Value, Thrown> {
+        // Some ported bodies name operators instead of spelling them.
+        let op = match op {
+            "plus" | "add" => "+",
+            "minus" | "subtract" => "-",
+            "multiply" => "*",
+            "divide" => "/",
+            "less" => "<",
+            "lessEqual" => "<=",
+            "greater" => ">",
+            "greaterEqual" => ">=",
+            other => other,
+        };
         let numeric = |realm: &mut Realm, f: fn(f64, f64) -> f64| -> Result<Value, Thrown> {
             let x = realm.to_number(a)?;
             let y = realm.to_number(b)?;
@@ -230,8 +242,8 @@ impl Realm {
     }
     pub fn unary(&mut self, op: &str, v: &Value) -> Result<Value, Thrown> {
         Ok(match op {
-            "+" => Value::Number(self.to_number(v)?),
-            "-" => Value::Number(-self.to_number(v)?),
+            "+" | "plus" => Value::Number(self.to_number(v)?),
+            "-" | "minus" => Value::Number(-self.to_number(v)?),
             "!" => Value::Bool(!v.truthy()),
             "typeof" => Value::str(v.type_of()),
             "~" => Value::Number(!to_int32(self.to_number(v)?) as f64),
