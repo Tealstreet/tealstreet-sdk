@@ -67,6 +67,14 @@ status = "ported"
 note = "Live TypeScript oracle runs under cargo test; adapted Rust representation preserves the source data and helper behavior on finite JSON and Unicode scalar strings."
 
 [[symbol]]
+ts = "isBybitSignRejection"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "isBybitEnvProbeRequest"
 kind = "const-fn"
 layer = "adapted"

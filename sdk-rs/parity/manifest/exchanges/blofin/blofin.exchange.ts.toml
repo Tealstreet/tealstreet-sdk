@@ -395,6 +395,14 @@ status = "divergent"
 note = "CHOSEN: retained UtilityInput reads own JSON worker result/argument fields with JS truthiness; inherited properties/getters are excluded. Truthy unsupported positionMode values are refused before cache write because shared PositionMode is closed; the actual source admits bogus mode (modes_oracle.cjs witness). Confirmed supported modes beat arguments, falsey/absent results use arguments; margin cache changes do not rewrite Store. Split targets expose the concrete host cache/options and executable helper body. Native assertions in tests/modes.rs precede any wire comparison; exact source AST oracle and one restored production mutation per row. Explicit rename: `safe-cex-venue-blofin/src/modes.rs::after_method_called_in_worker` mirrors BlofinExchange.afterMethodCalledInWorker. Concrete member binding: safe-cex-venue-blofin/src/exchange.rs::BlofinExchange::after_method_called_in_worker."
 
 [[symbol]]
+ts = "BlofinExchange#applyConfirmedMarginType"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "BlofinExchange#applyConfirmedPositionMode"
 kind = "field-fn"
 layer = "adapted"

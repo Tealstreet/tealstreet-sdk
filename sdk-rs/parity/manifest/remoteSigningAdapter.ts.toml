@@ -19,6 +19,14 @@ status = "ported"
 note = "IndexMap<String, String> projects the plain-object branch and deliberately retains differently cased entries. The string-valued input excludes null/non-string values; it does not enforce normalization. AxiosHeaders is normalized upstream, and shared request assembly performs that normalization before signing and after signer output."
 
 [[symbol]]
+ts = "executeThroughDefaultAdapters"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
 ts = "createRemoteSigningAdapter"
 kind = "const-fn"
 layer = "adapted"

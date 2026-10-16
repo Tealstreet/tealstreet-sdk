@@ -1,0 +1,18 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/bybit/bybit.inverse.ts"
+
+[[symbol]]
+ts = "isBybitInverseSymbol"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "positionUpnlInQuote"
+kind = "const-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
