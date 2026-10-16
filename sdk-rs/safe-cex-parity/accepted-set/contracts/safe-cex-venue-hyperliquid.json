@@ -5621,5 +5621,281 @@
         }
       ]
     }
+  },
+  "safe_cex_venue_hyperliquid::private_class::PrivateValue": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "evidence": "Reviewed the actual private websocket PrivateValue<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Value associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Value binding is the actual realm::value::Value enum. The named native private_value_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
+    "reason": "For the reviewed actual Realm instantiation, this private websocket value alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+  },
+  "safe_cex_venue_hyperliquid::private_class::PrivateError": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "evidence": "Reviewed the actual private websocket PrivateError<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Error associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Error binding is the actual realm::value::Value enum. The named native private_error_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
+    "reason": "For the reviewed actual Realm instantiation, this private websocket error alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+  },
+  "safe_cex_venue_hyperliquid::public_class::PublicValue": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "evidence": "Reviewed the actual public websocket PublicValue<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Value associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Value binding is the actual realm::value::Value enum. The named native public_value_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
+    "reason": "For the reviewed actual Realm instantiation, this public websocket value alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+  },
+  "safe_cex_venue_hyperliquid::public_class::PublicError": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "evidence": "Reviewed the actual public websocket PublicError<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Error associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Error binding is the actual realm::value::Value enum. The named native public_error_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
+    "reason": "For the reviewed actual Realm instantiation, this public websocket error alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+  },
+  "safe_cex_venue_hyperliquid::core_exchange_class::ExchangeValue": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Value",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "evidence": "Reviewed the actual perpetual exchange ExchangeValue<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Value associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Value binding is the actual realm::value::Value enum. The named native exchange_value_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
+    "reason": "For the reviewed actual Realm instantiation, this perpetual exchange value alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
+  },
+  "safe_cex_venue_hyperliquid::core_exchange_class::ExchangeError": {
+    "category": "non-decoder",
+    "generics": {
+      "params": [
+        {
+          "name": "H",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "target": {
+      "qualified_path": {
+        "name": "Error",
+        "args": null,
+        "self_type": {
+          "generic": "H"
+        },
+        "trait": {
+          "path": "safe_cex_venue_hyperliquid::ws_ping_lifecycle::WsPingHost",
+          "args": null
+        }
+      }
+    },
+    "evidence": "Reviewed the actual perpetual exchange ExchangeError<H> declaration, the compiler-resolved WsPingHost trait path and production Realm implementation. Source and expanded targets are the exact H::Error associated projection, with unbounded H and no default/where predicates. The finite reviewed host is Realm, whose Error binding is the actual realm::value::Value enum. The named native exchange_error_realm_is_the_native_value test uses both invariant mutable-reference equalities and TypeId, preserves native slots, undefined, negative-zero/infinity bits, lone UTF-16 surrogate units and object/thrown identity, and mutates the original object through the alias. Source/compiler/artifact evidence is exported separately; decoder and alternate-route traits must still be probed by the ordinary maintained runner.",
+    "reason": "For the reviewed actual Realm instantiation, this perpetual exchange error alias forwards the host's native value handle without parsing, validation or JSON conversion. It declares no decoder body or alternate input route. Runtime JSON/property/signing operations remain separate owner obligations. This classifies only one exact production host instantiation; it does not classify arbitrary H, any other associated projection or all realm APIs."
   }
 }

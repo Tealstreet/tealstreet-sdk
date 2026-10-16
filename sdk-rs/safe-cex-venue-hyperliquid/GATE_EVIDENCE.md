@@ -1,25 +1,36 @@
-# Associated-type alias review proposal
+# Six fixed Realm associated-projection contracts
 
-Six native witnesses instantiate `PrivateValue`, `PrivateError`, `PublicValue`,
-`PublicError`, `ExchangeValue` and `ExchangeError` with the actual production Realm.
-Each public alias remains the exact `<H as WsPingHost>::Value` or `::Error`
-projection; no declaration or trait bound changes. The compiler-authenticated
-Realm implementation binds both associated types to `realm::value::Value`.
+Six accepted contracts classify only `PrivateValue<Realm>`, `PrivateError<Realm>`,
+`PublicValue<Realm>`, `PublicError<Realm>`, `ExchangeValue<Realm>` and
+`ExchangeError<Realm>`. Their actual raw and expanded targets remain the exact
+`<H as WsPingHost>::Value` or `::Error` projection. The shared finite mechanism in
+merged #362 authenticates the same-crate trait, concrete Realm, native Value enum,
+unique Realm implementation and associated bindings from fresh compiler metadata.
+This consumer preserves all six policy records and installs only its six contracts.
 
-`tests/support/accepted_projection_aliases.rs`: **6/6 native tests pass**. Each
-checks both directions of mutable-reference type equality and actual TypeId,
-then retains the original native slot, undefined, negative-zero/infinity bits,
-unpaired UTF-16 units, object identity and thrown-object identity. A write through
-the aliased reference is visible through the original object. An initial fixture
-compile error (missing `mut` on the Realm binding) was repaired before execution;
-it is not runtime failure evidence. Strict native all-targets clippy passes.
-The independent review found no issues.
+`tests/support/accepted_projection_aliases.rs`: **6/6 native runtime identity tests
+pass** against the refreshed master. Each checks invariant mutable-reference type
+equality in both directions, TypeId, the original native slot, undefined,
+negative-zero/infinity bits, unpaired UTF-16 units and object/thrown identity. A
+write through the alias remains visible through the original object.
 
-This is a finite native identity proposal for Realm only. The ordinary accepted
-package gate retains its associated-projection refusal until the shared finite
-policy route is reviewed. No contract or generic policy permission is installed
-by this proof, and decoder traits, alternate ingress and route behavior remain
-separate obligations. No whole-package acceptance is claimed.
+`scripts/accepted-projection-native.mjs` reads the installed contracts and runs fresh
+ordinary rustdoc/check discovery, source claims and compiler-root authentication
+before selecting the finite cohort. It discovers all 534 owners and 36 aliases and
+requires new compiler-derived `projectionIdentity` evidence for every selected alias.
+The maintained `runProbes` executes the ordinary Serde and conversion detectors:
+**six native capability classifications pass with zero failures**. These are
+classification receipts, separate from the six runtime identity tests above.
+The target-specific Wasm run also passes all six capability classifications with
+zero failures, retaining all 534 owners and 36 aliases. Reproduce it with
+`--target=wasm32-unknown-unknown`.
+
+The shared mechanism's five executed provenance/host/source guard removals and its
+compiled concrete-owner rename control remain unchanged in #362. The normal native
+consumer probes grant only one fixed Realm identity per alias. Other generic hosts,
+remaining alias families, runtime decoder owners, local helpers, dependency and
+feature/target obligations retain their separate reviews. No package acceptance is
+claimed by these six contracts.
 
 # Eight account, market and ledger string-enum reviews
 
