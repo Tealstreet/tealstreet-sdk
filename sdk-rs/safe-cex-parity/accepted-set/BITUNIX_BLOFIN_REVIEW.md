@@ -305,6 +305,34 @@ After the six earlier REST/history owners, this batch leaves 30 original
 Bitunix owners and the previously measured 49 Blofin owners. Complete-package,
 local-owner and feature/WASM matrices remain separate obligations.
 
+## Position records and multi-page histories
+
+Three additional native/default owners now execute their actual production
+bodies. PositionRecord observations cover every string, enum identity, optional
+presence and numeric bit. Long/short and hedged/one-way rows keep closed size
+separate from maximum size, rebate separate from cost and the explicit funding
+choice. Zero versus null position IDs retain distinct key/fallback behavior.
+
+The general history pager executes a real 100-row first page and short second
+page, asserting all 103 admitted native rows. First-ID deduplication, repeated
+empty IDs, time bounds, UTF-16 endpoint/symbol units and offset bits remain
+distinct. A later fetch failure retains the first 100 collected rows; report
+failure propagates. Historical orders separately assert all 100 mapped outputs,
+including a skipped mapper row and duplicate ID, descending timestamp order and
+fractional limit truncation. Their cursor follows oldest creation time rather
+than mapped timestamp; a later fetch failure clears the earlier outputs.
+
+All three owners pass actual native execution. Three compiled copied-production
+controls replace closed size with maximum size, offset 100 with 99 and the
+initial to cursor with from. Each fails its named output observation and passes
+after restoration. Independent review found no issues. Production bytes remain
+unchanged. Ready callbacks bound this profile; concrete REST/mappers and the
+unexecuted 100-page/50-page warning caps are not inferred from these receipts.
+
+Together with the separate six read/write contracts, this leaves 27 original
+Bitunix owners and the previously measured 49 Blofin owners. Complete-package,
+local-owner and feature/WASM matrices remain separate obligations.
+
 ## Socket callbacks and login signing
 
 Eleven additional Bitunix owners execute native/default witnesses. Debounce and
