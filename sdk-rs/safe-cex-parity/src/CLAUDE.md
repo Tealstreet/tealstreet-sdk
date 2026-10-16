@@ -189,3 +189,10 @@ actual decoders, not callback exemptions. Fields<bool> preserves its original
 static borrowed string keys: its reviewed type identity does not grant
 DeserializeOwned or bypass the existing borrowed-alias refusal. Decoder
 classifications and borrowed production-path coverage remain separate obligations.
+
+
+The separate `secondary::RateLimitWrapper<'static>` registry entry retains its
+actual unsized `dyn Fn(Arc<dyn RestAdapter>)->Arc<dyn RestAdapter>` target. Its
+existing unsized alias path requires invariant native function/pointer type
+equality and ordinary Serde/conversion checks. The finite static capability
+identity does not execute its callback or classify other lifetimes.
