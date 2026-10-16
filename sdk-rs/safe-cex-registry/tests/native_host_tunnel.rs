@@ -127,6 +127,7 @@ async fn serve_tunnel(listener: TcpListener, handler: Handler, tunnel: Rc<Tunnel
                             .and_then(|(_, rest)| rest.find('/').map(|i| rest[i..].to_owned()))
                             .unwrap_or_default();
                         let request = Seen {
+                            body: String::new(),
                             method: arg["method"].as_str().unwrap_or_default().into(),
                             path,
                             query: query_of(arg["params"].as_object().unwrap()),

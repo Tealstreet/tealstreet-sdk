@@ -147,3 +147,5 @@ semantic depth refusals on the surviving object; first key insertion stays fixed
 The discarded_duplicate_capture target independently guards overwritten lone-unit
 and depth140 values, native first-key position and unrelated lexemes. Invalid
 JSON syntax and surviving-value refusals remain separate negative cases.
+
+Balance.currencies stores CurrencyBalance: either the declared recursive Balance or the actual Crypto.com REST available/locked row. Serialization preserves the selected source field names; there is no computed free/used/total normalization. The static TypeScript declaration still names Balance, so its generated annotation remains unchanged while the runtime violation is recorded on the owning manifest row. Both runtime shapes require objects; available/locked are required non-null numbers.
