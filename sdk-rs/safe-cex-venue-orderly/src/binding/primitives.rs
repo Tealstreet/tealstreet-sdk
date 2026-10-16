@@ -435,6 +435,7 @@ impl crate::classes::ClassHost for Host {
             (*name).clone(),
             (*options).clone(),
             (*store).clone(),
+            |_| Ok(()),
         )?;
         if let Js::Object(object) = &this {
             *object.proto.borrow_mut() = Some(rt.shared.extra.prototype.clone());
