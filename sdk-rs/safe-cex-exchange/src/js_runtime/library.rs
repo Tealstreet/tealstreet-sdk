@@ -1320,20 +1320,12 @@ mod tests {
     fn run(g: &Js, name: &str, args: Vec<Js>) -> Js {
         call(&g.get(name).unwrap(), args).unwrap()
     }
-    /// JS number spelling; builtins' JSON.stringify prints `1.0` today.
     fn json(v: &Js) -> String {
-        fn spell(v: serde_json::Value) -> serde_json::Value {
-            match v {
-                serde_json::Value::Number(n) => {
-                    serde_json::from_str(&safe_cex_num::js_number_string(n.as_f64().unwrap()))
-                        .unwrap()
-                }
-                serde_json::Value::Array(xs) => xs.into_iter().map(spell).collect(),
-                serde_json::Value::Object(m) => m.into_iter().map(|(k, v)| (k, spell(v))).collect(),
-                other => other,
-            }
-        }
-        spell(super::super::value::to_json(v).unwrap()).to_string()
+        s(&globals()
+            .get("JSON")
+            .unwrap()
+            .call_method("stringify", vec![v.clone()])
+            .unwrap())
     }
     fn s(v: &Js) -> String {
         text(v).unwrap()

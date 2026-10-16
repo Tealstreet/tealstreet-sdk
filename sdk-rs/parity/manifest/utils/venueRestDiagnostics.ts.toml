@@ -91,6 +91,14 @@ status = "divergent"
 note = "FINDING owner: shared core divergence audit. actual readHeaders contributes public sample.headers.server length120 with U+D83D at119 after cutting valid scalar input; native String output substitutes U+FFFD. This returned program value is not covered by diagnostic-only labeling. See sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict. Source observed; native inspected only. Evidence scope: sdk-rs/parity/SHARED_CORE_DIVERGENCE_AUDIT.md. Historical annotation: CHOSEN: explicit typed config/response/header adapter excludes arbitrary JS objects/prototype properties and per-property setters; sealed writes and throwing Axios-style header accessors are modeled. Native f64 preserves NaN/infinities. UTF-16 snippets/header slices replace cut surrogates per MANIFEST-SPEC.md#shared-utf8-string-boundary; output fields are owned UTF-8 strings. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::read_headers` mirrors readHeaders. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::DiagnosticHeaders` mirrors readHeaders. Split targets retain the adapter and its concrete behavior."
 
 [[symbol]]
+ts = "visibleText"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-store/src/venue_rest_diagnostics.rs::visible_text"
+status = "divergent"
+note = "CHOSEN: the 64,000-unit UTF-16 cut replaces an isolated cut surrogate with U+FFFD per sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary; output is an owned UTF-8 string. The style/script strip is an explicit lazy scan because Rust regex has no backreference; it keeps the source's ASCII-only non-unicode /i name match, unclosed-tag fallthrough and JS whitespace set. Native assertions in safe-cex-store/tests/diagnostics.rs; the same literals hold in actual source through rest_and_ws_literals_hold_in_actual_typescript_source. Explicit rename: `safe-cex-store/src/venue_rest_diagnostics.rs::visible_text` mirrors visibleText."
+
+[[symbol]]
 ts = "classifyBody"
 kind = "const-fn"
 layer = "adapted"

@@ -6,6 +6,7 @@ pub mod builtins;
 pub mod client;
 pub mod globals;
 pub mod library;
+pub mod ops;
 pub mod promise;
 pub mod scope;
 pub mod sockets;

@@ -34,6 +34,36 @@ pub struct PlacedOrderRef {
     pub order_ids: Vec<String>,
     pub client_order_id: String,
 }
+/// A cancel+replace `updateOrder` result: the replacement's venue order IDs plus
+/// the client order ID it went out with. Derefs to the IDs, as TS keeps it a
+/// `string[]`, so `result[0]` callers are unaffected.
+#[derive(Clone, Debug, Default, PartialEq, Eq)]
+pub struct ReplacementOrderIds {
+    pub order_ids: Vec<String>,
+    pub client_order_id: Option<String>,
+}
+impl std::ops::Deref for ReplacementOrderIds {
+    type Target = Vec<String>;
+    fn deref(&self) -> &Vec<String> {
+        &self.order_ids
+    }
+}
+pub fn with_replacement_client_order_id(
+    order_ids: Vec<String>,
+    client_order_id: String,
+) -> ReplacementOrderIds {
+    ReplacementOrderIds {
+        order_ids,
+        client_order_id: Some(client_order_id),
+    }
+}
+/// TS truthiness: an empty client order ID reads as absent.
+pub fn replacement_client_order_id_of(order_ids: &ReplacementOrderIds) -> Option<&str> {
+    order_ids
+        .client_order_id
+        .as_deref()
+        .filter(|id| !id.is_empty())
+}
 pub enum ClientOrderLookup {
     Found(Box<Order>),
     NotFound { definitive: bool },
@@ -129,7 +159,10 @@ pub fn order_carries_client_order_id(order: &Order, id: &str) -> bool {
     if id.is_empty() || id == "0" || id == "undefined" {
         return false;
     }
-    if order.id == id || order.parent_id.as_deref() == Some(id) {
+    if order.id == id
+        || order.parent_id.as_deref() == Some(id)
+        || order.client_order_id.as_deref() == Some(id)
+    {
         return true;
     }
     let Some(info) = order.info.as_ref() else {

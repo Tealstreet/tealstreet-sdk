@@ -83,7 +83,7 @@ Existing history capability finding is carried forward, not re-derived:
 `docs/plans/TRADE_DATA_TRIAGE_v1.md:359` and
 `docs/plans/HISTORICAL_DATA_v1.md:504` record Phemex as symbol-scoped with no income
 ledger. The fills axis reports unsupported and is never called; the capability
-BRAND gates it, not supportsExecutionsHistory. This read slice does not alter it.
+BRAND gates it; there is no metadata flag. This read slice does not alter it.
 
 `fetch_tickers_raw` uses the shared get_key::v helper and keeps the strict null
 check: missing error emits undefined and returns null (named ts-bug); only an

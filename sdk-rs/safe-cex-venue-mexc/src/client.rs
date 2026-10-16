@@ -12,11 +12,15 @@ use safe_cex_transport::{
     RestAdapter, RestBody, RestFailure, RestFuture, RestRequest, RestResponse, TransportError,
     TransportRegistry,
     rate_limit::RateLimitClock,
-    retry::{ClassifiedRequest, ReadClassification, network_error_on_read},
+    retry::{ClassifiedRequest, ReadClassification, only_reads},
 };
 use safe_cex_types::{ExchangeOptions, QueryValue};
 use serde_json::Value;
-use std::{rc::Rc, sync::Arc};
+use std::{
+    cell::{Cell, RefCell},
+    rc::Rc,
+    sync::Arc,
+};
 
 struct ResponseTransform {
     inner: Arc<dyn RestAdapter>,
@@ -160,35 +164,57 @@ impl RestAdapter for MexcAttempt {
                     request.headers.insert(key.into(), value);
                 }
             }
-            let execution = self.client.execute_with_receipt(request.clone()).await?;
-            let response = &execution.response;
-            let data: Value = response.body.json_value().unwrap_or(Value::Null);
-            if data.is_object() || data.is_array() {
-                let code = data.get("code");
-                let rejected = if data.get("success") == Some(&Value::Bool(false)) {
-                    true
-                } else {
-                    code.map(|v| js_string(Some(v)))
-                        .transpose()
-                        .map_err(|e| RestFailure::pre_transmit(e.message.into(), request.clone()))?
-                        .is_some_and(|s| s != "0" && s != "200")
-                };
-                let message = data
-                    .get("message")
-                    .filter(|v| js_truthy(Some(v)))
-                    .or_else(|| data.get("msg"));
-                if rejected && js_truthy(message) {
-                    let text = js_string(message).map_err(|e| {
-                        RestFailure::pre_transmit(e.message.into(), request.clone())
-                    })?;
-                    let mut error = RestFailure::pre_transmit(text, execution.config);
-                    error.response = Some(Box::new(execution.response));
-                    return Err(error);
-                }
-            }
-            Ok(execution)
+            self.client.execute_with_receipt(request).await
         })
     }
+}
+fn response_data(response: &RestResponse) -> Value {
+    response.body.json_value().unwrap_or(Value::Null)
+}
+fn coercion_failure(error: safe_cex_num::JsCoercionError, request: &RestRequest) -> RestFailure {
+    RestFailure::pre_transmit(error.message.into(), request.clone())
+}
+// Source response interceptor after its signature-resend check.
+fn reject_envelope(
+    execution: safe_cex_transport::RestExecution,
+) -> Result<safe_cex_transport::RestExecution, RestFailure> {
+    let data = response_data(&execution.response);
+    if data.is_object() || data.is_array() {
+        let code = data.get("code");
+        let rejected = if data.get("success") == Some(&Value::Bool(false)) {
+            true
+        } else {
+            code.map(|v| js_string(Some(v)))
+                .transpose()
+                .map_err(|e| coercion_failure(e, &execution.config))?
+                .is_some_and(|s| s != "0" && s != "200")
+        };
+        let message = data
+            .get("message")
+            .filter(|v| js_truthy(Some(v)))
+            .or_else(|| data.get("msg"));
+        if rejected && js_truthy(message) {
+            let text = js_string(message).map_err(|e| coercion_failure(e, &execution.config))?;
+            let mut error = RestFailure::pre_transmit(text, execution.config);
+            error.response = Some(Box::new(execution.response));
+            return Err(error);
+        }
+    }
+    Ok(execution)
+}
+// ts: signatureRejectedResponse(isMexcSignatureRejection), stamping the one resend.
+fn rejected_signature(error: &RestFailure, retried: &Cell<bool>) -> Result<bool, RestFailure> {
+    let Some(response) = error.response.as_deref() else {
+        return Ok(false);
+    };
+    if retried.get()
+        || !is_mexc_signature_rejection(&response_data(response))
+            .map_err(|e| coercion_failure(e, &error.request))?
+    {
+        return Ok(false);
+    }
+    retried.set(true);
+    Ok(true)
 }
 struct MexcApi {
     attempt: MexcAttempt,
@@ -215,15 +241,84 @@ impl RestAdapter for MexcApi {
             if request.timeout_ms.is_none() {
                 request.timeout_ms = Some(20000);
             }
-            match ReadClassification::Methods.classify(request) {
-                ClassifiedRequest::Read(read) => {
-                    network_error_on_read(read, 3)
-                        .execute_with_receipt(&self.attempt, self.clock.as_ref())
-                        .await
-                }
-                ClassifiedRequest::Write(write) => write.execute_with_receipt(&self.attempt).await,
-            }
+            self.request(request, Rc::new(Cell::new(false))).await
         })
+    }
+}
+impl MexcApi {
+    // ts: xhr.request — axios-retry, then the response interceptor's single re-signed resend.
+    fn request(
+        &self,
+        request: RestRequest,
+        retried: Rc<Cell<bool>>,
+    ) -> RestFuture<'_, safe_cex_transport::RestExecution> {
+        Box::pin(async move {
+            let execution = self.retrying(request, retried.clone()).await?;
+            if !retried.get()
+                && is_mexc_signature_rejection(&response_data(&execution.response))
+                    .map_err(|e| coercion_failure(e, &execution.config))?
+            {
+                retried.set(true);
+                return self.request(execution.config, retried).await;
+            }
+            reject_envelope(execution)
+        })
+    }
+    async fn retrying(
+        &self,
+        request: RestRequest,
+        retried: Rc<Cell<bool>>,
+    ) -> Result<safe_cex_transport::RestExecution, RestFailure> {
+        let timeout = request.timeout_ms;
+        match ReadClassification::Methods.classify(request) {
+            ClassifiedRequest::Read(read) => {
+                let failure = Rc::new(RefCell::new(None));
+                let condition_failure = failure.clone();
+                let result = only_reads(read, 3, move |_, result| {
+                    let Err(error) = result else {
+                        return false;
+                    };
+                    if error.is_retryable_network() {
+                        return true;
+                    }
+                    rejected_signature(error, &retried).unwrap_or_else(|cause| {
+                        *condition_failure.borrow_mut() = Some(cause);
+                        false
+                    })
+                })
+                .execute_with_receipt(&self.attempt, self.clock.as_ref())
+                .await;
+                match failure.take() {
+                    Some(cause) => Err(cause),
+                    None => result,
+                }
+            }
+            ClassifiedRequest::Write(write) => {
+                let started = self.clock.now_ms();
+                let error = match write.execute_with_receipt(&self.attempt).await {
+                    Err(error) if rejected_signature(&error, &retried)? => error,
+                    result => return result,
+                };
+                // Same axios-retry budget as the read policy: shouldResetTimeout=false.
+                let mut next = (*error.request).clone();
+                next.timeout_ms = timeout;
+                if let Some(timeout) = timeout.filter(|timeout| *timeout != 0)
+                    && started != 0
+                {
+                    let remaining = i128::from(timeout)
+                        - (i128::from(self.clock.now_ms()) - i128::from(started));
+                    if remaining <= 0 {
+                        return Err(error);
+                    }
+                    next.timeout_ms = Some(remaining.min(i128::from(i64::MAX)) as i64);
+                }
+                self.clock
+                    .sleep_ms(0)
+                    .await
+                    .map_err(|cause| RestFailure::from_transport(cause, next.clone()))?;
+                self.attempt.execute_with_receipt(next).await
+            }
+        }
     }
 }
 // ts: createAPI

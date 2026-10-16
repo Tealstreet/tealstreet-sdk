@@ -22,7 +22,7 @@ fn ready<F: Future>(future: F) -> F::Output {
 }
 #[test]
 fn native_secondary_runtime_and_capture_flags() {
-    assert_eq!(EXCHANGES_WITHOUT_SECONDARY_KEY.len(), 15);
+    assert_eq!(EXCHANGES_WITHOUT_SECONDARY_KEY.len(), 16);
     assert_eq!(
         EXCHANGES_WITHOUT_SECONDARY_KEY,
         [
@@ -40,6 +40,7 @@ fn native_secondary_runtime_and_capture_flags() {
             "mode",
             "salsadex",
             "tealstreet-dex",
+            "txflow",
             "what"
         ]
     );
@@ -174,13 +175,31 @@ fn native_unknown_send_veto_response_precedence_and_codes() {
             false,
         ),
         (json!({"response":0,"code":"ERR_NETWORK"}), true),
+        (
+            json!({"message":"WebSocket disconnected — signing aborted"}),
+            false,
+        ),
     ];
-    assert_eq!(cases.len(), 16);
+    assert_eq!(cases.len(), 17);
     for (error, expected) in cases {
         assert_eq!(
             is_unknown_outcome(&error).unwrap(),
             expected,
             "native unknown outcome {error}"
+        );
+    }
+    for (message, expected) in [
+        (Some("Signing request abc timed out"), true),
+        (Some("Remote signer unavailable"), true),
+        (Some("WebSocket disconnected — signing aborted"), true),
+        (Some("Signing Aborted"), false),
+        (Some("timeout"), false),
+        (None, false),
+    ] {
+        assert_eq!(
+            is_unsent_signing_failure(message),
+            expected,
+            "native unsent signing {message:?}"
         );
     }
     assert!(is_unknown_outcome(&json!({"message":{"toString":"no"}})).is_err());

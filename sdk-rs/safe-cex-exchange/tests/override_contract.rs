@@ -366,6 +366,86 @@ fn walk(directory: &Path, files: &mut Vec<std::path::PathBuf>) {
         }
     }
 }
+// Reviewed base calls the syntactic audit flags. Each entry is re-proved here
+// from its evidence; an unused entry is stale and fails like a new finding.
+struct ReviewedDelegations {
+    rows: Vec<(String, String)>,
+    used: BTreeSet<(String, String)>,
+}
+impl ReviewedDelegations {
+    fn load(repo: &Path, overrides: &serde_json::Value) -> Self {
+        let reviewed: serde_json::Value =
+            serde_json::from_str(include_str!("override-base-delegations.json")).unwrap();
+        assert_eq!(
+            reviewed["version"], 1,
+            "unsupported delegation review version"
+        );
+        let kinds = reviewed["kinds"].as_object().unwrap();
+        let mut rows = vec![];
+        for row in reviewed["delegations"].as_array().unwrap() {
+            let file = row["file"].as_str().unwrap().to_owned();
+            let finding = row["finding"].as_str().unwrap().to_owned();
+            let kind = row["kind"].as_str().unwrap();
+            assert!(
+                kinds.contains_key(kind),
+                "unknown delegation kind {kind}: {file}"
+            );
+            let evidence = row["evidence"].as_array().unwrap();
+            assert!(
+                !evidence.is_empty(),
+                "delegation needs evidence: {file}: {finding}"
+            );
+            for item in evidence {
+                let source = item["file"].as_str().unwrap();
+                let text = std::fs::read_to_string(repo.join(source))
+                    .unwrap_or_else(|error| panic!("delegation evidence {source}: {error}"));
+                assert!(
+                    text.contains(item["contains"].as_str().unwrap()),
+                    "delegation evidence no longer holds: {source}: {}",
+                    item["contains"]
+                );
+            }
+            if kind == "no-venue-override" {
+                let member = row["member"].as_str().unwrap();
+                for class in row["classes"].as_array().unwrap() {
+                    assert!(
+                        !overrides.as_array().unwrap().iter().any(|override_row| {
+                            override_row["method"] == member && override_row["class"] == *class
+                        }),
+                        "{class} now overrides {member}; {file}: {finding} must dispatch dynamically"
+                    );
+                }
+            }
+            assert!(
+                !rows.contains(&(file.clone(), finding.clone())),
+                "duplicate delegation review: {file}: {finding}"
+            );
+            rows.push((file, finding));
+        }
+        Self {
+            rows,
+            used: BTreeSet::new(),
+        }
+    }
+    fn accept(&mut self, file: &str, finding: &str) -> bool {
+        let key = (file.to_owned(), finding.to_owned());
+        let reviewed = self.rows.contains(&key);
+        if reviewed {
+            self.used.insert(key);
+        }
+        reviewed
+    }
+    fn assert_all_used(&self) {
+        for row in &self.rows {
+            assert!(
+                self.used.contains(row),
+                "stale delegation review: {}: {}",
+                row.0,
+                row.1
+            );
+        }
+    }
+}
 #[test]
 fn production_callers_do_not_bypass_exchange_override_hooks() {
     let rows: serde_json::Value =
@@ -407,6 +487,7 @@ fn production_callers_do_not_bypass_exchange_override_hooks() {
         }
     }
     files.sort();
+    let mut delegations = ReviewedDelegations::load(workspace.parent().unwrap(), &rows);
     let mut inventory = vec![];
     for file in files {
         let source = syn::parse_file(&std::fs::read_to_string(&file).unwrap()).unwrap();
@@ -423,19 +504,24 @@ fn production_callers_do_not_bypass_exchange_override_hooks() {
             inventory: vec![],
         };
         calls.visit_file(&source);
+        let relative = file.strip_prefix(workspace).unwrap().to_string_lossy();
         for mut row in calls.inventory {
-            row["file"] =
-                serde_json::json!(file.strip_prefix(workspace).unwrap().to_string_lossy());
+            row["file"] = serde_json::json!(relative);
             inventory.push(row);
         }
-
+        let unreviewed: Vec<_> = calls
+            .findings
+            .into_iter()
+            .filter(|finding| !delegations.accept(&relative, finding))
+            .collect();
         assert!(
-            calls.findings.is_empty(),
+            unreviewed.is_empty(),
             "{}: {}",
             file.display(),
-            calls.findings.join("; ")
+            unreviewed.join("; ")
         );
     }
+    delegations.assert_all_used();
     let inventory = serde_json::json!(inventory);
     let path = Path::new(env!("CARGO_MANIFEST_DIR")).join("tests/override-call-sites.json");
     if std::env::var_os("UPDATE_EXCHANGE_CALL_INVENTORY").is_some() {

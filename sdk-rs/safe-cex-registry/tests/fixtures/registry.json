@@ -225,6 +225,11 @@
     "constructor": "TealstreetDEXExchange"
   },
   {
+    "name": "txflow",
+    "module": "./txflow/txflow.exchange",
+    "constructor": "TxFlowExchange"
+  },
+  {
     "name": "what",
     "module": "./orderly/exchanges/what/what.exchange",
     "constructor": "WhatExchange"
