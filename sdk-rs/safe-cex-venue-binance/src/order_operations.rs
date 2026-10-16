@@ -11,7 +11,7 @@ use crate::{
     request_weight::{Failure, type_error},
 };
 use safe_cex_types::{OrderStatus, OrderType, object_map::JsObjectMap};
-use std::{cell::RefCell, future::Future, pin::Pin, rc::Rc};
+use std::{future::Future, pin::Pin, rc::Rc};
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Venue {
     Futures,
@@ -42,11 +42,11 @@ pub trait OrderBindings {
     fn capture_method(&mut self, method: Method) -> Result<Operation, Failure>;
 }
 pub fn array(values: Vec<EventValue>) -> EventValue {
-    EventValue::Array(Rc::new(RefCell::new(values)))
+    EventValue::array(values)
 }
 fn snapshot(v: &EventValue, expression: &str, method: &str) -> Result<Vec<EventValue>, Failure> {
     if let EventValue::Array(a) = v {
-        return Ok(a.borrow().clone());
+        return Ok(array_values(&a));
     }
     if v.nullish() {
         return Err(type_error(format!(
@@ -68,7 +68,7 @@ fn each_map(
     for i in 0..len {
         let row = {
             if let EventValue::Array(a) = v {
-                a.borrow().get(i).cloned()
+                a.borrow().get(i).cloned().flatten()
             } else {
                 None
             }
@@ -80,7 +80,7 @@ fn each_map(
     Ok(array(out))
 }
 fn ids(v: &EventValue) -> Result<EventValue, Failure> {
-    each_map(v, "orders", |o| Ok(record([("id", o.get("id")?)])))
+    each_map(v, "orders", |o| Ok(record([("id", o.read("id")?)])))
 }
 fn groups(v: &EventValue) -> Result<Vec<(String, EventValue)>, Failure> {
     // The configured lodash groupBy domain is dense arrays and nullish collections.
@@ -92,7 +92,7 @@ fn groups(v: &EventValue) -> Result<Vec<(String, EventValue)>, Failure> {
         let symbol = if order.nullish() {
             EventValue::Undefined
         } else {
-            order.get("symbol")?
+            order.read("symbol")?
         }
         .text()?;
         if let Some(g) = grouped.get_mut(&symbol) {
@@ -158,7 +158,7 @@ fn conditional(v: &EventValue) -> bool {
         OrderType::TrailingStopLoss,
     ]
     .iter()
-    .any(|t| v.same(&EventValue::Enum(PrivateEnum::Type(*t))))
+    .any(|t| v.same(&EventValue::enum_value(PrivateEnum::Type(*t))))
 }
 fn classify(
     b: &mut impl OrderBindings,
@@ -170,14 +170,14 @@ fn classify(
     for i in 0..len {
         let row = {
             if let EventValue::Array(a) = orders {
-                a.borrow().get(i).cloned()
+                a.borrow().get(i).cloned().flatten()
             } else {
                 None
             }
         };
         if let Some(row) = row {
             let f = b.capture_is_algo()?;
-            if f(row.get("type")?)?.truthy() == algo {
+            if f(row.read("type")?)?.truthy() == algo {
                 out.push(row)
             }
         }
@@ -195,7 +195,7 @@ pub async fn cancel_futures(
         let requests = groups(&regular)?
             .into_iter()
             .map(|(symbol, orders)| {
-                let captured = each_map(&orders, "symbolOrders", |o| o.get("id"))?;
+                let captured = each_map(&orders, "symbolOrders", |o| o.read("id"))?;
                 Ok((symbol, orders, captured))
             })
             .collect::<Result<Vec<_>, Failure>>()?;
@@ -247,22 +247,22 @@ pub async fn cancel_futures(
         }
         // Array iterator reads current length and values on each iteration.
         let mut i = 0;
-        while i < algo.get("length")?.number()? as usize {
+        while i < algo.read("length")?.number()? as usize {
             let order = algo.get(&i.to_string())?;
             i += 1;
             let result = async {
-                let algo_id = order.get("id")?;
+                let algo_id = order.read("id")?;
                 delete(b, Venue::Futures, "ALGO_ORDER", || {
                     Ok(record([("algoId", algo_id)]))
                 })
                 .await?;
-                status(b, true, || Ok(record([("id", order.get("id")?)])))?;
+                status(b, true, || Ok(record([("id", order.read("id")?)])))?;
                 Ok::<(), Failure>(())
             }
             .await;
             if let Err(e) = result {
                 if unknown_order(&e) {
-                    status(b, true, || Ok(record([("id", order.get("id")?)])))?;
+                    status(b, true, || Ok(record([("id", order.read("id")?)])))?;
                     continue;
                 }
                 emit(b, &e)?;
@@ -286,7 +286,7 @@ pub async fn cancel_pm(
         for (symbol, rows) in groups(&orders)? {
             for order in snapshot(&rows, "request.orders", "map")? {
                 let result = async {
-                    let is_conditional = conditional(&order.get("type")?);
+                    let is_conditional = conditional(&order.read("type")?);
                     delete(
                         b,
                         Venue::PM,
@@ -296,7 +296,7 @@ pub async fn cancel_pm(
                             "ORDER"
                         },
                         || {
-                            Ok(EventValue::object(
+                            Ok(EventValue::record_object(
                                 [
                                     ("symbol".into(), string(&symbol)),
                                     (
@@ -306,7 +306,7 @@ pub async fn cancel_pm(
                                             "origClientOrderId"
                                         }
                                         .into(),
-                                        order.get("id")?,
+                                        order.read("id")?,
                                     ),
                                 ]
                                 .into_iter()
@@ -321,7 +321,7 @@ pub async fn cancel_pm(
                     let f = b.capture_emit()?;
                     f(string(format!(
                         "Failed to cancel order {}: {}",
-                        order.get("id")?.text()?,
+                        order.read("id")?.text()?,
                         selected_message(&e).text()?
                     )))?;
                     return Err(e);
@@ -345,7 +345,7 @@ pub async fn cancel_spot(
     let result = async {
         let requests = groups(&orders)?
             .into_iter()
-            .map(|(s, o)| Ok((s, each_map(&o, "symbolOrders", |o| o.get("id"))?)))
+            .map(|(s, o)| Ok((s, each_map(&o, "symbolOrders", |o| o.read("id"))?)))
             .collect::<Result<Vec<_>, Failure>>()?;
         for (symbol, captured) in requests {
             for id in snapshot(&captured, "request.origClientOrderIdList", "map")? {
@@ -372,12 +372,15 @@ pub async fn cancel_spot(
     result
 }
 fn has(v: &EventValue, key: &str) -> Result<bool, Failure> {
+    if let EventValue::Builtin(reference) = v {
+        return Ok(reference.own_fields().contains_key(key)
+            || !matches!(reference.get(key), safe_cex_num::PrototypeValue::Undefined));
+    }
     if let EventValue::Object(o) = v {
-        let o = o.borrow();
-        if o.fields.contains_key(key) {
+        if v.has_own(key) {
             return Ok(true);
         }
-        if let Some(p) = &o.prototype {
+        if let Some(p) = &*o.proto.borrow() {
             if !p.nullish() {
                 return has(p, key);
             }
@@ -411,35 +414,35 @@ async fn update(
             args.text()?
         )));
     }
-    let order = args.get("order")?;
-    let changes = args.get("update")?;
+    let order = args.read("order")?;
+    let changes = args.read("update")?;
     let new = record([
-        ("symbol", order.get("symbol")?),
-        ("type", order.get("type")?),
-        ("side", order.get("side")?),
-        ("price", order.get("price")?),
-        ("amount", order.get("amount")?),
+        ("symbol", order.read("symbol")?),
+        ("type", order.read("type")?),
+        ("side", order.read("side")?),
+        ("price", order.read("price")?),
+        ("amount", order.read("amount")?),
         (
             "reduceOnly",
-            fallback(order.get("reduceOnly")?, EventValue::Bool(false)),
+            fallback(order.read("reduceOnly")?, EventValue::Bool(false)),
         ),
     ]);
     if venue == Venue::Futures {
-        new.define(
+        new.write(
             "close",
-            fallback(order.get("close")?, EventValue::Bool(false)),
+            fallback(order.read("close")?, EventValue::Bool(false)),
         )
     }
     if venue != Venue::Spot {
         for key in ["tpTriggerType", "slTriggerType"] {
             if has(&order, key)? {
-                new.define(key, order.get(key)?);
+                new.write(key, order.get(key)?);
             }
         }
     }
     for key in ["price", "amount"] {
         if has(&changes, key)? {
-            new.define(key, changes.get(key)?);
+            new.write(key, changes.get(key)?);
         }
     }
     let cancel = b.capture_method(Method::Cancel)?;
@@ -473,13 +476,18 @@ fn spread_ids(out: &mut Vec<EventValue>, ids: EventValue) -> Result<(), Failure>
         EventValue::Array(a) => {
             let mut i = 0;
             while i < a.borrow().len() {
-                out.push(a.borrow()[i].clone());
+                out.push(a.borrow()[i].clone().unwrap_or(EventValue::Undefined));
                 i += 1
             }
             Ok(())
         }
         EventValue::String(s) => {
-            out.extend(s.chars().map(|c| string(c.to_string())));
+            out.extend(
+                EventValue::String(s.clone())
+                    .text()?
+                    .chars()
+                    .map(|c| string(c.to_string())),
+            );
             Ok(())
         }
         _ => Err(type_error(
@@ -504,14 +512,14 @@ pub async fn place_futures(
             formatted.text()?
         )));
     }
-    let regular = formatted.get("regular")?;
-    let algo = formatted.get("algo")?;
+    let regular = formatted.read("regular")?;
+    let algo = formatted.read("algo")?;
     let mut out = vec![];
-    if regular.get("length")?.number()? > 0.0 {
+    if regular.read("length")?.number()? > 0.0 {
         let batch = b.capture_method(Method::RegularBatch)?;
         spread_ids(&mut out, batch(regular)?.await?)?;
     }
-    if algo.get("length")?.number()? > 0.0 {
+    if algo.read("length")?.number()? > 0.0 {
         let batch = b.capture_method(Method::AlgoBatch)?;
         spread_ids(&mut out, batch(algo)?.await?)?;
     }

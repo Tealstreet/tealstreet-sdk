@@ -431,6 +431,44 @@
       ]
     },
     {
+      "file": "safe-cex-venue-grvt/src/binding/private.rs",
+      "finding": "base_dispose bypasses dynamic hook dispose through base",
+      "kind": "socket-receiver",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/grvt/grvt.ws-private.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-grvt/src/binding/private.rs",
+          "contains": "sockets::core_of(&h.0.shared.sockets, &self.this)"
+        },
+        {
+          "file": "sdk-rs/safe-cex-exchange/src/js_runtime/sockets.rs",
+          "contains": "pub base: OnceCell<Rc<BaseWebSocket>>,"
+        }
+      ]
+    },
+    {
+      "file": "safe-cex-venue-grvt/src/binding/public.rs",
+      "finding": "invoke bypasses dynamic hook dispose through base",
+      "kind": "socket-receiver",
+      "evidence": [
+        {
+          "file": "packages/safe-cex/src/exchanges/grvt/grvt.ws-public.ts",
+          "contains": "super.dispose();"
+        },
+        {
+          "file": "sdk-rs/safe-cex-venue-grvt/src/binding/public.rs",
+          "contains": "sockets::core_of(&h.0.shared.sockets, &self.this)"
+        },
+        {
+          "file": "sdk-rs/safe-cex-exchange/src/js_runtime/sockets.rs",
+          "contains": "pub base: OnceCell<Rc<BaseWebSocket>>,"
+        }
+      ]
+    },
+    {
       "file": "safe-cex-venue-phemex/src/binding/session.rs",
       "finding": "base_dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
