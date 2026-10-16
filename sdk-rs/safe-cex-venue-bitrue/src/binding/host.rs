@@ -305,7 +305,13 @@ impl TradingHost for Rt {
     }
     fn times(&self, n: Js, mut f: impl FnMut() -> Result<Js, Thrown>) -> Result<Js, Thrown> {
         let mut out = vec![];
-        for _ in 0..(n.to_number()?.trunc().max(0.) as usize) {
+        // lodash times returns [] above MAX_SAFE_INTEGER (including infinity),
+        // rather than attempting a saturated usize allocation/loop.
+        let count = n.to_number()?.trunc();
+        if !(1.0..=9_007_199_254_740_991.0).contains(&count) {
+            return Ok(Js::array(out));
+        }
+        for _ in 0..(count as usize) {
             out.push(f()?)
         }
         Ok(Js::array(out))
