@@ -2,6 +2,7 @@
 //! p-iteration, safe-math, bignumber.js, dayjs, qs, create-hmac, nanoid and
 //! safe-cex/src/utils), as thin wrappers over the existing Rust ports.
 use super::{
+    ops,
     promise::{Promise, await_js},
     scope::{Scope, ScopeShared, scope_of},
     value::{Js, Thrown, arg},
@@ -52,26 +53,6 @@ fn iteratee(f: &Js, value: Js) -> Result<Js, Thrown> {
         out = out.get(part)?;
     }
     Ok(out)
-}
-
-/// JS `a > b` / `a < b` over primitives: string pairs compare UTF-16 units.
-fn relation(a: &Js, b: &Js) -> Result<Option<Ordering>, Thrown> {
-    if let (Js::String(x), Js::String(y)) = (a, b) {
-        return Ok(Some(x.as_ref().cmp(y.as_ref())));
-    }
-    Ok(a.to_number()?.partial_cmp(&b.to_number()?))
-}
-
-fn add_js(a: Js, b: Js) -> Result<Js, Thrown> {
-    Ok(match (&a, &b) {
-        (Js::Number(x), Js::Number(y)) => Js::Number(x + y),
-        (Js::String(_), _) | (_, Js::String(_)) => {
-            let mut out = a.to_js_string()?.to_vec();
-            out.extend_from_slice(&b.to_js_string()?);
-            Js::utf16(&out)
-        }
-        _ => Js::Number(a.to_number()? + b.to_number()?),
-    })
 }
 
 fn in_operator(obj: &Js, key: &str) -> bool {
@@ -148,14 +129,14 @@ fn compare_ascending(a: &Js, b: &Js) -> Result<Ordering, Thrown> {
     let reflexive = |v: &Js| !matches!(v, Js::Number(n) if n.is_nan());
     let (a_def, a_null, a_refl) = (!a.is_undefined(), matches!(a, Js::Null), reflexive(a));
     let (b_def, b_null, b_refl) = (!b.is_undefined(), matches!(b, Js::Null), reflexive(b));
-    if (!b_null && relation(a, b)? == Some(Ordering::Greater))
+    if (!b_null && ops::greater_than(a, b)?)
         || (a_null && b_def && b_refl)
         || (!a_def && b_refl)
         || !a_refl
     {
         return Ok(Ordering::Greater);
     }
-    if (!a_null && relation(a, b)? == Some(Ordering::Less))
+    if (!a_null && ops::less_than(a, b)?)
         || (b_null && a_def && a_refl)
         || (!b_def && a_refl)
         || !b_refl
@@ -918,7 +899,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 total = if total.is_undefined() {
                     current
                 } else {
-                    add_js(total, current)?
+                    ops::add(&total, &current)?
                 };
             }
         }
@@ -1052,9 +1033,9 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             if mode.strict_equals(&Js::str("oneway")) || !side.truthy() {
                 return Ok(symbol);
             }
-            add_js(
-                add_js(Js::String(symbol.to_js_string()?), Js::str(":"))?,
-                Js::String(side.to_js_string()?),
+            ops::add(
+                &ops::add(&Js::String(symbol.to_js_string()?), &Js::str(":"))?,
+                &Js::String(side.to_js_string()?),
             )
         }),
     );
@@ -1114,7 +1095,7 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             for side in ["bids", "asks"] {
                 let mut total = Js::Number(0.0);
                 for level in list(&book.get(side)?) {
-                    total = add_js(total, level.get("amount")?)?;
+                    total = ops::add(&total, &level.get("amount")?)?;
                     level.set("total", total.clone())?;
                 }
             }
@@ -1197,10 +1178,18 @@ pub fn install_library<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             define_on(&ctor, name, func(name, move |a| extreme(&a, pick)));
         }
     }
-    def(
-        "dayjs",
-        scoped("dayjs", |s, a| Ok(dayjs(dayjs_ms(&arg(&a, 0), s.now())?))),
-    );
+    def("dayjs", {
+        let rt = rt.clone();
+        Js::function("dayjs", move |_, a| {
+            let input = arg(&a, 0);
+            let now = if input.is_undefined() {
+                scope_of(&rt)?.now()
+            } else {
+                f64::NAN
+            };
+            Ok(dayjs(dayjs_ms(&input, now)?))
+        })
+    });
     if let Ok(clock) = g.get("virtualClock") {
         define_on(
             &clock,

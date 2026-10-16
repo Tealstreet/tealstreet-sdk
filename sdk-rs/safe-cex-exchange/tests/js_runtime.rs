@@ -316,3 +316,145 @@ fn json_stringify_prints_numbers_and_escapes_like_javascript() {
         r#"{"qty":1,"px":0.1,"big":1e+21,"nan":null,"s":"a\"\n","list":[null,0]}"#
     );
 }
+
+fn library() -> Js {
+    let globals = Js::object(vec![]);
+    safe_cex_exchange::js_runtime::globals::install_builtins::<()>(&globals, std::rc::Weak::new());
+    safe_cex_exchange::js_runtime::library::install_library::<()>(&globals, std::rc::Weak::new());
+    globals
+}
+
+fn run(globals: &Js, path: &str, args: Vec<Js>) -> Js {
+    let mut parts = path.split('.');
+    let mut f = globals.get(parts.next().unwrap()).unwrap();
+    for part in parts {
+        f = f.get(part).unwrap();
+    }
+    f.call(Js::Undefined, args).unwrap()
+}
+
+fn stringify(globals: &Js, v: Js) -> String {
+    let text = run(globals, "JSON.stringify", vec![v]);
+    String::from_utf16_lossy(&text.to_js_string().unwrap())
+}
+
+#[test]
+fn library_lodash_order_by_and_get_key_case_fallbacks() {
+    let g = library();
+    let row = |a: Js, b: f64| Js::object(vec![("a", a), ("b", Js::Number(b))]);
+    let rows = Js::array(vec![
+        row(Js::Number(2.0), 1.0),
+        row(Js::Undefined, 2.0),
+        row(Js::Number(1.0), 3.0),
+        row(Js::Number(2.0), 0.0),
+    ]);
+    let keys = Js::array(vec![Js::str("a"), Js::str("b")]);
+    let sorted = run(
+        &g,
+        "lodash.orderBy",
+        vec![rows, keys, Js::array(vec![Js::str("desc"), Js::str("asc")])],
+    );
+    assert_eq!(
+        stringify(&g, sorted),
+        r#"[{"b":2},{"a":2,"b":0},{"a":2,"b":1},{"a":1,"b":3}]"#
+    );
+    let record = Js::object(vec![
+        ("order_id", Js::Number(7.0)),
+        ("clientOid", Js::Number(8.0)),
+    ]);
+    assert_eq!(
+        stringify(&g, run(&g, "v", vec![record.clone(), Js::str("orderId")])),
+        "7"
+    );
+    assert_eq!(
+        stringify(&g, run(&g, "v", vec![record, Js::str("client_oid")])),
+        "8"
+    );
+}
+
+#[test]
+fn library_safe_math_and_big_number_are_decimal_exact() {
+    let g = library();
+    let n = Js::Number;
+    assert_eq!(run(&g, "add", vec![n(0.1), n(0.2)]).as_f64(), Some(0.3));
+    assert_eq!(
+        run(&g, "subtract", vec![n(0.3), n(0.1)]).as_f64(),
+        Some(0.2)
+    );
+    assert_eq!(
+        run(&g, "adjust", vec![n(1.23456), Js::str("0.01")]).as_f64(),
+        Some(1.23)
+    );
+    let step = run(&g, "BigNumber", vec![n(0.01)]);
+    let lot = run(&g, "BigNumber", vec![n(1000.005)])
+        .call_method("dividedToIntegerBy", vec![step.clone()])
+        .unwrap()
+        .call_method("multipliedBy", vec![step])
+        .unwrap();
+    assert_eq!(
+        stringify(&g, lot.call_method("toFixed", vec![]).unwrap()),
+        r#""1000""#
+    );
+    let half = run(&g, "BigNumber", vec![Js::str("1.005")])
+        .call_method("toFixed", vec![n(2.0)])
+        .unwrap();
+    assert_eq!(stringify(&g, half), r#""1.01""#);
+}
+
+#[test]
+fn library_dayjs_subtracts_calendar_months_and_minutes() {
+    let g = library();
+    let jan31 = run(&g, "dayjs", vec![Js::Number(1_706_659_200_000.0)]);
+    let feb = jan31
+        .call_method("add", vec![Js::Number(1.0), Js::str("M")])
+        .unwrap();
+    assert_eq!(
+        feb.call_method("valueOf", vec![]).unwrap().as_f64(),
+        Some(1_709_164_800_000.0)
+    );
+    let earlier = jan31
+        .call_method("subtract", vec![Js::Number(300.0), Js::str("m")])
+        .unwrap();
+    assert_eq!(
+        earlier.call_method("unix", vec![]).unwrap().as_f64(),
+        Some(1_706_641_200.0)
+    );
+    assert!(
+        earlier
+            .call_method("isBefore", vec![jan31])
+            .unwrap()
+            .truthy()
+    );
+}
+
+#[test]
+fn library_qs_stringify_and_hmac_digest() {
+    let g = library();
+    let params = Js::object(vec![
+        ("instId", Js::str("BTC-USDT-SWAP")),
+        ("ids", Js::array(vec![Js::Number(1.0), Js::Number(2.0)])),
+        ("skip", Js::Undefined),
+        ("note", Js::str("a b")),
+    ]);
+    let query = run(&g, "qs.stringify", vec![params]);
+    assert_eq!(
+        stringify(&g, query.clone()),
+        r#""instId=BTC-USDT-SWAP&ids%5B0%5D=1&ids%5B1%5D=2&note=a%20b""#
+    );
+    let decoded = run(&g, "decodeURIComponent", vec![query]);
+    assert_eq!(
+        stringify(&g, decoded),
+        r#""instId=BTC-USDT-SWAP&ids[0]=1&ids[1]=2&note=a b""#
+    );
+    let digest = run(&g, "createHmac", vec![Js::str("sha256"), Js::str("key")])
+        .call_method("update", vec![Js::str("The quick brown fox ")])
+        .unwrap()
+        .call_method("update", vec![Js::str("jumps over the lazy dog")])
+        .unwrap()
+        .call_method("digest", vec![Js::str("base64")])
+        .unwrap();
+    assert_eq!(
+        stringify(&g, digest),
+        r#""97yD9DBThCSxMpjmqm+xQ+9NWaFJRhdZl0edvC0aPNg=""#
+    );
+}
