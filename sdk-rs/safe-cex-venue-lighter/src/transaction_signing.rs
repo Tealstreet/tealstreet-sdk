@@ -20,6 +20,13 @@ impl HostThrownValue {
     pub fn ptr_eq(&self, other: &Self) -> bool {
         std::rc::Rc::ptr_eq(&self.0, &other.0)
     }
+    /// The shared handle, so a host can hand out the same value again.
+    pub fn shared(&self) -> std::rc::Rc<dyn std::any::Any> {
+        self.0.clone()
+    }
+    pub fn from_shared(value: std::rc::Rc<dyn std::any::Any>) -> Self {
+        Self(value)
+    }
 }
 impl std::fmt::Debug for HostThrownValue {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {

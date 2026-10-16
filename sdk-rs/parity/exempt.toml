@@ -7216,3 +7216,23 @@ reason = "Rust-only boxed future/result carrier for host asynchronous loader ope
 [[exempt]]
 rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeLoopFn"
 reason = "Rust-only owned callback carrier for the host loop scheduler's anonymous asynchronous function argument; no standalone TypeScript declaration. Loop behavior remains in its mapped operations. Accepted-set alias identity and raw-construction probes remain mandatory. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_exchange.rs::NativeAccountInit"
+reason = "FFI boundary glue: napi object carrying the account's exchange name, JSON options and accountName, with no TypeScript counterpart."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_exchange.rs::native_account_open"
+reason = "FFI boundary glue: napi export opening a native-host account with JS signer/token/event/store callbacks, with no TypeScript counterpart."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_exchange.rs::native_account_call_method"
+reason = "FFI boundary glue: napi export calling an account's Exchange method by name with JSON arguments, with no TypeScript counterpart."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_exchange.rs::signer_available"
+reason = "FFI boundary glue: napi export pushing remote-signer availability from the JS session, with no TypeScript counterpart."
+
+[[exempt]]
+rs = "safe-cex-ffi/src/native_exchange.rs::native_account_close"
+reason = "FFI boundary glue: napi export disposing a native-host account, with no TypeScript counterpart."
