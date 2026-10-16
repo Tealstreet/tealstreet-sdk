@@ -362,3 +362,24 @@ Source review prompted the explicit successful unknown-field projection probe;
 shared typed ingress is not described solely as refusal. This helper introduces
 no Store calls, grading policy or market price/amount-step reads. These price-field
 substitution controls are semantic controls, not precision-axis swap controls.
+
+## Batch position-side admission
+
+The declared `net | long | short` response field admitted externally tagged
+objects through ordinary Serde and its qualified decoder. Both the maintained
+accepted-set native probe and the new repository regression failed before the
+repair. String admission now precedes a private remote enum companion, preserving
+the existing rename attributes, native variants and serialization.
+
+`batch_position_side_accepts_only_declared_strings` checks every literal and
+tagged form through text, owned, borrowed, qualified and shared ingress routes.
+`python3 sdk-rs/safe-cex-venue-blofin/tests/batch_side_controls.py` removes only
+the String frontdoor: the actual remote decoder then admits the tagged map and
+the named assertion fails at exit 101. Exact source restoration passes. A fresh
+Rust 1.99 compiler inventory and the corresponding production-native contract
+also pass; copied-source guard removal fails that native contract and restoration
+passes without changing real production bytes.
+
+Package validation: 112 tests pass across 24 target summaries, with one existing
+ignored test; strict host and WASM all-target Clippy, formatting and canonical
+parity pass. No ledger, source corpus, manifest row or shared gate policy changes.
