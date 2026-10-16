@@ -27,6 +27,7 @@ pub mod polling;
 pub mod rate_limit;
 pub mod retry;
 pub mod secondary;
+pub mod signature_rejection;
 pub mod signing;
 
 pub mod how_config;
