@@ -240,6 +240,29 @@ impl Exchange for WooExchange {
         let a = args!(js(&orders));
         self.invoke_unit("cancelOrders", a)
     }
+    // ts: WOOXExchange.cancelSymbolOrders / cancelAllOrders override the base loops.
+    fn cancel_symbol_orders(&self, symbol: String) -> ExchangeFuture<'_, ()> {
+        let a = args!(js(&symbol));
+        self.invoke_unit("cancelSymbolOrders", a)
+    }
+    fn cancel_all_orders(&self) -> ExchangeFuture<'_, ()> {
+        self.invoke_unit("cancelAllOrders", vec![])
+    }
+    // ts: WOOXExchange.afterMethodCalledInWorker
+    fn after_method_called_in_worker(
+        &self,
+        result: &serde_json::Value,
+        method: safe_cex_exchange::worker::CallableMethodsInWorker,
+        args: &[serde_json::Value],
+    ) -> Result<(), ExchangeError> {
+        let mut a = vec![super::value::from_json(result), js(&method)?];
+        a.extend(args.iter().map(super::value::from_json));
+        self.rt
+            .this
+            .call_method("afterMethodCalledInWorker", a)
+            .map(|_| ())
+            .map_err(err)
+    }
     // ts: base.ts:989 — WOOXExchange inherits scheduleCancel, which rejects.
     fn schedule_cancel(&self, _time: Option<Option<f64>>) -> ExchangeFuture<'_, ()> {
         not_implemented()

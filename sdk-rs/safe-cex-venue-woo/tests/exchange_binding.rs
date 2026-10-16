@@ -17,7 +17,7 @@ fn get_account_reads_account_info() {
         http.ok(
             "GET",
             "/v3/accountinfo",
-            json!({"applicationId": "app-1", "referrerID": "ref-9", "accountMode": "FUTURES"}),
+            json!({"applicationId": "app-1", "referrerID": "ref-9", "accountMode": "FUTURES", "positionMode": "ONE_WAY"}),
         );
     });
     let account = h.drive(h.venue().get_account()).unwrap();
