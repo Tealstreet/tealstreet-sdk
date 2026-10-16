@@ -101,3 +101,8 @@ GRVT is constructed by the Rust table through `RustVenueHost::grvt`, with a fres
 terminal HTTP host and the common public-data provider. Active GRVT SDK signing
 uses its local wallet; the native hosted-signer host refuses this venue visibly.
 The registry construction test reads actual GRVT public-gateway market data.
+BingX is constructed by `rust_constructor` through its shared-js_runtime binding.
+The native host supplies a fresh HTTP host and the common gateway factory; remote
+signer hosts fail visibly until BingX signing is connected.
+`tests/native_host_bingx.rs` starts it on loopback HTTP/WS, verifies a signed order
+payload and caller client ID, and cancels the resulting order.

@@ -791,8 +791,20 @@ fn js_response(response: RestResponse, config: Js) -> Js {
     for (name, value) in &response.headers {
         let _ = headers.define(name, Js::str(value));
     }
+    // Venue-specific bigint parsers must see the original tokens before the
+    // ordinary Axios JSON projection rounds them through binary64.
+    let data = match response.body {
+        RestResponseBody::Encoded(bytes)
+            if config
+                .get("responseType")
+                .is_ok_and(|value| value.to_display() == "text") =>
+        {
+            Js::str(&String::from_utf8_lossy(&bytes))
+        }
+        body => response_data(body),
+    };
     Js::object(vec![
-        ("data", response_data(response.body)),
+        ("data", data),
         ("status", Js::Number(f64::from(response.status))),
         (
             "statusText",
