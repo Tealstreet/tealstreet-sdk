@@ -245,3 +245,33 @@ production source bytes remain unchanged throughout the controls.
 These rows leave 42 original
 Bitunix owners and 49 Blofin owners for subsequent review. Complete-package
 runtime, local-owner and feature/WASM matrix gates remain separate obligations.
+
+## REST and historical-read orchestration
+
+Six more Bitunix owners execute native/default contracts with bounded immediately
+ready futures and explicit callbacks. OHLCV observes request order, date callback
+inputs, optional limit presence and complete ordered Candle fields as native
+number bits, including signed zero. Its two distinct candles also detect partial
+output loss. Account validation retains strict numeric-code admission, original
+error variants, account-before-balance order and balance-failure presence. Symbol
+metadata retains set-before-read order, margin/leverage presence, matching-only
+overlays and null-response short circuits.
+
+The three history wrappers observe the actual selector function pointers, native
+UTF-16 ID and timestamp results, exact endpoint/options, public-only short circuits
+and propagated errors. Income preserves one-to-many mapping and empty results;
+closed PnL reads each account value before mapping, including a skipped row.
+Complete native result vectors retain descending order and number bits. These
+bounded callbacks do not replace the separately mapped pagination, REST, Store
+or mapper implementations.
+
+All six native owners pass. Five compiled copied-production mutations alter a
+candle field, strict validation code, margin mode, history selector precedence
+and descending sorting: all six observations fail and all restored owners pass.
+An additional keep-first candle mutation fails the full two-row observation,
+then passes after restoration. Real production bytes remain unchanged.
+
+This batch leaves 36 original Bitunix owners and the previously measured
+49 Blofin owners. The original Blofin census stopped at receiver drift, so its
+empty missing-owner array does not prove runtime completeness. Full-package,
+local-owner and feature/WASM matrices remain separate obligations.

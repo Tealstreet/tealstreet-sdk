@@ -320,6 +320,14 @@ seven original native/default census owners; the other owners, aliases,
 construction records, locals, features and target execution remain separate
 obligations. No decoder behavior or manifest classification is changed.
 
+Native/default accepted-contract review for six concrete scalar wire records and
+eight finite carrier enum APIs is documented in RECORD_CARRIER_CONTRACT_REVIEW.md.
+The closed selector is scripts/record-carrier-contracts.mjs; native field/variant
+observations and mutation controls run independently of compiler shape discovery.
+This is fourteen original census owners and six specific Clone reviews; other
+owners, aliases, construction entries, locals, features and WASM execution remain
+separate obligations.
+
 The nested wire accepted-contract slice covers seven remaining concrete wire
 records and two private presence decoders. See NESTED_WIRE_CONTRACT_REVIEW.md and
 scripts/nested-wire-contracts.mjs for scope, native observations, exact selected

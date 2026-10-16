@@ -86,3 +86,65 @@ fn malformed(venue: &str, endpoint: &str, shape: String, message: String) -> Bin
         ),
     }
 }
+
+#[cfg(test)]
+mod accepted_contract_tests {
+    use super::*;
+    use serde_json::json;
+
+    #[test]
+    fn private_descriptor_preserves_source_shape() {
+        assert_eq!(describe(None), "undefined");
+        for (input, expected) in [
+            (Value::Null, "null"),
+            (json!(false), "boolean"),
+            (json!(17), "number"),
+            (json!("x"), "string"),
+            (json!([]), "array(0)"),
+            (json!(["x", null]), "array(2)"),
+            (json!({}), "object"),
+        ] {
+            assert_eq!(describe(Some(&input)), expected);
+        }
+        let mut record = serde_json::Map::new();
+        for key in ["b", "10", "2", "01", "a", "z", "4294967295", "0", "y"] {
+            record.insert(key.into(), Value::Null);
+        }
+        assert_eq!(
+            describe(Some(&Value::Object(record))),
+            "object(0,2,10,b,01,a)"
+        );
+    }
+
+    #[test]
+    fn private_malformed_constructor_preserves_error_fields() {
+        for (venue, endpoint, shape, message, expected) in [
+            (
+                "Binance",
+                "/fapi",
+                "null",
+                "",
+                "Binance /fapi response malformed: expected array, received null",
+            ),
+            (
+                "Binance PM",
+                "/papi",
+                "object(code,msg)",
+                "code=0 bad",
+                "Binance PM /papi response malformed: expected array, received object(code,msg) (code=0 bad)",
+            ),
+            (
+                "Binance",
+                "",
+                "undefined",
+                " ",
+                "Binance  response malformed: expected array, received undefined ( )",
+            ),
+        ] {
+            let error = malformed(venue, endpoint, shape.into(), message.into());
+            assert_eq!(error.name, "Error");
+            assert_eq!(error.message, expected);
+            assert_eq!(error.to_string(), expected);
+        }
+    }
+}

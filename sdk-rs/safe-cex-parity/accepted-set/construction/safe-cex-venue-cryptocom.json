@@ -1,4 +1,40 @@
 {
+  "safe_cex_venue_cryptocom::wire::CryptocomInstrument": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed wire.rs::CryptocomInstrument: the concrete source record stores symbol, inst_type, display_name, base_ccy, quote_ccy, quote_decimals, quantity_decimals, price_tick_size, qty_tick_size, max_leverage, tradable, expiry_timestamp_ms, beta_product, underlying_symbol, contract_size, margin_buy_enabled, margin_sell_enabled, retained owned additional_fields JSON and private captured input_keys string order. Derived Clone copies reusable decoded data and key metadata, with no consumed validation token, registration or one-use authority. Native scalar-record observations check every declared field, f64 bits where present, retained opaque values, actual clone field preservation and independently modified clone extras; the canonical probes additionally compare private captured keys. The clone policy does not admit new raw values or expand the JSON/string boundary; Deserialize and own_keys retain their independently reviewed entries. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomTicker": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed wire.rs::CryptocomTicker: the concrete source record stores i, b, k, a, c, h, l, v, vv, oi, t, retained owned additional_fields JSON and private captured input_keys string order. Derived Clone copies reusable decoded data and key metadata, with no consumed validation token, registration or one-use authority. Native scalar-record observations check every declared field, f64 bits where present, retained opaque values, actual clone field preservation and independently modified clone extras; the canonical probes additionally compare private captured keys. The clone policy does not admit new raw values or expand the JSON/string boundary; Deserialize and own_keys retain their independently reviewed entries. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomCandlestick": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed wire.rs::CryptocomCandlestick: the concrete source record stores t, o, h, l, c, v, retained owned additional_fields JSON and private captured input_keys string order. Derived Clone copies reusable decoded data and key metadata, with no consumed validation token, registration or one-use authority. Native scalar-record observations check every declared field, f64 bits where present, retained opaque values, actual clone field preservation and independently modified clone extras; the canonical probes additionally compare private captured keys. The clone policy does not admit new raw values or expand the JSON/string boundary; Deserialize and own_keys retain their independently reviewed entries. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomPositionBalance": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed wire.rs::CryptocomPositionBalance: the concrete source record stores instrument_name, quantity, reserved_qty, collateral_amount, collateral_eligible, haircut, market_value, max_withdrawal_balance, hourly_interest_rate, retained owned additional_fields JSON and private captured input_keys string order. Derived Clone copies reusable decoded data and key metadata, with no consumed validation token, registration or one-use authority. Native scalar-record observations check every declared field, f64 bits where present, retained opaque values, actual clone field preservation and independently modified clone extras; the canonical probes additionally compare private captured keys. The clone policy does not admit new raw values or expand the JSON/string boundary; Deserialize and own_keys retain their independently reviewed entries. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomError": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed wire.rs::CryptocomError: the concrete source record stores code, message, retained owned additional_fields JSON and private captured input_keys string order. Derived Clone copies reusable decoded data and key metadata, with no consumed validation token, registration or one-use authority. Native scalar-record observations check every declared field, f64 bits where present, retained opaque values, actual clone field preservation and independently modified clone extras; the canonical probes additionally compare private captured keys. The clone policy does not admit new raw values or expand the JSON/string boundary; Deserialize and own_keys retain their independently reviewed entries. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+  },
+  "safe_cex_venue_cryptocom::wire::CryptocomAccountIdentity": {
+    "traits": [
+      "core::clone::Clone"
+    ],
+    "reason": "Reviewed wire.rs::CryptocomAccountIdentity: the concrete source record stores uuid, retained owned additional_fields JSON and private captured input_keys string order. Derived Clone copies reusable decoded data and key metadata, with no consumed validation token, registration or one-use authority. Native scalar-record observations check every declared field, f64 bits where present, retained opaque values, actual clone field preservation and independently modified clone extras; the canonical probes additionally compare private captured keys. The clone policy does not admit new raw values or expand the JSON/string boundary; Deserialize and own_keys retain their independently reviewed entries. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+  },
   "safe_cex_venue_cryptocom::wire::CryptocomTrade": {
     "traits": [
       "core::clone::Clone"
