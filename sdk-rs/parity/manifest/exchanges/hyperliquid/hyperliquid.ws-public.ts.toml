@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-venue-hyperliquid/src/public_class.rs", "safe-cex-venue
 ts = "HyperliquidPublicWebSocket"
 kind = "class"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/public_class.rs::create_core_public_class", "safe-cex-venue-hyperliquid/src/public_class.rs::construct_core_public_class", "safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_arrow", "safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_dispose" ]
+rs = [ "safe-cex-venue-hyperliquid/src/public_class.rs::create_core_public_class", "safe-cex-venue-hyperliquid/src/public_class.rs::construct_core_public_class", "safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_arrow", "safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_dispose", "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket" ]
 status = "ported"
-note = "Behaviour finding repaired by actual native class allocation, prototype dispose and17 installed-arrow dispatcher entries, composing the existing constructor fields, ping/transport, frame routing, ticker updates, candle/book listeners and native subscription bodies. Primitive realm/class/function/collection/callee bindings remain explicit. Native constructed-state/capture/identity/subscription assertions precede seven actual-source cases through dispose. This bounds assembly evidence rather than proving all17 complete bodies or live-network operation. Rename targets: `safe-cex-venue-hyperliquid/src/public_class.rs::create_core_public_class`, `safe-cex-venue-hyperliquid/src/public_class.rs::construct_core_public_class`, `safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_arrow`, `safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_dispose`."
+note = "Behaviour finding repaired by actual native class allocation, prototype dispose and17 installed-arrow dispatcher entries, composing the existing constructor fields, ping/transport, frame routing, ticker updates, candle/book listeners and native subscription bodies. Primitive realm/class/function/collection/callee bindings remain explicit. Native constructed-state/capture/identity/subscription assertions precede seven actual-source cases through dispose. This bounds assembly evidence rather than proving all17 complete bodies or live-network operation. Rename targets: `safe-cex-venue-hyperliquid/src/public_class.rs::create_core_public_class`, `safe-cex-venue-hyperliquid/src/public_class.rs::construct_core_public_class`, `safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_arrow`, `safe-cex-venue-hyperliquid/src/public_class.rs::call_core_public_dispose`. Split member `safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket` - typed native public socket owner."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket.constructor"
@@ -46,9 +46,9 @@ note = "Source public websocket startPingLoop algorithm in Rust with explicit ve
 ts = "HyperliquidPublicWebSocket#schedulePing"
 kind = "field-fn"
 layer = "adapted"
-rs = [ "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::public_schedule_ping" ]
+rs = [ "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::public_schedule_ping", "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::run_ping_timeout" ]
 status = "ported"
-note = "Source public websocket schedulePing algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Full class, virtual callee implementations and live timer/socket composition remain separate pending work. Rename target: `safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::public_schedule_ping`."
+note = "Source public websocket schedulePing algorithm in Rust with explicit venue-local JS property/callee/global/timer primitive bindings; native actual-source123case floor through122. Lexical scheduled callback body is run_ping_timeout; fifteen-second interval read from source class constant, callee/assignment order, truthy guards and errors retained. Full class, virtual callee implementations and live timer/socket composition remain separate pending work. Rename target: `safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::public_schedule_ping`. Split member `safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::run_ping_timeout` - holds the scheduled ping timeout body."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket#stopPingLoop"
@@ -62,9 +62,9 @@ note = "Source public websocket stopPingLoop algorithm in Rust with explicit ven
 ts = "HyperliquidPublicWebSocket.subscribePublicTopics"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_public_topics"
+rs = [ "safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_public_topics", "safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::subscribe_public_topics" ]
 status = "ported"
-note = "Behaviour finding repaired: installed native arrow sends fixed allMids then fastAssetCtxs through fresh sendWithDiagnostics calls, bypasses dedup, then invokes actual native user-topic enumeration. Both routines share the constructed topics and activeSubscriptions Set with sendSubscription/unsubscription. Repeated calls, candle/depth/BBO payloads, original sender failure and add-before-send retention have native assertions before source; source floor seven cases through dispose. Globals/JSON/Set/iterator/callee primitives remain host contracts. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_public_topics`."
+note = "Behaviour finding repaired: installed native arrow sends fixed allMids then fastAssetCtxs through fresh sendWithDiagnostics calls, bypasses dedup, then invokes actual native user-topic enumeration. Both routines share the constructed topics and activeSubscriptions Set with sendSubscription/unsubscription. Repeated calls, candle/depth/BBO payloads, original sender failure and add-before-send retention have native assertions before source; source floor seven cases through dispose. Globals/JSON/Set/iterator/callee primitives remain host contracts. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::core_public_subscribe_public_topics`. Split member `safe-cex-venue-hyperliquid/src/ws_public.rs::HyperliquidPublicWebSocket::subscribe_public_topics` - typed native topic loop over a fallible sender."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket#sendSubscription"
@@ -110,17 +110,17 @@ note = "Ports the source synchronous frame body over explicit native event/prope
 ts = "HyperliquidPublicWebSocket#sendWithDiagnostics"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::public_send_with_diagnostics"
+rs = [ "safe-cex-venue-hyperliquid/src/ws_emission.rs::public_send_with_diagnostics", "safe-cex-venue-hyperliquid/src/ws_emission.rs::run_diagnostic_formatter" ]
 status = "ported"
-note = "Source HyperliquidPublicWebSocket.sendWithDiagnostics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Full class composition, primitive/callee implementations and live sockets remain pending. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::public_send_with_diagnostics`."
+note = "Source HyperliquidPublicWebSocket.sendWithDiagnostics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Full class composition, primitive/callee implementations and live sockets remain pending. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::public_send_with_diagnostics`. Split member `safe-cex-venue-hyperliquid/src/ws_emission.rs::run_diagnostic_formatter` - holds the lazy diagnostic formatter callback body."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket#emitReceiveDiagnostics"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::public_emit_receive_diagnostics"
+rs = [ "safe-cex-venue-hyperliquid/src/ws_emission.rs::public_emit_receive_diagnostics", "safe-cex-venue-hyperliquid/src/ws_emission.rs::run_diagnostic_formatter" ]
 status = "ported"
-note = "Source HyperliquidPublicWebSocket.emitReceiveDiagnostics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Full class composition, primitive/callee implementations and live sockets remain pending. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::public_emit_receive_diagnostics`."
+note = "Source HyperliquidPublicWebSocket.emitReceiveDiagnostics algorithm in Rust with venue-local property/iterator/global/JSON/callee bindings and owned formatter callback body. Native118case floor through117: ordered literal field trees precede serialization, captured core versus fresh spot user reads, venue-specific subscription arrays, packet ordering/spot filters/optional portfolio spread, callee evaluation order, IteratorClose and formatter scope/errors retained as applicable. Full class composition, primitive/callee implementations and live sockets remain pending. Rename target: `safe-cex-venue-hyperliquid/src/ws_emission.rs::public_emit_receive_diagnostics`. Split member `safe-cex-venue-hyperliquid/src/ws_emission.rs::run_diagnostic_formatter` - holds the lazy diagnostic formatter callback body."
 
 [[symbol]]
 ts = "HyperliquidPublicWebSocket.handleAllMids"

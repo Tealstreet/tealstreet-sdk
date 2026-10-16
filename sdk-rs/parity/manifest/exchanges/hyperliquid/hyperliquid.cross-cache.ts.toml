@@ -6,25 +6,25 @@ rust_files = [ "safe-cex-venue-hyperliquid/src/json_models.rs", "safe-cex-venue-
 ts = "PrePlacementEntry"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/json_models.rs::PrePlacementEntry"
+rs = [ "safe-cex-venue-hyperliquid/src/json_models.rs::PrePlacementEntry", "safe-cex-venue-hyperliquid/src/json_models.rs::CacheOrderType" ]
 status = "ported"
-note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and binary64 bits preserve source own-property snapshots. Integer keys enumerate first, other keys retain insertion order, duplicate keys take the last value before typed decoding. Any-indexed UserRateLimit/OrderStatus retain accepted array alternatives. Actual AST writer and independent strict-source oracle cover eight fixed roots, 71 cases through70; native fields/keys/units/bits/tags are read directly before any wire assertion. No Value ingress, prototypes, non-JSON values, live-alias identity or exhaustive cardinality claim. Existing shared/core consumers and their named FINDINGs are unchanged."
+note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and binary64 bits preserve source own-property snapshots. Integer keys enumerate first, other keys retain insertion order, duplicate keys take the last value before typed decoding. Any-indexed UserRateLimit/OrderStatus retain accepted array alternatives. Actual AST writer and independent strict-source oracle cover eight fixed roots, 71 cases through70; native fields/keys/units/bits/tags are read directly before any wire assertion. No Value ingress, prototypes, non-JSON values, live-alias identity or exhaustive cardinality claim. Existing shared/core consumers and their named FINDINGs are unchanged. Split member `safe-cex-venue-hyperliquid/src/json_models.rs::CacheOrderType` - closed decoder for the entry type field."
 
 [[symbol]]
 ts = "PendingOrderEntry"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/json_models.rs::PendingOrderEntry"
+rs = [ "safe-cex-venue-hyperliquid/src/json_models.rs::PendingOrderEntry", "safe-cex-venue-hyperliquid/src/json_models.rs::CacheOrderType" ]
 status = "ported"
-note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and binary64 bits preserve source own-property snapshots. Integer keys enumerate first, other keys retain insertion order, duplicate keys take the last value before typed decoding. Any-indexed UserRateLimit/OrderStatus retain accepted array alternatives. Actual AST writer and independent strict-source oracle cover eight fixed roots, 71 cases through70; native fields/keys/units/bits/tags are read directly before any wire assertion. No Value ingress, prototypes, non-JSON values, live-alias identity or exhaustive cardinality claim. Existing shared/core consumers and their named FINDINGs are unchanged."
+note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and binary64 bits preserve source own-property snapshots. Integer keys enumerate first, other keys retain insertion order, duplicate keys take the last value before typed decoding. Any-indexed UserRateLimit/OrderStatus retain accepted array alternatives. Actual AST writer and independent strict-source oracle cover eight fixed roots, 71 cases through70; native fields/keys/units/bits/tags are read directly before any wire assertion. No Value ingress, prototypes, non-JSON values, live-alias identity or exhaustive cardinality claim. Existing shared/core consumers and their named FINDINGs are unchanged. Split member `safe-cex-venue-hyperliquid/src/json_models.rs::CacheOrderType` - closed decoder for the entry type field."
 
 [[symbol]]
 ts = "HyperliquidCrossCache"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::HyperliquidCrossCache"
+rs = [ "safe-cex-venue-hyperliquid/src/cache_runtime.rs::HyperliquidCrossCache", "safe-cex-venue-hyperliquid/src/cache_runtime.rs::new_module", "safe-cex-venue-hyperliquid/src/cache_runtime.rs::run_callback", "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheModule", "safe-cex-venue-hyperliquid/src/cache_runtime.rs::METHODS" ]
 status = "ported"
-note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof."
+note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Split member `safe-cex-venue-hyperliquid/src/cache_runtime.rs::new_module` - assembles the class constructor/prototype and installs every source method. Split member `safe-cex-venue-hyperliquid/src/cache_runtime.rs::run_callback` - dispatches the installed prototype methods to their mapped bodies. Split member `safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheModule` - module class handle and singleton slot. Split member `safe-cex-venue-hyperliquid/src/cache_runtime.rs::METHODS` - prototype method table installed by the class assembly."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.constructor"
@@ -38,9 +38,9 @@ note = "Complete cache runtime composition: shared class prototype with non-enum
 ts = "HyperliquidCrossCache#initializeBroadcastChannel"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::initialize_broadcast_channel"
+rs = [ "safe-cex-venue-hyperliquid/src/cache_runtime.rs::initialize_broadcast_channel", "safe-cex-venue-hyperliquid/src/cache_runtime.rs::receive", "safe-cex-venue-hyperliquid/src/cache_runtime.rs::run_callback" ]
 status = "ported"
-note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::initialize_broadcast_channel`."
+note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::initialize_broadcast_channel`. Split member `safe-cex-venue-hyperliquid/src/cache_runtime.rs::receive` - holds the captured onmessage handler body. Split member `safe-cex-venue-hyperliquid/src/cache_runtime.rs::run_callback` - invokes that onmessage handler."
 
 [[symbol]]
 ts = "HyperliquidCrossCache#clearStaleSessionStorage"
@@ -94,17 +94,17 @@ note = "Individual source method algorithm: fresh global/property reads, exact c
 ts = "HyperliquidCrossCache.addPrePlacement"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::add_pre_placement"
+rs = [ "safe-cex-venue-hyperliquid/src/cache_runtime.rs::add_pre_placement", "safe-cex-venue-hyperliquid/src/cache_runtime.rs::run_callback" ]
 status = "ported"
-note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::add_pre_placement`."
+note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::add_pre_placement`. Split member `safe-cex-venue-hyperliquid/src/cache_runtime.rs::run_callback` - holds the stale-entry filter predicate body."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.matchPrePlacement"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::match_pre_placement"
+rs = [ "safe-cex-venue-hyperliquid/src/cache_runtime.rs::match_pre_placement", "safe-cex-venue-hyperliquid/src/cache_runtime.rs::run_callback" ]
 status = "ported"
-note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::match_pre_placement`."
+note = "Complete cache runtime composition: shared class prototype with non-enumerable methods/constructor, distinct opaque Map/Set instance fields, init then stale cleanup, captured receive callbacks, add <=30000 versus match <30000, first-price/unique-amount/FIFO matching, singleton assignment after successful construction and module wrappers. Browser globals, native JS coercions/properties/collections, constructor/function handles are explicit host primitives; eighteen method bodies dispatch to mapped Rust algorithms. Complete unmodified TypeScript module oracle; 27 fixed cases through26 plus native alias/retry checks, bounded floor rather than exhaustive/browser integration proof. Rename target: `safe-cex-venue-hyperliquid/src/cache_runtime.rs::match_pre_placement`. Split member `safe-cex-venue-hyperliquid/src/cache_runtime.rs::run_callback` - holds the validity, price and amount predicate bodies."
 
 [[symbol]]
 ts = "HyperliquidCrossCache.clearPrePlacement"

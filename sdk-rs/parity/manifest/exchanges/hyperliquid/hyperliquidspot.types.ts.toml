@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.types.ts"
-rust_files = [ "safe-cex-venue-hyperliquid/src/spot_types.rs", "safe-cex-venue-hyperliquid/src/spot_models.rs", "safe-cex-venue-hyperliquid/src/json_models.rs", "safe-cex-venue-hyperliquid/src/spot_user_event.rs" ]
+rust_files = [ "safe-cex-venue-hyperliquid/src/spot_types.rs", "safe-cex-venue-hyperliquid/src/spot_models.rs", "safe-cex-venue-hyperliquid/src/json_models.rs", "safe-cex-venue-hyperliquid/src/spot_user_event.rs", "safe-cex-venue-hyperliquid/src/json_values.rs" ]
 
 [[symbol]]
 ts = "BASE_URLS"
@@ -70,33 +70,33 @@ note = "Spot-only native table compared to actual source exports with independen
 ts = "Tif"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::Tif"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::Tif", "safe-cex-venue-hyperliquid/src/spot_models.rs::Tif" ]
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::Tif` - generated spot_models closed-literal/wire decoder for this declaration."
 
 [[symbol]]
 ts = "Tpsl"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::Tpsl"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::Tpsl", "safe-cex-venue-hyperliquid/src/spot_models.rs::Tpsl" ]
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::Tpsl` - generated spot_models closed-literal/wire decoder for this declaration."
 
 [[symbol]]
 ts = "LimitOrderType"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::LimitOrderType"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::LimitOrderType", "safe-cex-venue-hyperliquid/src/spot_models.rs::LimitOrderType" ]
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::LimitOrderType` - generated spot_models closed-literal/wire decoder for this declaration."
 
 [[symbol]]
 ts = "TriggerOrderType"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::TriggerOrderType"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::TriggerOrderType", "safe-cex-venue-hyperliquid/src/spot_models.rs::TriggerOrderType" ]
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::TriggerOrderType` - generated spot_models closed-literal/wire decoder for this declaration."
 
 [[symbol]]
 ts = "Grouping"
@@ -110,9 +110,9 @@ note = "Exact closed source declaration and all transitive references checked ag
 ts = "OrderType"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_types.rs::OrderType"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_types.rs::OrderType", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderType" ]
 status = "ported"
-note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope."
+note = "Exact closed source declaration and all transitive references checked against core AST; spot target reuses strict string/map ingress and binary64 numbers. Direct native variants, fields, presence and bits checked against 47 actual strict-TypeScript cases across six roots; JSON typed-input scope. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderType` - generated spot_models closed-literal/wire decoder for this declaration."
 
 [[symbol]]
 ts = "Cloid"
@@ -142,17 +142,17 @@ note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and bin
 ts = "Meta"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::Meta"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::Meta", "safe-cex-venue-hyperliquid/src/spot_models.rs::MetaUniverseItem", "safe-cex-venue-hyperliquid/src/spot_models.rs::MetaTokensItem" ]
 status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::MetaUniverseItem` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::MetaTokensItem` - generated spot_models struct for an inline nested object/literal shape of this declaration."
 
 [[symbol]]
 ts = "ClearinghouseState"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseState"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseState", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPositionCumFunding", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPositionLeverage", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPosition", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItem", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateCrossMarginSummary", "safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateMarginSummary" ]
 status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPositionCumFunding` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPositionLeverage` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItemPosition` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateAssetPositionsItem` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateCrossMarginSummary` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::ClearinghouseStateMarginSummary` - generated spot_models struct for an inline nested object/literal shape of this declaration."
 
 [[symbol]]
 ts = "UserFills"
@@ -166,9 +166,9 @@ note = "Declared spot model with native UTF-16 string units and binary64 numbers
 ts = "OrderResponse"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponse"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponse", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItemResting", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItemFilled", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItem", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseData", "safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponse" ]
 status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItemResting` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItemFilled` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseDataStatusesItem` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponseData` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::OrderResponseResponse` - generated spot_models struct for an inline nested object/literal shape of this declaration."
 
 [[symbol]]
 ts = "WsTrade"
@@ -198,17 +198,17 @@ note = "Declared spot model with native UTF-16 string units and binary64 numbers
 ts = "WsOrder"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::WsOrder"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::WsOrder", "safe-cex-venue-hyperliquid/src/spot_models.rs::WsOrderOrder" ]
 status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::WsOrderOrder` - generated spot_models struct for an inline nested object/literal shape of this declaration."
 
 [[symbol]]
 ts = "WsUserEvent"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_user_event.rs::WsUserEvent"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_user_event.rs::WsUserEvent", "safe-cex-venue-hyperliquid/src/spot_user_event.rs::WsUserEvent::user" ]
 status = "ported"
-note = "Native closed union/intersection has four typed payload branches plus required UTF16 user in every branch; array-attached user is retained separately and is not discarded by a JSON Value alias. Existing strict payload decoders remain unchanged. Source strict compiler accepts four attached-user witnesses and rejects four missing-user witnesses; native variant/field checks include two-entry arrays, ordered identities, signed-zero bits and a lone surrogate user. No whole-event JSON serializer is provided: source JSON.stringify(array) omits its attached user property."
+note = "Native closed union/intersection has four typed payload branches plus required UTF16 user in every branch; array-attached user is retained separately and is not discarded by a JSON Value alias. Existing strict payload decoders remain unchanged. Source strict compiler accepts four attached-user witnesses and rejects four missing-user witnesses; native variant/field checks include two-entry arrays, ordered identities, signed-zero bits and a lone surrogate user. No whole-event JSON serializer is provided: source JSON.stringify(array) omits its attached user property. Split member `safe-cex-venue-hyperliquid/src/spot_user_event.rs::WsUserEvent::user` - shared user field read across the event variants."
 
 [[symbol]]
 ts = "WsFill"
@@ -246,9 +246,9 @@ note = "Declared spot model with native UTF-16 string units and binary64 numbers
 ts = "SpotClearinghouseState"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotClearinghouseState"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotClearinghouseState", "safe-cex-venue-hyperliquid/src/spot_models.rs::SpotClearinghouseStateBalancesItem" ]
 status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::SpotClearinghouseStateBalancesItem` - generated spot_models struct for an inline nested object/literal shape of this declaration."
 
 [[symbol]]
 ts = "FrontendOpenOrders"
@@ -262,25 +262,25 @@ note = "Declared spot model with native UTF-16 string units and binary64 numbers
 ts = "UserRateLimit"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/json_models.rs::UserRateLimit"
+rs = [ "safe-cex-venue-hyperliquid/src/json_models.rs::UserRateLimit", "safe-cex-venue-hyperliquid/src/json_values.rs::JsonContainer" ]
 status = "ported"
-note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and binary64 bits preserve source own-property snapshots. Integer keys enumerate first, other keys retain insertion order, duplicate keys take the last value before typed decoding. Any-indexed UserRateLimit/OrderStatus retain accepted array alternatives. Actual AST writer and independent strict-source oracle cover eight fixed roots, 71 cases through70; native fields/keys/units/bits/tags are read directly before any wire assertion. No Value ingress, prototypes, non-JSON values, live-alias identity or exhaustive cardinality claim. Existing shared/core consumers and their named FINDINGs are unchanged."
+note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and binary64 bits preserve source own-property snapshots. Integer keys enumerate first, other keys retain insertion order, duplicate keys take the last value before typed decoding. Any-indexed UserRateLimit/OrderStatus retain accepted array alternatives. Actual AST writer and independent strict-source oracle cover eight fixed roots, 71 cases through70; native fields/keys/units/bits/tags are read directly before any wire assertion. No Value ingress, prototypes, non-JSON values, live-alias identity or exhaustive cardinality claim. Existing shared/core consumers and their named FINDINGs are unchanged. Split member `safe-cex-venue-hyperliquid/src/json_values.rs::JsonContainer` - native object-or-array carrier the alias names."
 
 [[symbol]]
 ts = "OrderStatus"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/json_models.rs::OrderStatus"
+rs = [ "safe-cex-venue-hyperliquid/src/json_models.rs::OrderStatus", "safe-cex-venue-hyperliquid/src/json_values.rs::JsonContainer" ]
 status = "ported"
-note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and binary64 bits preserve source own-property snapshots. Integer keys enumerate first, other keys retain insertion order, duplicate keys take the last value before typed decoding. Any-indexed UserRateLimit/OrderStatus retain accepted array alternatives. Actual AST writer and independent strict-source oracle cover eight fixed roots, 71 cases through70; native fields/keys/units/bits/tags are read directly before any wire assertion. No Value ingress, prototypes, non-JSON values, live-alias identity or exhaustive cardinality claim. Existing shared/core consumers and their named FINDINGs are unchanged."
+note = "Declared raw JSON string/slice native model; UTF-16 keys/strings and binary64 bits preserve source own-property snapshots. Integer keys enumerate first, other keys retain insertion order, duplicate keys take the last value before typed decoding. Any-indexed UserRateLimit/OrderStatus retain accepted array alternatives. Actual AST writer and independent strict-source oracle cover eight fixed roots, 71 cases through70; native fields/keys/units/bits/tags are read directly before any wire assertion. No Value ingress, prototypes, non-JSON values, live-alias identity or exhaustive cardinality claim. Existing shared/core consumers and their named FINDINGs are unchanged. Split member `safe-cex-venue-hyperliquid/src/json_values.rs::JsonContainer` - native object-or-array carrier the alias names."
 
 [[symbol]]
 ts = "L2Book"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::L2Book"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::L2Book", "safe-cex-venue-hyperliquid/src/spot_models.rs::L2BookLevelsItem0Item", "safe-cex-venue-hyperliquid/src/spot_models.rs::L2BookLevelsItem1Item" ]
 status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::L2BookLevelsItem0Item` - generated spot_models struct for an inline nested object/literal shape of this declaration. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::L2BookLevelsItem1Item` - generated spot_models struct for an inline nested object/literal shape of this declaration."
 
 [[symbol]]
 ts = "CandleSnapshot"
@@ -310,9 +310,9 @@ note = "Declared spot model with native UTF-16 string units and binary64 numbers
 ts = "UserFundingDelta"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::UserFundingDelta"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::UserFundingDelta", "safe-cex-venue-hyperliquid/src/spot_models.rs::UserFundingDeltaType" ]
 status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::UserFundingDeltaType` - generated spot_models struct for an inline nested object/literal shape of this declaration."
 
 [[symbol]]
 ts = "UserFundingEntry"
@@ -334,9 +334,9 @@ note = "Declared spot model with native UTF-16 string units and binary64 numbers
 ts = "UserNonFundingLedgerDelta"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::UserNonFundingLedgerDelta"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::UserNonFundingLedgerDelta", "safe-cex-venue-hyperliquid/src/spot_models.rs::UserNonFundingLedgerDeltaType" ]
 status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::UserNonFundingLedgerDeltaType` - generated spot_models struct for an inline nested object/literal shape of this declaration."
 
 [[symbol]]
 ts = "UserNonFundingLedgerEntry"
@@ -550,9 +550,9 @@ note = "Declared spot model with native UTF-16 string units and binary64 numbers
 ts = "WsUserNonFundingLedgerUpdate"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserNonFundingLedgerUpdate"
+rs = [ "safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserNonFundingLedgerUpdate", "safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserNonFundingLedgerUpdateType" ]
 status = "ported"
-note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged."
+note = "Declared spot model with native UTF-16 string units and binary64 numbers; actual spot source/merged declarations generate the field mapping. Raw JSON from_str/from_slice ingress is tested against an independent actual-AST resolver and strict TypeScript compiler: fifty fixed roots, four accepted/four rejected cases each (400-case floor), native field/unit/number-bit/variant assertions before wire. Unknown keys are ignored, duplicate known keys take the last value. No serde_json::Value/other-format ingress, excess-property retention, prototype or live-alias identity claim. Shared UTF-8 consumers remain unchanged. Split member `safe-cex-venue-hyperliquid/src/spot_models.rs::WsUserNonFundingLedgerUpdateType` - generated spot_models struct for an inline nested object/literal shape of this declaration."
 
 [[symbol]]
 ts = "WsUserNonFundingLedgerUpdates"

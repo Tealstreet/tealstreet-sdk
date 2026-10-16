@@ -7220,3 +7220,1331 @@ reason = "Rust-only boxed future/result carrier for host asynchronous loader ope
 [[exempt]]
 rs = "safe-cex-exchange/src/cross_trade/mod.rs::CrossTradeLoopFn"
 reason = "Rust-only owned callback carrier for the host loop scheduler's anonymous asynchronous function argument; no standalone TypeScript declaration. Loop behavior remains in its mapped operations. Accepted-set alias identity and raw-construction probes remain mandatory. See sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::AccountPositionHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#resolveReduceOnly, HyperliquidExchange._getSymbolConfigurationFromAssetData, HyperliquidExchange._hasFullSizedPositionOppositeSide, HyperliquidExchange.getFakePositions, HyperliquidExchange.invalidateFakePositionsCache, HyperliquidExchange.shouldRequestPortfolioMarginSpotState, HyperliquidExchange.shouldTrackSpotHoldings, HyperliquidExchange.shouldUseSpotCollateralBalance; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::AccountPositionHost::boolean"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability AccountPositionHost used by the mapped HyperliquidExchange#resolveReduceOnly, HyperliquidExchange._getSymbolConfigurationFromAssetData, HyperliquidExchange._hasFullSizedPositionOppositeSide, HyperliquidExchange.getFakePositions, HyperliquidExchange.invalidateFakePositionsCache, HyperliquidExchange.shouldRequestPortfolioMarginSpotState, HyperliquidExchange.shouldTrackSpotHoldings, HyperliquidExchange.shouldUseSpotCollateralBalance. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::AccountPositionHost::greater_equal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability AccountPositionHost used by the mapped HyperliquidExchange#resolveReduceOnly, HyperliquidExchange._getSymbolConfigurationFromAssetData, HyperliquidExchange._hasFullSizedPositionOppositeSide, HyperliquidExchange.getFakePositions, HyperliquidExchange.invalidateFakePositionsCache, HyperliquidExchange.shouldRequestPortfolioMarginSpotState, HyperliquidExchange.shouldTrackSpotHoldings, HyperliquidExchange.shouldUseSpotCollateralBalance. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::AccountPositionHost::is_nullish"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability AccountPositionHost used by the mapped HyperliquidExchange#resolveReduceOnly, HyperliquidExchange._getSymbolConfigurationFromAssetData, HyperliquidExchange._hasFullSizedPositionOppositeSide, HyperliquidExchange.getFakePositions, HyperliquidExchange.invalidateFakePositionsCache, HyperliquidExchange.shouldRequestPortfolioMarginSpotState, HyperliquidExchange.shouldTrackSpotHoldings, HyperliquidExchange.shouldUseSpotCollateralBalance. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::AccountPositionHost::null"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability AccountPositionHost used by the mapped HyperliquidExchange#resolveReduceOnly, HyperliquidExchange._getSymbolConfigurationFromAssetData, HyperliquidExchange._hasFullSizedPositionOppositeSide, HyperliquidExchange.getFakePositions, HyperliquidExchange.invalidateFakePositionsCache, HyperliquidExchange.shouldRequestPortfolioMarginSpotState, HyperliquidExchange.shouldTrackSpotHoldings, HyperliquidExchange.shouldUseSpotCollateralBalance. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::AccountPositionHost::number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability AccountPositionHost used by the mapped HyperliquidExchange#resolveReduceOnly, HyperliquidExchange._getSymbolConfigurationFromAssetData, HyperliquidExchange._hasFullSizedPositionOppositeSide, HyperliquidExchange.getFakePositions, HyperliquidExchange.invalidateFakePositionsCache, HyperliquidExchange.shouldRequestPortfolioMarginSpotState, HyperliquidExchange.shouldTrackSpotHoldings, HyperliquidExchange.shouldUseSpotCollateralBalance. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::AccountPositionHost::opposite_predicate"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability AccountPositionHost used by the mapped HyperliquidExchange#resolveReduceOnly, HyperliquidExchange._getSymbolConfigurationFromAssetData, HyperliquidExchange._hasFullSizedPositionOppositeSide, HyperliquidExchange.getFakePositions, HyperliquidExchange.invalidateFakePositionsCache, HyperliquidExchange.shouldRequestPortfolioMarginSpotState, HyperliquidExchange.shouldTrackSpotHoldings, HyperliquidExchange.shouldUseSpotCollateralBalance. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::AccountPositionHost::strict_equal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability AccountPositionHost used by the mapped HyperliquidExchange#resolveReduceOnly, HyperliquidExchange._getSymbolConfigurationFromAssetData, HyperliquidExchange._hasFullSizedPositionOppositeSide, HyperliquidExchange.getFakePositions, HyperliquidExchange.invalidateFakePositionsCache, HyperliquidExchange.shouldRequestPortfolioMarginSpotState, HyperliquidExchange.shouldTrackSpotHoldings, HyperliquidExchange.shouldUseSpotCollateralBalance. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/account_position_leaves.rs::OppositePredicate"
+reason = "Captured-value shape of the positions.some() predicate for the mapped HyperliquidExchange._hasFullSizedPositionOppositeSide; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/agent.rs::EthereumWindow"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped hasEthereumWallet; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/agent.rs::EthereumWindow::Error"
+reason = "Associated value/error type of host capability EthereumWindow used by the mapped hasEthereumWallet. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/agent.rs::EthereumWindow::ethereum_truthy"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability EthereumWindow used by the mapped hasEthereumWallet. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/agent.rs::EthereumWindow::window_defined"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability EthereumWindow used by the mapped hasEthereumWallet. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorClass"
+reason = "Derived Error prototype selector (core, spot, intrinsic) for the host Error allocation for the mapped HyperliquidAPIError.constructor, handleApiError; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidAPIError.constructor, decodeHyperliquidFastAssetCtxs, handleApiError; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::define_field"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability ApiErrorHost used by the mapped HyperliquidAPIError.constructor, decodeHyperliquidFastAssetCtxs, handleApiError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::exception_from_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability ApiErrorHost used by the mapped HyperliquidAPIError.constructor, decodeHyperliquidFastAssetCtxs, handleApiError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::literal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability ApiErrorHost used by the mapped HyperliquidAPIError.constructor, decodeHyperliquidFastAssetCtxs, handleApiError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::new_error"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability ApiErrorHost used by the mapped HyperliquidAPIError.constructor, decodeHyperliquidFastAssetCtxs, handleApiError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::set_property"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability ApiErrorHost used by the mapped HyperliquidAPIError.constructor, decodeHyperliquidFastAssetCtxs, handleApiError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/api_errors.rs::ApiErrorHost::truthy"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability ApiErrorHost used by the mapped HyperliquidAPIError.constructor, decodeHyperliquidFastAssetCtxs, handleApiError. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/balance_state.rs::BalanceOperator"
+reason = "Inline operator selector for the host's full ECMAScript arithmetic/relational primitives in the mapped HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange.scheduleCancel, HyperliquidSpotExchange#buildSpotBalance; the operator semantics stay in the host, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/balance_state.rs::SpotMarketPredicate"
+reason = "Captured-value shape of the market find() predicate for the mapped HyperliquidSpotExchange#getSpotCoinMarkPrice; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/browser_approval_flows.rs::BrowserApprovalHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped approveBuilderFeeWithBrowserWallet, checkBuilderFeeApproved, connectBrowserWallet, createAgentWalletWithBrowserWallet, createBuilderInfo, signAgentApproval, signBuilderFeeApproval, submitAgentApproval, submitBuilderFeeApproval, switchToCorrectNetwork; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/browser_approval_flows.rs::BrowserApprovalHost::construct_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability BrowserApprovalHost used by the mapped approveBuilderFeeWithBrowserWallet, checkBuilderFeeApproved, connectBrowserWallet, createAgentWalletWithBrowserWallet, createBuilderInfo, signAgentApproval, signBuilderFeeApproval, submitAgentApproval, submitBuilderFeeApproval, switchToCorrectNetwork. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/browser_approval_flows.rs::BrowserApprovalHost::error_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability BrowserApprovalHost used by the mapped approveBuilderFeeWithBrowserWallet, checkBuilderFeeApproved, connectBrowserWallet, createAgentWalletWithBrowserWallet, createBuilderInfo, signAgentApproval, signBuilderFeeApproval, submitAgentApproval, submitBuilderFeeApproval, switchToCorrectNetwork. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/browser_approval_flows.rs::BrowserApprovalHost::global_typeof"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability BrowserApprovalHost used by the mapped approveBuilderFeeWithBrowserWallet, checkBuilderFeeApproved, connectBrowserWallet, createAgentWalletWithBrowserWallet, createBuilderInfo, signAgentApproval, signBuilderFeeApproval, submitAgentApproval, submitBuilderFeeApproval, switchToCorrectNetwork. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/builder_fee.rs::ApprovalDomain"
+reason = "Typed EIP-712 domain literal shape of the mapped constants for the mapped HYPERLIQUID_BUILDER_DOMAIN, HYPERLIQUID_BUILDER_DOMAIN_TESTNET; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/builder_fee.rs::ApprovalField"
+reason = "Typed EIP-712 field literal shape of the mapped constant for the mapped APPROVE_BUILDER_FEE_TYPES; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::CacheOrdersHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidCrossCache#clearStaleSessionStorage, HyperliquidCrossCache.addPendingOrder, HyperliquidCrossCache.clearPrePlacement, HyperliquidCrossCache.getPendingOrder, HyperliquidCrossCache.removePendingOrder, HyperliquidExchange.addPendingHip3Order, HyperliquidExchange.addToPrePlacementCache, HyperliquidExchange.getPendingHip3Order, HyperliquidExchange.matchPrePlacement, HyperliquidExchange.removePendingHip3Order; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::CacheOrdersHost::delete"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheOrdersHost used by the mapped HyperliquidCrossCache#clearStaleSessionStorage, HyperliquidCrossCache.addPendingOrder, HyperliquidCrossCache.clearPrePlacement, HyperliquidCrossCache.getPendingOrder, HyperliquidCrossCache.removePendingOrder, HyperliquidExchange.addPendingHip3Order, HyperliquidExchange.addToPrePlacementCache, HyperliquidExchange.getPendingHip3Order, HyperliquidExchange.matchPrePlacement, HyperliquidExchange.removePendingHip3Order. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::CacheOrdersHost::get_index"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheOrdersHost used by the mapped HyperliquidCrossCache#clearStaleSessionStorage, HyperliquidCrossCache.addPendingOrder, HyperliquidCrossCache.clearPrePlacement, HyperliquidCrossCache.getPendingOrder, HyperliquidCrossCache.removePendingOrder, HyperliquidExchange.addPendingHip3Order, HyperliquidExchange.addToPrePlacementCache, HyperliquidExchange.getPendingHip3Order, HyperliquidExchange.matchPrePlacement, HyperliquidExchange.removePendingHip3Order. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::CacheOrdersHost::now"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheOrdersHost used by the mapped HyperliquidCrossCache#clearStaleSessionStorage, HyperliquidCrossCache.addPendingOrder, HyperliquidCrossCache.clearPrePlacement, HyperliquidCrossCache.getPendingOrder, HyperliquidCrossCache.removePendingOrder, HyperliquidExchange.addPendingHip3Order, HyperliquidExchange.addToPrePlacementCache, HyperliquidExchange.getPendingHip3Order, HyperliquidExchange.matchPrePlacement, HyperliquidExchange.removePendingHip3Order. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::CacheOrdersHost::object_keys"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheOrdersHost used by the mapped HyperliquidCrossCache#clearStaleSessionStorage, HyperliquidCrossCache.addPendingOrder, HyperliquidCrossCache.clearPrePlacement, HyperliquidCrossCache.getPendingOrder, HyperliquidCrossCache.removePendingOrder, HyperliquidExchange.addPendingHip3Order, HyperliquidExchange.addToPrePlacementCache, HyperliquidExchange.getPendingHip3Order, HyperliquidExchange.matchPrePlacement, HyperliquidExchange.removePendingHip3Order. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::CacheOrdersHost::older_than"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheOrdersHost used by the mapped HyperliquidCrossCache#clearStaleSessionStorage, HyperliquidCrossCache.addPendingOrder, HyperliquidCrossCache.clearPrePlacement, HyperliquidCrossCache.getPendingOrder, HyperliquidCrossCache.removePendingOrder, HyperliquidExchange.addPendingHip3Order, HyperliquidExchange.addToPrePlacementCache, HyperliquidExchange.getPendingHip3Order, HyperliquidExchange.matchPrePlacement, HyperliquidExchange.removePendingHip3Order. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_orders.rs::CacheOrdersHost::singleton"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheOrdersHost used by the mapped HyperliquidCrossCache#clearStaleSessionStorage, HyperliquidCrossCache.addPendingOrder, HyperliquidCrossCache.clearPrePlacement, HyperliquidCrossCache.getPendingOrder, HyperliquidCrossCache.removePendingOrder, HyperliquidExchange.addPendingHip3Order, HyperliquidExchange.addToPrePlacementCache, HyperliquidExchange.getPendingHip3Order, HyperliquidExchange.matchPrePlacement, HyperliquidExchange.removePendingHip3Order. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheMethod"
+reason = "Prototype-method identity selector dispatched by run_callback for the mapped HyperliquidCrossCache; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::abstract_string"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::array"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::boolean"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::broadcast_constructor"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::class_definition"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::construct_broadcast"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::define_method"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::destructure"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::equal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::function"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::instance"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::less"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::less_equal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::new_map"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::new_set"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::CacheRuntimeHost::subtract"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CacheRuntimeHost used by the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.constructor, HyperliquidCrossCache.matchPrePlacement, getCrossCache, hasSeenFill, markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cache_runtime.rs::Callback"
+reason = "Callback identity shape dispatched by run_callback for the mapped HyperliquidCrossCache, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.matchPrePlacement; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/constants.rs::HyperliquidBuilderProvider::Error"
+reason = "Associated value/error type of host capability HyperliquidBuilderProvider used by the mapped resolveHyperliquidBuilder. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/constants.rs::HyperliquidBuilderProvider::hyperliquid_builder"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability HyperliquidBuilderProvider used by the mapped resolveHyperliquidBuilder. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/constants.rs::HyperliquidBuilderProvider::testnet"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability HyperliquidBuilderProvider used by the mapped resolveHyperliquidBuilder. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::add_values"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::array_define"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::await_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::close_after_return"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::close_after_throw"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::construct_error"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::error_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::instance_of"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::iterator"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::next"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::null_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::pair"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::return_await_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::snapshot_predicate"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::CoreSnapshotHost::spread_into"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CoreSnapshotHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchHistoricalPositions, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_account_snapshots.rs::SnapshotPredicate"
+reason = "Callback identity/capture shape dispatched by run_snapshot_predicate for the mapped HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::PositionCallback"
+reason = "Callback identity/capture shape dispatched by run_position_callback for the mapped HyperliquidExchange#generateFakePositionsFromMarkets, HyperliquidExchange#parseOpenOrders, HyperliquidExchange.fetchHip3Positions, HyperliquidPrivateWebSocket#applyOptimisticCorePositionFromFill, HyperliquidPrivateWebSocket#applyRealizedPnlToCurrentPosition, HyperliquidPrivateWebSocket.handleFills, HyperliquidPrivateWebSocket.handleOrderUpdates; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::PositionOrderHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#generateFakePositionsFromMarkets, HyperliquidExchange#parseOpenOrders, HyperliquidExchange.fetchHip3Positions, HyperliquidExchange.syncBalanceFromLivePositions, HyperliquidPrivateWebSocket#applyOptimisticCorePositionFromFill, HyperliquidPrivateWebSocket#applyRealizedPnlToCurrentPosition, HyperliquidPrivateWebSocket.applyCoreClearinghouseState, HyperliquidPrivateWebSocket.handleFills, HyperliquidPrivateWebSocket.handleHip3ClearinghouseState, HyperliquidPrivateWebSocket.handleOrderUpdates; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::PositionOrderHost::append_position_spread"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PositionOrderHost used by the mapped HyperliquidExchange#generateFakePositionsFromMarkets, HyperliquidExchange#parseOpenOrders, HyperliquidExchange.fetchHip3Positions, HyperliquidExchange.syncBalanceFromLivePositions, HyperliquidPrivateWebSocket#applyOptimisticCorePositionFromFill, HyperliquidPrivateWebSocket#applyRealizedPnlToCurrentPosition, HyperliquidPrivateWebSocket.applyCoreClearinghouseState, HyperliquidPrivateWebSocket.handleFills, HyperliquidPrivateWebSocket.handleHip3ClearinghouseState, HyperliquidPrivateWebSocket.handleOrderUpdates. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::PositionOrderHost::position_callback"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PositionOrderHost used by the mapped HyperliquidExchange#generateFakePositionsFromMarkets, HyperliquidExchange#parseOpenOrders, HyperliquidExchange.fetchHip3Positions, HyperliquidExchange.syncBalanceFromLivePositions, HyperliquidPrivateWebSocket#applyOptimisticCorePositionFromFill, HyperliquidPrivateWebSocket#applyRealizedPnlToCurrentPosition, HyperliquidPrivateWebSocket.applyCoreClearinghouseState, HyperliquidPrivateWebSocket.handleFills, HyperliquidPrivateWebSocket.handleHip3ClearinghouseState, HyperliquidPrivateWebSocket.handleOrderUpdates. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::PositionOrderHost::position_operator"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PositionOrderHost used by the mapped HyperliquidExchange#generateFakePositionsFromMarkets, HyperliquidExchange#parseOpenOrders, HyperliquidExchange.fetchHip3Positions, HyperliquidExchange.syncBalanceFromLivePositions, HyperliquidPrivateWebSocket#applyOptimisticCorePositionFromFill, HyperliquidPrivateWebSocket#applyRealizedPnlToCurrentPosition, HyperliquidPrivateWebSocket.applyCoreClearinghouseState, HyperliquidPrivateWebSocket.handleFills, HyperliquidPrivateWebSocket.handleHip3ClearinghouseState, HyperliquidPrivateWebSocket.handleOrderUpdates. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::PositionOrderHost::position_unary"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PositionOrderHost used by the mapped HyperliquidExchange#generateFakePositionsFromMarkets, HyperliquidExchange#parseOpenOrders, HyperliquidExchange.fetchHip3Positions, HyperliquidExchange.syncBalanceFromLivePositions, HyperliquidPrivateWebSocket#applyOptimisticCorePositionFromFill, HyperliquidPrivateWebSocket#applyRealizedPnlToCurrentPosition, HyperliquidPrivateWebSocket.applyCoreClearinghouseState, HyperliquidPrivateWebSocket.handleFills, HyperliquidPrivateWebSocket.handleHip3ClearinghouseState, HyperliquidPrivateWebSocket.handleOrderUpdates. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_position_order_state.rs::PositionOrderHost::set_position_index"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PositionOrderHost used by the mapped HyperliquidExchange#generateFakePositionsFromMarkets, HyperliquidExchange#parseOpenOrders, HyperliquidExchange.fetchHip3Positions, HyperliquidExchange.syncBalanceFromLivePositions, HyperliquidPrivateWebSocket#applyOptimisticCorePositionFromFill, HyperliquidPrivateWebSocket#applyRealizedPnlToCurrentPosition, HyperliquidPrivateWebSocket.applyCoreClearinghouseState, HyperliquidPrivateWebSocket.handleFills, HyperliquidPrivateWebSocket.handleHip3ClearinghouseState, HyperliquidPrivateWebSocket.handleOrderUpdates. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_rest_reads.rs::RestCallback"
+reason = "Callback identity/capture shape dispatched by run_rest_callback and start_rest_callback for the mapped HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange.deriveClosedPositions, HyperliquidExchange.fetchHistoricalFills, HyperliquidExchange.fetchHistoricalOrders, HyperliquidExchange.fetchIncomeHistory, HyperliquidExchange.fetchOHLCV; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_rest_reads.rs::RestCallback::is_async"
+reason = "Sync/async selector of the RestCallback shape routing to start_rest_callback for the mapped HyperliquidExchange.deriveClosedPositions, HyperliquidExchange.fetchIncomeHistory; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_rest_reads.rs::RestCallback::kind"
+reason = "Stable callback identity label of the RestCallback shape for the mapped HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange.deriveClosedPositions, HyperliquidExchange.fetchHistoricalFills, HyperliquidExchange.fetchHistoricalOrders, HyperliquidExchange.fetchIncomeHistory, HyperliquidExchange.fetchOHLCV; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_rest_reads.rs::RestReadHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange#fetchMarketsHelper, HyperliquidExchange.deriveClosedPositions, HyperliquidExchange.fetchFillsForOrderIds, HyperliquidExchange.fetchHistoricalFills, HyperliquidExchange.fetchHistoricalOrders, HyperliquidExchange.fetchIncomeHistory, HyperliquidExchange.fetchIncomeHistoryRange, HyperliquidExchange.fetchOHLCV; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_rest_reads.rs::RestReadHost::rest_argument_spread"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability RestReadHost used by the mapped HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange#fetchMarketsHelper, HyperliquidExchange.deriveClosedPositions, HyperliquidExchange.fetchFillsForOrderIds, HyperliquidExchange.fetchHistoricalFills, HyperliquidExchange.fetchHistoricalOrders, HyperliquidExchange.fetchIncomeHistory, HyperliquidExchange.fetchIncomeHistoryRange, HyperliquidExchange.fetchOHLCV. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_rest_reads.rs::RestReadHost::rest_array_binding"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability RestReadHost used by the mapped HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange#fetchMarketsHelper, HyperliquidExchange.deriveClosedPositions, HyperliquidExchange.fetchFillsForOrderIds, HyperliquidExchange.fetchHistoricalFills, HyperliquidExchange.fetchHistoricalOrders, HyperliquidExchange.fetchIncomeHistory, HyperliquidExchange.fetchIncomeHistoryRange, HyperliquidExchange.fetchOHLCV. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_rest_reads.rs::RestReadHost::rest_callback"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability RestReadHost used by the mapped HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange#fetchMarketsHelper, HyperliquidExchange.deriveClosedPositions, HyperliquidExchange.fetchFillsForOrderIds, HyperliquidExchange.fetchHistoricalFills, HyperliquidExchange.fetchHistoricalOrders, HyperliquidExchange.fetchIncomeHistory, HyperliquidExchange.fetchIncomeHistoryRange, HyperliquidExchange.fetchOHLCV. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_rest_reads.rs::RestReadHost::rest_exception"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability RestReadHost used by the mapped HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange#fetchMarketsHelper, HyperliquidExchange.deriveClosedPositions, HyperliquidExchange.fetchFillsForOrderIds, HyperliquidExchange.fetchHistoricalFills, HyperliquidExchange.fetchHistoricalOrders, HyperliquidExchange.fetchIncomeHistory, HyperliquidExchange.fetchIncomeHistoryRange, HyperliquidExchange.fetchOHLCV. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/core_rest_reads.rs::RestTaskHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange.deriveClosedPositions, HyperliquidExchange.fetchFillsForOrderIds, HyperliquidExchange.fetchHistoricalFills, HyperliquidExchange.fetchHistoricalOrders, HyperliquidExchange.fetchIncomeHistory, HyperliquidExchange.fetchIncomeHistoryRange, HyperliquidExchange.fetchOHLCV; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::call"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::close_after_throw"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::define_data"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::entries"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::entry_pair"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::greater_than_500"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::is_undefined"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::iterator_step"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::literal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::null"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::object"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::parse_json_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::property_key"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::session_storage"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::set"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::spread"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/cross_cache.rs::CrossCacheHost::truthy"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability CrossCacheHost used by the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getSessionStorage, HyperliquidCrossCache#readPendingOrdersCache, HyperliquidCrossCache#readPrePlacementCache, HyperliquidCrossCache#writePendingOrdersCache, HyperliquidCrossCache#writePrePlacementCache, HyperliquidCrossCache.dispose, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/helper_tasks.rs::HelperObserver"
+reason = "Observed helper-task Promise primitive (settled value/error with waker list) for the mapped HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange#fetchMarketsAndTickers, HyperliquidExchange#fetchOrdersInternal, HyperliquidExchange#fetchSpotMarketsAndTickers, HyperliquidExchange#refreshUnifiedSpotCollateralBalance, HyperliquidExchange#resolveApplicationIdFromKey, HyperliquidExchange#resolveUserAbstractionMode, HyperliquidExchange#runRetryChainStep, HyperliquidExchange#withStartupTimeout and 31 more mapped rows in hyperliquid.exchange, hyperliquid.income, hyperliquid.market-startup-helpers, hyperliquidspot.exchange, hyperliquidspot.rateLimiter; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/helper_tasks.rs::HelperTaskHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#fetchOrdersInternal, HyperliquidExchange#runRetryChainStep, HyperliquidExchange.cancelOrders, HyperliquidExchange.fetchOrders, HyperliquidExchange.placeLimitOrder, HyperliquidExchange.placeOrder, HyperliquidExchange.placeOrders, HyperliquidExchange.updateOrder, RateLimiter.waitForToken, fetchCoreMetaAndAssetCtxsWithFallback and 2 more mapped rows in hyperliquid.exchange, hyperliquid.income, hyperliquid.market-startup-helpers, hyperliquidspot.rateLimiter; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/helper_tasks.rs::HelperTaskHost::settle_return"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability HelperTaskHost used by the mapped HyperliquidExchange#fetchOrdersInternal, HyperliquidExchange#runRetryChainStep, HyperliquidExchange.cancelOrders, HyperliquidExchange.fetchOrders, HyperliquidExchange.placeLimitOrder, HyperliquidExchange.placeOrder, HyperliquidExchange.placeOrders, HyperliquidExchange.updateOrder, RateLimiter.waitForToken, fetchCoreMetaAndAssetCtxsWithFallback and 2 more mapped rows in hyperliquid.exchange, hyperliquid.income, hyperliquid.market-startup-helpers, hyperliquidspot.rateLimiter. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/helper_tasks.rs::HelperTaskHost::start_task"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability HelperTaskHost used by the mapped HyperliquidExchange#fetchOrdersInternal, HyperliquidExchange#runRetryChainStep, HyperliquidExchange.cancelOrders, HyperliquidExchange.fetchOrders, HyperliquidExchange.placeLimitOrder, HyperliquidExchange.placeOrder, HyperliquidExchange.placeOrders, HyperliquidExchange.updateOrder, RateLimiter.waitForToken, fetchCoreMetaAndAssetCtxsWithFallback and 2 more mapped rows in hyperliquid.exchange, hyperliquid.income, hyperliquid.market-startup-helpers, hyperliquidspot.rateLimiter. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeFuture"
+reason = "Boxed host Promise/await primitive alias for the mapped deriveHyperliquidClosedPositions, fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped deriveHyperliquidClosedPositions, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeHost::array"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability IncomeHost used by the mapped deriveHyperliquidClosedPositions, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeHost::await_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability IncomeHost used by the mapped deriveHyperliquidClosedPositions, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeHost::equal_number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability IncomeHost used by the mapped deriveHyperliquidClosedPositions, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeHost::math_max"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability IncomeHost used by the mapped deriveHyperliquidClosedPositions, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeHost::new_set"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability IncomeHost used by the mapped deriveHyperliquidClosedPositions, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeHost::number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability IncomeHost used by the mapped deriveHyperliquidClosedPositions, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeHost::number_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability IncomeHost used by the mapped deriveHyperliquidClosedPositions, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/income.rs::IncomeHost::parse_float"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability IncomeHost used by the mapped deriveHyperliquidClosedPositions, mapHyperliquidFillToIncomeRecords, mapHyperliquidFundingToIncomeRecord, paginateHyperliquidByTime, readFundingRow, toNumber. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::Error"
+reason = "Associated value/error type of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::Value"
+reason = "Associated value/error type of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::get"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::is_array"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::is_nullish"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::is_object"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::json_stringify"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::parse_json"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::string_units"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::to_string"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_boundaries.rs::JsPayloadHost::undefined"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability JsPayloadHost used by the mapped formatHyperliquidWsDiagnostic, maskHyperliquidAddress, parseHyperliquidExchangePayload, parseJsonObject, shouldEmitHyperliquidWsReceiveDiagnostic, shouldEmitHyperliquidWsSendDiagnostic, stringifyDiagnosticPayload. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_values.rs::JsonObject"
+reason = "Shared ordered own-property JSON snapshot carrier for the mapped getHyperliquidRestRequestWeight; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_values.rs::JsonObject::get"
+reason = "Own-property lookup of the shared JSON snapshot carrier for the mapped HyperliquidCrossCache, HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#initializeBroadcastChannel, HyperliquidCrossCache.addPendingOrder, HyperliquidCrossCache.addPrePlacement, HyperliquidCrossCache.clearPrePlacement, HyperliquidCrossCache.dispose, HyperliquidCrossCache.getPendingOrder, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen and 171 more mapped rows in hyperliquid.api, hyperliquid.builderFee, hyperliquid.cross-cache, hyperliquid.exchange, hyperliquid.fast-asset-ctxs, hyperliquid.income, hyperliquid.order-history, hyperliquid.order-inference, hyperliquid.order-response, hyperliquid.rateLimiter, hyperliquid.signing, hyperliquid.utils, hyperliquid.ws-diagnostics, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/json_values.rs::JsonValue"
+reason = "Shared raw JSON value carrier (UTF-16 strings, binary64 numbers, ordered keys) for the mapped getHyperliquidRestRequestWeight, getRequestActionType; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleCallback"
+reason = "Captured-value shape of the order-refresh timer/rejection callbacks for the mapped HyperliquidExchange.scheduleOrderRefresh; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleCallbackKind"
+reason = "Timer-versus-rejection selector of the order-refresh callbacks for the mapped HyperliquidExchange.scheduleOrderRefresh; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost::boolean"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability LifecycleHost used by the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost::greater_than"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability LifecycleHost used by the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost::is_nullish"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability LifecycleHost used by the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost::lifecycle_callback"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability LifecycleHost used by the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost::null"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability LifecycleHost used by the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost::number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability LifecycleHost used by the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost::subtract"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability LifecycleHost used by the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost::super_get"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability LifecycleHost used by the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/lifecycle_delegates.rs::LifecycleHost::template_string"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability LifecycleHost used by the mapped HyperliquidExchange#endRetryChain, HyperliquidExchange.dispose, HyperliquidExchange.scheduleOrderRefresh, HyperliquidPrivateWebSocket.dispose, HyperliquidPublicWebSocket.dispose, HyperliquidSpotExchange.dispose. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::close_after_throw"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::construct"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::first_binding"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::index"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::is_nullish"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::is_string"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::iterator"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::next"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::null"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::strict_equal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::subtract"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::template_string"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_data_selectors.rs::MarketDataHost::unit_regex"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketDataHost used by the mapped HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#resolveCoinToSymbol, HyperliquidExchange#resolveSpotDisplayName, HyperliquidExchange.priceToPrecision, HyperliquidPrivateWebSocket#collectHip3DexesFromFills, HyperliquidPrivateWebSocket#getStaleCheckChannelKey, HyperliquidSpotExchange.priceToPrecision, HyperliquidSpotExchange.symbolOrIdToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::FastAssetCtxHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped decodeHyperliquidFastAssetCtxs; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::FastAssetCtxHost::atob"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability FastAssetCtxHost used by the mapped decodeHyperliquidFastAssetCtxs. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::FastAssetCtxHost::decode_text"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability FastAssetCtxHost used by the mapped decodeHyperliquidFastAssetCtxs. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::FastAssetCtxHost::inflate_raw"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability FastAssetCtxHost used by the mapped decodeHyperliquidFastAssetCtxs. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MarketScalarHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped calculatePricePrecision, parseHyperliquidOpenInterestNotional, parseHyperliquidVolumeFields, symbolToCoin; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MarketScalarHost::lowercase"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketScalarHost used by the mapped calculatePricePrecision, parseHyperliquidOpenInterestNotional, parseHyperliquidVolumeFields, symbolToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MarketScalarHost::number_to_string"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketScalarHost used by the mapped calculatePricePrecision, parseHyperliquidOpenInterestNotional, parseHyperliquidVolumeFields, symbolToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MarketScalarHost::number_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketScalarHost used by the mapped calculatePricePrecision, parseHyperliquidOpenInterestNotional, parseHyperliquidVolumeFields, symbolToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MarketScalarHost::parse_float"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketScalarHost used by the mapped calculatePricePrecision, parseHyperliquidOpenInterestNotional, parseHyperliquidVolumeFields, symbolToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MarketScalarHost::parse_to_int"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketScalarHost used by the mapped calculatePricePrecision, parseHyperliquidOpenInterestNotional, parseHyperliquidVolumeFields, symbolToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MarketScalarHost::precise_compare"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketScalarHost used by the mapped calculatePricePrecision, parseHyperliquidOpenInterestNotional, parseHyperliquidVolumeFields, symbolToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MarketScalarHost::value_by_key"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MarketScalarHost used by the mapped calculatePricePrecision, parseHyperliquidOpenInterestNotional, parseHyperliquidVolumeFields, symbolToCoin. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MetaTupleHost"
+reason = "Host capability trait (base capability extended by StartupHost, JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MetaTupleHost::first_two"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MetaTupleHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MetaTupleHost::implicit_string"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MetaTupleHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MetaTupleHost::log_warning"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MetaTupleHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::MetaTupleHost::type_of"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability MetaTupleHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::PreciseComparison"
+reason = "Inline operator selector for the host's full ECMAScript arithmetic/relational primitives in the mapped calculatePricePrecision; the operator semantics stay in the host, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::await_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::call"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::error_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::helper_promise"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::info_endpoint"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::meta_info_type"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::null"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::object"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::request_config"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::string_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::tuple"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/market_startup.rs::StartupHost::warning_severity"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupHost used by the mapped fetchCoreMetaAndAssetCtxsWithFallback, fetchHip3MetaAndAssetCtxsWithRetry. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::OrderRequestHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#getBuilderInfo, HyperliquidExchange#postOrderAction, HyperliquidExchange#signActionOrDefer, HyperliquidExchange#validateResponseAndExtractOrderIds, HyperliquidExchange.changeMarginType, HyperliquidExchange.getOrderErrorTelemetry, HyperliquidExchange.scheduleCancel, HyperliquidExchange.setLeverage, HyperliquidSpotExchange.changeMarginType, HyperliquidSpotExchange.setLeverage; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::OrderRequestHost::await_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability OrderRequestHost used by the mapped HyperliquidExchange#getBuilderInfo, HyperliquidExchange#postOrderAction, HyperliquidExchange#signActionOrDefer, HyperliquidExchange#validateResponseAndExtractOrderIds, HyperliquidExchange.changeMarginType, HyperliquidExchange.getOrderErrorTelemetry, HyperliquidExchange.scheduleCancel, HyperliquidExchange.setLeverage, HyperliquidSpotExchange.changeMarginType, HyperliquidSpotExchange.setLeverage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::OrderRequestHost::compare"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability OrderRequestHost used by the mapped HyperliquidExchange#getBuilderInfo, HyperliquidExchange#postOrderAction, HyperliquidExchange#signActionOrDefer, HyperliquidExchange#validateResponseAndExtractOrderIds, HyperliquidExchange.changeMarginType, HyperliquidExchange.getOrderErrorTelemetry, HyperliquidExchange.scheduleCancel, HyperliquidExchange.setLeverage, HyperliquidSpotExchange.changeMarginType, HyperliquidSpotExchange.setLeverage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::OrderRequestHost::construct_error"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability OrderRequestHost used by the mapped HyperliquidExchange#getBuilderInfo, HyperliquidExchange#postOrderAction, HyperliquidExchange#signActionOrDefer, HyperliquidExchange#validateResponseAndExtractOrderIds, HyperliquidExchange.changeMarginType, HyperliquidExchange.getOrderErrorTelemetry, HyperliquidExchange.scheduleCancel, HyperliquidExchange.setLeverage, HyperliquidSpotExchange.changeMarginType, HyperliquidSpotExchange.setLeverage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::OrderRequestHost::instance_of"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability OrderRequestHost used by the mapped HyperliquidExchange#getBuilderInfo, HyperliquidExchange#postOrderAction, HyperliquidExchange#signActionOrDefer, HyperliquidExchange#validateResponseAndExtractOrderIds, HyperliquidExchange.changeMarginType, HyperliquidExchange.getOrderErrorTelemetry, HyperliquidExchange.scheduleCancel, HyperliquidExchange.setLeverage, HyperliquidSpotExchange.changeMarginType, HyperliquidSpotExchange.setLeverage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::OrderRequestHost::type_is"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability OrderRequestHost used by the mapped HyperliquidExchange#getBuilderInfo, HyperliquidExchange#postOrderAction, HyperliquidExchange#signActionOrDefer, HyperliquidExchange#validateResponseAndExtractOrderIds, HyperliquidExchange.changeMarginType, HyperliquidExchange.getOrderErrorTelemetry, HyperliquidExchange.scheduleCancel, HyperliquidExchange.setLeverage, HyperliquidSpotExchange.changeMarginType, HyperliquidSpotExchange.setLeverage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::OrderRequestHost::unary_number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability OrderRequestHost used by the mapped HyperliquidExchange#getBuilderInfo, HyperliquidExchange#postOrderAction, HyperliquidExchange#signActionOrDefer, HyperliquidExchange#validateResponseAndExtractOrderIds, HyperliquidExchange.changeMarginType, HyperliquidExchange.getOrderErrorTelemetry, HyperliquidExchange.scheduleCancel, HyperliquidExchange.setLeverage, HyperliquidSpotExchange.changeMarginType, HyperliquidSpotExchange.setLeverage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/order_request_leaves.rs::RequestComparison"
+reason = "Inline operator selector for the host's full ECMAScript arithmetic/relational primitives in the mapped HyperliquidExchange.getOrderErrorTelemetry, HyperliquidExchange.scheduleCancel, checkBuilderFeeApproved; the operator semantics stay in the host, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::DispatchOperator"
+reason = "Inline operator selector for the host's full ECMAScript arithmetic/relational primitives in the mapped HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidPrivateWebSocket#getMessageTimestamp, HyperliquidPrivateWebSocket#handleUserEvents, HyperliquidPrivateWebSocket#isStaleMessage, HyperliquidPrivateWebSocket.onMessage, HyperliquidPublicWebSocket.handleFastAssetCtxs; the operator semantics stay in the host, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::array"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::boolean"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::construct"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::for_in"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::for_in_next"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::has_property"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::index"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::is_null"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::is_nullish"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::operator"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::regex"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::strict_equal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::template_string"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::typeof_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_message_dispatch.rs::PrivateMessageHost::valid_fill_predicate"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivateMessageHost used by the mapped HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchCorePerpsState, HyperliquidExchange#fetchFee, HyperliquidExchange#warnOnMismatchedApiWallet, HyperliquidExchange.fetchAllHip3Positions, HyperliquidExchange.fetchAndSetPrivateSnapshot, HyperliquidExchange.fetchPositions, HyperliquidExchange.handleSpotClearinghouseStateUpdate, HyperliquidExchange.validateAccount, HyperliquidPrivateWebSocket#extractCoreBalanceSummary and 13 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::PrivatePositionHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidPrivateWebSocket#extractCoreBalanceSummary, HyperliquidPrivateWebSocket#getFillPositionSide, HyperliquidPrivateWebSocket#getMessageTimestamp, HyperliquidPrivateWebSocket#getRealizedPnlForPosition, HyperliquidPrivateWebSocket#incrementRealizedPnlForPosition, HyperliquidPrivateWebSocket#resolvePositionMode, HyperliquidPrivateWebSocket#resolveSymbolFromCoin, HyperliquidPrivateWebSocket#safeParseNumber, HyperliquidPrivateWebSocket#setRealizedPnlForPosition, HyperliquidPrivateWebSocket#trackProcessedRealizedPnlFill; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::PrivatePositionHost::add"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivatePositionHost used by the mapped HyperliquidPrivateWebSocket#extractCoreBalanceSummary, HyperliquidPrivateWebSocket#getFillPositionSide, HyperliquidPrivateWebSocket#getMessageTimestamp, HyperliquidPrivateWebSocket#getRealizedPnlForPosition, HyperliquidPrivateWebSocket#incrementRealizedPnlForPosition, HyperliquidPrivateWebSocket#resolvePositionMode, HyperliquidPrivateWebSocket#resolveSymbolFromCoin, HyperliquidPrivateWebSocket#safeParseNumber, HyperliquidPrivateWebSocket#setRealizedPnlForPosition, HyperliquidPrivateWebSocket#trackProcessedRealizedPnlFill. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::PrivatePositionHost::greater_than"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivatePositionHost used by the mapped HyperliquidPrivateWebSocket#extractCoreBalanceSummary, HyperliquidPrivateWebSocket#getFillPositionSide, HyperliquidPrivateWebSocket#getMessageTimestamp, HyperliquidPrivateWebSocket#getRealizedPnlForPosition, HyperliquidPrivateWebSocket#incrementRealizedPnlForPosition, HyperliquidPrivateWebSocket#resolvePositionMode, HyperliquidPrivateWebSocket#resolveSymbolFromCoin, HyperliquidPrivateWebSocket#safeParseNumber, HyperliquidPrivateWebSocket#setRealizedPnlForPosition, HyperliquidPrivateWebSocket#trackProcessedRealizedPnlFill. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::PrivatePositionHost::index"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivatePositionHost used by the mapped HyperliquidPrivateWebSocket#extractCoreBalanceSummary, HyperliquidPrivateWebSocket#getFillPositionSide, HyperliquidPrivateWebSocket#getMessageTimestamp, HyperliquidPrivateWebSocket#getRealizedPnlForPosition, HyperliquidPrivateWebSocket#incrementRealizedPnlForPosition, HyperliquidPrivateWebSocket#resolvePositionMode, HyperliquidPrivateWebSocket#resolveSymbolFromCoin, HyperliquidPrivateWebSocket#safeParseNumber, HyperliquidPrivateWebSocket#setRealizedPnlForPosition, HyperliquidPrivateWebSocket#trackProcessedRealizedPnlFill. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::PrivatePositionHost::lowercase"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivatePositionHost used by the mapped HyperliquidPrivateWebSocket#extractCoreBalanceSummary, HyperliquidPrivateWebSocket#getFillPositionSide, HyperliquidPrivateWebSocket#getMessageTimestamp, HyperliquidPrivateWebSocket#getRealizedPnlForPosition, HyperliquidPrivateWebSocket#incrementRealizedPnlForPosition, HyperliquidPrivateWebSocket#resolvePositionMode, HyperliquidPrivateWebSocket#resolveSymbolFromCoin, HyperliquidPrivateWebSocket#safeParseNumber, HyperliquidPrivateWebSocket#setRealizedPnlForPosition, HyperliquidPrivateWebSocket#trackProcessedRealizedPnlFill. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::PrivatePositionHost::max_tracked_fill_ids"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivatePositionHost used by the mapped HyperliquidPrivateWebSocket#extractCoreBalanceSummary, HyperliquidPrivateWebSocket#getFillPositionSide, HyperliquidPrivateWebSocket#getMessageTimestamp, HyperliquidPrivateWebSocket#getRealizedPnlForPosition, HyperliquidPrivateWebSocket#incrementRealizedPnlForPosition, HyperliquidPrivateWebSocket#resolvePositionMode, HyperliquidPrivateWebSocket#resolveSymbolFromCoin, HyperliquidPrivateWebSocket#safeParseNumber, HyperliquidPrivateWebSocket#setRealizedPnlForPosition, HyperliquidPrivateWebSocket#trackProcessedRealizedPnlFill. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::PrivatePositionHost::number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivatePositionHost used by the mapped HyperliquidPrivateWebSocket#extractCoreBalanceSummary, HyperliquidPrivateWebSocket#getFillPositionSide, HyperliquidPrivateWebSocket#getMessageTimestamp, HyperliquidPrivateWebSocket#getRealizedPnlForPosition, HyperliquidPrivateWebSocket#incrementRealizedPnlForPosition, HyperliquidPrivateWebSocket#resolvePositionMode, HyperliquidPrivateWebSocket#resolveSymbolFromCoin, HyperliquidPrivateWebSocket#safeParseNumber, HyperliquidPrivateWebSocket#setRealizedPnlForPosition, HyperliquidPrivateWebSocket#trackProcessedRealizedPnlFill. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/private_position_helpers.rs::PrivatePositionHost::number_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability PrivatePositionHost used by the mapped HyperliquidPrivateWebSocket#extractCoreBalanceSummary, HyperliquidPrivateWebSocket#getFillPositionSide, HyperliquidPrivateWebSocket#getMessageTimestamp, HyperliquidPrivateWebSocket#getRealizedPnlForPosition, HyperliquidPrivateWebSocket#incrementRealizedPnlForPosition, HyperliquidPrivateWebSocket#resolvePositionMode, HyperliquidPrivateWebSocket#resolveSymbolFromCoin, HyperliquidPrivateWebSocket#safeParseNumber, HyperliquidPrivateWebSocket#setRealizedPnlForPosition, HyperliquidPrivateWebSocket#trackProcessedRealizedPnlFill. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_account_reads.rs::AccountCallback"
+reason = "Callback identity/capture shape dispatched by run_account_callback for the mapped HyperliquidExchange.tick, HyperliquidSpotExchange#generateFakePositionsFromMarkets, HyperliquidSpotExchange.fetchOHLCV, HyperliquidSpotExchange.fetchPositions, HyperliquidSpotExchange.tick; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_account_reads.rs::AccountFuture"
+reason = "Boxed host Promise/await primitive alias for the mapped HyperliquidExchange, HyperliquidExchange#fetchMarketsAndTickers, HyperliquidExchange#refreshHip3OrdersWithRetry, HyperliquidExchange#refreshOrders, HyperliquidExchange#refreshUnifiedSpotCollateralBalance, HyperliquidExchange#resolveApplicationIdFromKey, HyperliquidExchange#resolveUserAbstractionMode, HyperliquidExchange.createLimitOrderWires, HyperliquidExchange.placeOrders, HyperliquidExchange.refreshHip3PositionsAsync and 23 more mapped rows in hyperliquid.exchange, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-public; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_client.rs::ClientCallback"
+reason = "Callback identity/capture shape dispatched by run_client_callback for the mapped RateLimiter#refillTokens, RateLimiter.waitForToken, createAPI; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_client.rs::SpotClientHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped RateLimiter, RateLimiter#refillTokens, RateLimiter.constructor, RateLimiter.waitForToken, createAPI; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_client.rs::SpotClientHost::allocate_class"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotClientHost used by the mapped RateLimiter, RateLimiter#refillTokens, RateLimiter.constructor, RateLimiter.waitForToken, createAPI. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_client.rs::SpotClientHost::class_pair"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotClientHost used by the mapped RateLimiter, RateLimiter#refillTokens, RateLimiter.constructor, RateLimiter.waitForToken, createAPI. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_client.rs::SpotClientHost::client_callback"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotClientHost used by the mapped RateLimiter, RateLimiter#refillTokens, RateLimiter.constructor, RateLimiter.waitForToken, createAPI. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_client.rs::SpotClientHost::define_hidden"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotClientHost used by the mapped RateLimiter, RateLimiter#refillTokens, RateLimiter.constructor, RateLimiter.waitForToken, createAPI. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_client.rs::SpotClientHost::native_method"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotClientHost used by the mapped RateLimiter, RateLimiter#refillTokens, RateLimiter.constructor, RateLimiter.waitForToken, createAPI. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_json.rs::JsString"
+reason = "Shared UTF-16 code-unit string carrier for the mapped HyperliquidCrossCache#broadcastCacheUpdate, HyperliquidCrossCache#getPrePlacementKey, HyperliquidCrossCache.hasSeenFill, HyperliquidCrossCache.markFillSeen, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#fetchBuilderFeeApproval, HyperliquidExchange#fetchHip3Dexs, HyperliquidExchange#fetchHip3Markets, HyperliquidExchange#fetchMarketsHelper, HyperliquidExchange#generateFakePositionsFromMarkets and 37 more mapped rows in hyperliquid.builderFee, hyperliquid.cross-cache, hyperliquid.exchange, hyperliquid.rateLimiter, hyperliquid.utils, hyperliquid.ws-diagnostics, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.types, hyperliquidspot.ws-public; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::BookCapture"
+reason = "Captured order-book record shared by the run_public_callback bodies for the mapped HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::PublicCallback"
+reason = "Callback identity/capture shape dispatched by run_public_callback for the mapped HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::PublicMethod"
+reason = "Prototype-method identity selector dispatched by run_public_method for the mapped HyperliquidSpotPublicWebSocket; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost::append_literal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotPublicHost used by the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost::assign_index"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotPublicHost used by the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost::base_socket"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotPublicHost used by the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost::decrement"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotPublicHost used by the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost::delete_index"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotPublicHost used by the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost::negate"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotPublicHost used by the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost::public_arrow"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotPublicHost used by the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost::public_callback"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotPublicHost used by the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::SpotPublicHost::record_binding"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotPublicHost used by the mapped HyperliquidSpotPublicWebSocket, HyperliquidSpotPublicWebSocket.constructor, HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_public_subscriptions.rs::Subscription"
+reason = "Captured subscription record shared by the run_public_callback bodies for the mapped HyperliquidSpotPublicWebSocket.listenOHLCV, HyperliquidSpotPublicWebSocket.listenOrderBook; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_runtime.rs::ExchangeMethod"
+reason = "Prototype-method/arrow identity selector dispatched by run_exchange_method for the mapped HyperliquidSpotExchange; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_runtime.rs::SpotRuntimeHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidSpotExchange; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_runtime.rs::SpotRuntimeHost::base_exchange"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotRuntimeHost used by the mapped HyperliquidSpotExchange. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_runtime.rs::SpotRuntimeHost::exchange_arrow"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotRuntimeHost used by the mapped HyperliquidSpotExchange. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_runtime.rs::SpotRuntimeHost::exchange_method"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotRuntimeHost used by the mapped HyperliquidSpotExchange. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::SpotTradingHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidSpotExchange#fetchMarketsAndTickers, HyperliquidSpotExchange.cancelOrders, HyperliquidSpotExchange.placeOrder, HyperliquidSpotExchange.updateOrder; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::SpotTradingHost::has_property"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotTradingHost used by the mapped HyperliquidSpotExchange#fetchMarketsAndTickers, HyperliquidSpotExchange.cancelOrders, HyperliquidSpotExchange.placeOrder, HyperliquidSpotExchange.updateOrder. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::SpotTradingHost::trading_binding"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotTradingHost used by the mapped HyperliquidSpotExchange#fetchMarketsAndTickers, HyperliquidSpotExchange.cancelOrders, HyperliquidSpotExchange.placeOrder, HyperliquidSpotExchange.updateOrder. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::SpotTradingHost::trading_callback"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotTradingHost used by the mapped HyperliquidSpotExchange#fetchMarketsAndTickers, HyperliquidSpotExchange.cancelOrders, HyperliquidSpotExchange.placeOrder, HyperliquidSpotExchange.updateOrder. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::SpotTradingHost::unary_number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotTradingHost used by the mapped HyperliquidSpotExchange#fetchMarketsAndTickers, HyperliquidSpotExchange.cancelOrders, HyperliquidSpotExchange.placeOrder, HyperliquidSpotExchange.updateOrder. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_trading.rs::TradingCallback"
+reason = "Callback identity/capture shape dispatched by run_trading_callback for the mapped HyperliquidSpotExchange#fetchMarketsAndTickers, HyperliquidSpotExchange.cancelOrders, HyperliquidSpotExchange.placeOrder; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::PrivateMethod"
+reason = "Prototype-method identity selector dispatched by run_private_callback for the mapped HyperliquidSpotPrivateWebSocket; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::array"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::arrow"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::construct_base"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::equal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::event_data"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::for_in"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::for_in_next"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::greater"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::index"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::is_array"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::is_nullish"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::json_parse"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::less"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::order_side"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::parse_float"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::private_class"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/spot_ws_dispatch.rs::SpotWsHost::template_string"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability SpotWsHost used by the mapped HyperliquidSpotPrivateWebSocket, HyperliquidSpotPrivateWebSocket#handleSpotClearinghouseState, HyperliquidSpotPrivateWebSocket.constructor, HyperliquidSpotPrivateWebSocket.handleFills, HyperliquidSpotPrivateWebSocket.handleFundings, HyperliquidSpotPrivateWebSocket.handleUserNonFundingLedgerUpdates, HyperliquidSpotPrivateWebSocket.onMessage, HyperliquidSpotPublicWebSocket.handleAllMids, HyperliquidSpotPublicWebSocket.onMessage. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::Error"
+reason = "Associated value/error type of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::Value"
+reason = "Associated value/error type of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::array"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::await_value"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::call"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::callback"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::construct"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::divide"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::get"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::global"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::literal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::null"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::number"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::template"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::truthy"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/startup_timeout.rs::StartupTimeoutHost::undefined"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability StartupTimeoutHost used by the mapped HyperliquidExchange#withStartupTimeout. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::DiagnosticScope"
+reason = "Public/private scope selector of the lazy diagnostic formatter for the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendWithDiagnostics; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost::boolean"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsEmissionHost used by the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost::close_after_throw"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsEmissionHost used by the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost::formatter"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsEmissionHost used by the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost::iterator"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsEmissionHost used by the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost::next"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsEmissionHost used by the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost::spread_into"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsEmissionHost used by the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost::string_units"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsEmissionHost used by the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost::system_types"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsEmissionHost used by the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_emission.rs::WsEmissionHost::triple"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsEmissionHost used by the mapped HyperliquidPrivateWebSocket#emitReceiveDiagnostics, HyperliquidPrivateWebSocket#sendWithDiagnostics, HyperliquidPrivateWebSocket#subscribeAllActiveAssetData, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket#emitReceiveDiagnostics, HyperliquidPublicWebSocket#sendSubscription, HyperliquidPublicWebSocket#sendUnsubscription, HyperliquidPublicWebSocket#sendWithDiagnostics, HyperliquidPublicWebSocket.subscribePublicTopics, HyperliquidPublicWebSocket.subscribeUserTopics and 4 more mapped rows in hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::PingCallback"
+reason = "Captured-value shape of the scheduled ping timeout for the mapped HyperliquidPrivateWebSocket#schedulePing, HyperliquidPublicWebSocket#schedulePing; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::SocketKind"
+reason = "Public/private socket selector for the shared ping lifecycle host bindings for the mapped HyperliquidPrivateWebSocket#schedulePing, HyperliquidPublicWebSocket#schedulePing; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::Error"
+reason = "Associated value/error type of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::Value"
+reason = "Associated value/error type of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::call"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::callback"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::define_data"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::get"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::global"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::literal"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::object"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::set"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::truthy"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_ping_lifecycle.rs::WsPingHost::undefined"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsPingHost used by the mapped HyperliquidExchange, HyperliquidExchange#applyBalanceFromCurrentMode, HyperliquidExchange#buildMarketsLowerCaseMap, HyperliquidExchange#buildUnifiedSpotCollateralSnapshot, HyperliquidExchange#endRetryChain, HyperliquidExchange#extractClearinghouseBalanceSummary, HyperliquidExchange#generateNonce, HyperliquidExchange#getAuthoritativeUnifiedUsdcAvailability, HyperliquidExchange#getSpotCollateralMarkPrice, HyperliquidExchange#resolveCoinToSymbol and 101 more mapped rows in hyperliquid.exchange, hyperliquid.ws-private, hyperliquid.ws-public, hyperliquidspot.api, hyperliquidspot.exchange, hyperliquidspot.rateLimiter, hyperliquidspot.ws-private, hyperliquidspot.ws-public. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs::WsTransportHost"
+reason = "Host capability trait (JS realm primitives: property Get/Set, calls, literals, coercions, throws) for the mapped HyperliquidPrivateWebSocket.connectAndSubscribe, HyperliquidPublicWebSocket.connectAndSubscribe, HyperliquidSpotPrivateWebSocket.connectAndSubscribe, HyperliquidSpotPrivateWebSocket.onOpen, HyperliquidSpotPublicWebSocket.connectAndSubscribe; adds no TypeScript symbol of its own."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs::WsTransportHost::boolean"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsTransportHost used by the mapped HyperliquidPrivateWebSocket.connectAndSubscribe, HyperliquidPublicWebSocket.connectAndSubscribe, HyperliquidSpotPrivateWebSocket.connectAndSubscribe, HyperliquidSpotPrivateWebSocket.onOpen, HyperliquidSpotPublicWebSocket.connectAndSubscribe. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs::WsTransportHost::urls_binding"
+reason = "Required host capability member (realm primitive, callback allocation or binding) of host capability WsTransportHost used by the mapped HyperliquidPrivateWebSocket.connectAndSubscribe, HyperliquidPublicWebSocket.connectAndSubscribe, HyperliquidSpotPrivateWebSocket.connectAndSubscribe, HyperliquidSpotPrivateWebSocket.onOpen, HyperliquidSpotPublicWebSocket.connectAndSubscribe. No independent venue algorithm."
+
+[[exempt]]
+rs = "safe-cex-venue-hyperliquid/src/ws_transport_leaves.rs::WsVenue"
+reason = "Perp/spot selector of the WSS_URLS import binding for the mapped HyperliquidPrivateWebSocket.connectAndSubscribe, HyperliquidPrivateWebSocket.subscribeSystemTopics, HyperliquidPublicWebSocket.connectAndSubscribe, HyperliquidSpotPrivateWebSocket.connectAndSubscribe, HyperliquidSpotPrivateWebSocket.subscribeSystemTopics, HyperliquidSpotPublicWebSocket.connectAndSubscribe; the source bodies live in those mapped Rust items, with no additional TypeScript symbol."
