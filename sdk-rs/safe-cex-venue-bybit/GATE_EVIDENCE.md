@@ -3865,7 +3865,9 @@ extractor check reports zero changed/added/orphaned manifests.
 
 The override inventory retains all 1101 incoming rows and adds one reviewed
 Bybit reference, `self.topics.dispose()` inside `PublicProtocol::dispose`: the
-core protocol cleanup calls the source Spot active-listener removal before core
+core protocol cleanup calls the source Spot active-listener removal
+(`packages/safe-cex/src/exchanges/bybit/bybitspot.ws-public.ts:144-147`,
+`BybitPublicWebsocket.dispose`) before core
 socket cleanup, with no BaseExchange dispatch bypass. Six existing Spot helper
 references keep identical targets; their enclosing installer fingerprint changes
 from `d269ecf6e0eb661f` to `0858624e3dde1a3b` solely because the two source selector

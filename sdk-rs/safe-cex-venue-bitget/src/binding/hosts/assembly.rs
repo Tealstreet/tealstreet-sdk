@@ -628,7 +628,7 @@ mod signature_tests {
     use serde_json::{Value, json};
 
     #[test]
-    fn venue_signature_predicate_source_witness_keeps_shared_coercion_gap_visible() {
+    fn venue_signature_predicate_matches_actual_source_values_and_getters() {
         let output = std::process::Command::new("node")
             .arg(concat!(
                 env!("CARGO_MANIFEST_DIR"),
@@ -718,20 +718,6 @@ mod signature_tests {
                 },
             )
             .collect();
-        // The predicate row remains pending: shared String conversion does not
-        // yet run arbitrary object toString hooks. Keep these source-positive
-        // gaps visible instead of treating the open runtime contract as ported.
-        for (native, source) in actual.iter().zip(&expected) {
-            assert_eq!(native["label"], source["label"]);
-            if matches!(
-                native["label"].as_str(),
-                Some("coerced-code" | "coerced-message")
-            ) {
-                assert_eq!(native["result"], false, "pending shared String coercion");
-                assert_eq!(source["result"], true, "actual source custom coercion");
-            } else {
-                assert_eq!(native, source);
-            }
-        }
+        assert_eq!(actual, expected);
     }
 }

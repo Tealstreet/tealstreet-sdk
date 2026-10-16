@@ -3204,3 +3204,51 @@ fn private_base_send_with_log_forwards_outbound_text_and_failures() {
     );
     assert_eq!(base.diagnostic_sends.get(), 5);
 }
+
+#[test]
+#[cfg(feature = "native")]
+fn native_import_default_weight_property_returns_existing_values() {
+    struct UnusedAdapter;
+    impl safe_cex_transport::RestAdapter for UnusedAdapter {
+        fn execute(
+            &self,
+            _: safe_cex_transport::RestRequest,
+        ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+            panic!("property forwarding must perform no I/O")
+        }
+    }
+    let dependencies = safe_cex_venue_binance::native_host::native_dependencies(
+        Rc::new(Runtime::default()),
+        std::sync::Arc::new(UnusedAdapter),
+        Rc::new(|_, _| panic!("property forwarding must not construct external data")),
+        None,
+    );
+    let receiver: &dyn ExchangeImports = dependencies.imports.as_ref();
+    let child = record([("id", number(-0.0))]);
+    let response = record([("headers", child.clone()), ("status", number(429.0))]);
+    assert!(
+        receiver
+            .weight_response_property(&response, "headers")
+            .unwrap()
+            .same(&child)
+    );
+    assert!(matches!(
+        receiver
+            .weight_response_property(&response, "status")
+            .unwrap(),
+        EventValue::Number(429.0)
+    ));
+    assert!(matches!(
+        receiver
+            .weight_response_property(&response, "missing")
+            .unwrap(),
+        EventValue::Undefined
+    ));
+    assert_eq!(
+        receiver
+            .weight_response_property(&EventValue::Null, "status")
+            .unwrap_err()
+            .name,
+        "TypeError"
+    );
+}

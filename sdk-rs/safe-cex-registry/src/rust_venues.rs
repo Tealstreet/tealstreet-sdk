@@ -29,6 +29,7 @@ use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_lighter::binding::exchange::{LighterDependencies, LighterNativeExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use safe_cex_venue_polymarket::binding::exchange::{PolymarketDependencies, PolymarketExchange};
+use safe_cex_venue_weex::{WeexDependencies, WeexExchange};
 use safe_cex_venue_woo::{WooDependencies, WooExchange};
 use std::rc::Rc;
 
@@ -129,6 +130,11 @@ pub trait RustVenueHost {
 
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
+    }
+    fn weex(&self) -> Result<WeexDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "WEEX dependencies were not supplied by this RustVenueHost",
+        ))
     }
     fn woo(&self) -> Result<WooDependencies, ExchangeError> {
         Err(ExchangeError::new(
@@ -233,6 +239,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Phemex, phemex_constructor),
     (ExchangeName::Polymarket, polymarket_constructor),
     (ExchangeName::Woo, woo_constructor),
+    (ExchangeName::Weex, weex_constructor),
 ];
 
 pub fn grvt_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -437,6 +444,12 @@ fn external_factory(
             },
         )),
     }
+}
+
+pub fn weex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(WeexExchange::new(name, options, store, host.weex()?)?)
+    })
 }
 
 pub fn woo_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
