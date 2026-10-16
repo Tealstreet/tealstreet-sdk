@@ -198,9 +198,9 @@ note = "CHOSEN: native_coinbasespot selects the actual source module ./coinbase/
 ts = "exchangeRegistry.cryptocom"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_cryptocom"
+rs = [ "safe-cex-registry/src/loaders.rs::native_cryptocom", "safe-cex-registry/src/rust_venues.rs::cryptocom_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::cryptocom" ]
 status = "divergent"
-note = "CHOSEN: native_cryptocom selects the actual source module ./cryptocom/cryptocom.exchange and export CryptocomExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_cryptocom. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::cryptocom_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::cryptocom construct the bound Crypto.com venue with shared native HTTP/WS runtime, hosted signing and external-public-data provider. CHOSEN: native_cryptocom selects the actual source module ./cryptocom/cryptocom.exchange and export CryptocomExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_cryptocom. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.grvt"

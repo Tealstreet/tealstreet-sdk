@@ -1,7 +1,7 @@
 # Rust venue construction through the registry
 
 Status: implemented for `asterdex`, `backpack`, the Bitget family (`bitget`, `bitgetinverse`,
-`bitgetusdc`), `bitunix`, `blofin`, the Kraken family (`kraken`, `krakenspot`),
+`bitgetusdc`), `bitunix`, `blofin`, `cryptocom`, the Kraken family (`kraken`, `krakenspot`),
 `hyperliquid`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
@@ -199,3 +199,9 @@ separate from the venue's local-key signing interceptor.
 trait methods over local reqwest HTTP, verifies signed action/nonce bytes on the
 server, and checks both network origins, proxy preservation, info bypass, repeat
 query encoding and limiter identity across separate account hosts.
+
+Crypto.com is in the Rust constructor table. `tests/native_host_cryptocom.rs`
+constructs the bound venue using production native inputs and the shared host
+limiter argument, then checks its identity, distinct market precision steps,
+real local HTTP dispatch and Store read purity. The registry passes through the
+account's hosted signer and external-public-data provider to the venue binding.

@@ -224,6 +224,23 @@ impl RustVenueHost for NativeVenueHost {
         self.remote.clone()
     }
 
+    fn cryptocom(
+        &self,
+    ) -> Result<safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies, ExchangeError>
+    {
+        Ok(
+            safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                    self.remote.clone(),
+                ),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
         if self.remote.is_some() {
             return Err(ExchangeError::new(

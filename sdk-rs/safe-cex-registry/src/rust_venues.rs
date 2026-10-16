@@ -73,6 +73,15 @@ pub trait RustVenueHost {
         ))
     }
 
+    fn cryptocom(
+        &self,
+    ) -> Result<safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies, ExchangeError>
+    {
+        Err(ExchangeError::new(
+            "cryptocom inputs are unavailable on this host",
+        ))
+    }
+
     /// Optional hosted account capability; no host-local secret is required.
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
@@ -115,6 +124,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Cryptocom, cryptocom_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
@@ -143,6 +153,19 @@ pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstruct
         let exchange =
             safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
         Ok(exchange)
+    })
+}
+
+pub fn cryptocom_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_cryptocom::binding::exchange::CryptocomExchange::new(
+                name,
+                options,
+                store,
+                host.cryptocom()?,
+            )?,
+        )
     })
 }
 

@@ -105,3 +105,11 @@ via `hyperliquid_rate_limiter()` and forwards it through `NativeAccountSpec`;
 never create a fresh budget per hosted account. The Hyperliquid adapter preserves
 the transport-resolved baseURL, repeat query serialization, hosted action signing
 and info skip-signing. Its local HTTP proof is `tests/native_host_hyperliquid.rs`.
+
+Crypto.com constructs through `cryptocom_constructor` using its bound Js runtime.
+Native inputs share the account's hosted signer between HTTP and private WS auth,
+and supply the existing external-public-data gateway factory. The native host
+constructor still takes the caller-owned Hyperliquid limiter introduced by the
+shared host API. `tests/native_host_cryptocom.rs` constructs through the registry
+and production native host, then reads markets over real local HTTP and checks
+read purity. The module-host construction path remains the default.
