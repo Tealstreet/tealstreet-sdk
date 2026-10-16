@@ -83,7 +83,12 @@ object. Its manifest row declares these independently from numeric normalization
 `PARSER_NUMERIC_EVIDENCE.md` records the raw source witnesses and positive Unicode.
 
 Signing envelope and secondary-options gates assert decoded native fields
-before re-encoding; roundtrip bytes cannot detect symmetric serde-name swaps.
+before re-encoding; roundtrip bytes cannot detect symmetric serde-name swaps. Secondary
+client derivation clones the typed options and overlays only the declared
+secondary credentials plus the selected proxy. Never serialize account options
+to copy them: JSON would erase native nonfinite signer types. The source oracle
+checks nested option identity before fixture encoding, and the native regression
+checks exact signer-type bits including negative zero and NaN payloads.
 The closed tryParseJson bit corpus cannot produce NaN and refuses it at capture.
 Its provenance supplement retains the old golden bytes, records the unknown
 original architecture, and distinguishes fresh verification from original capture.

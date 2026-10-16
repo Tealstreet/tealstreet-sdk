@@ -25,5 +25,17 @@ assert.ok(Object.hasOwn(constructed[1],'secret') && constructed[1].secret===unde
   'TS own-undefined secondary secret must erase primary secret');
 assert.ok(Object.hasOwn(constructed[1],'passphrase') && constructed[1].passphrase===undefined,
   'TS own-undefined secondary passphrase must erase primary passphrase');
+// Observe native fields before JSON fixture encoding can erase their identity.
+for (const signerType of [NaN, -0, Infinity, -Infinity, 1.5]) {
+ events=[];proxy=undefined;const actual=[];
+ const polymarket={apiKey:'native-credential',signerType};
+ const original={key:'primary',secret:'primary-secret',secondary_key:'secondary',polymarket};
+ module.exports.createApiWithSecondaryKey(original,{},options=>{actual.push(options);return {get(){}};});
+ assert.equal(actual.length,2);
+ assert.equal(actual[0],original);
+ assert.equal(actual[1].polymarket,polymarket,'source preserves nested options identity');
+ assert.ok(Object.is(actual[1].polymarket.signerType,signerType),'source preserves native signerType');
+ assert.equal(original.key,'primary');
+}
 assert.equal(cases.length,729);
 process.stdout.write(JSON.stringify(cases));
