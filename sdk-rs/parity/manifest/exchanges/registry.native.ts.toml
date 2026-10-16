@@ -390,9 +390,9 @@ note = "API split: safe-cex-registry/src/rust_venues.rs::orderly_constructor and
 ts = "exchangeRegistry.txflow"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_txflow"
+rs = [ "safe-cex-registry/src/loaders.rs::native_txflow", "safe-cex-registry/src/rust_venues.rs::txflow_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::txflow" ]
 status = "divergent"
-note = "CHOSEN: native_txflow selects the actual source module ./txflow/txflow.exchange and export TxFlowExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_txflow. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "API split: safe-cex-registry/src/rust_venues.rs::txflow_constructor and safe-cex-registry/src/rust_venues.rs::RustVenueHost::txflow supply the source scaffold and its native HTTP inputs. CHOSEN: native_txflow selects the actual source module ./txflow/txflow.exchange and export TxFlowExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. ConstructionPath::Rust constructs the existing Phase-0 TxFlowExchange with native HTTP inputs; start retains the exact source refusal and no REST, WebSocket, or trading support is enabled. tests/native_host_txflow.rs witnesses eager error emission and no IO. Renamed to safe-cex-registry/src/loaders.rs::native_txflow. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
 ts = "exchangeRegistry.what"

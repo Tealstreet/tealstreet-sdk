@@ -130,6 +130,16 @@ pub trait RustVenueHost {
         ))
     }
 
+    /// Native inputs for the source's Phase-0 scaffold; start still refuses support.
+    fn txflow(
+        &self,
+        _: &ExchangeOptions,
+    ) -> Result<safe_cex_exchange::http::HttpClientOptions, ExchangeError> {
+        Err(ExchangeError::new(
+            "TxFlow inputs are unavailable on this host",
+        ))
+    }
+
     /// Optional hosted account capability; no host-local secret is required.
     fn bitrue(&self) -> Result<safe_cex_venue_bitrue::BitrueDependencies, ExchangeError> {
         Err(ExchangeError::new(
@@ -253,6 +263,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxeudemo, okx_constructor),
     (ExchangeName::Phemex, phemex_constructor),
     (ExchangeName::Polymarket, polymarket_constructor),
+    (ExchangeName::Txflow, txflow_constructor),
     (ExchangeName::Woo, woo_constructor),
     (ExchangeName::Weex, weex_constructor),
 ];
@@ -668,5 +679,23 @@ pub fn apexomni_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
     ExchangeConstructor::new(move |name, options, store| {
         safe_cex_venue_apexomni::ApexOmniExchange::new(name, options, store, host.apexomni()?)
             .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
+}
+
+/// Construct the existing scaffold without widening its Phase-0 capabilities.
+pub fn txflow_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let http = host.txflow(&options)?;
+        let runtime = http.runtime.clone();
+        Ok(Rc::new(
+            safe_cex_venue_txflow::exchange::TxFlowExchange::new(
+                name,
+                options,
+                store,
+                runtime,
+                http,
+                &safe_cex_transport::TransportRegistry::default(),
+            )?,
+        ))
     })
 }

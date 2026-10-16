@@ -509,6 +509,20 @@ impl RustVenueHost for NativeVenueHost {
             },
         )
     }
+    fn txflow(
+        &self,
+        options: &safe_cex_types::ExchangeOptions,
+    ) -> Result<safe_cex_exchange::http::HttpClientOptions, ExchangeError> {
+        Ok(native_http_options(
+            &self.runtime,
+            (self.adapter)()?,
+            safe_cex_types::ExchangeName::Txflow,
+            options,
+            safe_cex_transport::RestRequest::default(),
+            self.remote.clone(),
+        ))
+    }
+
     fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
         Ok(safe_cex_venue_kraken::KrakenDependencies {
             runtime: self.runtime.clone(),
