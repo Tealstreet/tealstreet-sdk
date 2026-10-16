@@ -1,4 +1,5 @@
 //! Owned private socket with bound authentication and reconciliation methods.
+use crate::native_value::NativeValue;
 use crate::{
     adapter::BackpackExchange,
     native_value::Value,

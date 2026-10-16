@@ -27,6 +27,7 @@ use safe_cex_venue_coinbase::{CoinbaseDependencies, CoinbaseExchange};
 use safe_cex_venue_kraken::{KrakenDependencies, KrakenExchange};
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use safe_cex_venue_polymarket::binding::exchange::{PolymarketDependencies, PolymarketExchange};
+use safe_cex_venue_woo::{WooDependencies, WooExchange};
 use std::rc::Rc;
 
 /// What `BackpackExchange::new` takes besides the BaseExchange the registry builds.
@@ -104,6 +105,17 @@ pub trait RustVenueHost {
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
     }
+    fn woo(&self) -> Result<WooDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "WOO dependencies were not supplied by this RustVenueHost",
+        ))
+    }
+    /// Bybit linear/options and Demo share the same concrete binding inputs.
+    fn bybit(&self) -> Result<safe_cex_venue_bybit::BybitDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "Bybit inputs are unavailable on this host",
+        ))
+    }
     fn coinbase(&self) -> Result<CoinbaseDependencies, ExchangeError> {
         Err(ExchangeError::new(
             "Coinbase dependencies were not supplied by this RustVenueHost",
@@ -158,6 +170,8 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Bybit, bybit_constructor),
+    (ExchangeName::Bybitdemo, bybit_constructor),
     (ExchangeName::Coinbase, coinbase_constructor),
     (ExchangeName::Coinbasespot, coinbase_constructor),
     (ExchangeName::Hyperliquid, hyperliquid_constructor),
@@ -171,6 +185,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
     (ExchangeName::Polymarket, polymarket_constructor),
+    (ExchangeName::Woo, woo_constructor),
 ];
 
 pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
@@ -332,6 +347,20 @@ fn external_factory(
             },
         )),
     }
+}
+
+pub fn woo_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(WooExchange::new(name, options, store, host.woo()?)?)
+    })
+}
+
+pub fn bybit_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let exchange =
+            safe_cex_venue_bybit::BybitExchange::create(name, options, store, host.bybit()?)?;
+        Ok(exchange)
+    })
 }
 
 pub fn coinbase_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
