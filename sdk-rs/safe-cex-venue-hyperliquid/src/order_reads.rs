@@ -6,10 +6,17 @@ use crate::{
 };
 #[derive(Clone)]
 pub enum OrderReadCallback<V> {
-    ObserveIds { observed: V },
+    ObserveIds {
+        observed: V,
+    },
     Id,
     IdPair,
     Void,
+    /// findOrderByClientOrderId: `order.symbol === symbol && orderCarriesClientOrderId(order, id)`.
+    ClientOrderMatch {
+        symbol: V,
+        client_order_id: V,
+    },
 }
 /// Owned callbacks retain the shared runtime. Iterator operations use native records;
 /// a throw from the loop body closes with original-throw precedence. The one-element
@@ -133,6 +140,18 @@ pub fn run_order_read_callback<H: OrderReadHost>(
             h.array(&[id, first])
         }
         OrderReadCallback::Void => Ok(h.undefined()),
+        OrderReadCallback::ClientOrderMatch {
+            symbol,
+            client_order_id,
+        } => {
+            let own = h.get(&first, "symbol")?;
+            if !h.strict_equal(&own, symbol) {
+                return Ok(h.boolean(false));
+            }
+            let carries = h.imported("orderCarriesClientOrderId")?;
+            let undefined = h.undefined();
+            h.call(&carries, &undefined, &[first, client_order_id.clone()])
+        }
     }
 }
 async fn post<H: OrderReadHost>(
@@ -312,7 +331,15 @@ async fn internal_body<H: OrderReadHost>(h: &mut H, e: &H::Value) -> Result<H::V
                     method(h, &store, "addOrder", |_| Ok(vec![new]))?;
                 } else {
                     let mut changed = false;
-                    for field in ["status", "price", "amount", "filled", "type", "timeInForce"] {
+                    for field in [
+                        "status",
+                        "price",
+                        "amount",
+                        "filled",
+                        "type",
+                        "timeInForce",
+                        "clientOrderId",
+                    ] {
                         let a = h.get(&existing, field)?;
                         let b = h.get(&new, field)?;
                         if !h.strict_equal(&a, &b) {
@@ -465,5 +492,128 @@ pub fn refresh_orders<H: OrderReadHost>(h: &mut H, e: &H::Value) -> Result<H::Va
     let request = method(h, e, "fetchOrders", |_| Ok(vec![]))?;
     method(h, &request, "then", |h| {
         Ok(vec![h.order_read_callback(OrderReadCallback::Void)?])
+    })
+}
+/// ts: HyperliquidExchange.findOrderByClientOrderId. Asks `orderStatus` by cloid,
+/// which also answers for filled/cancelled orders and never writes the store; a
+/// miss is never definitive (a nonce up to two days old can still land).
+async fn find_body<H: OrderReadHost>(
+    h: &mut H,
+    e: &H::Value,
+    symbol: &H::Value,
+    client_order_id: &H::Value,
+) -> Result<H::Value, H::Error> {
+    let not_found = object(
+        h,
+        &[
+            ("found", h.boolean(false)),
+            ("definitive", h.boolean(false)),
+        ],
+    )?;
+    let store = h.get(e, "store")?;
+    let orders = h.get(&store, "orders")?;
+    let in_store = method(h, &orders, "find", |h| {
+        Ok(vec![h.order_read_callback(
+            OrderReadCallback::ClientOrderMatch {
+                symbol: symbol.clone(),
+                client_order_id: client_order_id.clone(),
+            },
+        )?])
+    })?;
+    if h.truthy(&in_store) {
+        return object(h, &[("found", h.boolean(true)), ("order", in_store)]);
+    }
+    let options = h.get(e, "options")?;
+    let vault = h.get(&options, "vault")?;
+    let user = if h.truthy(&vault) {
+        vault
+    } else {
+        let options = h.get(e, "options")?;
+        h.get(&options, "applicationId")?
+    };
+    if !h.truthy(&user) {
+        return Ok(not_found);
+    }
+    let pattern = h.imported("HYPERLIQUID_CLOID_PATTERN")?;
+    let valid = method(h, &pattern, "test", |_| Ok(vec![client_order_id.clone()]))?;
+    if !h.truthy(&valid) {
+        return Ok(not_found);
+    }
+    let xhr = h.get(e, "infoXhr")?;
+    let response = method(h, &xhr, "post", |h| {
+        let endpoint = named(h, "ENDPOINTS", "INFO")?;
+        let kind = named(h, "INFO_TYPES", "ORDER_STATUS")?;
+        let body = object(
+            h,
+            &[
+                ("type", kind),
+                ("user", user.clone()),
+                ("oid", client_order_id.clone()),
+            ],
+        )?;
+        let content = lit(h, "application/json");
+        let headers = object(h, &[("Content-Type", content)])?;
+        let config = object(h, &[("headers", headers)])?;
+        Ok(vec![endpoint, body, config])
+    })?;
+    let response = h.await_value(response).await?;
+    let data = h.get(&response, "data")?;
+    // data?.status !== 'order' || !data.order?.order
+    let status = if h.is_nullish(&data) {
+        h.undefined()
+    } else {
+        h.get(&data, "status")?
+    };
+    if !h.strict_equal(&status, &lit(h, "order")) {
+        return Ok(not_found);
+    }
+    let order = h.get(&data, "order")?;
+    let row = if h.is_nullish(&order) {
+        h.undefined()
+    } else {
+        h.get(&order, "order")?
+    };
+    if !h.truthy(&row) {
+        return Ok(not_found);
+    }
+    let order = h.get(&data, "order")?;
+    let venue_status = h.get(&order, "status")?;
+    let status = if h.strict_equal(&venue_status, &lit(h, "open"))
+        || h.strict_equal(&venue_status, &lit(h, "triggered"))
+    {
+        named(h, "OrderStatus", "Open")?
+    } else if h.strict_equal(&venue_status, &lit(h, "filled")) {
+        named(h, "OrderStatus", "Closed")?
+    } else {
+        named(h, "OrderStatus", "Canceled")?
+    };
+    let mapped = method(h, e, "mapOpenOrderRow", |h| {
+        let order = h.get(&data, "order")?;
+        Ok(vec![h.get(&order, "order")?, status])
+    })?;
+    if h.truthy(&mapped) {
+        let own = h.get(&mapped, "symbol")?;
+        if h.strict_equal(&own, symbol) {
+            return object(h, &[("found", h.boolean(true)), ("order", mapped)]);
+        }
+    }
+    Ok(not_found)
+}
+pub fn find_order_by_client_order_id<H: OrderReadHost + HelperTaskHost<H::Value, H::Error>>(
+    host: &H,
+    e: &H::Value,
+    symbol: &H::Value,
+    client_order_id: &H::Value,
+) -> HelperObserver<H::Value, H::Error>
+where
+    H::Value: 'static,
+    H::Error: Clone + 'static,
+{
+    let mut h = host.clone();
+    let e = e.clone();
+    let symbol = symbol.clone();
+    let client_order_id = client_order_id.clone();
+    crate::helper_tasks::start(host, async move {
+        find_body(&mut h, &e, &symbol, &client_order_id).await
     })
 }

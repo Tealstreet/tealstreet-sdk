@@ -79,3 +79,7 @@ pub mod futures_native_order_reads;
 
 pub mod futures_native_formatters;
 pub mod futures_native_mapping;
+
+mod binding;
+
+pub mod kucoin_exchange;

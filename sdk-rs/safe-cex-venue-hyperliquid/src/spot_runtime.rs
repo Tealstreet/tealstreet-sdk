@@ -168,6 +168,9 @@ pub fn new_spot_exchange<H: SpotRuntimeHost>(
     target: Option<&H::Value>,
 ) -> Result<H::Value, H::Error> {
     let owner = h.base_exchange(args, target.unwrap_or(&class.constructor), &class.prototype)?;
+    // Same cloid contract as perps; declared first in the source class body.
+    let rule = SpotAccountHost::imported(h, "hyperliquidClientOrderIdRule")?;
+    h.define_data(&owner, "clientOrderIdRule", &rule)?;
     for key in ["xhr", "unlimitedXHR"] {
         h.define_data(&owner, key, &h.undefined())?;
     }

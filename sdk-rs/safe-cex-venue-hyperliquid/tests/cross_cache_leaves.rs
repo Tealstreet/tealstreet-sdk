@@ -568,6 +568,9 @@ impl safe_cex_venue_hyperliquid::cache_orders::CacheOrdersHost for Host {
     fn singleton(&mut self) -> Result<Native, Native> {
         self.take("singleton", json!([]))
     }
+    fn imported(&mut self, name: &str) -> Result<Native, Native> {
+        self.take("imported", json!([name]))
+    }
 }
 fn run_order_method(row: &Value) {
     use safe_cex_venue_hyperliquid::cache_orders::*;
@@ -617,7 +620,13 @@ fn run_order_method(row: &Value) {
             remove_pending_order(&mut h, &cache, &args[0]).map(|()| h.undefined())
         }
         "exchange.addToPrePlacementCache" => exchange_add_to_pre_placement_cache(
-            &mut h, &args[0], &args[1], &args[2], &args[3], &args[4],
+            &mut h,
+            &args[0],
+            &args[1],
+            &args[2],
+            &args[3],
+            &args[4],
+            args.get(5),
         )
         .map(|()| h.undefined()),
         "exchange.matchPrePlacement" => {
@@ -630,6 +639,20 @@ fn run_order_method(row: &Value) {
         }
         "exchange.removePendingHip3Order" => {
             exchange_remove_pending_hip3_order(&mut h, &args[0]).map(|()| h.undefined())
+        }
+        "exchange.forgetPrePlacement" => {
+            exchange_forget_pre_placement(&mut h, &args[0], &args[1], &args[2])
+                .map(|()| h.undefined())
+        }
+        "exchange.recordPlacement" => {
+            exchange_record_placement(&mut h, &args[0], &args[1]).map(|()| h.undefined())
+        }
+        "exchange.getPlacementRecord" => exchange_get_placement_record(&mut h, &args[0]),
+        "exchange.forgetPlacementRecord" => {
+            exchange_forget_placement_record(&mut h, &args[0]).map(|()| h.undefined())
+        }
+        "exchange.matchPrePlacementTrigger" => {
+            exchange_match_pre_placement_trigger(&mut h, &args[0], &args[1], &args[2])
         }
         _ => unreachable!(),
     };
@@ -683,7 +706,7 @@ fn run_order_method(row: &Value) {
     );
 }
 #[test]
-fn native_ten_cache_order_methods_match_actual_source() {
+fn native_fifteen_cache_order_methods_match_actual_source() {
     let output = std::process::Command::new("node")
         .arg(format!(
             "{}/scripts/cache-orders-oracle.cjs",
@@ -708,11 +731,16 @@ fn native_ten_cache_order_methods_match_actual_source() {
         "exchange.getPendingHip3Order",
         "exchange.addPendingHip3Order",
         "exchange.removePendingHip3Order",
+        "exchange.forgetPrePlacement",
+        "exchange.recordPlacement",
+        "exchange.getPlacementRecord",
+        "exchange.forgetPlacementRecord",
+        "exchange.matchPrePlacementTrigger",
     ];
     assert_eq!(corpus["names"], json!(names));
-    assert_eq!(corpus["iterationStop"], 94);
-    assert_eq!(corpus["cases"].as_array().unwrap().len(), 95);
-    let expected = [7, 9, 17, 12, 8, 8, 10, 8, 8, 8];
+    assert_eq!(corpus["iterationStop"], 136);
+    assert_eq!(corpus["cases"].as_array().unwrap().len(), 137);
+    let expected = [7, 9, 17, 12, 8, 9, 10, 8, 8, 8, 8, 9, 8, 8, 8];
     let mut failures = vec![];
     for (name, count) in names.iter().zip(expected) {
         let rows = corpus["cases"]

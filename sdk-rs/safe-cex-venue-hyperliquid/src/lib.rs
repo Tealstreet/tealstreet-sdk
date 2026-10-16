@@ -20,6 +20,7 @@ pub mod api;
 pub mod order_response;
 pub mod rate_limit;
 
+pub mod cloid;
 pub mod order_history;
 pub mod order_inference;
 
