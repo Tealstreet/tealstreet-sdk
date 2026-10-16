@@ -79,6 +79,7 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
         .expect("native host runtime builds");
     let local = tokio::task::LocalSet::new();
     local.block_on(&runtime, async move {
+        let hyperliquid_limiter = safe_cex_registry::native_host::hyperliquid_rate_limiter();
         let mut accounts: HashMap<u32, Open> = HashMap::new();
         let mut next = 1u32;
         while let Some(command) = receiver.recv().await {
@@ -91,7 +92,14 @@ fn run_host(mut receiver: mpsc::UnboundedReceiver<Command>) {
                     on_store,
                     reply,
                 } => {
-                    let opened = open(init, sign, proxy_token, on_event, on_store);
+                    let opened = open(
+                        init,
+                        sign,
+                        proxy_token,
+                        on_event,
+                        on_store,
+                        hyperliquid_limiter.clone(),
+                    );
                     let _ = reply.send(opened.map(|open| {
                         let id = next;
                         next += 1;
@@ -173,6 +181,7 @@ fn open(
     proxy_token: Option<Request>,
     on_event: Notify,
     on_store: Notify,
+    hyperliquid_limiter: Rc<safe_cex_registry::native_host::HyperliquidRateLimiter>,
 ) -> Result<Open, String> {
     let options: Value =
         serde_json::from_str(&init.options_json).map_err(|e| error_json(&e.to_string()))?;
@@ -191,6 +200,7 @@ fn open(
             as Rc<dyn Fn() -> JsonFuture<String>>
     });
     let account = open_native_account(NativeAccountSpec {
+        hyperliquid_limiter,
         exchange: init.exchange,
         options,
         account_name: init.account_name,

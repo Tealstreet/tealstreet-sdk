@@ -30,6 +30,8 @@ pub type JsonFuture<T> = Pin<Box<dyn Future<Output = Result<T, Value>>>>;
 /// `sign` answers one remote-signer request (ts: RemoteSigner.sign); `proxy_token`
 /// selects the Tealstreet transport (ts: registerTealstreetTransport + accessToken).
 pub struct NativeAccountSpec {
+    /// Shared by every account on the caller's LocalSet, including hosted ones.
+    pub hyperliquid_limiter: Rc<crate::native_host::HyperliquidRateLimiter>,
     pub exchange: String,
     pub options: Value,
     pub account_name: Option<String>,
@@ -96,7 +98,7 @@ fn host_error(message: impl Into<String>) -> Value {
     json!({"name": "Error", "message": message.into()})
 }
 
-/// Build the account: `binance` names only, through the registry's Rust constructor.
+/// Build an account through its bound registry Rust constructor.
 pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>, Value> {
     let name: ExchangeName = serde_json::from_value(Value::String(spec.exchange.clone()))
         .map_err(|e| host_error(e.to_string()))?;
@@ -135,8 +137,9 @@ pub fn open_native_account(spec: NativeAccountSpec) -> Result<Rc<NativeAccount>,
             adapters,
             signer.clone() as Rc<dyn RemoteSigner>,
             spec.account_name,
+            spec.hyperliquid_limiter,
         ),
-        None => native_venue_host_with(runtime, adapters),
+        None => native_venue_host_with(runtime, adapters, spec.hyperliquid_limiter),
     };
     let constructor = rust_constructor(&name, host)
         .ok_or_else(|| host_error(format!("no Rust constructor for {}", spec.exchange)))?;
