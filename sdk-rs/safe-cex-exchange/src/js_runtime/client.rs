@@ -2,9 +2,12 @@
 //! interceptors (FIFO), axios-retry and axios-rate-limit spacing.
 use super::{
     promise::{JsFuture, Promise, await_js},
-    value::{Js, Thrown, arg},
+    value::{Js, Thrown, arg, from_json, to_json},
 };
 use crate::runtime::ExchangeRuntime;
+use safe_cex_transport::{
+    RestAdapter, RestFailure, RestFuture, RestRequest, RestResponse, RestResponseBody,
+};
 use std::{cell::RefCell, rc::Rc};
 
 /// What a client needs from its host: the runtime owning launched requests and
@@ -254,5 +257,113 @@ async fn throttle(host: &Host, state: &Rc<RefCell<ClientState>>) {
                 let _ = runtime.sleep(ms.max(1.0) as u64).await;
             }
         }
+    }
+}
+
+fn optional(v: &Js, key: &str) -> Result<Js, Thrown> {
+    if v.is_nullish() {
+        Ok(Js::Undefined)
+    } else {
+        v.get(key)
+    }
+}
+
+fn rest_response(response: &Js) -> Result<RestResponse, Thrown> {
+    let status = response.get("status")?.to_number().unwrap_or(200.0);
+    Ok(RestResponse {
+        status: if status.is_finite() { status as u16 } else { 0 },
+        reason: None,
+        headers: Default::default(),
+        body: RestResponseBody::Untransformed(to_json(&response.get("data")?)?),
+    })
+}
+
+/// A JS Axios client as a typed `RestAdapter`: requests run the client's whole
+/// pipeline (interceptors, signing, retry). A rejection keeps its JS value so
+/// [`JsRestAdapter::thrown`] can rethrow it unchanged.
+pub struct JsRestAdapter {
+    xhr: Js,
+    rejection: RefCell<Option<Thrown>>,
+}
+
+impl JsRestAdapter {
+    pub fn new(xhr: Js) -> Self {
+        Self {
+            xhr,
+            rejection: RefCell::default(),
+        }
+    }
+    async fn send(&self, request: &RestRequest) -> Result<RestResponse, Thrown> {
+        let config = Js::object(
+            request
+                .params
+                .iter()
+                .map(|params| ("params", from_json(params)))
+                .collect(),
+        );
+        let url = Js::str(&request.url);
+        let pending = if request.method == "post" {
+            let data = match &request.body {
+                Some(body) => {
+                    let bytes = body
+                        .wire_bytes()
+                        .map_err(|e| Thrown::error("Error", &e.to_string()))?;
+                    let text = String::from_utf8_lossy(&bytes);
+                    from_json(
+                        &serde_json::from_str(&text)
+                            .unwrap_or(serde_json::Value::String(text.into_owned())),
+                    )
+                }
+                None => Js::Undefined,
+            };
+            self.xhr.call_method("post", vec![url, data, config])?
+        } else {
+            self.xhr.call_method(&request.method, vec![url, config])?
+        };
+        rest_response(&await_js(pending).await?)
+    }
+    /// The body's `RestFailure` as JS: this adapter's own rejection as-is, else a host Error.
+    pub fn thrown(&self, failure: RestFailure) -> Thrown {
+        if let Some(original) = self.rejection.borrow_mut().take() {
+            return original;
+        }
+        let name = failure
+            .context
+            .as_deref()
+            .and_then(|c| c.get("name"))
+            .and_then(serde_json::Value::as_str)
+            .unwrap_or("Error")
+            .to_owned();
+        Thrown::error(&name, &failure.message)
+    }
+}
+
+impl RestAdapter for JsRestAdapter {
+    fn execute(&self, request: RestRequest) -> RestFuture<'_, RestResponse> {
+        Box::pin(async move {
+            match self.send(&request).await {
+                Ok(response) => Ok(response),
+                Err(thrown) => {
+                    let response = optional(&thrown.value, "response")
+                        .ok()
+                        .filter(|r| !r.is_nullish())
+                        .and_then(|r| rest_response(&r).ok());
+                    let code = optional(&thrown.value, "code")
+                        .ok()
+                        .filter(Js::is_string)
+                        .map(|c| String::from_utf16_lossy(&c.to_js_string().unwrap_or_default()));
+                    let failure = RestFailure {
+                        code,
+                        message: thrown.message(),
+                        transport_error: None,
+                        response: response.map(Box::new),
+                        request: Box::new(request),
+                        context: None,
+                    };
+                    *self.rejection.borrow_mut() = Some(thrown);
+                    Err(failure)
+                }
+            }
+        })
     }
 }

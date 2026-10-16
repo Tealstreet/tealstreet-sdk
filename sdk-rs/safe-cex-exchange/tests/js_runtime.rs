@@ -700,3 +700,139 @@ fn base_exchange_refuses_external_public_data_without_a_provider() {
             .contains("no external public data provider")
     );
 }
+
+#[test]
+fn rest_adapter_runs_the_js_client_and_rethrows_its_rejection_unchanged() {
+    use safe_cex_transport::{RestAdapter, RestRequest, RestResponseBody};
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    let adapter = Rc::new(client::JsRestAdapter::new(xhr));
+    let exchange_runtime: Rc<dyn ExchangeRuntime> = runtime.clone();
+    let run = |url: &str| {
+        let adapter = adapter.clone();
+        let request = RestRequest {
+            method: "get".into(),
+            url: url.into(),
+            params: Some(json!({"instId": "BTC-USDT-SWAP"})),
+            ..Default::default()
+        };
+        settle(
+            &runtime,
+            Js::Promise(Promise::spawn(
+                &exchange_runtime,
+                Box::pin(async move {
+                    match adapter.execute(request).await {
+                        Ok(response) => {
+                            let RestResponseBody::Untransformed(body) = response.body else {
+                                panic!("adapter bodies are untransformed JSON");
+                            };
+                            Ok(safe_cex_exchange::js_runtime::value::from_json(
+                                &json!({"status": response.status, "body": body}),
+                            ))
+                        }
+                        Err(failure) => Err(adapter.thrown(failure)),
+                    }
+                }),
+            )),
+        )
+    };
+    let ok = to_json(&run("/ok").unwrap()).unwrap();
+    assert_eq!(ok, json!({"status": 200.0, "body": {"ok": true}}));
+    assert_eq!(
+        http.sent.borrow()[0]["params"],
+        json!({"instId": "BTC-USDT-SWAP"})
+    );
+    let rejected = run("/fail").unwrap_err();
+    assert_eq!(
+        to_json(
+            &rejected
+                .value
+                .get("response")
+                .unwrap()
+                .get("status")
+                .unwrap()
+        )
+        .unwrap(),
+        json!(500.0)
+    );
+}
+
+#[test]
+fn to_js_json_keeps_undefined_and_bigint_and_ordered_fields() {
+    use safe_cex_exchange::js_runtime::value::to_js_json;
+    use safe_cex_num::JsJsonValue as J;
+    let value = Js::object(vec![
+        ("b", Js::Number(1.0)),
+        ("a", Js::Undefined),
+        ("n", Js::BigInt(Rc::new(7.into()))),
+        ("xs", Js::array(vec![Js::Null, Js::str("s")])),
+    ]);
+    assert_eq!(
+        to_js_json(&value).unwrap(),
+        J::Object(vec![
+            ("b".into(), J::Number(1.0)),
+            ("a".into(), J::Undefined),
+            ("n".into(), J::BigInt(7.into())),
+            ("xs".into(), J::Array(vec![J::Null, J::String("s".into())])),
+        ])
+    );
+}
+
+#[test]
+fn ws_direct_fallback_moves_to_the_next_host_after_silent_connects() {
+    let g = library();
+    let fallback = run(&g, "WsDirectFallback", vec![Js::Number(1.0)]);
+    let resolve = |f: &Js| {
+        let url = f
+            .call_method(
+                "resolveUrl",
+                vec![
+                    Js::str("wss://primary"),
+                    Js::Undefined,
+                    Js::str("wss://backup"),
+                ],
+            )
+            .unwrap();
+        String::from_utf16_lossy(&url.to_js_string().unwrap())
+    };
+    assert_eq!(resolve(&fallback), "wss://primary");
+    fallback.call_method("onMessage", vec![]).unwrap();
+    assert_eq!(resolve(&fallback), "wss://primary");
+    assert_eq!(resolve(&fallback), "wss://backup");
+}
+
+#[test]
+fn emitter_on_and_off_follow_listener_identity() {
+    let this = base_exchange(json!({"key": "k", "secret": "s"})).unwrap();
+    let emitter = this.get("emitter").unwrap();
+    let seen = Rc::new(RefCell::new(vec![]));
+    let sink = seen.clone();
+    let listener = Js::function("listener", move |_, a| {
+        sink.borrow_mut().push(to_json(&Js::array(a)).unwrap());
+        Ok(Js::Undefined)
+    });
+    let other = Js::function("other", |_, _| Ok(Js::Undefined));
+    emitter
+        .call_method("on", vec![Js::str("markets:changed"), listener.clone()])
+        .unwrap();
+    emitter
+        .call_method("emit", vec![Js::str("markets:changed"), Js::Number(1.0)])
+        .unwrap();
+    emitter
+        .call_method("off", vec![Js::str("markets:changed"), other])
+        .unwrap();
+    emitter
+        .call_method("emit", vec![Js::str("markets:changed"), Js::Number(2.0)])
+        .unwrap();
+    emitter
+        .call_method("off", vec![Js::str("markets:changed"), listener])
+        .unwrap();
+    emitter
+        .call_method("emit", vec![Js::str("markets:changed"), Js::Number(3.0)])
+        .unwrap();
+    assert_eq!(*seen.borrow(), vec![json!([1.0]), json!([2.0])]);
+}
