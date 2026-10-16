@@ -105,6 +105,13 @@
       "generic identity probes reject bounds defaults synthetic parameters and where clauses",
       "expanded identity cannot conceal a nonidentity source target"
     ],
+    "accepted-inherited-constant-output-native.test.mjs": [
+      "reviewed inherited refusals execute the complete production owner and reject native error or HTTP drift"
+    ],
+    "accepted-inherited-constant-output.test.mjs": [
+      "reviewed inherited refusals retain exact compiler source fixture and native witnesses",
+      "reviewed inherited refusal source fixture and adapter pins reject executed mutations"
+    ],
     "accepted-inventory.test.mjs": [
       "compiler impl identity sees manual private Deserialize and deduplicates reexports",
       "an unrelated trait spelled Deserialize cannot impersonate serde",
@@ -326,6 +333,11 @@
     "Weex kline native identity",
     "Weex kline policy routing",
     "contract shard namespace",
-    "contract shard complete merge"
+    "contract shard complete merge",
+    "inherited refusal maintained source pin",
+    "inherited refusal native fixture pin",
+    "inherited refusal native adapter pin",
+    "inherited refusal native error identity",
+    "inherited refusal native zero HTTP"
   ]
 }

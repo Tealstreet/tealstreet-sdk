@@ -106,12 +106,17 @@ non-decoder receipts are counted separately. Total decoders cannot be validated
 by an is_ok-only adapter. A new
 raw decoder needs an adapter and positive witnesses; a typed constructor needs
 its reason. Record arrays use Serde's field order, not JSON map insertion order.
-Observed methods normally require distinct inputs and outputs. Only the two
-`Capture` serializer metadata constructors listed in
-`../accepted-set/constant-outputs.json` may set `constantOutput: true`. Their
-actual compiler package, API, body span, whole-source hash, native adapter and
-cases are pinned. Both distinct metadata inputs still execute; this is no
-permission for other constant methods, altered adapters or decoder exemptions.
+Observed methods normally require distinct inputs and outputs. The two
+`Capture` serializer metadata constructors in `../accepted-set/constant-outputs.json`
+and four exact GRVT inherited refusals in `../accepted-set/inherited-constant-outputs.json`
+may set `constantOutput: true`. Their actual compiler package, API, body span,
+whole-source hash, native adapter and cases are pinned. Inherited refusals also
+pin the maintained TS base method lines, base/venue file hashes and native
+harness bytes. Distinct genuine inputs still execute and observe native Error
+identity/message, zero HTTP and unchanged Store/notification/runtime state.
+Every compiler-listed API remains in the complete owner contract; get_account
+and schedule_cancel behavior tests do not invent indexed entries or unit-input
+permissions. Unknown constant methods and changed adapters remain refused.
 The bounded `construction.json` policy classifies Clone/Copy on private-field
 types, including service handles whose shared ownership is intentional.
 

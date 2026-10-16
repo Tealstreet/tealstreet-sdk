@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { reviewedInheritedConstantOutput } from './accepted-inherited-constant-output.mjs';
 import fs from 'node:fs';
 import { createHash } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
@@ -11,6 +12,7 @@ export function reviewedConstantOutput(type, entry, index, context) {
   if (entry.constantOutput === undefined) return false;
   const label = `${type.name}: accepted-set assertion: reviewed constant output`;
   assert.equal(entry.constantOutput, true, `${label}: flag must be true`);
+  if (reviewedInheritedConstantOutput(type, entry, index, context)) return true;
   const spec = reviewed[`${type.name}::${entry.api.trait}::${entry.api.name}`];
   assert.ok(spec, `${label}: unreviewed owner or method`);
   assert.ok(type.deserialize === false && type.kind === 'record' && type.ident === spec.ident, `${label}: actual serializer owner required`);
