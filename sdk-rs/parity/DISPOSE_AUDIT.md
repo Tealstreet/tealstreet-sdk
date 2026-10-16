@@ -40,7 +40,7 @@ same. Source `base.ws.ts:1194-1202` distinguishes `forceClose` metadata from
 disposal call the latter without super. They need #227's
 `close_current_websocket` primitive and native/source forceClosed-retention
 witnesses. The shared bridge is assigned to codex-nlry7m; the Hyperliquid bridge
-is reported to the overseer. These routed runtime issues are outside this
+is assigned to codex-nkxoxx. These routed runtime issues are outside this
 classification gate's proof.
 
 ## Complete venue pass
