@@ -3528,6 +3528,24 @@
     "file": "safe-cex-venue-grvt/src/trading_runtime.rs"
   },
   {
+    "function": "capabilities",
+    "body": "933749c1feb84223",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/binding.rs"
+  },
+  {
+    "function": "is_public_data_only",
+    "body": "70a8f967bbffb371",
+    "reference": "HyperliquidExchange :: is_public_data_only",
+    "file": "safe-cex-venue-hyperliquid/src/binding.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "45a8a8dba45efd57",
+    "call": "self . base . dispose ()",
+    "file": "safe-cex-venue-hyperliquid/src/binding.rs"
+  },
+  {
     "function": "run_callback",
     "body": "c17bf2b76978420f",
     "reference": "cross_cache :: dispose",
@@ -3780,12 +3798,6 @@
     "file": "safe-cex-venue-hyperliquid/src/core_rest_reads.rs"
   },
   {
-    "function": "is_public_data_only",
-    "body": "70a8f967bbffb371",
-    "reference": "HyperliquidExchange :: is_public_data_only",
-    "file": "safe-cex-venue-hyperliquid/src/exchange.rs"
-  },
-  {
     "function": "paginate_hyperliquid_by_time",
     "body": "8ea8fce9d08562a5",
     "reference": "crate :: helper_tasks :: start",
@@ -3862,6 +3874,78 @@
     "body": "23a065ac1f98ed34",
     "reference": "crate :: helper_tasks :: start",
     "file": "safe-cex-venue-hyperliquid/src/placement_dispatch.rs"
+  },
+  {
+    "function": "base_exchange_class",
+    "body": "775186cf3d335ac4",
+    "call": "b . dispose ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
+  },
+  {
+    "function": "base_exchange_class",
+    "body": "775186cf3d335ac4",
+    "call": "b . name ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
+  },
+  {
+    "function": "base_websocket_class",
+    "body": "98b2e6c011ff88a4",
+    "call": "h . socket . dispose ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/facade_socket.rs"
+  },
+  {
+    "function": "store_object",
+    "body": "48f2b1686705ce57",
+    "call": "s . update_order (& id , & changes)",
+    "file": "safe-cex-venue-hyperliquid/src/realm/facade_store.rs"
+  },
+  {
+    "function": "start_task",
+    "body": "591fbe90af234906",
+    "call": "self . start (task)",
+    "file": "safe-cex-venue-hyperliquid/src/realm/host_core.rs"
+  },
+  {
+    "function": "spawn_value",
+    "body": "44913fe5f82f8981",
+    "call": "self . start (Box :: pin (async move { match body . await { Ok (v) => realm . resolve_promise (& cell , v) , Err (e) => settle (& cell , Err (e)) , } }))",
+    "file": "safe-cex-venue-hyperliquid/src/realm/promise.rs"
+  },
+  {
+    "function": "exec",
+    "body": "b314a26129508256",
+    "call": "captures . get (0) ? . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/regex.rs"
+  },
+  {
+    "function": "split",
+    "body": "e51e2ce7f380c62e",
+    "call": "whole . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/regex.rs"
+  },
+  {
+    "function": "split",
+    "body": "e51e2ce7f380c62e",
+    "call": "whole . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/regex.rs"
+  },
+  {
+    "function": "split",
+    "body": "e51e2ce7f380c62e",
+    "call": "whole . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/regex.rs"
+  },
+  {
+    "function": "split",
+    "body": "e51e2ce7f380c62e",
+    "call": "whole . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/regex.rs"
+  },
+  {
+    "function": "split",
+    "body": "e51e2ce7f380c62e",
+    "call": "whole . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/regex.rs"
   },
   {
     "function": "wallet_prototype_property",
