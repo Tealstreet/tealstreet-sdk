@@ -1,0 +1,931 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/base.ts"
+rust_files = [ "safe-cex-crypto/src/lib.rs", "safe-cex-exchange/src/capabilities.rs", "safe-cex-exchange/src/error_reporting.rs", "safe-cex-exchange/src/exchange.rs", "safe-cex-exchange/src/journal.rs", "safe-cex-exchange/src/runtime.rs", "safe-cex-exchange/src/snapshots.rs", "safe-cex-exchange/src/socket_lifecycle.rs", "safe-cex-exchange/src/worker.rs", "safe-cex-store/src/socket_health.rs", "safe-cex-transport/src/polling.rs", "safe-cex-exchange/src/waiters.rs" ]
+
+[[symbol]]
+ts = "normalizeSymbols"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::normalize_symbols"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::normalize_symbols is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "summarizeSocketDiagnostics"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-store/src/socket_health.rs::summarize_socket_diagnostics"
+status = "ported"
+note = "Standalone socket aggregation; private boolean selects the closed public/private kind. Undefined close-code retained as Option internally and omitted at JSON boundary."
+
+[[symbol]]
+ts = "BaseCapabilityMethod"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-exchange/src/capabilities.rs::BaseCapabilityMethod"
+status = "ported"
+note = "Rust also brands the sequential PlaceOrders fallback so a native bulk trait override without dynamic registration is detectable. Binding origin is stored with its callback; compiled function bodies are not introspectable, so an entirely empty override is registered explicitly. safe-cex-exchange/src/capabilities.rs::BaseCapabilityMethod is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "markBaseCapabilityFallback"
+kind = "const-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::mark_base_capability_fallback", "safe-cex-exchange/src/capabilities.rs::CapabilityBinding", "safe-cex-exchange/src/capabilities.rs::CapabilityBinding::call", "safe-cex-exchange/src/capabilities.rs::CapabilityBinding::implemented" ]
+status = "ported"
+note = "Binding origin is stored with its callback; compiled function bodies are not introspectable, so an entirely empty override is registered explicitly. safe-cex-exchange/src/capabilities.rs::mark_base_capability_fallback is the typed Rust composition of this source symbol. Split: origin and callback are stored together, and override registration removes the inherited brand. Explicit targets: safe-cex-exchange/src/capabilities.rs::mark_base_capability_fallback safe-cex-exchange/src/capabilities.rs::CapabilityBinding safe-cex-exchange/src/capabilities.rs::CapabilityBinding::call safe-cex-exchange/src/capabilities.rs::CapabilityBinding::implemented"
+
+[[symbol]]
+ts = "isBaseCapabilityFallback"
+kind = "const-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::is_base_capability_fallback", "safe-cex-exchange/src/capabilities.rs::CapabilityBrand", "safe-cex-exchange/src/capabilities.rs::CapabilityBrand::is_base" ]
+status = "ported"
+note = "Split: the sealed brand interface exposes origin checks for generic and typed placement bindings. The origin remains private and cannot be forged by an external implementer. Explicit targets: safe-cex-exchange/src/capabilities.rs::is_base_capability_fallback safe-cex-exchange/src/capabilities.rs::CapabilityBrand safe-cex-exchange/src/capabilities.rs::CapabilityBrand::is_base"
+
+[[symbol]]
+ts = "isEmptyStubCapability"
+kind = "const-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::is_empty_stub_capability", "safe-cex-exchange/src/capabilities.rs::CapabilityBinding::empty_override", "safe-cex-exchange/src/capabilities.rs::PlaceOrderBinding::empty_override", "safe-cex-exchange/src/capabilities.rs::CapabilityBrand::is_empty" ]
+status = "divergent"
+note = "CHOSEN: explicit empty-override registration replaces TS callback-source inspection. Compiled closures expose no source body; executing a callback to infer support could perform writes or mistake a valid empty result for an unsupported capability. Both ordinary and typed placement bindings preserve the empty origin; an implemented callback returning an empty vector remains supported. Required follow-up: a registry-driven recorder-transport capability gate must cross-check declarations; until then, wrong empty-body registrations are caught only by review. Explicit targets: safe-cex-exchange/src/capabilities.rs::is_empty_stub_capability safe-cex-exchange/src/capabilities.rs::CapabilityBinding::empty_override safe-cex-exchange/src/capabilities.rs::PlaceOrderBinding::empty_override safe-cex-exchange/src/capabilities.rs::CapabilityBrand::is_empty"
+
+[[symbol]]
+ts = "isInertCapability"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/capabilities.rs::is_inert_capability"
+status = "ported"
+note = "Binding origin is stored with its callback; compiled function bodies are not introspectable, so an entirely empty override is registered explicitly. safe-cex-exchange/src/capabilities.rs::is_inert_capability is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "CallableMethodsInWorker"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-exchange/src/worker.rs::CallableMethodsInWorker"
+status = "ported"
+note = "safe-cex-exchange/src/worker.rs::CallableMethodsInWorker is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "Exchange"
+kind = "type"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::Exchange", "safe-cex-exchange/src/exchange.rs::Exchange::base", "safe-cex-exchange/src/exchange.rs::Exchange::capabilities", "safe-cex-exchange/src/exchange.rs::Exchange::class_name" ]
+status = "ported"
+note = "Object-safe dynamic venue protocol with concrete Self: Sized placement hooks carrying venue-specific tokens; concrete orchestration belongs to BaseExchange and checked typed bindings bridge placement into ExchangeCapabilities. safe-cex-exchange/src/exchange.rs::Exchange is the typed Rust composition of this source symbol. Split: object-safe core reference, binding registry and runtime class name replace inherited property access and constructor.name. Explicit targets: safe-cex-exchange/src/exchange.rs::Exchange safe-cex-exchange/src/exchange.rs::Exchange::base safe-cex-exchange/src/exchange.rs::Exchange::capabilities safe-cex-exchange/src/exchange.rs::Exchange::class_name"
+
+[[symbol]]
+ts = "AccountMarketOverlay"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-exchange/src/snapshots.rs::AccountMarketOverlay"
+status = "ported"
+note = "Shared with the accountMarketOverlay callback-field row: one typed callback alias represents the declared type and its optional instance slot."
+
+[[symbol]]
+ts = "BaseExchange"
+kind = "class"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange", "safe-cex-exchange/src/exchange.rs::ExchangeSettings", "safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities", "safe-cex-exchange/src/runtime.rs::ExchangeSigners", "safe-cex-exchange/src/exchange.rs::BaseExchange::is_disposed", "safe-cex-exchange/src/exchange.rs::BaseExchange::emit" ]
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange is the typed Rust composition of this source symbol. Split: class-owned imported metadata/settings, callback bindings, live signer handles, disposal getter and emitter method represent the TypeScript instance fields explicitly. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange safe-cex-exchange/src/exchange.rs::ExchangeSettings safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities safe-cex-exchange/src/runtime.rs::ExchangeSigners safe-cex-exchange/src/exchange.rs::BaseExchange::is_disposed safe-cex-exchange/src/exchange.rs::BaseExchange::emit"
+
+[[symbol]]
+ts = "BaseExchange#unsubscribeFromStore"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::unsubscribe_from_store"
+status = "ported"
+note = "Stored subscription cleanup is invoked through this one-shot owner method. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::unsubscribe_from_store"
+
+[[symbol]]
+ts = "BaseExchange.on"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::on"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::on is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.once"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::once"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::once is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.off"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::off"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::off is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.createXhrWithSecondaryKey"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::create_xhr_with_secondary_key"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::create_xhr_with_secondary_key is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.constructor"
+kind = "constructor"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::new", "safe-cex-exchange/src/exchange.rs::BaseExchange::options", "safe-cex-exchange/src/exchange.rs::BaseExchange::bind_socket_watchdog" ]
+status = "divergent"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. One internal owner is shared by base and WS; only the returned view is a snapshot. Source retained aliases observe identity patches while earlier Rust snapshots stay unchanged, pinned by the live constructor witness. Fresh base and pre-existing WS reads observe patches. Split read target: safe-cex-exchange/src/exchange.rs::BaseExchange::options. Custom parent assemblies bind their stable shared core through safe-cex-exchange/src/exchange.rs::BaseExchange::bind_socket_watchdog ; the timer retains a weak owner and preserves the existing venue-wrapper binding for other assemblies."
+
+[[symbol]]
+ts = "BaseExchange.getActiveTickerSymbols"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::get_active_ticker_symbols"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::get_active_ticker_symbols is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.setActiveTickerSymbols"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::set_active_ticker_symbols"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::set_active_ticker_symbols is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.getTickerSymbolsForSubscription"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::get_ticker_symbols_for_subscription"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::get_ticker_symbols_for_subscription is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.onWSPublicClose"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::on_ws_public_close"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::on_ws_public_close is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.get canSign"
+kind = "accessor"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::can_sign", "safe-cex-exchange/src/exchange.rs::Exchange::can_sign", "safe-cex-exchange/src/exchange.rs::can_sign_with" ]
+status = "ported"
+note = "Split source getter into the base fallback and dynamically dispatched venue hook: safe-cex-exchange/src/exchange.rs::Exchange::can_sign. Base orchestration retains venue dispatch; source getter overrides are inventoried by the live contract gate. Split the existing Base receiver getter from its shared lazy operand evaluator; class receiver views use the same short-circuit body, while each operand read remains in source order. Five native operand traces and the deliberate eager-AND control discriminate this path. Native mapping targets: safe-cex-exchange/src/exchange.rs::BaseExchange::can_sign, safe-cex-exchange/src/exchange.rs::can_sign_with."
+
+[[symbol]]
+ts = "BaseExchange.getTickInterval"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-transport/src/polling.rs::get_tick_interval", "safe-cex-exchange/src/exchange.rs::BaseExchange::get_tick_interval" ]
+status = "ported"
+note = "Polling calculation slice: takes the caller-resolved metadata/extra base and auth failure streak; slowdown is applied before the 60000ms backoff cap. BaseExchange lifecycle remains outside P2c. Adapted targets: `safe-cex-transport/src/polling.rs::get_tick_interval`. Split: account override/metadata selection delegates multiplier/backoff arithmetic to transport implementation. Explicit targets: safe-cex-transport/src/polling.rs::get_tick_interval safe-cex-exchange/src/exchange.rs::BaseExchange::get_tick_interval"
+
+[[symbol]]
+ts = "BaseExchange.recordAuthFailure"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::record_auth_failure"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::record_auth_failure is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.recordAuthSuccess"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::record_auth_success"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::record_auth_success is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.get authFailureStreak"
+kind = "accessor"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::auth_failure_streak"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::auth_failure_streak is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.get isPublicDataOnly"
+kind = "accessor"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::is_public_data_only", "safe-cex-exchange/src/exchange.rs::Exchange::is_public_data_only", "safe-cex-exchange/src/exchange.rs::is_public_data_only_with" ]
+status = "ported"
+note = "Split source getter into the base fallback and dynamically dispatched venue hook: safe-cex-exchange/src/exchange.rs::Exchange::is_public_data_only. Base orchestration retains venue dispatch; source getter overrides are inventoried by the live contract gate. Split the existing Base receiver getter from the shared public-flag/virtual-canSign evaluator. Preserve the explicit-public short circuit and the receiver callback rather than hard-coding a signer calculation. Native callback traces and a reversed-order control discriminate that distinction. Native mapping targets: safe-cex-exchange/src/exchange.rs::BaseExchange::is_public_data_only, safe-cex-exchange/src/exchange.rs::is_public_data_only_with."
+
+[[symbol]]
+ts = "BaseExchange.get isPrivateOnly"
+kind = "accessor"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::is_private_only"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::is_private_only is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.get usesExternalPublicData"
+kind = "accessor"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::uses_external_public_data"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::uses_external_public_data is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.disablePublicWebsockets"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::disable_public_websockets"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::disable_public_websockets is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange#accountMarketOverlay"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/snapshots.rs::AccountMarketOverlay"
+status = "ported"
+note = "Typed optional callback slot; adaptExternalMarkets applies it and loadAccountMarketOverlay assigns it. Explicit targets: safe-cex-exchange/src/snapshots.rs::AccountMarketOverlay"
+
+[[symbol]]
+ts = "BaseExchange.adaptExternalMarkets"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::adapt_external_markets"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.get needsAccountMarketOverlay"
+kind = "accessor"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::needs_account_market_overlay", "safe-cex-exchange/src/exchange.rs::Exchange::needs_account_market_overlay" ]
+status = "ported"
+note = "Split source getter into the base fallback and dynamically dispatched venue hook: safe-cex-exchange/src/exchange.rs::Exchange::needs_account_market_overlay. Base orchestration retains venue dispatch; source getter overrides are inventoried by the live contract gate."
+
+[[symbol]]
+ts = "BaseExchange.loadAccountMarketOverlay"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::load_account_market_overlay"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.initExternalPublicData"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::init_external_public_data"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::init_external_public_data is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange#waitForExternalPublicDataLoaded"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::wait_for_external_public_data_loaded"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::wait_for_external_public_data_loaded exposes the private TS startup wait to host/provider orchestration while preserving loaded/disposed/timeout behavior."
+
+[[symbol]]
+ts = "BaseExchange.getAccount"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::get_account"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::get_account is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.validateAccount"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::validate_account"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::validate_account is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.fetchPositions"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::fetch_positions"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_positions is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.fetchOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::fetch_orders"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_orders is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.fetchMarkets"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::fetch_markets"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_markets is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.fetchTickers"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::fetch_tickers"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_tickers is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.refreshMarkets"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::refresh_markets", "safe-cex-exchange/src/snapshots.rs::MarketChanges", "safe-cex-exchange/src/exchange.rs::Exchange::refresh_markets" ]
+status = "ported"
+note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::refresh_markets preserve venue polymorphism. safe-cex-exchange/src/exchange.rs::BaseExchange::refresh_markets holds orchestration; safe-cex-exchange/src/snapshots.rs::MarketChanges holds the returned added/removed pair. ts-bug: refresh compares IDs only and ignores unchanged-ID metadata."
+
+[[symbol]]
+ts = "BaseExchange.log"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::log"
+status = "ported"
+note = "Console precedes the fallible log event. TinyEmitter snapshots listeners and stops at the first throw, preserving the original ExchangeError name and metadata; callback invocation holds no listener-map borrow."
+
+[[symbol]]
+ts = "BaseExchange.start"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::start", "safe-cex-exchange/src/exchange.rs::Exchange::start" ]
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::start is the typed Rust composition of this source symbol. Split: branded dispatch and stateful venue hook. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::start safe-cex-exchange/src/exchange.rs::Exchange::start"
+
+[[symbol]]
+ts = "BaseExchange.fetchSymbolMaxLeverage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::fetch_symbol_max_leverage"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_symbol_max_leverage is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.updateSymbolMetadata"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::update_symbol_metadata"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::update_symbol_metadata is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.setLeverage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::set_leverage"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::set_leverage is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.fetchLeverageForSymbol"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::fetch_leverage_for_symbol", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_leverage_for_symbol" ]
+status = "ported"
+note = "Split into the source default implementation safe-cex-exchange/src/exchange.rs::BaseExchange::fetch_leverage_for_symbol and overridable dynamic venue dispatch safe-cex-exchange/src/exchange.rs::Exchange::fetch_leverage_for_symbol, so callers retain concrete venue overrides instead of bypassing them."
+
+[[symbol]]
+ts = "BaseExchange.changePositionMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::change_position_mode"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::change_position_mode is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.changeMarginType"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::change_margin_type"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::change_margin_type is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.setAllLeverage"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::set_all_leverage", "safe-cex-exchange/src/exchange.rs::Exchange::set_all_leverage" ]
+status = "ported"
+note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::set_all_leverage preserve venue polymorphism. "
+
+[[symbol]]
+ts = "BaseExchange.placeOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::place_order", "safe-cex-exchange/src/exchange.rs::ValidatedOrder", "safe-cex-exchange/src/exchange.rs::ValidatedOrder::new", "safe-cex-exchange/src/exchange.rs::ValidatedOrder::options", "safe-cex-exchange/src/exchange.rs::ValidatedOrder::into_raw", "safe-cex-exchange/src/exchange.rs::Exchange::place_order", "safe-cex-exchange/src/capabilities.rs::PlaceOrderBinding", "safe-cex-exchange/src/capabilities.rs::PlaceOrderBinding::implemented", "safe-cex-exchange/src/capabilities.rs::PlaceOrderBinding::call_raw", "safe-cex-exchange/src/exchange.rs::BaseExchange::place_order_json", "safe-cex-exchange/src/exchange.rs::Exchange::PlaceOpts", "safe-cex-exchange/src/exchange.rs::Exchange::validate_order_capabilities" ]
+status = "ported"
+note = "Split: raw placement validates the target base first. The private binding boundary downcasts that target to its registered concrete venue before minting ValidatedOrder<V>; typed hooks require exactly V and private immutable payloads cannot be replaced. Sequential bulk dispatch unwraps only inside the crate and reuses the checked binding. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::place_order safe-cex-exchange/src/exchange.rs::ValidatedOrder safe-cex-exchange/src/exchange.rs::ValidatedOrder::new safe-cex-exchange/src/exchange.rs::ValidatedOrder::options safe-cex-exchange/src/exchange.rs::ValidatedOrder::into_raw safe-cex-exchange/src/exchange.rs::Exchange::place_order safe-cex-exchange/src/capabilities.rs::PlaceOrderBinding safe-cex-exchange/src/capabilities.rs::PlaceOrderBinding::implemented safe-cex-exchange/src/capabilities.rs::PlaceOrderBinding::call_raw Full venue options are retained as V::PlaceOpts. The associated type is Sized-only to keep dyn Exchange object-safe; shared callers convert explicitly through From, typed requests must match exactly, and JSON decodes directly as venue options. The validation hook is Rust dispatch plumbing for venue/family preflight (Bybit/HyroTrader supply concrete behavior), not a claim that TS BaseExchange declares that hook. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::place_order_json safe-cex-exchange/src/exchange.rs::Exchange::PlaceOpts safe-cex-exchange/src/exchange.rs::Exchange::validate_order_capabilities"
+
+[[symbol]]
+ts = "BaseExchange.placeOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::place_orders", "safe-cex-exchange/src/exchange.rs::BaseExchange::place_orders_sequential", "safe-cex-exchange/src/exchange.rs::Exchange::place_orders", "safe-cex-exchange/src/exchange.rs::ValidatedBatch", "safe-cex-exchange/src/exchange.rs::ValidatedBatch::new", "safe-cex-exchange/src/exchange.rs::ValidatedBatch::orders", "safe-cex-exchange/src/capabilities.rs::PlaceOrdersBinding", "safe-cex-exchange/src/capabilities.rs::PlaceOrdersBinding::implemented", "safe-cex-exchange/src/capabilities.rs::PlaceOrdersBinding::call_raw", "safe-cex-exchange/src/exchange.rs::BaseExchange::place_orders_json" ]
+status = "ported"
+note = "Split: whole-batch target validation precedes every write. The private native bulk binding checks concrete venue identity before minting ValidatedBatch<V>; the default bulk path sequentially invokes the target single-order binding. Native bulk overrides register their typed binding explicitly. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::place_orders safe-cex-exchange/src/exchange.rs::BaseExchange::place_orders_sequential safe-cex-exchange/src/exchange.rs::Exchange::place_orders safe-cex-exchange/src/exchange.rs::ValidatedBatch safe-cex-exchange/src/exchange.rs::ValidatedBatch::new safe-cex-exchange/src/exchange.rs::ValidatedBatch::orders safe-cex-exchange/src/capabilities.rs::PlaceOrdersBinding safe-cex-exchange/src/capabilities.rs::PlaceOrdersBinding::implemented safe-cex-exchange/src/capabilities.rs::PlaceOrdersBinding::call_raw Full batch payloads decode before shared ID/duplicate checks and all typed capability checks, before any write. Both native and sequential paths retain venue extensions. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::place_orders_json"
+
+[[symbol]]
+ts = "BaseExchange.placeOrderWithClientOrderId"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::place_order_with_client_order_id"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.mintClientOrderId"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::mint_client_order_id"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.findOrderByClientOrderId"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::find_order_by_client_order_id", "safe-cex-exchange/src/exchange.rs::Exchange::find_order_by_client_order_id" ]
+status = "ported"
+note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::find_order_by_client_order_id preserve venue polymorphism. "
+
+[[symbol]]
+ts = "BaseExchange.resolveCallerClientOrderId"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::resolve_caller_client_order_id"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::resolve_caller_client_order_id is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.assertCallerClientOrderIds"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::assert_caller_client_order_ids"
+status = "ported"
+note = "Validates every caller ID, split restriction and duplicate before any write, returning unit as the source helper does. It cannot mint or export validated tokens; only the target-checked private placement bindings construct them. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::assert_caller_client_order_ids"
+
+[[symbol]]
+ts = "BaseExchange.assertSingleNativeClientOrderId"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::assert_single_native_client_order_id", "safe-cex-exchange/src/exchange.rs::ValidatedOrder::assert_single_native_client_order_id" ]
+status = "ported"
+note = "Split: core emit-before-reject policy and immutable validated payload formatter backstop delegate to the same check. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::assert_single_native_client_order_id safe-cex-exchange/src/exchange.rs::ValidatedOrder::assert_single_native_client_order_id"
+
+[[symbol]]
+ts = "BaseExchange#wouldSplitOrder"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::would_split_order"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::would_split_order is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange#assertCallerClientOrderIdUnsplit"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::assert_caller_client_order_id_unsplit"
+status = "ported"
+note = "Presence and rounded market size guard shared by preflight. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::assert_caller_client_order_id_unsplit"
+
+[[symbol]]
+ts = "BaseExchange.updateOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::update_order"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::update_order is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.cancelOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::cancel_orders"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::cancel_orders is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.cancelSymbolOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::cancel_symbol_orders", "safe-cex-exchange/src/exchange.rs::Exchange::cancel_symbol_orders" ]
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::cancel_symbol_orders holds shared cancellation; safe-cex-exchange/src/exchange.rs::Exchange::cancel_symbol_orders preserves the overridable TS method dispatch for venue implementations."
+
+[[symbol]]
+ts = "BaseExchange.cancelAllOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::cancel_all_orders", "safe-cex-exchange/src/exchange.rs::Exchange::cancel_all_orders" ]
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::cancel_all_orders holds shared cancellation; safe-cex-exchange/src/exchange.rs::Exchange::cancel_all_orders preserves the overridable TS method dispatch for venue implementations."
+
+[[symbol]]
+ts = "BaseExchange.scheduleCancel"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::schedule_cancel"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::schedule_cancel is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.fetchOHLCV"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_ohlcv is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.fetchHistoricalFills"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_historical_fills", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_historical_fills" ]
+status = "ported"
+note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; default returns an empty vector without becoming an override. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_historical_fills safe-cex-exchange/src/exchange.rs::Exchange::fetch_historical_fills"
+
+[[symbol]]
+ts = "BaseExchange.fetchHistoricalPositions"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::Exchange::fetch_historical_positions", "safe-cex-exchange/src/journal.rs::HistoricalPositionOptions" ]
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_historical_positions is the typed Rust composition of this source symbol. Split: refusal hook and its anonymous source account/time options representation. Explicit targets: safe-cex-exchange/src/exchange.rs::Exchange::fetch_historical_positions safe-cex-exchange/src/journal.rs::HistoricalPositionOptions"
+
+[[symbol]]
+ts = "BaseExchange.foldClosedPositionRecords"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/journal.rs::fold_closed_position_records"
+status = "ported"
+note = "Imported journal fold remains an injected callback; no private derivation crate is reachable. safe-cex-exchange/src/journal.rs::fold_closed_position_records is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.fetchIncomeHistory"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_income_history", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_income_history" ]
+status = "ported"
+note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; default returns an empty vector without becoming an override. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_income_history safe-cex-exchange/src/exchange.rs::Exchange::fetch_income_history"
+
+[[symbol]]
+ts = "BaseExchange.fetchIncomeHistoryRange"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_income_history_range", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_income_history_range" ]
+status = "ported"
+note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; default returns an empty vector without becoming an override. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_income_history_range safe-cex-exchange/src/exchange.rs::Exchange::fetch_income_history_range"
+
+[[symbol]]
+ts = "BaseExchange.fetchClosedPnl"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_closed_pnl", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_closed_pnl" ]
+status = "ported"
+note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; default returns an empty vector without becoming an override. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_closed_pnl safe-cex-exchange/src/exchange.rs::Exchange::fetch_closed_pnl"
+
+[[symbol]]
+ts = "BaseExchange.fetchHistoricalOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_historical_orders", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_historical_orders" ]
+status = "ported"
+note = "Split: branded callback dispatch and stateful venue hook retain separate identity and execution; default returns an empty vector without becoming an override. Explicit targets: safe-cex-exchange/src/capabilities.rs::ExchangeCapabilities::fetch_historical_orders safe-cex-exchange/src/exchange.rs::Exchange::fetch_historical_orders"
+
+[[symbol]]
+ts = "BaseExchange.fetchPublicTrades"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::Exchange::fetch_public_trades"
+status = "ported"
+note = "Overridable venue hook retains the source default. safe-cex-exchange/src/exchange.rs::Exchange::fetch_public_trades is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.listenOHLCV"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::listen_ohlcv", "safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcv" ]
+status = "ported"
+note = "Shared base implementation plus object-safe venue override dispatch. safe-cex-exchange/src/exchange.rs::BaseExchange::listen_ohlcv safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcv"
+
+[[symbol]]
+ts = "BaseExchange.listenOHLCVs"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::listen_ohlcvs", "safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcvs", "safe-cex-exchange/src/exchange.rs::SubscribedCandle" ]
+status = "ported"
+note = "Shared base implementation plus object-safe venue override dispatch. The multi-symbol callback carries one candle with symbol and interval, not a batch. safe-cex-exchange/src/exchange.rs::BaseExchange::listen_ohlcvs safe-cex-exchange/src/exchange.rs::Exchange::listen_ohlcvs safe-cex-exchange/src/exchange.rs::SubscribedCandle"
+
+[[symbol]]
+ts = "BaseExchange.listenOrderBook"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::listen_order_book", "safe-cex-exchange/src/exchange.rs::Exchange::listen_order_book" ]
+status = "ported"
+note = "Shared base implementation plus object-safe venue override dispatch. safe-cex-exchange/src/exchange.rs::BaseExchange::listen_order_book safe-cex-exchange/src/exchange.rs::Exchange::listen_order_book"
+
+[[symbol]]
+ts = "BaseExchange.deriveAlgoOrdersFromNormalOrdersOpts"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::derive_algo_orders_from_normal_orders_opts"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.nuke"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::nuke", "safe-cex-exchange/src/exchange.rs::Exchange::nuke" ]
+status = "ported"
+note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::nuke preserve venue polymorphism. ts-bug: BaseExchange.nuke retries from current store even after disposal. Shared iterative helper preserves four attempts and per-position error continuation."
+
+[[symbol]]
+ts = "BaseExchange.nukePositions"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::nuke_positions", "safe-cex-exchange/src/exchange.rs::Exchange::nuke_positions" ]
+status = "ported"
+note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::nuke_positions preserve venue polymorphism. ts-bug: BaseExchange.nuke retries from current store even after disposal. Shared iterative helper preserves four attempts and per-position error continuation."
+
+[[symbol]]
+ts = "BaseExchange.nukeOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::nuke_orders"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.waitForRemoteSigner"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::wait_for_remote_signer"
+status = "divergent"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice. Eager availability checks, disconnected emission and callback installation are repaired; native invocation/drop and actual source prefix witnesses are in EXCHANGES_DIVERGENCE_RESOLUTION.md. Callback failure reporting and caller-owned cancellation remain priced there; connected-listener throw preserves the source settled-before-emit/unresolved-after-throw quirk (ts-bug). Targets: safe-cex-exchange/src/exchange.rs::BaseExchange::wait_for_remote_signer"
+
+[[symbol]]
+ts = "BaseExchange.dispose"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::dispose", "safe-cex-exchange/src/exchange.rs::Exchange::dispose" ]
+status = "ported"
+note = "Source default and dynamic override dispatch safe-cex-exchange/src/exchange.rs::Exchange::dispose preserve venue polymorphism. safe-cex-exchange/src/exchange.rs::BaseExchange::dispose is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.listenOHLCVWebworker"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::listen_ohlcv_webworker", "safe-cex-exchange/src/runtime.rs::ListenerCleanup" ]
+status = "ported"
+note = "Setup and the returned cleanup both retain fallible emission. Split cleanup contract safe-cex-exchange/src/runtime.rs::ListenerCleanup returns the unsubscribe listener failure rather than swallowing it."
+
+[[symbol]]
+ts = "BaseExchange.listenOrderBookWebworker"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::listen_order_book_webworker"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::listen_order_book_webworker is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.fetchAndSetOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::fetch_and_set_orders", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_and_set_orders" ]
+status = "ported"
+note = "Source default delegates through safe-cex-exchange/src/exchange.rs::BaseExchange::fetch_and_set_orders; dynamic venue overrides dispatch through safe-cex-exchange/src/exchange.rs::Exchange::fetch_and_set_orders so worker and socket callers preserve venue orchestration."
+
+[[symbol]]
+ts = "BaseExchange.updatePositionsInWebworker"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::update_positions_in_webworker"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::update_positions_in_webworker is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.callMethodInWorker"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::call_method_in_worker"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::call_method_in_worker is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.afterMethodCalledInWorker"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::after_method_called_in_worker", "safe-cex-exchange/src/exchange.rs::Exchange::after_method_called_in_worker" ]
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::after_method_called_in_worker is the typed Rust composition of this source symbol. Split: concrete worker correlation dispatches the overridable venue completion hook. Explicit targets: safe-cex-exchange/src/exchange.rs::BaseExchange::after_method_called_in_worker safe-cex-exchange/src/exchange.rs::Exchange::after_method_called_in_worker"
+
+[[symbol]]
+ts = "BaseExchange.removeOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::remove_orders"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.fetchAndSetPrivateSnapshot"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::fetch_and_set_private_snapshot", "safe-cex-exchange/src/exchange.rs::Exchange::fetch_and_set_private_snapshot" ]
+status = "ported"
+note = "Dynamic venue orchestration dispatches through safe-cex-exchange/src/exchange.rs::Exchange::fetch_and_set_private_snapshot, with the base default retained. The source try/catch covers both fetching orders and the committed Store notification; notification failure enters the same bounded retry. A failure from the recovery error emitter escapes before sleeping or fetching again."
+
+[[symbol]]
+ts = "BaseExchange.getOrFetchPositionsForSymbol"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::get_or_fetch_positions_for_symbol", "safe-cex-exchange/src/snapshots.rs::PositionFetch", "safe-cex-exchange/src/waiters.rs::Waiters" ]
+status = "ported"
+note = "Rust waiter registrations in safe-cex-exchange/src/waiters.rs::Waiters are owned per future; cancellation releases only that caller waker before shared settlement, including same-waker siblings. Gate-owner public position/proxy retention witnesses both flip after repair. safe-cex-exchange/src/exchange.rs::BaseExchange::get_or_fetch_positions_for_symbol manages lookup and Store mutation; safe-cex-exchange/src/snapshots.rs::PositionFetch holds the shared result/wakers. ts-bug: rejected and disposed promises remain cached; existing waiters return raw fetch results. A committed Store notification failure reaches only the originator; existing shared-fetch waiters still receive fetched positions."
+
+[[symbol]]
+ts = "BaseExchange.get name"
+kind = "accessor"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::name", "safe-cex-exchange/src/exchange.rs::Exchange::name" ]
+status = "ported"
+note = "Split source getter into the base fallback and dynamically dispatched venue hook: safe-cex-exchange/src/exchange.rs::Exchange::name. Base orchestration retains venue dispatch; source getter overrides are inventoried by the live contract gate."
+
+[[symbol]]
+ts = "BaseExchange.get isOnline"
+kind = "accessor"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::is_online"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::is_online is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.setOnlineStatus"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::set_online_status"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.reconnect"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::reconnect"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.recoverAfterOffline"
+kind = "field-fn"
+layer = ""
+rs = "safe_cex_exchange::exchange::BaseExchange::recover_after_offline"
+status = "ported"
+note = "Snapshots the real get_all_sockets result, invokes every supplied context-bound socket recovery before aggregating booleans, treats None as the source nullish true, and stops immediately on a recovery error. The explicit native dispatcher represents the source virtual call and carries each venue policy; no always-success callback is supplied by this method. Native Rc socket identities, three ordered callbacks even after false, two-call error prefix and empty snapshot truth are asserted before executing the actual source property body. Existing getAllSockets representation boundaries remain mapped in its own row."
+
+[[symbol]]
+ts = "BaseExchange.noteHttpResponse"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::note_http_response"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.emitAndLogError"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::emit_and_log_error", "safe-cex-exchange/src/error_reporting.rs::ExchangeErrorInput", "safe-cex-exchange/src/error_reporting.rs::truthy", "safe-cex-exchange/src/error_reporting.rs::assign" ]
+status = "ported"
+note = "Split source input union, truthiness checks, and metadata spread from the emitter method: safe-cex-exchange/src/exchange.rs::BaseExchange::emit_and_log_error safe-cex-exchange/src/error_reporting.rs::ExchangeErrorInput safe-cex-exchange/src/error_reporting.rs::truthy safe-cex-exchange/src/error_reporting.rs::assign"
+
+[[symbol]]
+ts = "BaseExchange.rejectPreflight"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::reject_preflight"
+status = "ported"
+note = "safe-cex-exchange/src/exchange.rs::BaseExchange::reject_preflight is the typed Rust composition of this source symbol."
+
+[[symbol]]
+ts = "BaseExchange.emitWsReconnected"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::emit_ws_reconnected"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.getAllSockets"
+kind = "method"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::get_all_sockets", "safe-cex-exchange/src/socket_lifecycle.rs::SocketSlot", "safe-cex-exchange/src/exchange.rs::BaseExchange::set_socket", "safe-cex-exchange/src/exchange.rs::BaseExchange::get_socket", "safe-cex-exchange/src/exchange.rs::BaseExchange::set_borrowed_socket" ]
+status = "ported"
+note = "SocketSlot encodes the eight source fields in their original ordering; set_socket is their explicit host binding; safe-cex-exchange/src/exchange.rs::BaseExchange::get_socket reads a single named field without flattening absent slots. safe-cex-exchange/src/exchange.rs::BaseExchange::get_all_sockets safe-cex-exchange/src/socket_lifecycle.rs::SocketSlot safe-cex-exchange/src/exchange.rs::BaseExchange::set_socket The concrete native owner can register a borrowed socket through safe-cex-exchange/src/exchange.rs::BaseExchange::set_borrowed_socket while preserving ordered live lookup. See sdk-rs/parity/MANIFEST-SPEC.md#owned-exchange-lease-policy."
+
+[[symbol]]
+ts = "BaseExchange.getPublicSockets"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::get_public_sockets"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.getPrivateSockets"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::get_private_sockets"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.syncSocketHealthToStore"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::sync_socket_health_to_store"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange#startWatchdog"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::start_watchdog"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange#stopWatchdog"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::stop_watchdog"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange#auditSocketHealth"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::audit_socket_health"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange#syncSocketHealthToStoreInternal"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::sync_socket_health_to_store_internal", "safe-cex-exchange/src/socket_lifecycle.rs::socket_diagnostics" ]
+status = "ported"
+note = "The shared aggregation projects actual sockets into safe-cex-store diagnostics and delegates the existing summarizer. safe-cex-exchange/src/exchange.rs::BaseExchange::sync_socket_health_to_store_internal safe-cex-exchange/src/socket_lifecycle.rs::socket_diagnostics"
+
+[[symbol]]
+ts = "BaseExchange.fetchLastLogsFromWebsockets"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::fetch_last_logs_from_websockets"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.signHttpRequest"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::sign_http_request", "safe-cex-exchange/src/exchange.rs::Exchange::sign_http_request" ]
+status = "ported"
+note = "Shared base implementation plus object-safe venue override dispatch. safe-cex-exchange/src/exchange.rs::BaseExchange::sign_http_request safe-cex-exchange/src/exchange.rs::Exchange::sign_http_request"
+
+[[symbol]]
+ts = "BaseExchange.signWsAuth"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-crypto/src/lib.rs::sign_ws_auth", "safe-cex-exchange/src/exchange.rs::BaseExchange::sign_ws_auth", "safe-cex-exchange/src/exchange.rs::Exchange::sign_ws_auth" ]
+status = "ported"
+note = "Shared base implementation plus object-safe venue override dispatch. safe-cex-crypto/src/lib.rs::sign_ws_auth safe-cex-exchange/src/exchange.rs::BaseExchange::sign_ws_auth safe-cex-exchange/src/exchange.rs::Exchange::sign_ws_auth"
+
+[[symbol]]
+ts = "BaseExchange.isTpSlOrTrailingOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::is_tp_sl_or_trailing_order"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "BaseExchange.isTpSlOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::is_tp_sl_order"
+status = "ported"
+note = ""

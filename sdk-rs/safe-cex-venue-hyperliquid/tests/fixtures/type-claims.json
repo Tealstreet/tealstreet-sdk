@@ -1,0 +1,274 @@
+{
+  "BASE_URLS": [
+    "BASE_URLS"
+  ],
+  "WSS_URLS": [
+    "WSS_URLS"
+  ],
+  "ENDPOINTS": [
+    "ENDPOINTS"
+  ],
+  "GRAFANA_ENDPOINTS_EVERY": [
+    "GRAFANA_ENDPOINTS_EVERY"
+  ],
+  "GRAFANA_ENDPOINTS_PERIODIC": [
+    "GRAFANA_ENDPOINTS_PERIODIC"
+  ],
+  "INFO_TYPES": [
+    "INFO_TYPES"
+  ],
+  "EXCHANGE_TYPES": [
+    "EXCHANGE_TYPES"
+  ],
+  "WEBSOCKET": [
+    "WEBSOCKET"
+  ],
+  "HyperliquidUserAbstractionMode": [
+    "HyperliquidUserAbstractionMode"
+  ],
+  "Tif": [
+    "Tif"
+  ],
+  "Tpsl": [
+    "Tpsl"
+  ],
+  "LimitOrderType": [
+    "LimitOrderType"
+  ],
+  "TriggerOrderType": [
+    "TriggerOrderType"
+  ],
+  "Grouping": [
+    "Grouping"
+  ],
+  "OrderType": [
+    "OrderType"
+  ],
+  "Cloid": [
+    "Cloid"
+  ],
+  "OidOrCloid": [
+    "OidOrCloid"
+  ],
+  "AllMids": [
+    "AllMids"
+  ],
+  "Meta": [
+    "MetaUniverseItemMarginMode",
+    "MetaUniverseItemGrowthMode",
+    "MetaUniverseItem",
+    "Meta"
+  ],
+  "ClearinghouseState": [
+    "ClearinghouseStateAssetPositionsItemPositionCumFunding",
+    "ClearinghouseStateAssetPositionsItemPositionLeverage",
+    "ClearinghouseStateAssetPositionsItemPosition",
+    "ClearinghouseStateAssetPositionsItem",
+    "ClearinghouseStateCrossMarginSummary",
+    "ClearinghouseStateMarginSummary",
+    "ClearinghouseState"
+  ],
+  "UserFills": [
+    "UserFills"
+  ],
+  "OrderResponseStatus": [
+    "OrderResponseStatusCase0RestingOid",
+    "OrderResponseStatusCase0Resting",
+    "OrderResponseStatusCase0",
+    "OrderResponseStatusCase1FilledOid",
+    "OrderResponseStatusCase1Filled",
+    "OrderResponseStatusCase1",
+    "OrderResponseStatusCase2",
+    "OrderResponseStatusCase3",
+    "OrderResponseStatusCase4",
+    "OrderResponseStatus"
+  ],
+  "OrderResponse": [
+    "OrderResponseResponseCase1Data",
+    "OrderResponseResponseCase1",
+    "OrderResponseResponse",
+    "OrderResponse"
+  ],
+  "WsTrade": [
+    "WsTrade"
+  ],
+  "WsBook": [
+    "WsBook"
+  ],
+  "WsBbo": [
+    "WsBbo"
+  ],
+  "WsLevel": [
+    "WsLevel"
+  ],
+  "WsOrder": [
+    "WsOrderOrder",
+    "WsOrder"
+  ],
+  "WsUserEvent": [
+    "WsUserEvent"
+  ],
+  "WsFill": [
+    "WsFill"
+  ],
+  "WsUserFunding": [
+    "WsUserFunding"
+  ],
+  "WsLiquidation": [
+    "WsLiquidation"
+  ],
+  "WsNonUserCancel": [
+    "WsNonUserCancel"
+  ],
+  "SpotClearinghouseBalance": [
+    "SpotClearinghouseBalance"
+  ],
+  "SpotClearinghouseState": [
+    "SpotClearinghouseState"
+  ],
+  "FrontendOpenOrders": [
+    "FrontendOpenOrders"
+  ],
+  "UserRateLimit": [
+    "UserRateLimit"
+  ],
+  "OrderStatus": [
+    "OrderStatus"
+  ],
+  "L2Book": [
+    "L2BookLevelsItem0Item",
+    "L2BookLevelsItem1Item",
+    "L2Book"
+  ],
+  "CandleSnapshot": [
+    "CandleSnapshot"
+  ],
+  "AssetCtx": [
+    "AssetCtx"
+  ],
+  "MetaAndAssetCtxs": [
+    "MetaAndAssetCtxs"
+  ],
+  "UserFundingDelta": [
+    "UserFundingDeltaType",
+    "UserFundingDelta"
+  ],
+  "UserFundingEntry": [
+    "UserFundingEntry"
+  ],
+  "UserFunding": [
+    "UserFunding"
+  ],
+  "UserNonFundingLedgerDelta": [
+    "UserNonFundingLedgerDeltaType",
+    "UserNonFundingLedgerDelta"
+  ],
+  "UserNonFundingLedgerEntry": [
+    "UserNonFundingLedgerEntry"
+  ],
+  "UserNonFundingLedgerUpdates": [
+    "UserNonFundingLedgerUpdates"
+  ],
+  "FundingHistoryEntry": [
+    "FundingHistoryEntry"
+  ],
+  "FundingHistory": [
+    "FundingHistory"
+  ],
+  "SpotToken": [
+    "SpotTokenEvmContract",
+    "SpotToken"
+  ],
+  "SpotMarket": [
+    "SpotMarket"
+  ],
+  "SpotMeta": [
+    "SpotMeta"
+  ],
+  "SpotAssetCtx": [
+    "SpotAssetCtx"
+  ],
+  "SpotMetaAndAssetCtxs": [
+    "SpotMetaAndAssetCtxs"
+  ],
+  "UserOpenOrder": [
+    "UserOpenOrder"
+  ],
+  "UserOpenOrders": [
+    "UserOpenOrders"
+  ],
+  "OrderRequest": [
+    "OrderRequest"
+  ],
+  "OrderWire": [
+    "OrderWire"
+  ],
+  "CancelOrderRequest": [
+    "CancelOrderRequest"
+  ],
+  "CancelOrderRequests": [
+    "CancelOrderRequestsItem",
+    "CancelOrderRequests"
+  ],
+  "CancelByCloidRequest": [
+    "CancelByCloidRequest"
+  ],
+  "ModifyRequest": [
+    "ModifyRequest"
+  ],
+  "ModifyWire": [
+    "ModifyWire"
+  ],
+  "ScheduleCancelAction": [
+    "ScheduleCancelActionType",
+    "ScheduleCancelAction"
+  ],
+  "Signature": [
+    "Signature"
+  ],
+  "Notification": [
+    "Notification"
+  ],
+  "Candle": [
+    "Candle"
+  ],
+  "HyperliquidCandle": [
+    "HyperliquidCandle"
+  ],
+  "WsUserFill": [
+    "WsUserFill"
+  ],
+  "WsUserFills": [
+    "WsUserFills"
+  ],
+  "WsUserFundings": [
+    "WsUserFundings"
+  ],
+  "WsUserNonFundingLedgerUpdate": [
+    "WsUserNonFundingLedgerUpdateType",
+    "WsUserNonFundingLedgerUpdate"
+  ],
+  "WsUserNonFundingLedgerUpdates": [
+    "WsUserNonFundingLedgerUpdates"
+  ],
+  "PerpDex": [
+    "PerpDex"
+  ],
+  "PerpDexs": [
+    "PerpDexs"
+  ],
+  "Hip3MarketInfo": [
+    "Hip3MarketInfoMarginMode",
+    "Hip3MarketInfoGrowthMode",
+    "Hip3MarketInfo"
+  ],
+  "BuilderInfo": [
+    "BuilderInfo"
+  ],
+  "BuilderFeeApprovalResult": [
+    "BuilderFeeApprovalResult"
+  ],
+  "BuilderFeeCheckResult": [
+    "BuilderFeeCheckResult"
+  ]
+}

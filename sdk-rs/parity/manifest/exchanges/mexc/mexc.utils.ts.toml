@@ -1,0 +1,251 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/mexc/mexc.utils.ts"
+rust_files = [ "safe-cex-venue-mexc/src/utils.rs" ]
+
+[[symbol]]
+ts = "toNumber"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::to_number"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "toIntegerString"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::to_integer_string"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "toMexcSymbol"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::to_mexc_symbol"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "fromMexcSymbol"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::from_mexc_symbol"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizeTimestampToMs"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_timestamp_to_ms"
+status = "ported"
+note = "Shared V8 Date.parse with explicit host local-to-UTC adapter; numeric positive fast path is not TimeClipped. Live oracle compares numeric bits, UTC and host DST delegation."
+
+[[symbol]]
+ts = "normalizeTimestampToSeconds"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_timestamp_to_seconds"
+status = "ported"
+note = "Shared V8 Date.parse with explicit host local-to-UTC adapter; numeric positive fast path is not TimeClipped. Live oracle compares numeric bits, UTC and host DST delegation."
+
+[[symbol]]
+ts = "stepFromScale"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::step_from_scale"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "getContractSize"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::get_contract_size"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "nativeVolumeToAmount"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::native_volume_to_amount"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "amountToNativeVolume"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::amount_to_native_volume"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizeMarket"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_market"
+status = "divergent"
+note = "MIXED: Actual normalizeMarket returns a symbol containing U+D800; mapper_symbols_keep_native_scalar_units_and_name_whole_record_refusals asserts Source UTF-16 units before serialization and native BMP, astral and internal-whitespace symbol units plus numeric fields. For the corresponding encoded lone-surrogate record, native serde_json::Value ingress returns a syntax error before the helper runs; no native helper invocation or partial mapped result is claimed. FORCED materialized-symbol/whole-record refusal cost: sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict and sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Earlier audit: sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#mexc-21. Retained CHOSEN cost: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. TypeScript info retains input aliases; mutations from input to result and result to input remain observable, while Rust owns snapshots. mexc_mapper_owned_snapshot_vs_live_alias records both views and both directions against live source."
+
+[[symbol]]
+ts = "isTradableMexcMarket"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::is_tradable_mexc_market"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizePercentage"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_percentage"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizeTicker"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_ticker"
+status = "divergent"
+note = "MIXED: Actual normalizeTicker returns a symbol containing U+D800; mapper_symbols_keep_native_scalar_units_and_name_whole_record_refusals asserts Source UTF-16 units before serialization and native BMP, astral and internal-whitespace symbol units plus numeric fields. For the corresponding encoded lone-surrogate record, native serde_json::Value ingress returns a syntax error before the helper runs; no native helper invocation or partial mapped result is claimed. FORCED materialized-symbol/whole-record refusal cost: sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict and sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Earlier audit: sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#mexc-26. Retained CHOSEN cost: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. TypeScript info retains input aliases; mutations from input to result and result to input remain observable, while Rust owns snapshots. mexc_mapper_owned_snapshot_vs_live_alias records both views and both directions against live source. Shared V8 Date.parse with explicit host local-to-UTC adapter; numeric positive fast path is not TimeClipped. Live oracle compares numeric bits, UTC and host DST delegation."
+
+[[symbol]]
+ts = "normalizeOrderbookSide"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_orderbook_side"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizeOrderBook"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_order_book"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizeCandle"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_candle"
+status = "ported"
+note = "Shared V8 Date.parse with explicit host local-to-UTC adapter; numeric positive fast path is not TimeClipped. Live oracle compares numeric bits, UTC and host DST delegation."
+
+[[symbol]]
+ts = "normalizeKlineResponse"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_kline_response"
+status = "ported"
+note = "Shared V8 Date.parse with explicit host local-to-UTC adapter; numeric positive fast path is not TimeClipped. Live oracle compares numeric bits, UTC and host DST delegation."
+
+[[symbol]]
+ts = "normalizeBalance"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_balance"
+status = "divergent"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. TypeScript info (including currency info) retains input aliases; mutations from input to result and result to input remain observable, while Rust owns snapshots. mexc_mapper_owned_snapshot_vs_live_alias records both views and both directions against live source. Shared Balance.currencies JsObjectMap now preserves source currency ordering; the committed finding flipped and mexc_balance_shared_currency_order_parity requires live-source equality. Own-key omission of __proto__ is preserved, but ts-bug: normalizeBalance assignment changes the currencies prototype and inherited currencies.free reads return a number in TypeScript; Rust has no entry. Separate FINDING pending shared dictionary-write representation; mexc_balance_prototype_write_finding captures inherited reads before serialization hides the prototype."
+
+[[symbol]]
+ts = "normalizePositionSide"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_position_side"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizePositionMode"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_position_mode"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizeMarginType"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_margin_type"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizePosition"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_position"
+status = "divergent"
+note = "MIXED: Actual normalizePosition returns a symbol containing U+D800; mapper_symbols_keep_native_scalar_units_and_name_whole_record_refusals asserts Source UTF-16 units before serialization and native BMP, astral and internal-whitespace symbol units plus numeric fields. For the corresponding encoded lone-surrogate record, native serde_json::Value ingress returns a syntax error before the helper runs; no native helper invocation or partial mapped result is claimed. FORCED materialized-symbol/whole-record refusal cost: sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict and sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Earlier audit: sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#mexc-24. Retained CHOSEN cost: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. TypeScript info retains input aliases; mutations from input to result and result to input remain observable, while Rust owns snapshots. mexc_mapper_owned_snapshot_vs_live_alias records both views and both directions against live source. Live JSON wire corpus covers malformed aliases, numeric-coerced table immunity, state spaces, sizing, guards and timestamp delegation. Numeric results compare as IEEE bits."
+
+[[symbol]]
+ts = "fakePositionsForMarket"
+kind = "const-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-mexc/src/utils.rs::fake_positions_for_market", "safe-cex-venue-mexc/src/utils.rs::MexcLeverage" ]
+status = "ported"
+note = "Split anonymous number-or-side-rail leverage argument into safe-cex-venue-mexc/src/utils.rs::MexcLeverage consumed by safe-cex-venue-mexc/src/utils.rs::fake_positions_for_market . Optional arguments retain source defaults, including independent long/short rails and nonfinite numeric leverage."
+
+[[symbol]]
+ts = "normalizeOrder"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_order"
+status = "divergent"
+note = "MIXED: Actual normalizeOrder returns a symbol containing U+D800; mapper_symbols_keep_native_scalar_units_and_name_whole_record_refusals asserts Source UTF-16 units before serialization and native BMP, astral and internal-whitespace symbol units plus numeric fields. For the corresponding encoded lone-surrogate record, native serde_json::Value ingress returns a syntax error before the helper runs; no native helper invocation or partial mapped result is claimed. FORCED materialized-symbol/whole-record refusal cost: sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict and sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Earlier audit: sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#mexc-22. Retained CHOSEN cost: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. TypeScript info retains input aliases; mutations from input to result and result to input remain observable, while Rust owns snapshots. mexc_mapper_owned_snapshot_vs_live_alias records both views and both directions against live source. Live JSON wire corpus covers malformed aliases, numeric-coerced table immunity, state spaces, sizing, guards and timestamp delegation. Numeric results compare as IEEE bits."
+
+[[symbol]]
+ts = "normalizePlanOrderType"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_plan_order_type"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizeTriggerOrderStatus"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_trigger_order_status"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizeStopOrderType"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_stop_order_type"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "normalizePlanOrder"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_plan_order"
+status = "divergent"
+note = "MIXED: Actual normalizePlanOrder returns a symbol containing U+D800; mapper_symbols_keep_native_scalar_units_and_name_whole_record_refusals asserts Source UTF-16 units before serialization and native BMP, astral and internal-whitespace symbol units plus numeric fields. For the corresponding encoded lone-surrogate record, native serde_json::Value ingress returns a syntax error before the helper runs; no native helper invocation or partial mapped result is claimed. FORCED materialized-symbol/whole-record refusal cost: sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict and sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Earlier audit: sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#mexc-23. Retained CHOSEN cost: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. TypeScript nested info members after the shallow spread retains input aliases; mutations from input to result and result to input remain observable, while Rust owns snapshots. mexc_mapper_owned_snapshot_vs_live_alias records both views and both directions against live source. Live JSON wire corpus covers malformed aliases, numeric-coerced table immunity, state spaces, sizing, guards and timestamp delegation. Numeric results compare as IEEE bits."
+
+[[symbol]]
+ts = "normalizeStopOrder"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_stop_order"
+status = "divergent"
+note = "MIXED: Actual normalizeStopOrder returns a symbol containing U+D800; mapper_symbols_keep_native_scalar_units_and_name_whole_record_refusals asserts Source UTF-16 units before serialization and native BMP, astral and internal-whitespace symbol units plus numeric fields. For the corresponding encoded lone-surrogate record, native serde_json::Value ingress returns a syntax error before the helper runs; no native helper invocation or partial mapped result is claimed. FORCED materialized-symbol/whole-record refusal cost: sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict and sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Earlier audit: sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#mexc-25. Retained CHOSEN cost: sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. TypeScript nested info members after the shallow spread retains input aliases; mutations from input to result and result to input remain observable, while Rust owns snapshots. mexc_mapper_owned_snapshot_vs_live_alias records both views and both directions against live source. Live JSON wire corpus covers malformed aliases, numeric-coerced table immunity, state spaces, sizing, guards and timestamp delegation. Numeric results compare as IEEE bits."
+
+[[symbol]]
+ts = "normalizeExecution"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-mexc/src/utils.rs::normalize_execution"
+status = "divergent"
+note = "MIXED: FORCED sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict: actual Source normalizeExecution returns an Execution.symbol exposing U+D800. In the actual historical caller, native encoded-response ingress refuses the whole response after one GET and before any Store read or normalize_execution invocation; the separate actual factory witness returns Transformed Null. This is not a claim that the native normalizer was invoked after refused ingress. BMP, astral and internal-whitespace Execution symbols have independent positive native assertions. This bounded native/Source floor addresses sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#mexc-20. CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary, applied to Execution.commission_asset Option<String> per the existing venue ruling. The actual Source commissionAsset42 witness returns an Execution, while native refuses the whole record. Native now evaluates realized-PnL and maker coercions before this refusal; later original profit/role TypeErrors win, and the historical caller defers only this exact boundary until subsequent rows finish. The fourteen-root historical floor pins later null/symbol failures and getter counts as well as these same-row coercions. Existing five live-source refusal witnesses retain the declared output choice; no stringification, field erasure or shared-model widening. Exact floor and gate SHAs are in HISTORICAL_QUERY_GATE_EVIDENCE.md."

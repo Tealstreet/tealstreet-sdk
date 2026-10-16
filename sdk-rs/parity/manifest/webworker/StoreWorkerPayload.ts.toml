@@ -1,0 +1,75 @@
+[file]
+ts = "packages/safe-cex/src/webworker/StoreWorkerPayload.ts"
+rust_files = [ "safe-cex-webworker/src/payload.rs" ]
+
+[[symbol]]
+ts = "StoreWorkerIncomingOp"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-webworker/src/payload.rs::StoreWorkerIncomingOp"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "StoreWorkerOutgoingOp"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-webworker/src/payload.rs::StoreWorkerOutgoingOp"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "StoreWorkerOp"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-webworker/src/payload.rs::StoreWorkerOp"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "StoreWorkerStorePayload"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-webworker/src/payload.rs::StoreWorkerStorePayload"
+status = "ported"
+note = "Shared strict decoders from 3bbc52657f now reject positional records and object-form literal tags; public qualified-call regression tests preserve the former widening witnesses as rejection cases."
+
+[[symbol]]
+ts = "StoreWorkerPayload"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-webworker/src/payload.rs::StoreWorkerPayload"
+status = "divergent"
+note = "CHOSEN: shared numeric-ingress input-depth boundary: Node and the legacy bare decoder accept 140 nested data arrays, while bounded shared capture refuses them; retaining one bounded recursive contract is preferable to a worker-specific unbounded decoder. The numeric FINDING is repaired at public Deserialize with JsNumberInput and strict map decoding. The data field explicitly uses shared js_deserialize_passthrough via present_value plus named passthrough eligibility; absence remains None and explicit null remains Some(Null). Two committed loss witnesses failed unchanged. tests/record_numeric_ingress.rs adds 450 pre-serialization bit comparisons over five envelope/config field paths, ten spellings and nine entry routes, alongside 810 fixture comparisons. Upstream native Value construction loss is not repaired."
+
+[[symbol]]
+ts = "WorkerConfig"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-webworker/src/payload.rs::WorkerConfig"
+status = "divergent"
+note = "CHOSEN: shared numeric-ingress input-depth boundary: Node and the legacy bare decoder accept an ignored property holding 140 nested arrays, while shared capture refuses it; retaining one bounded recursive contract is preferable to a worker-specific unbounded decoder. The numeric FINDING is repaired at public Deserialize with JsNumberInput and strict map decoding, including nested fixture captures. The exhaustive eligibility macro names every WorkerConfig field and delegates IndexMap key/value checking to the shared numeric container impl; it introduces no JSON buffer. Two committed loss witnesses failed unchanged. tests/record_numeric_ingress.rs adds 450 pre-serialization bit comparisons over five envelope/config field paths, ten spellings and nine entry routes, alongside 810 fixture comparisons; absent and optional-null rejection behavior remains pinned."
+
+[[symbol]]
+ts = "PerfFixtureFrame"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-webworker/src/payload.rs::PerfFixtureFrame"
+status = "divergent"
+note = "CHOSEN: shared numeric-ingress input-depth boundary: Node accepts a 140-array-deep msg while the shared operation refuses it. Retaining its bounded capture limits recursive visitor work across native/wasm consumers; mirroring with an unbounded worker decoder would fork that shared contract. The prior numeric FINDING is repaired at the PUBLIC Deserialize depth, not only helper entries. Public Deserialize captures JsNumberInput and uses strict_decode::object before the private companion; msg explicitly uses shared js_deserialize_passthrough plus named output eligibility, retaining its Value representation without skipping whole-output numeric checks. Three committed old per-record witnesses failed unchanged after opt-in, including raw frames[0].atMs. tests/record_numeric_ingress.rs compares 810 live Node bit observations over nine field paths, ten numeric spellings and nine bare/shared/native entry routes; ordinary nested inputs remain accepted and the deep refusal is independently witnessed. This does not recover numbers already collapsed during upstream Value construction."
+
+[[symbol]]
+ts = "PerfFixture"
+kind = "type"
+layer = "adapted"
+rs = [ "safe-cex-webworker/src/payload.rs::PerfFixture", "safe-cex-webworker/src/payload.rs::PerfFixtureVersion" ]
+status = "divergent"
+note = "CHOSEN: shared numeric-ingress input-depth boundary: Node accepts a 140-array-deep msg while the shared operation refuses it. Retaining its bounded capture limits recursive visitor work across native/wasm consumers; mirroring with an unbounded worker decoder would fork that shared contract. The prior numeric FINDING is repaired at the PUBLIC Deserialize depth, not only helper entries. Public Deserialize and nested PerfFixtureFrame both capture JsNumberInput before private strict map decoding; frames[0].atMs now retains integer -0 even from raw outer JSON. Split: safe-cex-webworker/src/payload.rs::PerfFixture holds the object; safe-cex-webworker/src/payload.rs::PerfFixtureVersion enforces its closed literal field during deserialization. Three committed old per-record witnesses failed unchanged after opt-in, including raw frames[0].atMs. tests/record_numeric_ingress.rs compares 810 live Node bit observations over nine field paths, ten numeric spellings and nine bare/shared/native entry routes; ordinary nested inputs remain accepted and the deep refusal is independently witnessed. This does not recover numbers already collapsed during upstream Value construction."
+
+[[symbol]]
+ts = "PerfFixtureConfig"
+kind = "type"
+layer = "adapted"
+rs = [ "safe-cex-webworker/src/payload.rs::PerfFixtureConfig", "safe-cex-webworker/src/payload.rs::PerfFixtureMode" ]
+status = "divergent"
+note = "CHOSEN: shared numeric-ingress input-depth boundary: Node accepts a 140-array-deep msg while the shared operation refuses it. Retaining its bounded capture limits recursive visitor work across native/wasm consumers; mirroring with an unbounded worker decoder would fork that shared contract. The prior numeric FINDING is repaired at the PUBLIC Deserialize depth, not only helper entries. Public Deserialize captures JsNumberInput before private strict map decoding, including nested fixture/frame buffers. Split: safe-cex-webworker/src/payload.rs::PerfFixtureConfig holds the object; safe-cex-webworker/src/payload.rs::PerfFixtureMode enforces its closed literal field during deserialization. Three committed old per-record witnesses failed unchanged after opt-in, including raw frames[0].atMs. tests/record_numeric_ingress.rs compares 810 live Node bit observations over nine field paths, ten numeric spellings and nine bare/shared/native entry routes; ordinary nested inputs remain accepted and the deep refusal is independently witnessed. This does not recover numbers already collapsed during upstream Value construction."

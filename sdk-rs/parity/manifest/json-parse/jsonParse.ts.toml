@@ -1,0 +1,19 @@
+[file]
+ts = "packages/json-parse/src/jsonParse.ts"
+rust_files = [ "safe-cex-transport/src/how.rs" ]
+
+[[symbol]]
+ts = "jsonParse"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-transport/src/how.rs::json_parse"
+status = "divergent"
+note = "CHOSEN string/JSON value boundary (a richer JS-value model is possible; this API simplifies ownership): accepts Rust UTF-8 strings and returns owned serde_json::Value, not arbitrary JS values or lone UTF-16 surrogates. Invalid JSON returns null; numeric values are normalized to JavaScript binary64 and property order is normalized before serialization. Overflow retains its arbitrary-precision Number lexeme so shared JS String/Boolean coercion observes Infinity before serialization; this is not an arbitrary JS-value API. Renamed to safe-cex-transport/src/how.rs::json_parse."
+
+[[symbol]]
+ts = "bigIntAsStringJsonParse"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-transport/src/how.rs::big_int_as_string_json_parse"
+status = "divergent"
+note = "CHOSEN string/JSON value boundary (a richer JS-value model is possible; this API simplifies ownership): accepts Rust UTF-8 strings and returns owned serde_json::Value, not arbitrary JS values or lone UTF-16 surrogates. Invalid JSON returns null; numeric values are normalized to JavaScript binary64 and property order is normalized before serialization. Overflow retains its arbitrary-precision Number lexeme so shared JS String/Boolean coercion observes Infinity before serialization; this is not an arbitrary JS-value API. ts-bug: the regex rewrites matching digit runs inside quoted strings; corruption returns null. HOW raw parsing calls this same public function, and the live TS correction detector pins that bug. No string-content skip exists. Renamed to safe-cex-transport/src/how.rs::big_int_as_string_json_parse."

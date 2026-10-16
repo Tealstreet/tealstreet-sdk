@@ -1,0 +1,93 @@
+use super::*;
+fn binary64(value: &Value) -> Value {
+    match value {
+        Value::Number(n) => serde_json::json!(n.as_f64().unwrap()),
+        Value::Array(items) => Value::Array(items.iter().map(binary64).collect()),
+        Value::Object(items) => Value::Object(
+            items
+                .iter()
+                .map(|(k, v)| (k.clone(), binary64(v)))
+                .collect(),
+        ),
+        _ => value.clone(),
+    }
+}
+
+#[test]
+#[ignore = "requires workspace Node; mandatory venue-oracle:bybit"]
+fn market_mapping_matches_each_live_family_source() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/scripts/market-fixtures.mjs"
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let cases: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
+    for (index, case) in cases.iter().enumerate() {
+        let family = match case["variant"].as_str().unwrap() {
+            "bybit" => Family::Linear,
+            "bybitinverse" => Family::Inverse,
+            "bybitspot" => Family::Spot,
+            _ => unreachable!(),
+        };
+        let result = map_market(
+            &case["raw"],
+            case["fees"].as_array().unwrap(),
+            case["category"].as_str().unwrap(),
+            family,
+        );
+        if let Some(error) = case.get("error") {
+            assert_eq!(
+                result.unwrap_err(),
+                error.as_str().unwrap(),
+                "case {index}: {case}"
+            );
+            continue;
+        }
+        let market = result.unwrap_or_else(|error| panic!("case {index}: {error}: {case}"));
+        assert_eq!(
+            binary64(&serde_json::to_value(&market).unwrap()),
+            binary64(&case["result"]),
+            "case {index}: {case}"
+        );
+        let mut values = vec![
+            market.precision.amount,
+            market.precision.price,
+            market.limits.amount.min,
+            market.limits.amount.max,
+            market.limits.leverage.min,
+            market.limits.leverage.max,
+        ];
+        if let Some(taker) = market.taker_fee {
+            values.extend([taker, market.maker_fee.unwrap()]);
+        }
+        let markers: Vec<_> = values
+            .into_iter()
+            .map(|value| {
+                if value.is_nan() {
+                    "NaN"
+                } else if value == f64::INFINITY {
+                    "Infinity"
+                } else if value == f64::NEG_INFINITY {
+                    "-Infinity"
+                } else if value == 0. && value.is_sign_negative() {
+                    "-0"
+                } else {
+                    "finite"
+                }
+            })
+            .collect();
+        assert_eq!(
+            serde_json::json!(markers),
+            case["markers"],
+            "number classes case {index}"
+        );
+    }
+    assert_eq!(cases.len(), 549);
+}

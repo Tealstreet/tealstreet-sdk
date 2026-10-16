@@ -1,0 +1,111 @@
+{
+  "scope": "Explicit fifteen-source-script floor, not the eight-target native Apex Cargo gate",
+  "scripts": [
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/api_runtime.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "d98d0d9832de33a4566289a0c353311c758885e881b0d2302bd062f4dd189572"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/exchange-utils.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "ee69a0290d73be675f5195510bc003a1333b3d1844ec264dd05a75c4df97445a"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/exchange.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "f92720bb0984b0787c09d5c250ca6e17c511388eda68dd2202da417dccefb4c3"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/historical_fills.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "e6db07fbb52e8400fde52ef763334662e337ab38cfce9e20e0eb7ff0d2487bb2"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/lifecycle.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "e946b42aba2b32acba70f8ddae104d009c399ed362dd5fa898376f1f9b459fb2"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/protocol.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "e393a4a85a0b357971ff1c6c09971626ba92ca5fca70a5d7a188343d1dfc1f75"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/pure.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "43e67534e1ba676f6519cd7e5ff8b2a9db12ecc1f3d68a03d7deba174229056b"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/records.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "6196b82b8bd4ec713d7b3bd5e77f53d9a2a082eb420269f770e87ea681009638"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/signer-records.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "837547bbe2613c3cb77b0d6abeae49b71f83b2c38161378d5f725d28e6f76997"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/signer-utils.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "9b59fafb9a4a7535abde4826427f7250f79cf1d67797be24ce25e1f7a1bf217c"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/signing.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "114dbfc2831549947cd20334b36fcb15d40bc0884c0f7153489dba3e9bfb47de"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/trading.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "b980e249e2b2322d7088f9dc0986389495d1bf0472e7e27be5d694efd89b64f0"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/transaction-records.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "5e926f1594373855fb8ee92cac347939782dd8f0a5b0123e7e0575c1db3fe482"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/utils.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "2f1331478f498f5f47f65357b8bed769ec9393be819405dd2a62f1b844a41309"
+    },
+    {
+      "code_revision": "0a6b621394d91702d408b27d1dcd007ea1620a1d",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/websockets.cjs",
+      "exit": 0,
+      "json_output": true,
+      "script_sha256": "0bbe8b235958b3abf06474180ad21e200baff92d834aea5a737cb2a51c445b08"
+    }
+  ],
+  "runtime": "Node 22.23.2"
+}

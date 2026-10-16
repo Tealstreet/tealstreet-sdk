@@ -1,0 +1,263 @@
+//! HyroTrader snapshot publication and simulator read facade.
+use crate::hyro_private_session::SessionFuture;
+use crate::variant_account_refresh::AccountRefreshHost;
+macro_rules! call {
+    ($h:expr,$owner:expr,$key:expr,$args:expr) => {{
+        let selected = $h.select($owner, $key)?;
+        $h.apply(selected, $args)?
+    }};
+}
+pub fn dispatch<H: AccountRefreshHost>(
+    h: &H,
+    code: &str,
+    args: Vec<H::Value>,
+) -> Result<H::Value, H::Error> {
+    match code {
+        "snapshot-current" => Ok(h.boolean(true)),
+        "snapshot-pnl" => h.intrinsic(
+            "addition",
+            vec![args[0].clone(), h.get(&args[1], "unrealizedPnl")?],
+        ),
+        "market-usdt" => Ok(h.boolean(h.equal(&h.get(&args[0], "quote")?, &h.literal("USDT")))),
+        "market-entry" => Ok(h.array(vec![h.get(&args[0], "symbol")?, args[0].clone()])),
+        _ => h.intrinsic("unknown callback", vec![h.literal(code)]),
+    }
+}
+pub fn reconcile_private_state<H: AccountRefreshHost>(
+    h: &H,
+    owner: H::Value,
+    current: H::Value,
+    orders: H::Value,
+) -> SessionFuture<'_, H::Value, H::Error> {
+    let initial = (|| {
+        let current = if h.equal(&current, &h.undefined()) {
+            h.callback(owner.clone(), "snapshot-current", vec![])?
+        } else {
+            current
+        };
+        let orders = if h.equal(&orders, &h.undefined()) {
+            h.boolean(true)
+        } else {
+            orders
+        };
+        let version = h.number(h.numeric(&h.get(&owner, "snapshotVersion")?)? + 1.0);
+        h.set(&owner, "snapshotVersion", version.clone())?;
+        let revision = h.get(&h.get(&owner, "privateWebsocket")?, "stateRevision")?;
+        Ok((current, orders, version, revision))
+    })();
+    let requests = initial.map(|(current, orders, version, revision)| {
+        let promise = (|| {
+            let orders = if h.truthy(&orders) {
+                call!(h, owner.clone(), "fetchOrders", vec![])
+            } else {
+                h.intrinsic("Promise.resolve", vec![h.undefined()])?
+            };
+            let positions = call!(h, owner.clone(), "fetchPositions", vec![]);
+            let raw = call!(h, owner.clone(), "fetchRawBalance", vec![]);
+            h.all(vec![orders, positions, raw])
+        })();
+        (current, version, revision, promise)
+    });
+    Box::pin(async move {
+        let (current, version, revision, promise) = requests?;
+        let run: Result<H::Value, H::Error> = async {
+            let results = h.wait(promise?).await?;
+            let values = h.intrinsic("destructure three", vec![results])?;
+            let orders = h.get(&values, "0")?;
+            let positions = h.get(&values, "1")?;
+            let raw = h.get(&values, "2")?;
+            if h.truthy(&h.get(&owner, "isDisposed")?)
+                || !h.truthy(&h.receiver_call(h.undefined(), current, vec![])?)
+                || !h.equal(&version, &h.get(&owner, "snapshotVersion")?)
+                || !h.equal(
+                    &revision,
+                    &h.get(&h.get(&owner, "privateWebsocket")?, "stateRevision")?,
+                )
+            {
+                return Ok(h.boolean(false));
+            }
+            let formatted = call!(h, owner.clone(), "formatBalance", vec![raw]);
+            let reduce = h.select(positions.clone(), "reduce")?;
+            let upnl = h.apply(
+                reduce,
+                vec![
+                    h.callback(owner.clone(), "snapshot-pnl", vec![])?,
+                    h.number(0.0),
+                ],
+            )?;
+            let update = h.select(h.get(&owner, "store")?, "update")?;
+            let balance_base = h.spread(formatted.clone(), vec![])?;
+            let sum = h.intrinsic(
+                "addition",
+                vec![h.get(&formatted, "total")?, h.get(&formatted, "upnl")?],
+            )?;
+            let total = h.number(h.numeric(&sum)? - h.numeric(&upnl)?);
+            let balance = h.spread(balance_base, vec![("total", total), ("upnl", upnl)])?;
+            let loaded = h.get(&h.get(&owner, "store")?, "loaded")?;
+            let mut flags = vec![];
+            if h.truthy(&orders) {
+                flags.push(("orders", h.boolean(true)));
+            }
+            flags.extend([("positions", h.boolean(true)), ("balance", h.boolean(true))]);
+            let loaded = h.spread(loaded, flags)?;
+            let mut fields = vec![];
+            if h.truthy(&orders) {
+                fields.push(("orders", orders.clone()));
+            }
+            fields.extend([
+                ("positions", positions),
+                ("balance", balance),
+                ("loaded", loaded),
+            ]);
+            h.apply(update, vec![h.object(fields)])?;
+            if h.truthy(&orders) {
+                let n = h.numeric(&h.get(&owner, "ordersSnapshotVersion")?)?;
+                h.set(&owner, "ordersSnapshotVersion", h.number(n + 1.0))?;
+            }
+            Ok(h.boolean(true))
+        }
+        .await;
+        match run {
+            Ok(value) => Ok(value),
+            Err(error) => {
+                let emit = h.select(owner, "emitAndLogError")?;
+                let message = h.normalize_error(error.clone())?;
+                h.apply(emit, vec![message])?;
+                Err(error)
+            }
+        }
+    })
+}
+fn snapshot<H: AccountRefreshHost>(
+    h: &H,
+    owner: H::Value,
+) -> SessionFuture<'_, H::Value, H::Error> {
+    let request = (|| Ok(call!(h, owner, "reconcilePrivateState", vec![])))();
+    Box::pin(async move {
+        h.wait(request?).await?;
+        Ok(h.undefined())
+    })
+}
+pub fn fetch_and_set_private_snapshot<H: AccountRefreshHost>(
+    h: &H,
+    owner: H::Value,
+) -> SessionFuture<'_, H::Value, H::Error> {
+    snapshot(h, owner)
+}
+pub fn fetch_orders_positions_and_balance<H: AccountRefreshHost>(
+    h: &H,
+    owner: H::Value,
+) -> SessionFuture<'_, H::Value, H::Error> {
+    snapshot(h, owner)
+}
+pub fn fetch_and_set_private_snapshot_helper<H: AccountRefreshHost>(
+    h: &H,
+    owner: H::Value,
+    orders: H::Value,
+) -> SessionFuture<'_, H::Value, H::Error> {
+    let request = (|| {
+        let orders = if h.equal(&orders, &h.undefined()) {
+            h.boolean(true)
+        } else {
+            orders
+        };
+        if h.truthy(&h.get(&h.get(&owner, "privateWebsocket")?, "started")?)
+            && !h.truthy(&h.get(&h.get(&owner, "privateWebsocket")?, "ready")?)
+        {
+            return Ok(None);
+        }
+        let reconcile = h.select(owner.clone(), "reconcilePrivateState")?;
+        let current = h.callback(owner, "snapshot-current", vec![])?;
+        Ok(Some(h.apply(reconcile, vec![current, orders])?))
+    })();
+    Box::pin(async move {
+        if let Some(value) = request? {
+            h.wait(value).await?;
+        }
+        Ok(h.undefined())
+    })
+}
+pub fn fetch_markets<H: AccountRefreshHost>(
+    h: &H,
+    owner: H::Value,
+) -> SessionFuture<'_, H::Value, H::Error> {
+    let request = (|| {
+        Ok(call!(
+            h,
+            owner.clone(),
+            "fetchMarketsHelper",
+            vec![h.literal("linear")]
+        ))
+    })();
+    Box::pin(async move {
+        let markets = h.wait(request?).await?;
+        let constructor = h.get(&h.global(), "Map")?;
+        let filter = h.select(markets, "filter")?;
+        let filtered = h.apply(
+            filter,
+            vec![h.callback(owner.clone(), "market-usdt", vec![])?],
+        )?;
+        let map = h.select(filtered, "map")?;
+        let entries = h.apply(map, vec![h.callback(owner, "market-entry", vec![])?])?;
+        let map = h.intrinsic("construct", vec![constructor, entries])?;
+        let values = call!(h, map, "values", vec![]);
+        h.intrinsic("iterable spread", vec![values])
+    })
+}
+fn configured<H: AccountRefreshHost>(
+    h: &H,
+    value: H::Value,
+    message: &str,
+) -> Result<H::Value, H::Error> {
+    if !h.truthy(&value) {
+        return Err(h.error(h.literal(message))?);
+    }
+    Ok(value)
+}
+pub fn get_bybit_rest_base_url<H: AccountRefreshHost>(
+    h: &H,
+    network: H::Value,
+) -> Result<H::Value, H::Error> {
+    let value = h.intrinsic(
+        "computed property",
+        vec![h.get(&h.global(), "HYROTRADER_SIMULATOR_URL")?, network],
+    )?;
+    configured(h, value, "HyroTrader simulator REST URL is not configured")
+}
+pub fn get_bybit_public_ws_url<H: AccountRefreshHost>(
+    h: &H,
+    category: H::Value,
+    network: H::Value,
+) -> Result<H::Value, H::Error> {
+    if !h.equal(&category, &h.literal("linear")) {
+        return Err(h.error(
+            h.literal("HyroTrader simulator only supports linear public WebSocket data"),
+        )?);
+    }
+    let table = h.get(
+        &h.get(
+            &h.get(&h.global(), "HYROTRADER_SIMULATOR_WS_URL")?,
+            "public",
+        )?,
+        "linear",
+    )?;
+    configured(
+        h,
+        h.intrinsic("computed property", vec![table, network])?,
+        "HyroTrader simulator public WebSocket URL is not configured",
+    )
+}
+pub fn get_bybit_private_ws_url<H: AccountRefreshHost>(
+    h: &H,
+    network: H::Value,
+) -> Result<H::Value, H::Error> {
+    let table = h.get(
+        &h.get(&h.global(), "HYROTRADER_SIMULATOR_WS_URL")?,
+        "private",
+    )?;
+    configured(
+        h,
+        h.intrinsic("computed property", vec![table, network])?,
+        "HyroTrader simulator private WebSocket URL is not configured",
+    )
+}

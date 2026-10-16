@@ -1,0 +1,273 @@
+# Kraken Futures and Spot Rust port
+
+Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/kraken/CLAUDE.md).
+Both variants remain in this family crate. `types.rs` maps `kraken.types.ts`;
+`spot_types.rs` maps `krakenspot.types.ts`. REST and websocket runtime hooks
+remain pending and must compose the [shared exchange core](../safe-cex-exchange/CLAUDE.md).
+The inherited `signWsAuth` manifest row belongs to shared crypto.
+
+Tables retain source own-key order as slices. Use `safe_cex_num::js_table_lookup`
+when reproducing ordinary-object reads: `.find()` alone loses inherited values.
+In particular `normalize_asset` retains the actual source's inherited non-string
+results as `TableHit::Inherited`, instead of coercing them to strings. Its input
+and mapped output are UTF-16 code units, preserving unmatched lone surrogates.
+The tables represent the source module's initialized values and stock prototype;
+no mutable module-global/prototype API is provided.
+
+`KrakenBaseUrl` has explicit numeric-output registration. Future number-bearing
+wire inputs must enter through shared `numeric_ingress`, with native output bits
+observed before JSON. `INTERVAL` values are f64 literals, not an integer wire decoder.
+
+The mandatory `tests/types.rs` oracle runs both complete actual TypeScript modules
+and their real shared enum source. Set `SAFE_CEX_TYPESCRIPT_PATH` explicitly.
+It compares every own entry and order, top-level and nested WS-map inherited
+lookups, interval f64 bits, literal-union membership and decoded native variants,
+and normalization output type/identity/UTF-16. It has no frozen shared fixture.
+This slice has no interface-field census, record decoder, or opaque info input.
+
+Scoped gates (from the repository root; cargo is available at
+`/opt/homebrew/opt/rustup/bin/cargo`):
+
+- `cargo check --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-kraken --jobs 1`
+- `cargo test --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-kraken --jobs 1`
+- `cargo fmt --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-kraken -- --check`
+- `cargo clippy --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-kraken --all-targets --jobs 1 -- -D warnings`
+- `cargo clippy --manifest-path sdk-rs/Cargo.toml -p safe-cex-venue-kraken --target wasm32-unknown-unknown --all-targets --jobs 1 -- -D warnings`
+- `python3.12 sdk-rs/safe-cex-venue-kraken/scripts/types-controls.py`
+
+The controls runner requires exactly one production mutation for every row in the
+two type manifests, measured with real `tomllib`. Each sequential mutation must
+fail its named runtime assertion, restore original bytes in `finally`, and pass
+a restored run. `--supplemental` also runs the five previously proven TypeScript,
+surrogate, and capture controls. `--start-at` resumes an interrupted run without
+repeating already proven rows; its output reports only the selected suffix.
+Each run uses the single scoped `--test types` target and one Node invocation for
+the entire corpus. Exit 126 never satisfies a negative control. Do not run it concurrently with other gates
+or edits of the same files. Review is by sub-agent only; merge integration down
+and repeat the scoped gates before handing the owner a SHA.
+
+Structural gates for the types slice:
+
+- `node sdk-rs/safe-cex-venue-kraken/scripts/types-manifest-check.mjs` invokes
+  the maintained TS `extractFile` on the seven source files containing implemented rows and compares
+  identities parsed by Python `tomllib` in one subprocess for the entire corpus.
+  This is not a package typecheck.
+- Build the maintained indexer with `cargo build --manifest-path sdk-rs/Cargo.toml
+  -p safe-cex-parity --bin parity-check --jobs 1`, then run
+  `python3.12 sdk-rs/safe-cex-venue-kraken/scripts/types-parity-check.py`.
+  Its temporary source-index workspace includes only this crate as a member,
+  only this crate's implemented rows across seven manifests, and no exemptions. It does not validate the
+  inherited shared-crypto row or any other crate's implementation.
+
+
+`fills.rs` and `income.rs` map all ten utility rows individually; their chosen
+wire domain is declared once in [MANIFEST-SPEC](../parity/MANIFEST-SPEC.md#kraken-utility-wire-domain).
+The private wire enum captures shared numeric ingress before untagged buffering,
+registers all variants, and delegates retained construction and coercion to shared
+crates. Mapper outputs are shared Execution/IncomeRecord values. There is no
+opaque passthrough. Provide a fallible symbol resolver and an explicit host
+local-time adapter. The UTC identity adapter is appropriate only for a UTC host.
+
+`tests/utilities.rs` runs one Node subprocess for the complete actual-source
+corpus. Private TS helpers are exported by appending an export declaration to
+the unmodified source body. Captures record Node, V8, CPU architecture, platform
+and timezone; only NaN is canonicalized and signed zero is observed by native bits.
+Rust assertions read native output fields and enum variants before Serialize.
+Distinct price/quantity/PnL, four separate ledger amounts, distinct identifiers,
+and nonzero balance-delta supplements prevent same-valued swaps and collapsed
+branches from satisfying these assertions. No local record-field Serde renames
+are involved: the input enum keeps keys and the output is constructed directly.
+This is not an interface-field AST census and makes no inherited-field claim.
+Paired source acceptance/Rust refusal witnesses cover lone surrogates and the
+shared depth budget. Host callback exceptions and resolver order are exercised.
+
+Utility porting gate: `cargo test --manifest-path sdk-rs/Cargo.toml
+-p safe-cex-venue-kraken --test utilities --jobs 1` with the same explicit compiler
+path. `python3.12 sdk-rs/safe-cex-venue-kraken/scripts/utilities-controls.py` requires
+one production mutation per each of the ten TOML rows, with named failure and a
+restored pass. It serializes Cargo runs; each run captures the complete corpus in
+one Node process. At slice readiness run full scoped tests and host/wasm clippy
+separately. A gate sheet and sub-agent verdict attach to the exact reviewed SHA;
+once accepted for merge-up, freeze the remote branch until released.
+
+
+`helpers.rs` maps the four remaining module utilities. Their shared-error ABI,
+collation profile and nanoid generator boundary are declared once in
+[MANIFEST-SPEC](../parity/MANIFEST-SPEC.md#kraken-module-utility-adapters).
+The client-ID factory must be created once per SDK runtime/module and shared
+across Spot instances. Its caller supplies a fallible CSPRNG; the fixed-size pool
+is not a random generator. Pending constructors must retain that lifetime.
+
+`tests/helpers.rs` starts Node once for the complete corpus. Its oracle uses AST
+selection of unchanged declarations (no copied function body), actual shared TS
+enums, and actual installed nanoid 6.0.1 with a pinned source checksum. It asserts
+native enums and error fields, actual comparator results, and two 1320-call ID
+schedules with and without entropy failure. Source acceptance witnesses retain
+the explicitly chosen error alias/Display, UTF-8 and custom-size differences.
+Run the single `--test helpers --jobs 1` target while porting, then
+`scripts/helpers-controls.py` with the explicit TypeScript compiler environment.
+The structural gate selects implemented Kraken-owned rows mechanically, excluding
+pending methods and the inherited shared-crypto row. The TS source census still
+checks the full manifests of all seven selected files against the maintained
+extractor, including the untouched pending rows in those files.
+
+The scoped index wrapper retains committed `[file].rust_files` declarations,
+filtering only other-crate paths. `scripts/manifest-controls.py` removes a real
+Kraken declaration, requires the maintained source-provenance gate to fail, then
+restores original bytes and requires a pass. Never derive declarations from rs
+targets: that would make the proof true by construction.
+
+
+`reads.rs` implements five read method bodies at the
+[parsed read boundary](../parity/MANIFEST-SPEC.md#kraken-parsed-read-boundary).
+It uses shared Store read views only; no notifying write is discarded. Boxed read
+errors propagate unchanged. Pending runtime assembly must drive the returned
+futures and provide already-parsed Axios data; API factories and signing are not
+implemented by this slice. `tests/reads.rs` runs all actual-source cases in one
+Node process, with native query, response, position and error-identity assertions.
+Run its single `--test reads --jobs 1` target during development, and
+`scripts/reads-controls.py --supplemental` for the three row mutations, symmetric
+query-field rename and six constant-position numeric-field mutations.
+
+Integration `9af82bfeaefa3496cd8eea0a29b9ce7d3c1741a7` includes structural
+subscriber identity in shared ExchangeErrorMetadata. The read-error witness
+passes distinct inner/outer IDs through both adapters and asserts their order.
+The existing Box is the generic callback error ABI, not a notification sidecar:
+it retains the caller's original error identity and also admits numeric-ingress
+errors. These five bodies contain no Store write or StoreMutationError conversion.
+
+Pager ownership: Bitget owns the one shared `paginateIncomeRange` operation.
+The Kraken source has one import at `kraken.exchange.ts:44` and one direct call
+at `:886`; the public wrapper calls the range method at `:914`. Both dependent
+income rows remain pending with FINDING notes, empty layer and empty Rust targets.
+The scoped status gate includes these two pending FINDINGs instead of hiding them.
+No venue-local pager exists. The shared manifest already has six pending rows at
+integration `710e663156c8` (four exports plus two private functions), and its source
+regression corpus remains unchanged. The experimental public-wrapper body and its
+8 proven controls remain in local commit `cfe6aefa095044f04a2bea55ba1973ae9dc78f7b`
+for reuse after the shared pager lands; they are not active mapped production code.
+
+See [precision audit](PRECISION_AUDIT.md) before porting the pending order writers.
+The current audit found zero production amount-step or price-step reads; this is
+not a claim that future formatters resist precision swaps.
+
+
+The [cardinality audit](CARDINALITY_AUDIT.md) pins independent source corpus and
+per-case output counts for all four implemented witness targets. Native collection
+lengths are checked before capture; mandatory loops use committed bounds, including
+2640 native ID comparisons across two scenarios. The read oracle wrapper adds live
+nonempty array-token supplements without editing the original oracle. Run
+`scripts/cardinality-controls.py` for production empty/subset and source omission
+controls; bypass controls prove the native guard does not depend on source census.
+
+`scripts/consuming-controls.py` separately probes the shared array decoder through
+Kraken's live corpora. It consumes discarded elements before returning None,
+requires named native-length failures, then removes both outer length checks while
+keeping the mutant active and requires named fixed-index failures. It restores
+shared production and witness bytes; never commit its temporary shared mutation.
+
+
+`fetch_leverage_settings` preserves the source success/truthiness guards, clear/set
+ordering, partial cache effects, and catch/console behavior. Its cache and console
+host boundary is declared in [MANIFEST-SPEC](../parity/MANIFEST-SPEC.md#kraken-leverage-cache-host).
+The pending constructor must retain the cache; this function does not create a
+venue-local Store or pager. The original read oracle remains byte-identical;
+`reads-leverage-supplement.cjs` adds 33 actual-source cases in the existing single
+Node process. Equal-shaped object/array keys remain distinct in the native witness.
+Source totals, per-case output counts, native lengths and 33 completed comparisons
+are independently asserted. `scripts/reads-controls.py --start-at
+kraken.exchange.KrakenExchange.fetchLeverageSettings --leverage-supplemental`
+runs eight production controls and one cache-witness control.
+`scripts/consuming-controls.py --leverage-only` consumes all decoded elements, then
+repeats with native length guards removed; direct native effects still must fail.
+See [leverage evidence](LEVERAGE_EVIDENCE.md) for this slice's measured controls.
+
+
+`fetch_historical_positions` calls the shared journal operation with symbol scope
+false. Its typed input/future boundary is declared in
+[MANIFEST-SPEC](../parity/MANIFEST-SPEC.md#kraken-journal-delegation).
+`tests/support/history.rs` compares ten cases executing the actual Kraken and base
+TypeScript arrows within the existing single Node corpus. The imported journal
+engine is a recording dependency on both sides; its algorithm remains shared-owned.
+Checks observe native from/to bits, originating exchange identity, quote fallback,
+record order/count/allocation and error metadata allocation/subscriber IDs.
+A numeric-account source acceptance/Rust refusal pair records the chosen type
+boundary. Seven serial production controls in `scripts/history-controls.py` cover
+scope, bound identity, empty/subset/extra records, length-guard bypass and error
+flattening. This path adds no decoded collection: native record vectors come from
+the shared folder and are returned directly. No new consuming-array control is
+claimed for the scalar options decoder.
+
+
+`spot_reads.rs::fetch_ohlcv` ports the Spot candle read at the
+[Spot candle host boundary](../parity/MANIFEST-SPEC.md#kraken-spot-candle-host).
+It reads shared Store market info, preserves inherited interval identities with
+shared TableHit, and uses shared numeric ingress/coercion and Candle output.
+The callback receives native query components; pending factory assembly must
+retain pair/interval/since semantics. Numeric infinite timestamps are retained;
+the explicit numeric-timestamp profile refuses source string/null timestamps.
+The oracle supplement executes the unchanged actual source in the existing one
+Node process. It pins 55 cases, 93 native records and 558 native field comparisons,
+plus two paired timestamp boundary cases. Original oracle files remain unchanged.
+`scripts/ohlcv-controls.py` runs 14 venue production mutations, two shared
+consuming-decoder controls, and two source omission controls. Guard bypass keeps
+native index coverage and completed comparison totals independent of source size.
+No market precision adjustment, Store notification or websocket path is added.
+
+
+`tickers.rs::fetch_tickers` implements the Futures ticker read at the
+[Futures ticker host boundary](../parity/MANIFEST-SPEC.md#kraken-futures-ticker-host).
+The existing single Node corpus executes the source arrow and real get-key module.
+It pins 49 cases, 63 records and 693 direct native numeric comparisons, alongside
+request/trace ordering, original error metadata and current Store fallback.
+Typed Store pseudo-market exclusion and owned fallback snapshots have paired
+source witnesses. `scripts/ticker-controls.py` runs sequential production swaps,
+collection controls, trace identity and consuming shared decoder controls.
+No notifying Store write or market precision adjustment is added.
+
+
+`validation.rs` ports both `validateAccount` bodies at the existing parsed read
+and shared UTF-8 boundary. Native `ValidationRead` forwards Futures GET without
+body and Spot POST with an empty object. Error-message and status precedence,
+malformed response handling, account own-key guards and best-effort balance
+presence retain the source behavior. A synchronous balance callback failure
+enters the outer catch; an asynchronous rejection resolves without a balance.
+`tests/validation.rs` observes 76 cases per method in one source process, including
+continuation-time balance callback replacement and catch-path TypeError rejection.
+Two paired Futures UTF-16 witnesses record the shared representation refusal;
+that row is FORCED divergent, while Spot is ported within the existing boundary.
+`scripts/validation-controls.py` proves one named production failure per new row.
+Measured code SHA, exits and non-claims are committed in `GATE_EVIDENCE.md`.
+
+`futures_candles.rs::fetch_ohlcv` implements the Futures charts read at the
+[Futures candle host boundary](../parity/MANIFEST-SPEC.md#kraken-futures-candle-host).
+The existing one-process read oracle adds 47 cases, 74 records and 444 direct
+native numeric comparisons. It observes inherited interval lookup, clock use,
+request range, sorting, missing-data reporting, catch reporting and emission.
+Both error callbacks remain fallible and preserve original metadata on failure.
+The paired mixed-NaN witness records the explicit sortable-timestamp refusal.
+`scripts/rest-read-controls.py` proves one production mutation per new read
+with a named native assertion failure and a restored pass.
+No Store write, timer, or two-axis precision adjustment is introduced.
+
+
+`spot_balance.rs::fetch_balance` ports the Spot balance read at the
+[Spot balance host boundary](../parity/MANIFEST-SPEC.md#kraken-spot-balance-host).
+`tests/spot_balance.rs` executes the unchanged source arrow in one Node process
+and asserts native balances, alias overwrites, currency order, continuation-time
+tickers, Store fallback timing and emitter metadata. The 29-case corpus compares
+49 currencies and includes a paired UTF-16 source acceptance/native refusal.
+Porting gates are the two named read tests, scoped all-targets check and maintained
+extractor writer/check; broad control matrices are unnecessary for this slice.
+
+
+`ws_helpers.rs` ports the public websocket's two pure utilities individually.
+`get_ticker_product_ids` captures shared Store market symbols before the fallible
+active-symbol callback, preserves duplicate/order semantics and retains the full
+list when the active set is empty or has no overlap. `map_timeframe` preserves
+its complete twelve-entry Futures table, nullish default and stock-prototype
+identities using shared TableHit; it accepts UTF-16 keys including lone surrogates.
+`tests/ws_helpers.rs` selects unchanged source members by AST, observing nine
+product cases (27 native IDs) and 32 timeframe cases (20 numbers and 12 inherited
+identities) in one Node process. `scripts/ws-helper-controls.py` proves one named
+production failure per new row. Socket lifecycle methods remain pending.

@@ -1,0 +1,25 @@
+{
+  "count": 476804,
+  "baselineConfiguration": "node-v24.20.0-darwin-arm64-legacy",
+  "baselineSha256": "49b80ed1ed553801cc190ee95fa519e8a0d29befa1f1c6afa3d2d0f1446ab082",
+  "disagreementsSha256": "dbe41801ad737eb9673e62fe0aee4edf2bb46f04fb6be54708e347af7b2fe426",
+  "inputsSha256": "256e8358c0f7ff3df191b74935415466f540df61f7778d9535dbad7da43550aa",
+  "configurations": {
+    "node-v24.20.0-darwin-arm64-legacy": {
+      "sha256": "49b80ed1ed553801cc190ee95fa519e8a0d29befa1f1c6afa3d2d0f1446ab082",
+      "mode": "legacy"
+    },
+    "node-v24.20.0-darwin-arm64-standard": {
+      "sha256": "70057ffd597fedf2eff98221789ac6bcd21d861e9658a0227aebf6c737d83119",
+      "mode": "standard"
+    },
+    "node-v24.20.0-linux-x64-legacy": {
+      "sha256": "d3a016f623018370a8c4b555318b27123c9635c6e988e1acd490e99c35b8bbcd",
+      "mode": "legacy"
+    },
+    "node-v24.20.0-linux-x64-standard": {
+      "sha256": "996573e0bd11f84bb7dc42f17d9732224effd7b619fe2f01e4bd7f76231c3529",
+      "mode": "standard"
+    }
+  }
+}

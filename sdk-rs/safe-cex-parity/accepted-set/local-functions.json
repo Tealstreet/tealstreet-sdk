@@ -1,0 +1,96 @@
+{
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:has_path": {
+    "category": "non-decoder",
+    "reason": "Examines parsed attribute tokens for a path identifier; no wire deserialization.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:file": {
+    "category": "non-decoder",
+    "reason": "Walks and validates Rust source modules for doc cfg guards; this is the discovery guard itself, not a wire/domain decoder.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:modules": {
+    "category": "non-decoder",
+    "reason": "Walks parsed Rust module declarations; no value decoding.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:namespace_alias": {
+    "category": "non-decoder",
+    "reason": "Inspects parsed use-tree namespace bindings.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:attribute_binding": {
+    "category": "non-decoder",
+    "reason": "Inspects parsed use-tree attribute bindings.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:ambiguous": {
+    "category": "non-decoder",
+    "reason": "Inspects parsed use-tree macro bindings.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-transport/src/relay.rs::LOCAL_FUNCTION:string": {
+    "category": "non-decoder",
+    "reason": "Formats an already decoded JSON error value using JavaScript coercion; no inbound shape acceptance.",
+    "sourceSha256": "eb7a3f3aeb0b1bcf7b4f1d953efad4dc6a92db8576aaf7dfa06d510d46c37d7c"
+  },
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_TRAIT_IMPL:Visit:Names": {
+    "category": "non-decoder",
+    "reason": "syn AST visitor collects nominal declaration names and unsupported expansion markers; not a wire decoder.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-store/src/orderbook.rs::LOCAL_FUNCTION:sorted": {
+    "category": "non-decoder",
+    "reason": "Recursive stable merge-sort helper invoked by sort_order_book; it mutates already-decoded order-book levels and does not accept wire values.",
+    "sourceSha256": "4f055d3ccc9a9d32c5a66174eadf93b24c5d8aa2aff2f0567a195490e8b64016"
+  },
+  "safe-cex-types/src/ws_auth.rs::LOCAL_TRAIT_IMPL:serde::de::Visitor:RequestVisitor": {
+    "category": "decoder-helper",
+    "runtimeOwner": "safe_cex_types::ws_auth::WsAuthRequest",
+    "reason": "Relocated canonical WS auth visitor linked to its actual production decoder with direct input/output witnesses; Deserialize shape probes remain mandatory alongside those outputs.",
+    "sourceSha256": "82ae56786796ad28f646a63aed1e41c6ee57458911ca6fe8c070daaa2f128b9a"
+  },
+  "safe-cex-types/src/ws_auth.rs::LOCAL_TRAIT_IMPL:serde::de::Visitor:PayloadVisitor": {
+    "category": "decoder-helper",
+    "runtimeOwner": "safe_cex_types::ws_auth::ws_auth_payload",
+    "reason": "Relocated canonical WS auth visitor linked to its actual production decoder with direct input/output witnesses; Deserialize shape probes remain mandatory alongside those outputs.",
+    "sourceSha256": "82ae56786796ad28f646a63aed1e41c6ee57458911ca6fe8c070daaa2f128b9a"
+  },
+  "safe-cex-types/src/ws_auth.rs::LOCAL_TRAIT_IMPL:serde::de::Visitor:ResponseVisitor": {
+    "category": "decoder-helper",
+    "runtimeOwner": "safe_cex_types::ws_auth::WsAuthResponse",
+    "reason": "Relocated canonical WS auth visitor linked to its actual production decoder with direct input/output witnesses; Deserialize shape probes remain mandatory alongside those outputs.",
+    "sourceSha256": "82ae56786796ad28f646a63aed1e41c6ee57458911ca6fe8c070daaa2f128b9a"
+  },
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:collect": {
+    "category": "non-decoder",
+    "reason": "Traverses parsed Rust module items to collect public alias namespace names and original declaration-end spans; the scope string is a Rust namespace prefix, not exchange wire input.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:renamed_macro": {
+    "category": "non-decoder",
+    "reason": "Inspects parsed Rust use-tree destinations to reject renamed imports resembling accepted expression macros; it neither executes macros nor admits exchange wire values.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-crypto/src/starknet.rs::LOCAL_FUNCTION:visit": {
+    "category": "non-decoder",
+    "reason": "Nested sdk_type_hash::visit traverses JSON-parsed type declarations, checks field/type availability and depth, and accumulates a deduplicated dependency-name worklist solely for the authenticated type-hash preimage. The parent exposes a computed hash, not a decoded domain owner; sdk_tuple retains its separate executed parser contract. sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary.",
+    "sourceSha256": "b28607378c9d99cb202580c0f55101de80a928f92b03256358921ef1c29173b5"
+  },
+  "safe-cex-parity/src/accepted_source.rs::LOCAL_FUNCTION:glob": {
+    "category": "non-decoder",
+    "reason": "Walks an already parsed syn UseTree to detect any glob import, including path and group nodes. It never parses wire input or grants macro-origin permission.",
+    "sourceSha256": "677b6310eb302d1aa7e2b9cfc1ad71541b9ae31cc235b6dffed347c6c02624c3"
+  },
+  "safe-cex-parity/src/bin/accepted-source.rs::LOCAL_FUNCTION:source": {
+    "category": "decoder-helper",
+    "reason": "Reads the canonical provider module file and parses its actual Rust source; production number_output_provider observations execute this helper over independently authored valid and refused module chains.",
+    "sourceSha256": "a6ff25eb6d525cf996a6026986cfc93c6556b31accff0f0373696bbccd4fa71d",
+    "runtimeOwner": "accepted_source::number_output_provider"
+  },
+  "safe-cex-parity/src/bin/accepted-source.rs::LOCAL_FUNCTION:module": {
+    "category": "non-decoder",
+    "reason": "Inspects already parsed module declarations for exactly one unconditional external module; no raw input is decoded here.",
+    "sourceSha256": "a6ff25eb6d525cf996a6026986cfc93c6556b31accff0f0373696bbccd4fa71d"
+  }
+}

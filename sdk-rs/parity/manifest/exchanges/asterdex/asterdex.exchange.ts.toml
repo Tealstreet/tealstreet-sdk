@@ -1,0 +1,523 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/asterdex/asterdex.exchange.ts"
+rust_files = [ "safe-cex-venue-asterdex/src/exchange_helpers.rs", "safe-cex-venue-asterdex/src/exchange_runtime.rs", "safe-cex-venue-asterdex/src/account_fetch.rs", "safe-cex-venue-asterdex/src/order_execution.rs", "safe-cex-venue-asterdex/src/public_stream.rs" ]
+
+[[symbol]]
+ts = "isAsterDEXUnknownOrderError"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::is_aster_dex_unknown_order_error"
+status = "ported"
+note = "Pure helper extracted from its TS owner: safe-cex-venue-asterdex/src/exchange_helpers.rs::is_aster_dex_unknown_order_error . Explicit arguments replace reads of caller state; live TS member oracle checks branch behavior. Native Error messages arrive separately before JSON erasure; other inputs use fallible shared String conversion."
+
+[[symbol]]
+ts = "AsterDEXExchange"
+kind = "class"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange"
+status = "divergent"
+note = "CHOSEN: Rc-owned native composition and an explicit member registry replace JavaScript subclass/prototype constructor identity. Native consumers retain typed owner/task/socket lifetimes rather than a JavaScript class interpreter; instanceof and source prototype reflection are excluded. Constructor/static values and lifecycle bodies are mapped independently; no concrete HTTP/backend integration claim. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ."
+
+[[symbol]]
+ts = "AsterDEXExchange.constructor"
+kind = "constructor"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::AsterDEXExchange::new"
+status = "ported"
+note = "Base/options/store handles, ordered declared fields and 44 arrow-member initializers, API-version assignment, four API slots, and public-before-private socket construction. Native source oracle asserts static values, field order, API slot IDs and original socket owner/store handles. Required member bindings are existing mapped Rust bodies, not a fallback source evaluator."
+
+[[symbol]]
+ts = "AsterDEXExchange.get canSign"
+kind = "accessor"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::can_sign"
+status = "ported"
+note = "Pure extraction safe-cex-venue-asterdex/src/exchange_helpers.rs::can_sign Host remote-signer presence supplied explicitly; empty key takes precedence, V3 checks full auth context, V1 tests secret truthiness."
+
+[[symbol]]
+ts = "AsterDEXExchange.markPositionStateUpdatedByWebsocket"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::mark_position_state_updated_by_websocket"
+status = "ported"
+note = "Function-for-function f64 state helper preserves ECMAScript binary64 increment and return timing; live oracle covers signed zero, non-finite values and the 2^53 precision boundary. Renamed target: `safe-cex-venue-asterdex/src/exchange_helpers.rs::mark_position_state_updated_by_websocket`."
+
+[[symbol]]
+ts = "AsterDEXExchange.getPositionStateVersion"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_position_state_version"
+status = "ported"
+note = "Function-for-function f64 state helper preserves ECMAScript binary64 increment and return timing; live oracle covers signed zero, non-finite values and the 2^53 precision boundary. Renamed target: `safe-cex-venue-asterdex/src/exchange_helpers.rs::get_position_state_version`."
+
+[[symbol]]
+ts = "AsterDEXExchange.markBalanceStateUpdatedByWebsocket"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::mark_balance_state_updated_by_websocket"
+status = "ported"
+note = "Function-for-function f64 state helper preserves ECMAScript binary64 increment and return timing; live oracle covers signed zero, non-finite values and the 2^53 precision boundary. Renamed target: `safe-cex-venue-asterdex/src/exchange_helpers.rs::mark_balance_state_updated_by_websocket`."
+
+[[symbol]]
+ts = "AsterDEXExchange.getBalanceStateVersion"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_balance_state_version"
+status = "ported"
+note = "Function-for-function f64 state helper preserves ECMAScript binary64 increment and return timing; live oracle covers signed zero, non-finite values and the 2^53 precision boundary. Renamed target: `safe-cex-venue-asterdex/src/exchange_helpers.rs::get_balance_state_version`."
+
+[[symbol]]
+ts = "AsterDEXExchange.reconcileBalanceAfterPrivateUpdate"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::reconcile_balance_after_private_update"
+status = "ported"
+note = "Adapted stateful method: awaits the account balance, rejects stale/disposed application, merges loaded.balance, and stamps the host wall clock only after Store notification succeeds. Balance/Store failures log Warning and resolve true, preserving the repair loop contract. Native futures are explicitly polled; whole exchange assembly is separate."
+
+[[symbol]]
+ts = "AsterDEXExchange.getFapiPath"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_fapi_path"
+status = "ported"
+note = "Pure extraction safe-cex-venue-asterdex/src/exchange_helpers.rs::get_fapi_path Explicit instance version and optional override delegate to the source path helper."
+
+[[symbol]]
+ts = "AsterDEXExchange#getAccountEndpoint"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_account_endpoint"
+status = "ported"
+note = "Pure extraction safe-cex-venue-asterdex/src/exchange_helpers.rs::get_account_endpoint V3 uses current version; V1 account explicitly uses v4."
+
+[[symbol]]
+ts = "AsterDEXExchange#initializeAPIs"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::initialize_apis"
+status = "ported"
+note = "Creates the four native API instances and assigns primary/secondary/unlimited/public slots in source order; constructor fixture reads the actual native slot values."
+
+[[symbol]]
+ts = "AsterDEXExchange.start"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::start_exchange"
+status = "ported"
+note = "Owns complete startup body: external-public guard, clock/auth ordering, market/ticker Store updates and precision log, independent position/order catches and timestamps, conditional sockets and unawaited tick, outer error log/rethrow. Source floor 16 startup cases; task ownership/reactions are bound runtime primitives."
+
+[[symbol]]
+ts = "AsterDEXExchange#tick"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::tick"
+status = "ported"
+note = "Owns due calculations at 25s/25s/75s, balance-version argument, stale-position guard and full Store writes, disposal short circuits, independent warning catches and 3s rescheduling. Source floor eleven cases, including exact boundaries, version race and disposal during each fetch."
+
+[[symbol]]
+ts = "AsterDEXExchange#fetchBalance"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::balance_from_account_response"
+status = "ported"
+note = "Extracts account-level total/free/upnl and summed margin. The signed GET and logged/rethrown transport failures remain host-owned. Live oracle executes the actual TS method for empty strings, parseFloat prefixes, signed zero and nonfinite values; it compares all four f64 bit patterns before serialization and checks V1/V3 paths. Source falsy-to-nullish and compiled-Rust default-value mutations both fail by named result assertion. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::balance_from_account_response."
+
+[[symbol]]
+ts = "AsterDEXExchange.getAccount"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_account_from_alias"
+status = "ported"
+note = "Extracts the typed response mapping: a nonempty accountAlias wins, otherwise the API key wins, then an empty string. Runtime GET/error logging remains host-owned; the live oracle executes the actual method and checks V1/V3 endpoint composition. Source nullish-fallback and compiled-Rust fallback mutations both fail the named output assertion. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::get_account_from_alias."
+
+[[symbol]]
+ts = "AsterDEXExchange.validateAccount"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::validate_account"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Actual source validateAccount rethrows its AxiosError after nested getAccount logging; native structural failure has name Error. The existing carrier loss is described, but FORCED does not establish Rust inability. Price the shared error ABI/reason or retain an owned defect; full constructor/auth/live traffic is not covered. Checker shape analogue: order_execution.rs:3 private types::* alongside local OrderExecution(:60)/impl(:73); no pub use and no measured checker rejection. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-31. Historical note follows: FORCED: OrderExecution::validate_account applies the original credential/main-wallet/V3 checks, GET account endpoint, nested getAccount logging, and returns native ValidateAccountResult with empty error and absent balance. Its REST boundary preserves available RestFailure metadata but has name Error where an actual AxiosError remains AxiosError in TS; the live validation failure witness asserts both names. Configured APIs are host supplied; no full exchange constructor claim."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchPositionMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::parse_position_mode_response"
+status = "ported"
+note = "Pure response parser extraction. Accepts only boolean true/false or exact strings true/false; nullish bodies preserve the property-read TypeError and other values preserve the source Error JSON.stringify text. Live oracle executes the actual TS method with a fake API response and verifies the GET path; networking and store update remain separate runtime rows. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::parse_position_mode_response."
+
+[[symbol]]
+ts = "AsterDEXExchange#syncPositionMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::sync_position_mode"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. The shared REST boundary really loses the source AxiosError name/identity as the note says, but FORCED is unsupported: ExchangeError has a name String and broader carriers are possible. Price the shared structural ABI/reason or retain the existing defect; caller polling and configured API construction are separate boundaries. No new error execution is claimed. Checker shape analogue: account_fetch.rs:4 private types::* alongside local AccountFetch(:14)/impl(:34); no pub use. Current unconditional-local-nominal bypass means no checker artifact is established. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-15. Historical note follows: FORCED: sync_position_mode exposes structural ExchangeError from the shared RestFailure carrier, which has no original JS error name/identity: source preserves AxiosError.name, native name is Error. A paired live real-AxiosError/native assertion pins this boundary. Successful boolean/string modes still set isHedged before the Hedge/One-Way Info log; invalid response and Store/log failure flow is preserved. The caller polls the native future; API construction remains pending."
+
+[[symbol]]
+ts = "AsterDEXExchange#getAccountPositionMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_account_position_mode"
+status = "ported"
+note = "Pure extraction from the required boolean StoreOptions.isHedged; both closed input values compared against the live TS method. Explicit input replaces instance store access; no runtime wiring claimed. Extracted Rust target: safe-cex-venue-asterdex/src/exchange_helpers.rs::get_account_position_mode ."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchPositions"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::fetch_positions"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Native decodes all position DTOs before symbol/zero filtering; source may ignore missing unused fields. This named acceptance and owned-info difference is a chosen model, not FORCED. Price whole-response refusal versus source positions/placeholders and explain polling separately; no new leverage/placeholder algorithm fault is demonstrated. Checker shape analogue: account_fetch.rs:4 private types::* alongside local AccountFetch(:14)/impl(:34); no pub use. Current unconditional-local-nominal bypass means no checker artifact is established. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-24. Historical note follows: FORCED: fetch_positions strictly decodes complete AsterDEXPositionResponse records before filtering; TS trusts positionRisk records and can ignore missing unused fields. Mapped info is owned rather than aliased. Finite positive leverage scan includes zero-contract/filtered symbols, real-first uniqBy and mode-aware placeholders are preserved. Futures run when polled rather than eager JS promises."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::fetch_orders"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Strict selected-row DTOs, whole-record closed OrderType refusal, owned info and structural errors are explicitly described. Section15 calls closed enum output CHOSEN, never FORCED. Correct/price the bucket without claiming source enum correctness or serialized convergence. Empty/filter branch inspection is not a new executed gate. Checker shape analogue: account_fetch.rs:4 private types::* alongside local AccountFetch(:14)/impl(:34); no pub use. Current unconditional-local-nominal bypass means no checker artifact is established. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary, sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-23. Historical note follows: FORCED: fetch_orders filters symbols then strictly decodes selected AsterDEXOrderResponse rows and rejects a mapped type outside the shared closed OrderType enum; TS can emit unknown/inherited values (ts-bug). Returned info is owned and structured REST failure metadata replaces JS error identity. Empty filters and null property-access failures retain source behavior; execution requires polling."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchMarkets"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::fetch_markets"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Complete trading-market DTO admission and numeric-only leverage brackets are chosen typed models, not language impossibilities. Source can retain string initialLeverage in output while native refuses it. Owned info and caller polling are named but need an appropriate chosen rationale instead of FORCED. No complete coercion/numeric-domain proof is supplied by inspection. Checker shape analogue: account_fetch.rs:4 private types::* alongside local AccountFetch(:14)/impl(:34); no pub use. Current unconditional-local-nominal bypass means no checker artifact is established. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-22. Historical note follows: FORCED: fetch_markets requires complete trading-market DTOs and numeric leverage-bracket values; TS casts Axios data and can retain out-of-contract string limits. Native market info is owned. BTC sample selection, trading-only filtering, default leverage, and partial bracket entries surviving a later null error are preserved. Requests/continuations require future polling rather than eager Promise execution."
+
+[[symbol]]
+ts = "AsterDEXExchange#fetchLeverageBrackets"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::parse_leverage_brackets_response"
+status = "ported"
+note = "Extracts the leverage-bracket response decision while the HTTP call remains host-owned: handles singleton/array responses, first bracket only, last duplicate symbol value, empty data, and caught request/shape errors with the source log and severity. The live oracle executes the actual TS method, checks its versioned GET path and full Map/log output; source and compiled-Rust last-bracket mutations both fail the named response assertion. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::parse_leverage_brackets_response."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchTickers"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::fetch_tickers"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Strict ticker DTOs, owned info, structural REST errors and polling are already named but incorrectly collected under FORCED. These are expressible input/alias/error/lifecycle decisions needing reasons and costs. Bulk OI startup control flow is inspected; generic String does not establish a retained public unit or a new request-order fault. Checker shape analogue: account_fetch.rs:4 private types::* alongside local AccountFetch(:14)/impl(:34); no pub use. Current unconditional-local-nominal bypass means no checker artifact is established. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-26. Historical note follows: FORCED: fetch_tickers strictly decodes complete ticker DTOs and returns owned info instead of retaining the Axios object identity. Startup still performs one bulk OI request with timeout 2000 and allowPerSymbolFallback=false, including empty bulk results; native REST failures are structural and continuations run only when polled."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchPublicTrades"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::map_public_trade"
+status = "divergent"
+note = "CHOSEN: ts-bug: AsterDEXExchange.fetchPublicTrades casts uppercase BUY/SELL strings into the shared closed OrderSide. Cite sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::map_public_trade. The live-source witness records typeof side === string before JSON serialization and the full TypeScript trade record; Rust's extracted per-trade mapper refuses with RepresentationError at the closed side field, so no PublicTrade record is returned. Serialized convergence is not claimed. Network request and logging runtime wiring remain outside this mapper slice."
+
+[[symbol]]
+ts = "AsterDEXExchange.setLeverage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::set_leverage"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Source rejects nonfinite leverage input but can create a nonfinite clamped value from market bounds and pass it to Axios; native refuses that request Value. This is a shared carrier decision with a withheld-POST cost, not Rust inability to retain f64. Price that choice independently of error identity/polling and do not infer preservation from JSON null. Checker shape analogue: account_fetch.rs:4 private types::* alongside local AccountFetch(:14)/impl(:34); no pub use. Current unconditional-local-nominal bypass means no checker artifact is established. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-29. Historical note follows: FORCED: set_leverage refuses non-finite clamped leverage because RestBody::Untransformed Value cannot retain NaN/Infinity; TS passes that number to Axios, which may serialize null. Finite inputs use JS half-up rounding, falsy minimum fallback, clamping, ignored side, primary POST and source log/error order. Native futures require polling and native failures cannot retain arbitrary JS Error identity."
+
+[[symbol]]
+ts = "AsterDEXExchange.changePositionMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/account_fetch.rs::AccountFetch::change_position_mode"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Source and native both compose POST, setting/log, then refresh with swallowed refresh errors. Strict DTO admission and owned positions are chosen models, not FORCED. Price the actual nested-warning/Store-update cost and why, alongside separately named polling. No new refresh/catch-order defect is established. Checker shape analogue: account_fetch.rs:4 private types::* alongside local AccountFetch(:14)/impl(:34); no pub use. Current unconditional-local-nominal bypass means no checker artifact is established. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-21. Historical note follows: FORCED: change_position_mode refreshes through strict fetch_positions DTOs, so an out-of-contract positionRisk record becomes the source-shaped nested Warning rather than a TS partially mapped position. Primary POST string true/false, Store setting and Info log precede refresh; refresh/Store failures are swallowed while outer failures propagate. Future execution is caller-polled, and returned positions/info are owned."
+
+[[symbol]]
+ts = "AsterDEXExchange.afterMethodCalledInWorker"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::after_method_called_in_worker"
+status = "ported"
+note = "Invokes the selected `isHedged` Store effect through a fallible callback, so the Store mutation commits before its notification error propagates, matching the source order. The integration conversion preserves the Store-local subscriber id in ExchangeError; `worker_hook_propagates_store_failure_after_mutation` checks the committed setting, original failure and id. IDs remain Store-local and are not compared across Store instances. The live helper oracle pins method selection and JS truthiness. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::after_method_called_in_worker."
+
+[[symbol]]
+ts = "AsterDEXExchange.changeMarginType"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::build_change_margin_type_request"
+status = "ported"
+note = "Pure validation and POST request-effect extraction. Missing/empty symbols preserve the Error and catch-log text without submitting; valid symbols preserve the instance API version, exact symbol, and ISOLATED/CROSSED mapping. A live-source oracle executes the actual V1/V3 method and checks errors, logs and request path/body, with an empty-symbol source mutation failing by row name. The actual API submission remains runtime behavior. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::build_change_margin_type_request."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchSymbolMaxLeverage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::fetch_symbol_max_leverage"
+status = "ported"
+note = "Pure selection extraction. Uses first matching market and JavaScript || fallback semantics for zero, negative zero, NaN, null and missing leverage; preserves negative and infinite truthy values. Live oracle executes the actual async TypeScript method with the fetchMarkets result and checks error/log behavior; network and caller wiring remain separate. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::fetch_symbol_max_leverage."
+
+[[symbol]]
+ts = "AsterDEXExchange#assertV3Feature"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::assert_v3_feature"
+status = "divergent"
+note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary . Extracted helper safe-cex-venue-asterdex/src/exchange_helpers.rs::assert_v3_feature consumes the real BaseExchange and delegates to its reject_preflight operation. V3 returns without effects; V1 reports/emits before returning the raw Error. Live oracle executes both the actual venue method and BaseExchange.emitAndLogError, preserving the distinction between prefixed emitted message and unprefixed thrown message. Production DefaultStore constructor is used in Rust; scalar/astral/whitespace and valid-JSON lone-surrogate witnesses remain distinct. Runtime exchange wiring is not claimed."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchStpMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::parse_stp_mode_response"
+status = "ported"
+note = "Pure response validation extraction. Accepts only the three exact AsterDEX STP mode strings; invalid and missing values preserve the fixed Error message and `emitAndLogError` effect. A live-source oracle executes the actual V3 method and checks its `/fapi/v3/stpMode` request path. The V3 feature gate is separately mapped to assert_v3_feature; API/network runtime wiring remains separate. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::parse_stp_mode_response."
+
+[[symbol]]
+ts = "AsterDEXExchange.changeStpMode"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::build_change_stp_mode_request"
+status = "ported"
+note = "Pure request-validation and request-effect extraction. Exact STP modes produce POST /fapi/v3/stpMode with the original mode; invalid JSON-domain values preserve String coercion, Error text, and the emit-before-reject path, while a coercion TypeError occurs before emission. The live oracle executes the actual method and checks successful request path/body, invalid-mode rejection, and coercion failure; a source mutation that accepts invalid modes fails by row name. V3 feature gating is separately mapped to assert_v3_feature; network/runtime wiring is not claimed. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::build_change_stp_mode_request."
+
+[[symbol]]
+ts = "AsterDEXExchange.placeOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::place_order"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. The finite-progress guard is an explicit justified CHOSEN departure from a potentially nonterminating split. The accompanying FORCED typed ExecutionOrder ingress and Axios identity clause is still a representable carrier/input choice. Separate those causes and any eager-preflight/drop cost. No new split algorithm or successful-order fault is asserted. Checker shape analogue: order_execution.rs:3 private types::* alongside local OrderExecution(:60)/impl(:73); no pub use and no measured checker rejection. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-27. Historical note follows: MIXED: OrderExecution::place_order executes preflight, bracket SL-before-TP expansion, sequential oversized chunks, hedge/close/reduce flags, tick-size adjustment, STP and builder fees, and actual secondary POST/ID extraction. FORCED typed ExecutionOrder ingress refuses invalid enum/null/nonnumeric shapes TS can inspect dynamically and REST failures lose AxiosError identity. CHOSEN: reject adjusted max<=0 or a nondecreasing split remainder to avoid the source unbounded loop; valid finite splitting remains sequential."
+
+[[symbol]]
+ts = "AsterDEXExchange.placeOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::place_orders"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. The row honestly inherits finite-progress rejection and states how it lets later batch items run. Caller-polled futures are not FORCED: eager owned task/observer models are expressible. Price this API/lifecycle choice separately from finite-progress behavior; this review adds no partial-ID/continuation proof. Checker shape analogue: order_execution.rs:3 private types::* alongside local OrderExecution(:60)/impl(:73); no pub use and no measured checker rejection. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-28. Historical note follows: MIXED: OrderExecution::place_orders validates the whole caller-ID batch before writes, awaits each placement in order, retains partial successful IDs, and throws only when all attempts fail with a nonempty message. It inherits place_order's CHOSEN finite-progress split rejection: a malformed oversized first item becomes a logged failure and later items continue, whereas TS never reaches them. FORCED configured native futures are caller-polled rather than JS eager promises."
+
+[[symbol]]
+ts = "AsterDEXExchange.updateOrder"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::update_order"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Cancel-before-replace is implemented, but missing suppression config and strict UpdateOrderOpts null/undefined admission are representable shared input/carrier policies, not FORCED. State their why and inherited old-order interceptor cost separately. No new cancel/replace ordering bug is established. Checker shape analogue: order_execution.rs:3 private types::* alongside local OrderExecution(:60)/impl(:73); no pub use and no measured checker rejection. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-30. Historical note follows: FORCED: OrderExecution::update_order constructs a fresh order with amount/price presence, TP/SL trigger-price routing, trigger types, TIF, and reduceOnly, then awaits cancellation before replacement placement. Its cancel_orders delegate cannot carry Axios __suppressAsterUnknownOrderError in the shared RestRequest, so the source secondary interceptor suppression metadata is absent for the old-order DELETE. Strict native UpdateOrderOpts also refuses dynamic explicit-null/undefined update members."
+
+[[symbol]]
+ts = "AsterDEXExchange.cancelOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::cancel_orders"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary explanation. Source DELETE config includes __suppressAsterUnknownOrderError; native receives _suppress but drops it because RestRequest lacks that carrier. The difference is named but not FORCED: transport metadata is expressible. Price the shared request/interceptor policy and outgoing logging cost; request-field absence alone does not prove the complete interceptor/user-visible effect. Checker shape analogue: order_execution.rs:3 private types::* alongside local OrderExecution(:60)/impl(:73); no pub use and no measured checker rejection. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-20. Historical note follows: FORCED: OrderExecution::cancel_orders issues individual secondary DELETEs, recognizes code:-2011 unknown-order messages, retains completed IDs, continues after errors, and rejects only all-failed cancellation. RestRequest has no Axios config-extension carrier for __suppressAsterUnknownOrderError: native request assertions expose that absent interceptor metadata while pinning the actual source flag; it is not smuggled into query params or headers."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchOHLCV"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_klines"
+status = "ported"
+note = "Rename: this pure candle mapper is safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_klines; request execution remains host-owned. The live fetchOHLCV oracle checks V1/V3 klines paths, limit || 500 and truthy startTime params, empty responses, parseFloat prefixes, signed zero and non-finite output bits before serialization. A source mutation and a compiled Rust field-index mutation both fail by the named fetchOHLCV output assertion."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchHistoricalFills"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::historical_fills_from_trades"
+status = "ported"
+note = "Rename: response mapper is safe-cex-venue-asterdex/src/exchange_helpers.rs::historical_fills_from_trades; REST execution remains host-owned. The live oracle executes the actual method and checks request params, public-only and missing-symbol early returns, catch-and-empty behavior, row filtering, cumulative realized-PnL deltas, numeric ID spelling, position-side and maker fields, parseFloat coercion, and pre-serialization numeric bits. Source and compiled Rust side mutations both fail by the named fetchHistoricalFills output assertion."
+
+[[symbol]]
+ts = "AsterDEXExchange.listenOHLCV"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicDataListeners::listen_ohlcv"
+status = "ported"
+note = "The real public-data delegate maps the native Timeframe, lowercases symbol, registers the candle callback when a socket exists and returns a cleanup which reads the current replaceable websocket slot before unsubscribing. Missing socket remains a no-op; subscription controller lifecycle divergences are tracked in its own rows."
+
+[[symbol]]
+ts = "AsterDEXExchange.fetchOrderBook"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_order_book"
+status = "ported"
+note = "Extracts depth sorting and cumulative quote totals; public HTTP request, limit params and error logging remain host-owned. The live oracle executes the actual method and checks exact request composition, unsorted sides, parseFloat prefixes, empty books, infinities, and negative-zero price bits before serialization. Source and compiled-Rust sort mutations fail the named result assertion. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_order_book."
+
+[[symbol]]
+ts = "AsterDEXExchange.listenOrderBook"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/public_stream.rs::PublicDataListeners::listen_order_book"
+status = "ported"
+note = "Delegates the symbol and callback directly to the assembled public socket and returns its actual listener cleanup. A missing public socket produces an explicit native error corresponding to the source property-access throw; no detached subscription plan is substituted."
+
+[[symbol]]
+ts = "AsterDEXExchange#transformPosition"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_position"
+status = "divergent"
+note = "MIXED: Native numeric info uses shared RetainedJsonInput, preserving signed zero and both infinities before serialization. mapper_metadata_retains_native_numbers covers 18 numeric cells through case 87; positive-infinite price/quantity precision is excluded because the maintained source precision loop does not terminate. FORCED: fixed shared Model.info JSON representation visibly refuses NaN: the whole mapper returns Err and no model, while source returns a usable model with native NaN info. See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy . CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias : native owned records retain independent snapshots so callbacks can release Store borrows; source info remains the original mutable response. Known and unknown response properties survive within the shared representation."
+
+[[symbol]]
+ts = "AsterDEXExchange#transformOrder"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_order"
+status = "divergent"
+note = "MIXED: Native numeric info uses shared RetainedJsonInput, preserving signed zero and both infinities before serialization. mapper_metadata_retains_native_numbers covers 18 numeric cells through case 87; positive-infinite price/quantity precision is excluded because the maintained source precision loop does not terminate. FORCED: fixed shared Model.info JSON representation visibly refuses NaN: the whole mapper returns Err and no model, while source returns a usable model with native NaN info. See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy . CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias : native owned records retain independent snapshots so callbacks can release Store borrows; source info remains the original mutable response. Known and unknown response properties survive within the shared representation. CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary : ts-bug: shared TableHit retains the source inherited lookup; the mapper then refuses the whole invalid Order because native type/status fields must remain valid enums. Live source witnesses distinguish all twelve inherited function/prototype-object hits before serialization, including the prototype object that JSON retains. Refusal is intentional, not serialized convergence."
+
+[[symbol]]
+ts = "AsterDEXExchange#transformMarket"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_market"
+status = "divergent"
+note = "MIXED: Native numeric info uses shared RetainedJsonInput, preserving signed zero and both infinities before serialization. mapper_metadata_retains_native_numbers covers 18 numeric cells through case 87; positive-infinite price/quantity precision is excluded because the maintained source precision loop does not terminate. FORCED: fixed shared Model.info JSON representation visibly refuses NaN: the whole mapper returns Err and no model, while source returns a usable model with native NaN info. See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy . CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias : native owned records retain independent snapshots so callbacks can release Store borrows; source info remains the original mutable response. Known and unknown response properties survive within the shared representation."
+
+[[symbol]]
+ts = "AsterDEXExchange#getOrderPositionSide"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_order_position_side"
+status = "ported"
+note = "Pure helper extracted from its TS owner: safe-cex-venue-asterdex/src/exchange_helpers.rs::get_order_position_side . Explicit arguments replace reads of caller state; live TS member oracle checks behavior."
+
+[[symbol]]
+ts = "AsterDEXExchange#fetchOpenInterestMap"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::fetch_open_interest_map"
+status = "divergent"
+note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. A live method witness uses valid JSON containing a double-escaped lone surrogate in `symbol`: TypeScript retains a one-entry Map with a string key before serialization, while Rust's shared UTF-8 String boundary cannot decode it and the helper returns no entry. Ordinary cases are exercised through the shared RestAdapter: 2000ms bulk GET, nonempty-map short circuit, warning on bulk failure, sequential truthy-symbol fallback, silent per-symbol failures, duplicate update order and partial-map retention on Number coercion failure. Actual exchange polling and Store writes remain separate. Renamed target: safe-cex-venue-asterdex/src/exchange_helpers.rs::fetch_open_interest_map."
+
+[[symbol]]
+ts = "AsterDEXExchange#collectOpenInterestFromPayload"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::collect_open_interest_from_payload"
+status = "ported"
+note = "Pure helper extracted from its TS owner: safe-cex-venue-asterdex/src/exchange_helpers.rs::collect_open_interest_from_payload . Explicit arguments replace reads of caller state; live TS member oracle checks behavior. Ordered map updates remain visible if a later Number coercion throws, including replacement without reordering."
+
+[[symbol]]
+ts = "AsterDEXExchange#updateStoreOpenInterest"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::update_store_open_interest"
+status = "ported"
+note = "OrderExecution::update_store_open_interest iterates a live insertion-ordered OpenInterestMap with insert/delete/clear tombstones, skips missing/equal ticker values, and writes real Store ModelPatch numbers without JSON erasure. Source/native witnesses pin subscriber-added/deleted entries, ordinary inherited prototype id coercion, NaN, Infinity and signed-zero equality before request assertions. Mutated/custom prototypes are outside the existing Store/table contract; no such coverage is claimed."
+
+[[symbol]]
+ts = "AsterDEXExchange#pollOpenInterest"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::poll_open_interest"
+status = "divergent"
+note = "CHOSEN: OrderExecution::poll_open_interest preserves disposed/empty guards, bulk-first fetch, repeated bulk before serial fallback, 25-symbol wrapped batches/cursor, warnings, and the 15000ms finally cadence. The native finally timeout is BaseExchange-owned and canceled on owner disposal; TS loop leaves its sleeping callback alive to wake and hit the disposed guard. Native scheduling omits loop's browser visibility/requestAnimationFrame dispatch because the host timer contract has no DOM; decoded deadline and 14999ms witnesses cover the timer floor. It also omits the Node/nonvisible loop post-sleep setTimeout(fn,0) turn; the injected timer oracle does not claim exact loop.ts host dispatch timing."
+
+[[symbol]]
+ts = "AsterDEXExchange#startOpenInterestPolling"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/order_execution.rs::OrderExecution::start_open_interest_polling"
+status = "divergent"
+note = "CHOSEN: OrderExecution::start_open_interest_polling starts a BaseExchange-owned operation immediately through the configured native runtime and reports uncaught host errors. TS discards an eager pollOpenInterest promise and does not own its pending request. Native owner disposal cancels this detached work and prevents completion after Store reset; this lifecycle choice avoids work retained beyond the owner, while the live start/repeat witness proves initial dispatch and the next 15000ms cycle."
+
+[[symbol]]
+ts = "AsterDEXExchange#transformTicker"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::transform_ticker"
+status = "divergent"
+note = "MIXED: Native numeric info uses shared RetainedJsonInput, preserving signed zero and both infinities before serialization. mapper_metadata_retains_native_numbers covers 18 numeric cells through case 87; positive-infinite price/quantity precision is excluded because the maintained source precision loop does not terminate. FORCED: fixed shared Model.info JSON representation visibly refuses NaN: the whole mapper returns Err and no model, while source returns a usable model with native NaN info. See sdk-rs/parity/MANIFEST-SPEC.md#numeric-ingress-defect and sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy . CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary and sdk-rs/parity/MANIFEST-SPEC.md#owned-snapshot-vs-live-alias : native owned records retain independent snapshots so callbacks can release Store borrows; source info remains the original mutable response. Known and unknown response properties survive within the shared representation."
+
+[[symbol]]
+ts = "AsterDEXExchange#extractFilterValue"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::extract_filter_value"
+status = "divergent"
+note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary . Pure helper extracted from its TS owner: safe-cex-venue-asterdex/src/exchange_helpers.rs::extract_filter_value . First matching filter ends the search even for a missing/falsy field; null element throws before later matches. ts-bug: prototype field names are truthy and parse to NaN. Actual callers use closed minQty/maxQty field literals, but the full helper retains arbitrary keys. Live exchange oracle pins all twelve inherited names, Unicode scalars and lone-surrogate TS acceptance versus Rust representation refusal."
+
+[[symbol]]
+ts = "AsterDEXExchange#getTickSize"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_tick_size"
+status = "ported"
+note = "Pure helper safe-cex-venue-asterdex/src/exchange_helpers.rs::get_tick_size Retains first matching PRICE_FILTER, truthy tickSize selection, fallible parseFloat coercion and malformed-filter errors."
+
+[[symbol]]
+ts = "AsterDEXExchange#getMaxAlgoOrdersLimit"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_max_algo_orders_limit"
+status = "ported"
+note = "Extracted decision safe-cex-venue-asterdex/src/exchange_helpers.rs::get_max_algo_orders_limit receives the same store market or order snapshot explicitly. Live member oracle pins first-match filter evaluation, fallible Number coercion and order filtering."
+
+[[symbol]]
+ts = "AsterDEXExchange#isAlgoOrder"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::is_algo_order"
+status = "ported"
+note = "Pure helper extracted from its TS owner: safe-cex-venue-asterdex/src/exchange_helpers.rs::is_algo_order . Explicit arguments replace reads of caller state; live TS member oracle checks behavior."
+
+[[symbol]]
+ts = "AsterDEXExchange#getOpenAlgoOrdersCount"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::get_open_algo_orders_count"
+status = "ported"
+note = "Extracted decision safe-cex-venue-asterdex/src/exchange_helpers.rs::get_open_algo_orders_count receives the same store market or order snapshot explicitly. Live member oracle pins first-match filter evaluation, fallible Number coercion and order filtering."
+
+[[symbol]]
+ts = "AsterDEXExchange#assertAlgoOrderCapacity"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::assert_algo_order_capacity"
+status = "ported"
+note = "Pure guard safe-cex-venue-asterdex/src/exchange_helpers.rs::assert_algo_order_capacity receives market and order snapshot explicitly, preserves nonpositive early return before filter errors, zero-limit bypass, negative limits and strict projected-total comparison. Error names and JS-formatted messages retained."
+
+[[symbol]]
+ts = "AsterDEXExchange#mapOrderType"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::map_order_type"
+status = "ported"
+note = "Pure helper safe-cex-venue-asterdex/src/exchange_helpers.rs::map_order_type Accepts the declared shared OrderType union, preserves conditional fallback and trailing-stop rejection, and consumes the protocol table. Out-of-union strings cannot enter this typed API."
+
+[[symbol]]
+ts = "AsterDEXExchange#reverseMapOrderType"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::reverse_map_order_type"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary documentation. The note calls the closed Order.type consumer a separate pending mapper, but transform_order and fetch_orders already exist. This scope statement is inaccurate independently of surrogate observability. A public fetchOrders witness with a complete order carrying D800 type remains necessary before escalating the generic UTF-8 rationale under section19. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary, sdk-rs/parity/MANIFEST-SPEC.md#forced-surrogate-conflict, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-13. Historical note follows: CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary . Pure helper extracted from its TS owner: safe-cex-venue-asterdex/src/exchange_helpers.rs::reverse_map_order_type . ts-bug: unknown strings pass through the OrderType cast and prototype names suppress the fallback; TableHit<String> retains both observable values. Closed Order.type consumer is a separate pending mapper; no enum widening or whole-record refusal occurs here. Live exchange oracle pins all twelve inherited names, Unicode scalars and lone-surrogate TS acceptance versus Rust representation refusal."
+
+[[symbol]]
+ts = "AsterDEXExchange#reverseMapOrderStatus"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::reverse_map_order_status"
+status = "divergent"
+note = "FINDING typed divergence audit (owner: rust-venue-polymarket): Primary documentation. The claim that closed Order.status consumption belongs to a pending mapper is stale: transform_order consumes this helper and fetch_orders calls the mapper. The helper preserves inherited TableHit values; unknown lone-unit status falls back to Open, so no retained-unit output follows. Correct the scope statement without inventing a new lookup/body defect. Canonical ruling sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy, sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary, sdk-rs/parity/MANIFEST-SPEC.md#closed-typed-output-boundary. Evidence sdk-rs/parity/evidence/mexc-asterdex-audit/README.md#asterdex-12. Historical note follows: CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Pure helper extracted from TS owner: safe-cex-venue-asterdex/src/exchange_helpers.rs::reverse_map_order_status . ts-bug: all twelve Object.prototype names suppress the Open fallback; shared TableHit retains inherited identity instead of silently returning Open. Live exchange oracle records typeof before serialization, scalar/astral/whitespace positives and double-escaped lone-surrogate acceptance versus Rust representation refusal. Closed Order.status consumption remains part of the pending mapper, not this helper."
+
+[[symbol]]
+ts = "AsterDEXExchange#reverseMapTimeInForce"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::reverse_map_time_in_force"
+status = "ported"
+note = "Pure helper extracted from its TS owner: safe-cex-venue-asterdex/src/exchange_helpers.rs::reverse_map_time_in_force . Explicit arguments replace reads of caller state; live TS member oracle checks behavior."
+
+[[symbol]]
+ts = "AsterDEXExchange#mapTimeframe"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_helpers.rs::map_timeframe"
+status = "ported"
+note = "Pure helper safe-cex-venue-asterdex/src/exchange_helpers.rs::map_timeframe Accepts every member of the declared shared Timeframe union; outside-union values cannot enter this typed API."
+
+[[symbol]]
+ts = "AsterDEXExchange.dispose"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/exchange_runtime.rs::dispose"
+status = "ported"
+note = "Clock stop precedes public/private socket disposal and base disposal; abrupt completion stops later effects. Four source cases cover both sockets, absent sockets and two failures."
