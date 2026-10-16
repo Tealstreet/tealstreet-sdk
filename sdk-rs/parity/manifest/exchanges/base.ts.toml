@@ -1,6 +1,6 @@
 [file]
 ts = "packages/safe-cex/src/exchanges/base.ts"
-rust_files = [ "safe-cex-crypto/src/lib.rs", "safe-cex-exchange/src/capabilities.rs", "safe-cex-exchange/src/error_reporting.rs", "safe-cex-exchange/src/exchange.rs", "safe-cex-exchange/src/journal.rs", "safe-cex-exchange/src/runtime.rs", "safe-cex-exchange/src/snapshots.rs", "safe-cex-exchange/src/socket_lifecycle.rs", "safe-cex-exchange/src/worker.rs", "safe-cex-store/src/socket_health.rs", "safe-cex-transport/src/polling.rs", "safe-cex-exchange/src/waiters.rs" ]
+rust_files = [ "safe-cex-crypto/src/lib.rs", "safe-cex-exchange/src/capabilities.rs", "safe-cex-exchange/src/error_reporting.rs", "safe-cex-exchange/src/exchange.rs", "safe-cex-exchange/src/journal.rs", "safe-cex-exchange/src/runtime.rs", "safe-cex-exchange/src/snapshots.rs", "safe-cex-exchange/src/socket_lifecycle.rs", "safe-cex-exchange/src/worker.rs", "safe-cex-store/src/socket_health.rs", "safe-cex-transport/src/polling.rs", "safe-cex-exchange/src/waiters.rs", "safe-cex-exchange/src/order_operations.rs" ]
 
 [[symbol]]
 ts = "normalizeSymbols"
@@ -638,9 +638,9 @@ note = "Shared base implementation plus object-safe venue override dispatch. saf
 ts = "BaseExchange.deriveAlgoOrdersFromNormalOrdersOpts"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/exchange.rs::BaseExchange::derive_algo_orders_from_normal_orders_opts"
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::derive_algo_orders_from_normal_orders_opts", "safe-cex-exchange/src/order_operations.rs::order_options" ]
 status = "ported"
-note = ""
+note = " Split member `safe-cex-exchange/src/order_operations.rs::order_options`; plumbing this body consumes: rust construction plumbing for the PlaceOrderOpts object literal {symbol, side, type, amount} that the mapped BaseExchange derive-algo-orders and nuke paths and the crossTradePlaceOrder row build inline; every optional field stays absent. No independent order algorithm."
 
 [[symbol]]
 ts = "BaseExchange.nuke"
@@ -806,9 +806,9 @@ note = ""
 ts = "BaseExchange.emitAndLogError"
 kind = "method"
 layer = "adapted"
-rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::emit_and_log_error", "safe-cex-exchange/src/error_reporting.rs::ExchangeErrorInput", "safe-cex-exchange/src/error_reporting.rs::truthy", "safe-cex-exchange/src/error_reporting.rs::assign" ]
+rs = [ "safe-cex-exchange/src/exchange.rs::BaseExchange::emit_and_log_error", "safe-cex-exchange/src/error_reporting.rs::ExchangeErrorInput", "safe-cex-exchange/src/error_reporting.rs::truthy", "safe-cex-exchange/src/error_reporting.rs::assign", "safe-cex-exchange/src/runtime.rs::ExchangeRuntime::report_raw_exception" ]
 status = "ported"
-note = "Split source input union, truthiness checks, and metadata spread from the emitter method: safe-cex-exchange/src/exchange.rs::BaseExchange::emit_and_log_error safe-cex-exchange/src/error_reporting.rs::ExchangeErrorInput safe-cex-exchange/src/error_reporting.rs::truthy safe-cex-exchange/src/error_reporting.rs::assign"
+note = "Split source input union, truthiness checks, and metadata spread from the emitter method: safe-cex-exchange/src/exchange.rs::BaseExchange::emit_and_log_error safe-cex-exchange/src/error_reporting.rs::ExchangeErrorInput safe-cex-exchange/src/error_reporting.rs::truthy safe-cex-exchange/src/error_reporting.rs::assign Split member `safe-cex-exchange/src/runtime.rs::ExchangeRuntime::report_raw_exception`; plumbing this body consumes: host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. This member preserves a non-string thrown value at the reporting boundary. Trait declarations add no routing, retry or venue behavior."
 
 [[symbol]]
 ts = "BaseExchange.rejectPreflight"
