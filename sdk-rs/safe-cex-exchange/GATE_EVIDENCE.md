@@ -1582,8 +1582,14 @@ socket order/fill/position delivery that previously failed NaN leverage. This
 validates the shared repair through that construction and socket path; it does
 not claim the remaining Inverse binding closure work is complete.
 
-Scoped validation: js_runtime 67, typed_js_values 5, new patch regressions 3 and
-cancellable_future_inventory 6 pass. Host all-feature/all-target and wasm library
+Final scoped validation: js_runtime 68, typed_js_values 5, new patch regressions
+3, override_contract 6 and cancellable_future_inventory 6 pass. The runtime and
+override suites include their maintained-source tests; only the existing
+cancellation discovery export remains ignored. Host all-feature/all-target and wasm library
 clippy pass; parity has zero findings and extractor reports zero changes.
-Final override inventory review follows the separately owned BreakoutProp
-classification repair in #295; no foreign delegation policy is changed here.
+After merging the separately owned BreakoutProp classification repair #295,
+the override inventory export passed. Review found exactly one changed enclosing
+body fingerprint among 1164 retained rows: Store facade `35d694b8312ceda6` to
+`c6140fadf0482da7`. Its existing Store `update_order` call is unchanged; the
+facade now selects the JSON-only socket-health helper explicitly. No call was
+added or removed, and no delegation policy or exemption changed.
