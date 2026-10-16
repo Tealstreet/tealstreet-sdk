@@ -349,7 +349,7 @@
   },
   {
     "function": "facade",
-    "body": "35d694b8312ceda6",
+    "body": "c6140fadf0482da7",
     "call": "st . update_order (& id_of (& arg (& a , 0)) ? , & patch (& arg (& a , 1)) ?)",
     "file": "safe-cex-exchange/src/js_runtime/store.rs"
   },
@@ -3462,10 +3462,70 @@
     "file": "safe-cex-venue-blofin/src/rest_lifecycle.rs"
   },
   {
+    "function": "capabilities",
+    "body": "e4388f54088116b2",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
+    "function": "native_call",
+    "body": "6f5243d4b0d576c4",
+    "call": "ctx . start ()",
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
+    "function": "native_call",
+    "body": "6f5243d4b0d576c4",
+    "reference": "crate :: account_auth :: validate_account",
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
+    "function": "native_call",
+    "body": "6f5243d4b0d576c4",
+    "call": "reads . fetch_markets ()",
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
+    "function": "native_call",
+    "body": "6f5243d4b0d576c4",
+    "call": "reads . fetch_tickers ()",
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
+    "function": "native_call",
+    "body": "6f5243d4b0d576c4",
+    "reference": "crate :: portfolio_reads :: fetch_positions",
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
+    "function": "native_call",
+    "body": "6f5243d4b0d576c4",
+    "reference": "crate :: portfolio_reads :: fetch_orders",
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
+    "function": "native_call",
+    "body": "6f5243d4b0d576c4",
+    "call": "ctx . cancel_orders (orders)",
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
+    "function": "native_call",
+    "body": "6f5243d4b0d576c4",
+    "call": "ctx . update_order (order , OrderUpdate { price , amount })",
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
     "function": "dispose",
     "body": "8ad49c84d9dd734c",
     "reference": "BreakoutpropExchange :: dispose",
-    "file": "safe-cex-venue-breakoutprop/src/lifecycle.rs"
+    "file": "safe-cex-venue-breakoutprop/src/binding.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "228a8efa12849471",
+    "call": "self . core . dispose ()",
+    "file": "safe-cex-venue-breakoutprop/src/host.rs"
   },
   {
     "function": "dispose",
