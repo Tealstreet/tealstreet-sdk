@@ -81,6 +81,7 @@ fn actual_typescript_ordinary_limit_predicate() {
             trigger_type: None,
             client_order_id: None,
             max_slippage_pct: None,
+            implied_volatility: None,
         };
         let source = case["actual"].as_bool().expect("native source bool");
         assert_eq!(

@@ -24,7 +24,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::hyro_is_finite_numeric"
 status = "divergent"
-note = "CHOSEN: retained inert JSON numbers/strings and UTF-8 strings exclude executable/getter inputs and lone UTF-16 surrogates. Native source assertions cover the type guard, ECMAScript whitespace, radix strings, malformed numbers, signed zero and overflow; Number/String coercion uses shared helpers. Non-JSON numeric NaN is outside this ingress; its string spelling is covered. Consumer validation rows remain pending."
+note = "CHOSEN: retained inert JSON numbers/strings and UTF-8 strings exclude executable/getter inputs and lone UTF-16 surrogates. Native source assertions cover the type guard, ECMAScript whitespace, radix strings, malformed numbers, signed zero and overflow; Number/String coercion uses shared helpers. Non-JSON numeric NaN is outside this ingress; its string spelling is covered. Consumer validation rows remain pending. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_is_finite_numeric."
 
 [[symbol]]
 ts = "HyrotraderExchange.fetchRawBalance"
@@ -40,7 +40,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/api_validation.rs::hyro_validate_account"
 status = "divergent"
-note = "CHOSEN: HyroTrader explicit balance/log callbacks retain native balance and ExchangeError identity; typed message errors omit primitive/non-Error String coercion, executable properties, JS stack and prototype identity. Both synchronous invocation errors and awaited balance rejection are caught; log rejection propagates. The anonymous result becomes a string/optional-balance tuple and Future execution/cancellation differs from Promise scheduling. Full host constructor/store composition is pending."
+note = "CHOSEN: HyroTrader explicit balance/log callbacks retain native balance and ExchangeError identity; typed message errors omit primitive/non-Error String coercion, executable properties, JS stack and prototype identity. Both synchronous invocation errors and awaited balance rejection are caught; log rejection propagates. The anonymous result becomes a string/optional-balance tuple and Future execution/cancellation differs from Promise scheduling. Full host constructor/store composition is pending. Renamed Rust target: safe-cex-venue-bybit/src/api_validation.rs::hyro_validate_account."
 
 [[symbol]]
 ts = "HyrotraderExchange.fetchMarginAccountInfos"
@@ -48,7 +48,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/account_readers.rs::hyro_fetch_margin_account_infos"
 status = "divergent"
-note = "CHOSEN: native generic future plus lazy disposal/update callbacks replace receiver properties and Promise scheduling; Rust starts when polled. The update callback accepts the retained native balance directly rather than an anonymous {balance} object; composing the store payload remains a host responsibility. The source updates only after successful fetch when still active, preserves fetched balance/error identity, and propagates update failure. HyroTrader constructor and lifecycle composition remain pending."
+note = "CHOSEN: native generic future plus lazy disposal/update callbacks replace receiver properties and Promise scheduling; Rust starts when polled. The update callback accepts the retained native balance directly rather than an anonymous {balance} object; composing the store payload remains a host responsibility. The source updates only after successful fetch when still active, preserves fetched balance/error identity, and propagates update failure. HyroTrader constructor and lifecycle composition remain pending. Renamed Rust target: safe-cex-venue-bybit/src/account_readers.rs::hyro_fetch_margin_account_infos."
 
 [[symbol]]
 ts = "HyrotraderExchange#assertPrivateListResponse"
@@ -280,7 +280,7 @@ kind = "accessor"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::hyro_supports_trade_derived_candles"
 status = "ported"
-note = "Exact false capability getter."
+note = "Exact false capability getter. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_supports_trade_derived_candles."
 
 [[symbol]]
 ts = "HyrotraderExchange.get supportedCategories"
@@ -288,7 +288,7 @@ kind = "accessor"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::hyro_supported_categories"
 status = "ported"
-note = "Returns a fresh linear-only vector on each call."
+note = "Returns a fresh linear-only vector on each call. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_supported_categories."
 
 [[symbol]]
 ts = "HyrotraderExchange.getBybitRestBaseUrl"
@@ -320,7 +320,7 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::hyro_get_settle_coins_for_category"
 status = "divergent"
-note = "CHOSEN: explicit synchronous logging callback replaces this-bound emission. UTF-8 category inputs exclude lone UTF-16 surrogates; ExchangeError retains name/message/metadata but excludes JS stack and thrown object identity. Host logging failure propagates before the venue error. Linear returns USDT only; other categories log and fail."
+note = "CHOSEN: explicit synchronous logging callback replaces this-bound emission. UTF-8 category inputs exclude lone UTF-16 surrogates; ExchangeError retains name/message/metadata but excludes JS stack and thrown object identity. Host logging failure propagates before the venue error. Linear returns USDT only; other categories log and fail. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_get_settle_coins_for_category."
 
 [[symbol]]
 ts = "HyrotraderExchange.requiresOrderLinkId"
@@ -328,4 +328,4 @@ kind = "method"
 layer = "adapted"
 rs = "safe-cex-venue-bybit/src/variant_accessors.rs::hyro_requires_order_link_id"
 status = "ported"
-note = "Exact true capability method."
+note = "Exact true capability method. Renamed Rust target: safe-cex-venue-bybit/src/variant_accessors.rs::hyro_requires_order_link_id."

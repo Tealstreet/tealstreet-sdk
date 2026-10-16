@@ -78,8 +78,10 @@ These classifications are not independent runtime proof. Unknown local custom tr
 to module scope for concrete API classification; local unions/generics and
 unknown procedural expansion fail closed. Function-local `macro_rules!`
 definitions and their invocations are ignored by public-surface discovery
-because lexical block scope makes them unnameable outside that body; hoisting the
-same macro to module scope fails closed by scope. Macro binding guards still
+because lexical block scope makes them unnameable outside that body. A
+module-scope `macro_rules!` is accepted only when every same-name definition in
+the target is unconditional and every arm transcribes without a declaration
+keyword or `item` fragment; each invocation's arguments get the same check. Macro binding guards still
 reject local shadowing of trusted expression/derive/attribute names and
 namespaces. A separate
 source module walk rejects doc-dependent cfg predicates before rustdoc, including

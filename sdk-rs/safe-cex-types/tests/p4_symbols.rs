@@ -17,9 +17,9 @@ fn symbol_conversion_typescript_differential() {
     );
     let corpus: Value = serde_json::from_slice(&output.stdout).unwrap();
     assert_eq!(corpus["symbols"], 21);
-    assert_eq!(corpus["names"], 47);
+    assert_eq!(corpus["names"], 48);
     let rows = corpus["rows"].as_array().unwrap();
-    assert_eq!(rows.len(), 48384);
+    assert_eq!(rows.len(), 50421);
     for row in rows {
         let s = row["symbol"].as_str().unwrap();
         let from: Option<ExchangeName> = serde_json::from_value(row["from"].clone()).unwrap();

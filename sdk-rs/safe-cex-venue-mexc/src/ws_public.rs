@@ -6,6 +6,9 @@ use crate::{
 };
 use indexmap::IndexMap;
 use safe_cex_exchange::{
+    OwnedOperation, exchange::Exchange, websocket::WsRuntime, ws_parent::WsExchangeParent,
+};
+use safe_cex_exchange::{
     runtime::{ExchangeError, ExchangeFuture, LogSeverity},
     websocket::{
         BaseWebSocket, MessageHandler, WsDiagnosticReceiveOptions, WsDiagnosticSendOptions,
@@ -16,10 +19,15 @@ use safe_cex_store::{Store, model_patch::ModelPatch};
 use safe_cex_transport::relay::WebSocketConnectionOptions;
 use safe_cex_types::OrderBook;
 use serde_json::{Map, Value, json};
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+use std::{
+    cell::{Cell, RefCell},
+    collections::HashMap,
+    rc::{Rc, Weak},
+};
 
 #[derive(Debug, Clone, PartialEq)]
 struct Subscription {
+    sequence: u64,
     method: String,
     param: Option<Value>,
 }
@@ -37,12 +45,150 @@ impl Subscription {
     }
 }
 
+pub struct MexcPublicSocket {
+    pub(crate) base: Rc<BaseWebSocket>,
+    protocol: Rc<MexcPublicProtocol>,
+    parent: Weak<crate::exchange::MexcExchange>,
+}
+impl MexcPublicSocket {
+    pub fn base(&self) -> &Rc<BaseWebSocket> {
+        &self.base
+    }
+    pub fn listen_ohlcv(
+        self: &Rc<Self>,
+        opts: safe_cex_types::OHLCVOptions,
+        callback: Rc<dyn Fn(safe_cex_types::Candle)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        let literal = serde_json::to_value(opts.interval).expect("Timeframe string");
+        let Some(interval) = crate::types::INTERVAL
+            .get(literal.as_str().expect("Timeframe string"))
+            .and_then(Value::as_str)
+        else {
+            let message = format!(
+                "MEXC public WebSocket does not support {} candles",
+                literal.as_str().unwrap_or_default()
+            );
+            self.base.emitter().log(&message, LogSeverity::Warning)?;
+            return Err(ExchangeError::new(message));
+        };
+        let key = format!("kline.{}.{interval}", opts.symbol);
+        let param =
+            json!({"symbol":crate::utils::to_mexc_symbol(&opts.symbol), "interval":interval});
+        let utc = self.protocol.local_to_utc.clone();
+        let handler: MessageHandler = Rc::new(move |json| {
+            let raw = json
+                .get("data")
+                .filter(|v| safe_cex_num::js_truthy(Some(v)))
+                .unwrap_or(json);
+            if let Some(candle) = crate::utils::normalize_candle(raw, utc.as_ref())
+                .map_err(crate::exchange_errors::coercion)?
+            {
+                callback(candle);
+            }
+            Ok(())
+        });
+        self.protocol
+            .add_handler(&self.base, &key, handler.clone())?;
+        self.protocol
+            .subscribe(&self.base, "sub.kline", Some(param.clone()), true)?;
+        let owner = self.clone();
+        Ok(Box::new(move || {
+            owner.protocol.remove_handler(&owner.base, &key, &handler)?;
+            owner
+                .protocol
+                .unsubscribe(&owner.base, "sub.kline", Some(param), true)
+        }))
+    }
+    pub fn listen_order_book(
+        self: &Rc<Self>,
+        symbol: String,
+        callback: Rc<dyn Fn(OrderBook)>,
+    ) -> Result<safe_cex_exchange::runtime::ListenerCleanup, ExchangeError> {
+        let parent = self
+            .parent
+            .upgrade()
+            .ok_or_else(|| ExchangeError::new("MEXC public parent was dropped"))?;
+        let market = parent
+            .base()
+            .store
+            .markets_by_symbol()
+            .get(&symbol)
+            .cloned()
+            .ok_or_else(|| ExchangeError::new(format!("Market {symbol} not found")))?;
+        let key = format!("depth.{symbol}");
+        let param = json!({"symbol":market.id, "limit":20});
+        let protocol = self.protocol.clone();
+        let selected = symbol.clone();
+        let sink = callback.clone();
+        let handler: MessageHandler = Rc::new(move |_| {
+            let book = protocol.orderbooks.borrow().get(&selected).cloned();
+            if let Some(book) = book {
+                sink(book);
+            }
+            Ok(())
+        });
+        self.protocol
+            .add_handler(&self.base, &key, handler.clone())?;
+        let owner = self.clone();
+        let selected = symbol.clone();
+        let subscription = param.clone();
+        let lease = parent.clone();
+        parent.base().start_owned_operation(async move {
+            let result = async {
+                let (snapshot, _) =
+                    crate::sockets::reaction(lease.fetch_order_book(selected.clone(), Some(100.)))
+                        .await?;
+                if owner.base.is_disposed() {
+                    return Ok(());
+                }
+                owner
+                    .protocol
+                    .orderbooks
+                    .borrow_mut()
+                    .insert(selected.clone(), snapshot.clone());
+                callback(snapshot);
+                owner
+                    .protocol
+                    .subscribe(&owner.base, "sub.depth.full", Some(subscription), true)
+            }
+            .await;
+            if let Err(error) = result {
+                if let Err(log_error) = lease.base().log(
+                    &format!(
+                        "MEXC orderbook snapshot failed for {selected}: {}",
+                        error.message
+                    ),
+                    "warning",
+                ) {
+                    lease.base().runtime.report_exception(
+                        &log_error,
+                        &json!({"operation":"MEXC orderbook snapshot catch"}),
+                    );
+                }
+            }
+        });
+        let owner = self.clone();
+        Ok(Box::new(move || {
+            owner.protocol.remove_handler(&owner.base, &key, &handler)?;
+            owner
+                .protocol
+                .unsubscribe(&owner.base, "sub.depth.full", Some(param), true)?;
+            owner.protocol.orderbooks.borrow_mut().remove(&symbol);
+            Ok(())
+        }))
+    }
+}
+
 /// MEXC public protocol state. BaseWebSocket owns dial, timers, and disposal.
 pub struct MexcPublicProtocol {
     subscriptions: RefCell<IndexMap<String, Subscription>>,
     ticker_subscriptions: RefCell<IndexMap<String, Subscription>>,
     orderbooks: RefCell<HashMap<String, OrderBook>>,
     local_to_utc: Rc<dyn Fn(f64) -> f64>,
+    sequence: Cell<u64>,
+    heartbeat: RefCell<Option<OwnedOperation>>,
+    active_listener: RefCell<Option<String>>,
+    owner: RefCell<Option<Weak<dyn Exchange>>>,
 }
 
 impl MexcPublicProtocol {
@@ -52,6 +198,10 @@ impl MexcPublicProtocol {
             ticker_subscriptions: RefCell::new(IndexMap::new()),
             orderbooks: RefCell::new(HashMap::new()),
             local_to_utc,
+            sequence: Cell::new(0),
+            heartbeat: RefCell::default(),
+            active_listener: RefCell::default(),
+            owner: RefCell::default(),
         }
     }
 
@@ -62,12 +212,19 @@ impl MexcPublicProtocol {
         param: Option<Value>,
         track: bool,
     ) -> Result<(), ExchangeError> {
-        let subscription = Subscription {
+        let mut subscription = Subscription {
+            sequence: 0,
             method: method.into(),
             param,
         };
         let key = subscription.key()?;
         if track {
+            subscription.sequence = self
+                .subscriptions
+                .borrow()
+                .get(&key)
+                .map(|v| v.sequence)
+                .unwrap_or_else(|| self.next_sequence());
             self.subscriptions
                 .borrow_mut()
                 .insert(key, subscription.clone());
@@ -86,6 +243,7 @@ impl MexcPublicProtocol {
         track: bool,
     ) -> Result<(), ExchangeError> {
         let subscription = Subscription {
+            sequence: 0,
             method: method.into(),
             param,
         };
@@ -100,6 +258,7 @@ impl MexcPublicProtocol {
             self.send(
                 socket,
                 &Subscription {
+                    sequence: 0,
                     method: unsubscribe_method,
                     param: subscription.param,
                 }
@@ -109,12 +268,157 @@ impl MexcPublicProtocol {
         Ok(())
     }
 
+    fn next_sequence(&self) -> u64 {
+        let next = self
+            .sequence
+            .get()
+            .checked_add(1)
+            .expect("MEXC subscription sequence exhausted");
+        self.sequence.set(next);
+        next
+    }
     fn resubscribe(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
-        for subscription in self.subscriptions.borrow().values() {
-            self.send(socket, &subscription.value())?;
+        for registry in [&self.subscriptions, &self.ticker_subscriptions] {
+            let mut cursor = 0;
+            loop {
+                let entry = registry
+                    .borrow()
+                    .values()
+                    .find(|v| v.sequence > cursor)
+                    .cloned();
+                let Some(entry) = entry else {
+                    break;
+                };
+                cursor = entry.sequence;
+                self.send(socket, &entry.value())?;
+            }
         }
-        for subscription in self.ticker_subscriptions.borrow().values() {
-            self.send(socket, &subscription.value())?;
+        Ok(())
+    }
+    pub(crate) fn bind(
+        parent: &Rc<crate::exchange::MexcExchange>,
+        runtime: Rc<dyn WsRuntime>,
+        local_to_utc: Rc<dyn Fn(f64) -> f64>,
+    ) -> Rc<MexcPublicSocket> {
+        let protocol = Rc::new(Self::new(local_to_utc));
+        let erased: Rc<dyn Exchange> = parent.clone();
+        *protocol.owner.borrow_mut() = Some(Rc::downgrade(&erased));
+        let socket =
+            BaseWebSocket::new(1, WsExchangeParent::new(&erased), runtime, protocol.clone());
+        socket.treat_any_message_as_pong.set(true);
+        let weak = Rc::downgrade(&protocol);
+        socket.set_before_close(Rc::new(move || {
+            if let Some(protocol) = weak.upgrade() {
+                protocol.stop_heartbeat();
+            }
+        }));
+        let weak_protocol = Rc::downgrade(&protocol);
+        let weak_socket = Rc::downgrade(&socket);
+        let listener = parent.base().on(
+            "activeTickerSymbols:changed",
+            Rc::new(move |_, _| {
+                if let (Some(protocol), Some(socket)) =
+                    (weak_protocol.upgrade(), weak_socket.upgrade())
+                {
+                    if !socket.is_disposed() {
+                        protocol.reconcile_tickers(&socket)?;
+                    }
+                }
+                Ok(())
+            }),
+        );
+        *protocol.active_listener.borrow_mut() = Some(listener);
+        Rc::new(MexcPublicSocket {
+            base: socket,
+            protocol,
+            parent: Rc::downgrade(parent),
+        })
+    }
+    fn stop_heartbeat(&self) {
+        let previous = self.heartbeat.borrow_mut().take();
+        if let Some(operation) = previous {
+            operation.cancel();
+        }
+    }
+    fn start_heartbeat(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        self.stop_heartbeat();
+        self.ping(socket)?;
+        let weak = Rc::downgrade(socket);
+        let interval =
+            socket.start_interval(crate::types::MEXC_WS_HEARTBEAT_INTERVAL_MS, move || {
+                if let Some(socket) = weak.upgrade() {
+                    if !socket.is_disposed() && socket.is_connected() {
+                        socket.mark_ping_sent();
+                        let text = r#"{"method":"ping"}"#;
+                        socket.send(text)?;
+                        socket.emit_ws_diagnostic_send(
+                            text,
+                            &WsDiagnosticSendOptions {
+                                format: Some(Rc::new(|s| Some(format!("[mexc public] {s}")))),
+                                redact: None,
+                            },
+                        )?;
+                    }
+                }
+                Ok(())
+            })?;
+        *self.heartbeat.borrow_mut() = Some(interval);
+        Ok(())
+    }
+    fn reconcile_tickers(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
+        let store = socket.store();
+        let available = store
+            .markets()
+            .iter()
+            .map(|m| m.symbol.clone())
+            .collect::<Vec<_>>();
+        let owner = self.owner.borrow().as_ref().and_then(Weak::upgrade);
+        let active = owner
+            .as_ref()
+            .map(|v| v.base().get_active_ticker_symbols())
+            .unwrap_or_default();
+        let mut desired = IndexMap::new();
+        let symbols = available
+            .into_iter()
+            .filter(|s| active.is_empty() || active.contains(s))
+            .take(100)
+            .collect::<Vec<_>>();
+        for symbol in symbols {
+            let market = store.markets_by_symbol().get(&symbol).cloned();
+            if let Some(market) = market {
+                let subscription = Subscription {
+                    sequence: 0,
+                    method: "sub.ticker".into(),
+                    param: Some(json!({"symbol":market.id})),
+                };
+                desired.insert(subscription.key()?, subscription);
+            }
+        }
+        let mut cursor = 0;
+        loop {
+            let entry = self
+                .ticker_subscriptions
+                .borrow()
+                .iter()
+                .find(|(_, v)| v.sequence > cursor)
+                .map(|(k, v)| (k.clone(), v.clone()));
+            let Some((key, subscription)) = entry else {
+                break;
+            };
+            cursor = subscription.sequence;
+            if !desired.contains_key(&key) {
+                self.unsubscribe(socket, &subscription.method, subscription.param, false)?;
+                self.ticker_subscriptions.borrow_mut().shift_remove(&key);
+            }
+        }
+        for (key, mut subscription) in desired {
+            if !self.ticker_subscriptions.borrow().contains_key(&key) {
+                subscription.sequence = self.next_sequence();
+                self.ticker_subscriptions
+                    .borrow_mut()
+                    .insert(key, subscription.clone());
+                self.subscribe(socket, subscription.method, subscription.param, false)?;
+            }
         }
         Ok(())
     }
@@ -124,8 +428,9 @@ impl MexcPublicProtocol {
         socket: &Rc<BaseWebSocket>,
         key: impl Into<String>,
         handler: MessageHandler,
-    ) {
+    ) -> Result<(), ExchangeError> {
         let key = key.into();
+        inherited_handler_guard(socket, &key, "is not iterable")?;
         // The source spread creates a new array. An in-flight route retains
         // the previous array, including its existing callbacks.
         let mut next = socket
@@ -139,6 +444,7 @@ impl MexcPublicProtocol {
             .message_handlers
             .borrow_mut()
             .insert(key, Rc::new(RefCell::new(next)));
+        Ok(())
     }
 
     pub fn remove_handler(
@@ -147,6 +453,7 @@ impl MexcPublicProtocol {
         key: &str,
         handler: &MessageHandler,
     ) -> Result<(), ExchangeError> {
+        inherited_handler_guard(socket, key, "filter is not a function")?;
         // filter creates a replacement array even when no callbacks match,
         // and removing from a missing key creates an own empty array.
         let next: Vec<_> = socket
@@ -269,6 +576,21 @@ impl MexcPublicProtocol {
     }
 }
 
+fn inherited_handler_guard(
+    socket: &Rc<BaseWebSocket>,
+    key: &str,
+    detail: &str,
+) -> Result<(), ExchangeError> {
+    if !socket.message_handlers.borrow().contains_key(key)
+        && socket.prototype_realm.inherited(key).truthy()
+    {
+        let mut error = ExchangeError::new(format!("MEXC messageHandlers[{key}]: {detail}"));
+        error.name = "TypeError".into();
+        return Err(error);
+    }
+    Ok(())
+}
+
 /// Normalize one MEXC depth frame and return the symbol used for its handler key.
 pub fn handle_depth_frame(
     store: &dyn Store,
@@ -318,6 +640,16 @@ pub fn kline_handler_key(frame: &Value) -> Result<String, ExchangeError> {
 }
 
 impl WsProtocol for MexcPublicProtocol {
+    fn dispose(&self) {
+        self.stop_heartbeat();
+        let owner = self.owner.borrow().as_ref().and_then(Weak::upgrade);
+        let listener = self.active_listener.borrow_mut().take();
+        if let (Some(owner), Some(listener)) = (owner, listener) {
+            owner
+                .base()
+                .off("activeTickerSymbols:changed", Some(&listener));
+        }
+    }
     fn ping(&self, socket: &Rc<BaseWebSocket>) -> Result<(), ExchangeError> {
         if !socket.is_disposed() {
             socket.mark_ping_sent();
@@ -358,20 +690,16 @@ impl WsProtocol for MexcPublicProtocol {
     }
 
     fn on_open(&self, socket: Rc<BaseWebSocket>) -> ExchangeFuture<'static, ()> {
-        let result = if socket.is_disposed() {
-            Ok(())
-        } else {
-            self.ping(&socket).and_then(|()| self.resubscribe(&socket))
-        };
-        if let Err(error) = result {
-            return Box::pin(async move { Err(error) });
-        }
-        if !socket.is_disposed() {
-            if let Err(error) = socket.emit_ws_reconnected() {
-                return Box::pin(async move { Err(error) });
+        let result = (|| {
+            if socket.is_disposed() {
+                return Ok(());
             }
-        }
-        Box::pin(async { Ok(()) })
+            self.start_heartbeat(&socket)?;
+            self.reconcile_tickers(&socket)?;
+            self.resubscribe(&socket)?;
+            socket.emit_ws_reconnected()
+        })();
+        Box::pin(async move { result })
     }
 
     fn on_message(

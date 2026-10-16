@@ -384,9 +384,6 @@ impl Host for Fixture {
     fn truthy(&self, v: &V) -> bool {
         truthy(v)
     }
-    fn nullish(&self, v: &V) -> bool {
-        matches!(*v.borrow(), Js::U | Js::Null)
-    }
     fn undefined(&self) -> V {
         val(Js::U)
     }
