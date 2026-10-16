@@ -177,3 +177,15 @@ crate namespaces have their own files too. Directory loading rejects misplaced
 or duplicate owners, empty shards, unexpected files and symlink entries.
 Explicit `--contracts=<file.json>` fixture inputs remain supported; a directory
 is also accepted. Storage changes no contract classification or native proof.
+
+Eleven GRVT aliases use the existing reviewed fixed-instantiation registry in
+`../accepted-set/generic-aliases.json`. Each pins its exact source, raw/expanded
+compiler targets, original generics (including defaults/lifetimes), canonical
+root and independently authored invariant Rust type. The selected arguments
+are explicit bool or bool/bool, and static lifetimes for three unsized FnMut
+capabilities; these scopes do not classify other instantiations or silently
+select a source generic default. AddedMarkets<bool> and JsResult<bool,bool> are
+actual decoders, not callback exemptions. Fields<bool> preserves its original
+static borrowed string keys: its reviewed type identity does not grant
+DeserializeOwned or bypass the existing borrowed-alias refusal. Decoder
+classifications and borrowed production-path coverage remain separate obligations.
