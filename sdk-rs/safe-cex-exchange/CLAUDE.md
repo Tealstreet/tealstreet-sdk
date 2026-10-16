@@ -127,7 +127,6 @@ defaults are fills, income, income range, historical orders and closed PnL.
 `fetchOHLCV` is unbranded in the actual TS source despite older guidance saying
 otherwise. The journal-position default refuses: it never invents an empty
 journal or silently folds fills. Imported folding is an explicit host seam.
-Legacy executions-history metadata is retained as metadata and gates no call.
 
 Implementations must preserve the documented TS quirks. In particular, an empty
 supplied symbol list differs from no symbol list, market refresh compares IDs,

@@ -13,7 +13,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": true,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Aster",
       "leverageMagnets": [
@@ -128,7 +127,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 100,
       "prettyName": "Backpack",
       "leverageMagnets": [
@@ -242,7 +240,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Bybit",
       "leverageMagnets": [
@@ -375,7 +372,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Bybit Demo",
       "leverageMagnets": [
@@ -508,7 +504,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "HyroTrader",
       "leverageMagnets": [
@@ -614,7 +609,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Bybit Spot",
       "leverageMagnets": [
@@ -745,7 +739,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Bybit Inverse",
       "leverageMagnets": [
@@ -879,7 +872,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": true,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Binance",
       "leverageMagnets": [
@@ -993,7 +985,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": true,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Binance Portfolio Margin",
       "leverageMagnets": [
@@ -1106,7 +1097,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": true,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Binance Spot",
       "leverageMagnets": [
@@ -1215,7 +1205,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Bitget",
       "leverageMagnets": [
@@ -1326,7 +1315,6 @@
       "enableInPreview": false,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Bitget Inverse",
       "leverageMagnets": [
@@ -1438,7 +1426,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Bitget USDC",
       "leverageMagnets": [
@@ -1549,7 +1536,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Bitunix",
       "leverageMagnets": [
@@ -1663,7 +1649,6 @@
       "enableInPreview": false,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "WEEX",
       "leverageMagnets": [
@@ -1778,7 +1763,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "MEXC",
       "leverageMagnets": [
@@ -1901,7 +1885,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Coinbase",
       "leverageMagnets": [
@@ -2012,7 +1995,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": true,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 100,
       "prettyName": "Crypto.com",
       "leverageMagnets": [
@@ -2143,7 +2125,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": true,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 100,
       "prettyName": "Grvt",
       "leverageMagnets": [
@@ -2255,7 +2236,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Phemex",
       "leverageMagnets": [
@@ -2372,7 +2352,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "BingX",
       "leverageMagnets": [
@@ -2488,7 +2467,6 @@
       "enableInPreview": false,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Bitrue",
       "leverageMagnets": [
@@ -2600,7 +2578,6 @@
       "enableInPreview": false,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 100,
       "prettyName": "Breakout",
       "leverageMagnets": [
@@ -2713,7 +2690,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 250,
       "prettyName": "BloFin",
       "leverageMagnets": [
@@ -2824,7 +2800,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 100,
       "prettyName": "Lighter",
       "leverageMagnets": [
@@ -2941,7 +2916,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 100,
       "prettyName": "Lighter Robinhood",
       "leverageMagnets": [
@@ -3059,7 +3033,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 250,
       "prettyName": "OKX",
       "leverageMagnets": [
@@ -3173,7 +3146,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 250,
       "prettyName": "OKX Demo",
       "leverageMagnets": [
@@ -3287,7 +3259,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 250,
       "prettyName": "OKX EU",
       "leverageMagnets": [
@@ -3401,7 +3372,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 250,
       "prettyName": "OKX EU Demo",
       "leverageMagnets": [
@@ -3515,7 +3485,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "WOO X",
       "leverageMagnets": [
@@ -3632,7 +3601,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "WOOFi",
       "leverageMagnets": [
@@ -3746,7 +3714,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Coinbase Spot",
       "leverageMagnets": [
@@ -3857,7 +3824,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Kodiak",
       "leverageMagnets": [
@@ -3971,7 +3937,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Mode",
       "leverageMagnets": [
@@ -4085,7 +4050,6 @@
       "enableInPreview": false,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "SalsaDEX",
       "leverageMagnets": [
@@ -4199,7 +4163,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "TSDEX",
       "leverageMagnets": [
@@ -4314,7 +4277,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "What",
       "leverageMagnets": [
@@ -4428,7 +4390,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": true,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "Hyperliquid",
       "leverageMagnets": [
@@ -4543,7 +4504,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Hyperliquid Spot",
       "leverageMagnets": [
@@ -4658,7 +4618,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 60,
       "prettyName": "ApeX Omni",
       "leverageMagnets": [
@@ -4774,7 +4733,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Kucoin",
       "leverageMagnets": [
@@ -4888,7 +4846,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Kucoin Spot",
       "leverageMagnets": [
@@ -4999,7 +4956,6 @@
       "enableInPreview": true,
       "supportedOnMobile": true,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Kraken Futures",
       "leverageMagnets": [
@@ -5112,7 +5068,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 60,
       "prettyName": "Kraken Spot",
       "leverageMagnets": [
@@ -5223,7 +5178,6 @@
       "enableInPreview": true,
       "supportedOnMobile": false,
       "supportsTestnet": true,
-      "supportsExecutionsHistory": true,
       "orderbookTickDelay": 100,
       "prettyName": "Paradex",
       "leverageMagnets": [
@@ -5341,7 +5295,6 @@
       "enableInPreview": false,
       "supportedOnMobile": false,
       "supportsTestnet": false,
-      "supportsExecutionsHistory": false,
       "orderbookTickDelay": 100,
       "prettyName": "Polymarket",
       "leverageMagnets": [
@@ -5437,7 +5390,6 @@
     "enableInPreview": true,
     "supportedOnMobile": true,
     "supportsTestnet": false,
-    "supportsExecutionsHistory": true,
     "orderbookTickDelay": 60,
     "prettyName": "Bybit",
     "leverageMagnets": [

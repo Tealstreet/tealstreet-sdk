@@ -78,8 +78,6 @@ pub struct ExchangeMetadata {
     pub supports_spot_toggle: Option<bool>,
     #[serde(rename = "supportsTestnet")]
     pub supports_testnet: bool,
-    #[serde(rename = "supportsExecutionsHistory")]
-    pub supports_executions_history: bool,
     #[serde(rename = "leverageMagnets")]
     pub leverage_magnets: Vec<f64>,
     #[serde(rename = "orderbookTickDelay")]
@@ -287,8 +285,6 @@ struct ExchangeMetadataWire {
     pub supports_spot_toggle: Option<bool>,
     #[serde(rename = "supportsTestnet")]
     pub supports_testnet: bool,
-    #[serde(rename = "supportsExecutionsHistory")]
-    pub supports_executions_history: bool,
     #[serde(rename = "leverageMagnets")]
     pub leverage_magnets: Vec<f64>,
     #[serde(rename = "orderbookTickDelay")]
