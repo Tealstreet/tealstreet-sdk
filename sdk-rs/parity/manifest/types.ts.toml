@@ -54,7 +54,7 @@ note = ""
 ts = "Balance"
 kind = "type"
 layer = "mirror"
-rs = ["safe-cex-types/src/lib.rs::Balance", "safe-cex-types/src/lib.rs::CurrencyBalance", "safe-cex-types/src/lib.rs::CurrencyBalance::as_balance"]
+rs = [ "safe-cex-types/src/lib.rs::Balance", "safe-cex-types/src/lib.rs::CurrencyBalance", "safe-cex-types/src/lib.rs::CurrencyBalance::as_balance" ]
 status = "ported"
 note = "Recursive currencies and coins use insertion order with canonical array-index enumeration after decoding and typed insertion, including Serialize; no lexical BTreeMap reordering. Split members `safe-cex-types/src/lib.rs::CurrencyBalance` and `safe-cex-types/src/lib.rs::CurrencyBalance::as_balance` preserve source runtime currency rows: declared Balance or Crypto.com REST available/locked, without normalizing their field names. TS static currencies annotation remains Balance; source cryptocom.exchange.ts fetchBalance violates it at runtime (ts-bug: currency-balance-runtime-shape). "
 
