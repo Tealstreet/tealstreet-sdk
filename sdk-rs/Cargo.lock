@@ -3936,6 +3936,7 @@ dependencies = [
  "safe-cex-types",
  "safe-cex-venue-backpack",
  "safe-cex-venue-binance",
+ "safe-cex-venue-blofin",
  "safe-cex-venue-okx",
  "serde",
  "serde_json",
