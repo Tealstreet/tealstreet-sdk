@@ -187,6 +187,22 @@ status = "divergent"
 note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Adapted wire shape into safe-cex-venue-bitget/src/types.rs::FetchUtaOrdersResponseData safe-cex-venue-bitget/src/types.rs::FetchUtaOrdersResponse . Nested structs hold anonymous TS response objects. The production derived Deserialize now delegates its requestTime leaf to shared JsNumberInput::decode::<f64> before extras buffering. Maintained numericIngress witnesses compare bits through bare serde_json::from_str, serde_json::from_value and borrowed Deserialize, including raw signed overflow and native/lexical signed zero. Unknown fields retain their original Value path. This is not a whole-record JsNumberOutput claim and cannot repair a sign erased by an upstream buffer."
 
 [[symbol]]
+ts = "BITGET_UTA_FILL"
+kind = "type"
+layer = "adapted"
+rs = [ "safe-cex-venue-bitget/src/types.rs::BitgetUtaFillFeeDetailItem", "safe-cex-venue-bitget/src/types.rs::BitgetUtaFill" ]
+status = "divergent"
+note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Adapted wire shape into safe-cex-venue-bitget/src/types.rs::BitgetUtaFillFeeDetailItem safe-cex-venue-bitget/src/types.rs::BitgetUtaFill . Nested structs hold anonymous TS response objects; optional non-null fields keep missing/null distinct and flattened extras retain unknown keys. Frozen types-oracle shape and field-identity cases cover both."
+
+[[symbol]]
+ts = "FETCH_UTA_FILLS_RESPONSE"
+kind = "type"
+layer = "adapted"
+rs = [ "safe-cex-venue-bitget/src/types.rs::FetchUtaFillsResponseData", "safe-cex-venue-bitget/src/types.rs::FetchUtaFillsResponse" ]
+status = "divergent"
+note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. Adapted wire shape into safe-cex-venue-bitget/src/types.rs::FetchUtaFillsResponseData safe-cex-venue-bitget/src/types.rs::FetchUtaFillsResponse . Nested structs hold anonymous TS response objects. requestTime is the sixth declared numeric leaf on the shared JsNumberInput ingress; 18 maintained lexemes compare pre-serialization bits."
+
+[[symbol]]
 ts = "FETCH_POSITIONS_V2_RESPONSE"
 kind = "type"
 layer = "adapted"

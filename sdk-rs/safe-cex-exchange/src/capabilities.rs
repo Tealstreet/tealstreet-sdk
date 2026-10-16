@@ -299,7 +299,10 @@ pub struct ExchangeCapabilities {
 }
 impl Default for ExchangeCapabilities {
     fn default() -> Self {
-        use BaseCapabilityMethod::*;
+        use BaseCapabilityMethod::{
+            FetchClosedPnl, FetchHistoricalFills, FetchHistoricalOrders, FetchIncomeHistory,
+            FetchIncomeHistoryRange, Start,
+        };
         Self {
             start: mark_base_capability_fallback(Start, |_, _| {
                 Box::pin(async { Err(ExchangeError::new("Not implemented")) })

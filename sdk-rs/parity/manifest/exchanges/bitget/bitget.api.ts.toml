@@ -30,9 +30,9 @@ note = ""
 ts = "createAPI"
 kind = "const-fn"
 layer = "adapted"
-rs = "safe-cex-venue-bitget/src/assembly.rs::create_api"
+rs = [ "safe-cex-venue-bitget/src/assembly.rs::create_api", "safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Value", "safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Error" ]
 status = "ported"
-note = "Native client configuration, three read-only retries, request signing/query-only mutation/body copy, owned request and async-response interceptors, silence/suppression emission and tunnel installation preserve source call order. Imported Axios/qs/HMAC/clock/transport operations are native host capabilities; fixtures test body/preimage separately, not a live HTTP adapter."
+note = "Native client configuration, three retries under a lazily evaluated read-only-network-error or signature-rejection condition, request signing/query-only mutation/body copy with an already-serialized string body signed raw, signature resend before a once-only (WeakSet) response emission, owned request and async-response interceptors, silence/suppression emission and tunnel installation preserve source call order. Imported Axios/qs/HMAC/clock/transport operations are native host capabilities; fixtures test body/preimage separately, not a live HTTP adapter. Host value split: safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Value is the opaque JS value and safe-cex-venue-bitget/src/assembly.rs::AssemblyHost::Error the thrown-value carrier of the AssemblyHost capability this body consumes; they add no behavior."
 
 [[symbol]]
 ts = "toJsonString"
