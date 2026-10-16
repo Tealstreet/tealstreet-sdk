@@ -1,0 +1,103 @@
+# Secret-scanning policy for this monorepo.
+#
+# There was no tracked `.gitleaks*` file before this one, which had two
+# consequences worth knowing:
+#
+#   * `sdk-secret-scan.yml` could only ever scan NEW commits, because a
+#     whole-tree scan drowns in test fixtures. That is still the right scope for
+#     the merge gate, but it meant nothing had ever been cleared.
+#   * `gitleaks dir <path>` AUTO-LOADS `<path>/.gitleaks.toml`. With no policy
+#     committed, anything scanning an exported tree would load whatever that
+#     tree happened to contain - so a pull request could have supplied its own
+#     allowlist. The mirror-export workflows therefore pass `--config`
+#     explicitly, and read it from the BASE revision rather than the head.
+#
+# Every allowlist below records what was actually verified, not what was
+# assumed. The default rule set stays on.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Build output and vendored trees are not sources."
+paths = [
+  # Cargo build output: gitignored, never mirrored, and full of fixture strings
+  # embedded from the crates it compiled. Scanning it took the run from
+  # 112 MB to 3.34 GB.
+  "sdk-rs/target/",
+  "(^|/)node_modules/",
+]
+
+# ---------------------------------------------------------------------------
+# sdk-rs: triaged 2026-10-14 against `gitleaks dir sdk-rs` - 366 findings, 332
+# of them outside sdk-rs/target. Every one was synthetic. The notes name the
+# evidence, because "it is probably a fixture" is not a clearance for pushing
+# to a public mirror.
+# ---------------------------------------------------------------------------
+
+[[rules]]
+id = "private-key"
+[rules.allowlist]
+description = """
+PEM MARKERS and deliberately tiny synthetic bodies, not key material. Scoped by
+PATH rather than by regex because the same strings appear with three different
+escapings - real newlines in .cjs, \\n in Rust string literals, \\\\n in JSON -
+and every site in these files was read individually:
+
+  * bodies are AQID (base64 of bytes 1,2,3) or AQIDBA== (1,2,3,4);
+  * scripts/crypto-encoding.cjs GENERATES its body with
+    Array.from({length}, (_, i) => (i * 23) & 0xff), i.e. counting bytes;
+  * scripts/credentials.cjs uses the literal abc;
+  * src/utils.rs matches only because coinbase_pem_contains_private_key
+    declares the two BEGIN markers as the constants it searches FOR.
+
+A PEM anywhere else in the tree is still reported.
+"""
+paths = [
+  "sdk-rs/safe-cex-venue-coinbase/scripts/(credentials|signing-helpers|crypto-encoding|order-sync-auth)\\.cjs$",
+  "sdk-rs/safe-cex-venue-coinbase/tests/(credentials|signing_helpers|order_sync_auth)\\.rs$",
+  "sdk-rs/safe-cex-venue-coinbase/tests/fixtures/order-sync-auth\\.json$",
+  "sdk-rs/safe-cex-venue-coinbase/src/utils\\.rs$",
+]
+
+[[rules]]
+id = "generic-api-key"
+[rules.allowlist]
+description = """
+Four distinct false-positive shapes across 306 findings, all verified:
+
+ 1. COMPUTED SIGNATURES, not credentials. kucoin's KC-API-SIGN /
+    KC-API-PASSPHRASE, woo's x-api-signature and bitget's signing reference are
+    the HMAC OUTPUT of signing a fixture request with a fixture secret.
+ 2. A literal test secret. safe-cex-crypto/tests/fixtures/node-crypto.json
+    carries "secret": "dGVzdC1zZWNyZXQtdmFsdWU=", which is base64 for
+    test-secret-value.
+ 3. FILE -> SHA MAPS in gate-result records (*_GATE_EXITS.json,
+    COMPLETION_GATES.json, RPC_GATE_RESULTS.json). The "secret" is a content
+    hash beside a filename; the same shape produced the two
+    coinbase-access-token hits, which matched on coinbase-tests.log.
+ 4. Ordinary PROSE long enough to trip the entropy heuristic with no secret in
+    it at all - blofin CLAUDE.md, weex MARKET_READS_GATE_EVIDENCE.md and
+    SELECTION_GATE_EVIDENCE.md.
+
+Scoped to fixture, test, script, gate-record and evidence paths. A long opaque
+string in production source is still reported.
+"""
+paths = [
+  "sdk-rs/[^/]+/tests/",
+  "sdk-rs/[^/]+/scripts/",
+  "sdk-rs/[^/]+/[A-Z_]+\\.json$",
+  "sdk-rs/[^/]+/[A-Za-z_]+\\.md$",
+]
+
+[[rules]]
+id = "coinbase-access-token"
+[rules.allowlist]
+description = """
+Matched on LOG FILENAMES inside a gate-result record -
+"coinbase-tests.log": "<hash>" in RPC_GATE_RESULTS.json. A filename beside its
+content hash, not a token.
+"""
+paths = [
+  "sdk-rs/[^/]+/[A-Z_]+\\.json$",
+]

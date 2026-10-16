@@ -1,0 +1,139 @@
+[file]
+ts = "packages/safe-cex/src/safeCexAxiosCreate.ts"
+rust_files = [ "safe-cex-store/src/request_stats.rs", "safe-cex-transport/src/signing.rs", "safe-cex-exchange/src/http.rs", "safe-cex-transport/src/provider.rs" ]
+
+[[symbol]]
+ts = "setInnerAdapterForRemoteSigning"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-transport/src/signing.rs::set_inner_adapter_for_remote_signing"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "installTransportAdapter"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::install_transport_adapter"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "maybeInstallRemoteSigningAdapter"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::maybe_install_remote_signing_adapter"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "HttpRequestStatsTracker"
+kind = "class"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::HttpRequestStatsTracker"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "HttpRequestStatsTracker.recordRequest"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::HttpRequestStatsTracker::record_request"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "HttpRequestStatsTracker.recordError"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::HttpRequestStatsTracker::record_error"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "HttpRequestStatsTracker.getRequestsPerMinute"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::HttpRequestStatsTracker::get_requests_per_minute"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "HttpRequestStatsTracker#cleanup"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::HttpRequestStatsTracker::cleanup"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "HttpRequestStatsTracker#maybeLog"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::HttpRequestStatsTracker::maybe_log"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "HttpRequestStatsTracker.getStats"
+kind = "method"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::HttpRequestStatsTracker::get_stats"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "httpStats"
+kind = "const"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::HTTP_STATS"
+status = "ported"
+note = "Per-process native or per-wasm-instance global stats preserve source runtime-module singleton behavior: safe-cex-exchange/src/http.rs::HTTP_STATS"
+
+[[symbol]]
+ts = "LAST_LOG_PERIODICY"
+kind = "const"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::LAST_LOG_PERIODICY"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "stringifyResponseBody"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::stringify_response_body"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "isTealstreetProxyAuthFailureBody"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::is_tealstreet_proxy_auth_failure_body"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "recordRequestOutcome"
+kind = "const-fn"
+layer = "mirror"
+rs = "safe-cex-store/src/request_stats.rs::record_request_outcome"
+status = "divergent"
+note = "CHOSEN Host supplies signing-capture boolean instead of config predicate; guard and HTTP-only classification preserved. Typed optional store eliminates missing-method/throw cases; source catch-all has no equivalent fallible path. HttpClient::record_outcome forwards through the typed Store operation."
+
+[[symbol]]
+ts = "safeCexAxiosCreateNoProxy"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/http.rs::safe_cex_axios_create_no_proxy"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "safeCexAxiosCreate"
+kind = "const-fn"
+layer = "adapted"
+rs = [ "safe-cex-exchange/src/http.rs::safe_cex_axios_create", "safe-cex-exchange/src/http.rs::HttpClient", "safe-cex-exchange/src/http.rs::HttpClientOptions", "safe-cex-exchange/src/http.rs::HttpFailure", "safe-cex-exchange/src/http.rs::HttpLogState", "safe-cex-exchange/src/http.rs::HTTP_LOGS", "safe-cex-exchange/src/http.rs::HttpFuture", "safe-cex-exchange/src/http.rs::HttpClient::execute", "safe-cex-exchange/src/http.rs::HttpClient::execute_with_interceptor", "safe-cex-exchange/src/http.rs::ParamsSerializer", "safe-cex-exchange/src/http.rs::HttpClient::refuse_before_transmit", "safe-cex-transport/src/provider.rs::RestFailure::pre_transmit", "safe-cex-exchange/src/http.rs::HttpClient::execute_with_receipt", "safe-cex-exchange/src/http.rs::HttpClient::execute_with_interceptor_receipt" ]
+status = "ported"
+note = "The remote inner-adapter wrapper serializes query params without re-transforming remote returned data or regenerating deleted headers; local requests retain the post-signing transform. safe-cex-exchange/src/http.rs::HttpClient::execute_with_interceptor applies factory defaults before the venue callback, retains its header deletions without a second merge, and continues through shared stats/error handling. Split implementation into source behavior, runtime state, and typed payload components: safe-cex-exchange/src/http.rs::safe_cex_axios_create safe-cex-exchange/src/http.rs::HttpClient safe-cex-exchange/src/http.rs::HttpClientOptions safe-cex-exchange/src/http.rs::HttpFailure safe-cex-exchange/src/http.rs::HttpLogState safe-cex-exchange/src/http.rs::HTTP_LOGS safe-cex-exchange/src/http.rs::HttpFuture safe-cex-exchange/src/http.rs::HttpClient::execute safe-cex-exchange/src/http.rs::ParamsSerializer represents the Axios factory config callback: sign then serialize then transmit, retained across transport replacement. Inherited Axios precondition: params-only signer responses assert factory-codec agreement; exact signed encoding requires URL with params absent. Serializer errors refuse before send. safe-cex-exchange/src/http.rs::HttpClient::refuse_before_transmit and safe-cex-transport/src/provider.rs::RestFailure::pre_transmit share enhancement and non-network refusal construction with serializers; signer preflight counts zero requests while adapter serialization counts one, matching measured Axios ordering. HttpFailure is a transitional alias of transport RestFailure, not a second model. Receipt split targets: `safe-cex-exchange/src/http.rs::HttpClient::execute_with_receipt`, `safe-cex-exchange/src/http.rs::HttpClient::execute_with_interceptor_receipt`. Both public response-only entrypoints delegate to the same receipt path; the receipt retains effective adapter config for existing response hooks and venue response-interceptor reentry. This is config provenance, not a second transport or an added source factory."

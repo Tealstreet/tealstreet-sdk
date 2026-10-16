@@ -1,0 +1,99 @@
+{
+  "sha": "74d0b79e1dddb094fd147ddf161cd4ed6b189a40",
+  "order": [
+    "ported",
+    "divergent",
+    "pending"
+  ],
+  "files": [
+    {
+      "file": "accessToken.ts",
+      "triple": [
+        0,
+        0,
+        12
+      ],
+      "symbols": 12
+    },
+    {
+      "file": "config/config.ts",
+      "triple": [
+        0,
+        0,
+        11
+      ],
+      "symbols": 11
+    },
+    {
+      "file": "index.ts",
+      "triple": [
+        0,
+        0,
+        8
+      ],
+      "symbols": 8
+    },
+    {
+      "file": "exchangeMetadata.ts",
+      "triple": [
+        0,
+        0,
+        8
+      ],
+      "symbols": 8
+    },
+    {
+      "file": "createExchangeFromAccount.ts",
+      "triple": [
+        0,
+        0,
+        7
+      ],
+      "symbols": 7
+    },
+    {
+      "file": "telemetry.ts",
+      "triple": [
+        0,
+        0,
+        5
+      ],
+      "symbols": 5
+    },
+    {
+      "file": "utils/venueRestDiagnostics.ts",
+      "triple": [
+        0,
+        0,
+        26
+      ],
+      "symbols": 26
+    },
+    {
+      "file": "utils/wsDiagnostics.ts",
+      "triple": [
+        0,
+        0,
+        9
+      ],
+      "symbols": 9
+    },
+    {
+      "file": "instrument-class/resolve.ts",
+      "triple": [
+        8,
+        0,
+        1
+      ],
+      "symbols": 9
+    }
+  ],
+  "triple": [
+    8,
+    0,
+    87
+  ],
+  "symbols": 95,
+  "stopped_after_file": 9,
+  "scope": "nine assigned files; 87 pending rows plus 8 existing ported rows"
+}

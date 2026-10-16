@@ -1,0 +1,10 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquidspot.api.ts"
+
+[[symbol]]
+ts = "createAPI"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/spot_client.rs::create_api"
+status = "ported"
+note = "Rust owns the spot factory/interceptors and independent RateLimiter class/constructor/refill/wait bodies. Preserves source retry/adapter/config/request/response ordering, native shallow-copy identity, optional-chain short-circuit state, emitted rejection values, default weight, boundary refill, retained timer recursion and executor return. Factory does not replace exchange constructor imported perp factory. Native class/property/coercion/Promise/timer and imported library implementations remain explicit bindings; floor30 source cases through29 across this slice, no general engine/thenable/live pacing proof."

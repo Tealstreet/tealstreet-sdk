@@ -1,0 +1,294 @@
+#[path = "support/adapter_runtime.rs"]
+mod support;
+use safe_cex_exchange::{
+    capabilities::{BaseCapabilityMethod, is_base_capability_fallback},
+    exchange::Exchange,
+    socket_lifecycle::SocketSlot,
+};
+use safe_cex_types::{OrderSide, OrderType};
+use safe_cex_venue_backpack::{
+    native_value::Value as Native, public_control::JsString, rest_reads,
+};
+use serde_json::json;
+use std::{
+    cell::RefCell,
+    future::Future,
+    rc::Rc,
+    task::{Context, Poll, Waker},
+};
+fn ready<F: Future>(f: F) -> F::Output {
+    let mut f = std::pin::pin!(f);
+    match f.as_mut().poll(&mut Context::from_waker(Waker::noop())) {
+        Poll::Ready(v) => v,
+        Poll::Pending => panic!("fixture must resolve"),
+    }
+}
+fn units(s: &str) -> JsString {
+    s.encode_utf16().collect()
+}
+#[test]
+fn concrete_exchange_owns_api_and_sdk_bindings() {
+    let (o, _, store, wire) = support::fixture();
+    assert_eq!(
+        o.account_leverage_limit.get().to_bits(),
+        1.0f64.to_bits(),
+        "CLASS native exchange leverage default"
+    );
+    assert_eq!(
+        o.grafana_endpoints_every,
+        safe_cex_venue_backpack::constants::GRAFANA_ENDPOINTS_EVERY
+    );
+    assert!(
+        !is_base_capability_fallback(&o.capabilities().start, BaseCapabilityMethod::Start),
+        "CLASS native startup capability binding"
+    );
+    assert!(
+        !is_base_capability_fallback(
+            &o.capabilities().place_order,
+            BaseCapabilityMethod::PlaceOrder
+        ),
+        "CLASS native placement capability binding"
+    );
+    assert!(
+        Rc::ptr_eq(
+            o.base.get_socket(SocketSlot::Public).as_ref().unwrap(),
+            &o.public_websocket.get().unwrap().base
+        ),
+        "CLASS native public socket slot"
+    );
+    assert!(
+        Rc::ptr_eq(
+            o.base.get_socket(SocketSlot::Private).as_ref().unwrap(),
+            &o.private_websocket.get().unwrap().base
+        ),
+        "CLASS native private socket slot"
+    );
+    let errors = Rc::new(RefCell::new(vec![]));
+    let out = errors.clone();
+    o.base.on(
+        "error",
+        Rc::new(move |_, v| {
+            out.borrow_mut().push(v.clone());
+            Ok(())
+        }),
+    );
+    wire.bodies.lock().unwrap().insert(
+        "/api/v1/markets".into(),
+        safe_cex_transport::RestResponseBody::Untransformed(json!({"error":{"msg":"same-base"}})),
+    );
+    let e = ready(o.fetch_markets()).err().unwrap();
+    assert!(e.message.contains("same-base"), "CLASS native API error");
+    assert_eq!(
+        errors.borrow().len(),
+        1,
+        "CLASS native API/base emitter identity"
+    );
+    let mut opts = safe_cex_venue_backpack::order_actions::Options {
+        symbol: units("BTC_USDC"),
+        kind: OrderType::Limit,
+        side: OrderSide::Buy,
+        amount: 1.25,
+        price: Some(10.0),
+        trigger_price: None,
+        take_profit: Some(11.0),
+        stop_loss: None,
+        reduce_only: false,
+        time_in_force: None,
+        tp_trigger_type: None,
+        sl_trigger_type: None,
+        client_id: Some(units("1")),
+    };
+    let before = wire.requests.lock().unwrap().len();
+    assert!(
+        ready(o.place_order(opts.clone()))
+            .unwrap_err()
+            .message
+            .contains("plain Limit/Market"),
+        "CLASS native caller ID shape rejection"
+    );
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        before,
+        "CLASS preflight before network"
+    );
+    opts.take_profit = None;
+    let ids = ready(o.place_order(opts)).unwrap();
+    assert_eq!(
+        ids,
+        [units("native-id")],
+        "CLASS native bound order placement"
+    );
+    assert_eq!(store.markets()[0].symbol, "BTC_USDC");
+    o.dispose().unwrap();
+    assert!(o.base.is_disposed(), "CLASS native disposal");
+}
+#[test]
+fn concrete_public_throttle_and_weak_listener_lifetime() {
+    let (o, rt, store, _) = support::fixture();
+    let p = o.public_websocket.get().unwrap().clone();
+    let data = |last| {
+        Native::from_prepared(json!({"s":"BTC_USDC","c":last,"P":"0.5","v":"8","q":"80"}).into())
+    };
+    p.ticker_handler.call(data("10")).unwrap();
+    assert_eq!(
+        store.tickers()[0].last.to_bits(),
+        10.0f64.to_bits(),
+        "PUBLIC CLASS native ticker binding"
+    );
+    assert_eq!(
+        store.tickers()[0].percentage.to_bits(),
+        50.0f64.to_bits(),
+        "PUBLIC CLASS native percentage binding"
+    );
+    rt.now.set(100.0);
+    p.ticker_handler.call(data("20")).unwrap();
+    rt.now.set(1000.0);
+    p.ticker_handler.call(data("30")).unwrap();
+    assert_eq!(
+        store.tickers()[0].last.to_bits(),
+        30.0f64.to_bits(),
+        "PUBLIC CLASS native throttle leading value"
+    );
+    rt.now.set(2000.0);
+    rt.pump();
+    assert_eq!(
+        store.tickers()[0].last.to_bits(),
+        30.0f64.to_bits(),
+        "PUBLIC CLASS native stale trailing canceled"
+    );
+    p.ticker_handler.cancel();
+    rt.now.set(2100.0);
+    p.ticker_handler.call(data("40")).unwrap();
+    assert_eq!(
+        store.tickers()[0].last.to_bits(),
+        40.0f64.to_bits(),
+        "PUBLIC CLASS native cancel resets timestamp"
+    );
+    let stop = p
+        .listen_ohlcv(units("BTC_USDC"), units("1m"), Rc::new(|_| Ok(())))
+        .unwrap();
+    let weak = Rc::downgrade(&p);
+    drop(p);
+    drop(o);
+    assert!(
+        weak.upgrade().is_none(),
+        "PUBLIC CLASS native stored listener weak ownership"
+    );
+    assert!(
+        stop().is_err(),
+        "PUBLIC CLASS detached cleanup visibly fails"
+    );
+}
+#[test]
+fn concrete_private_handler_and_throttle_state() {
+    let (o, rt, store, _) = support::fixture();
+    let p = o.private_websocket.get().unwrap();
+    for state in [&p.state.positions, &p.state.balance] {
+        assert_eq!(
+            state.throttle_ms.get().to_bits(),
+            500.0f64.to_bits(),
+            "PRIVATE CLASS native reconciliation interval"
+        );
+        assert_eq!(state.last.get().to_bits(), 0.0f64.to_bits());
+        assert!(!state.scheduled.get());
+        assert!(!state.pending.get());
+    }
+    assert!(p.state.orders_timeout.borrow().is_none());
+    p.on_message(&safe_cex_transport::socket::SocketFrame::Text(
+        "broken JSON".into(),
+    ))
+    .unwrap();
+    assert!(
+        rt.errors.borrow().is_empty(),
+        "PRIVATE CLASS malformed JSON source null"
+    );
+    let raw=json!({"stream":"account.orderUpdate","data":{"e":"orderUpdate","s":"BTC_USDC","i":"private-id","S":"Bid","o":"Limit","p":"10","q":"3","z":"1","X":"New","E":1000000,"f":"GTC"}}).to_string();
+    p.on_message(&safe_cex_transport::socket::SocketFrame::Text(raw))
+        .unwrap();
+    assert_eq!(
+        store.orders().len(),
+        1,
+        "PRIVATE CLASS native dispatcher order count"
+    );
+    let order = store.orders()[0].clone();
+    assert_eq!(order.id, "private-id", "PRIVATE CLASS native dispatcher ID");
+    assert_eq!(
+        order.amount.to_bits(),
+        3.0f64.to_bits(),
+        "PRIVATE CLASS native order amount"
+    );
+    assert_eq!(
+        order.remaining.to_bits(),
+        2.0f64.to_bits(),
+        "PRIVATE CLASS native order remaining"
+    );
+    assert!(
+        p.state.orders_timeout.borrow().is_some(),
+        "PRIVATE CLASS native reconciliation timer bound"
+    );
+    o.dispose().unwrap();
+}
+#[test]
+fn concrete_transport_preserves_successful_text() {
+    let (o, _, _, wire) = support::fixture();
+    wire.bodies.lock().unwrap().insert(
+        "/api/v1/klines".into(),
+        safe_cex_transport::RestResponseBody::Encoded(b"<html>no klines</html>".to_vec()),
+    );
+    let c = ready(o.fetch_ohlcv(rest_reads::OHLCVOptions {
+        symbol: units("BTC_USDC"),
+        interval: units("1m"),
+        from: None,
+        to: None,
+    }))
+    .unwrap();
+    assert!(
+        c.is_empty(),
+        "CLASS native non-array text OHLCV returns empty"
+    );
+    o.dispose().unwrap();
+}
+#[test]
+fn concrete_exchange_limits_to_ten_requests_per_second() {
+    let (o, rt, _, wire) = support::fixture();
+    for _ in 0..10 {
+        ready(o.xhr.request(
+            "GET",
+            "/api/v1/time",
+            safe_cex_num::JsJsonValue::Undefined,
+            safe_cex_num::JsJsonValue::Undefined,
+        ))
+        .unwrap();
+    }
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        10,
+        "CLASS independent native RPS floor"
+    );
+    let mut eleventh = o.xhr.request(
+        "GET",
+        "/api/v1/time",
+        safe_cex_num::JsJsonValue::Undefined,
+        safe_cex_num::JsJsonValue::Undefined,
+    );
+    assert!(
+        eleventh
+            .as_mut()
+            .poll(&mut Context::from_waker(Waker::noop()))
+            .is_pending(),
+        "CLASS native eleventh request throttled"
+    );
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        10,
+        "CLASS native throttle before transport"
+    );
+    rt.now.set(1000.0);
+    ready(eleventh).unwrap();
+    assert_eq!(
+        wire.requests.lock().unwrap().len(),
+        11,
+        "CLASS native RPS resumes after interval"
+    );
+    o.dispose().unwrap();
+}

@@ -1,0 +1,192 @@
+[
+  {
+    "file": "packages/safe-cex/src/exchanges/kucoin/kucoinspot.api.ts",
+    "renderer": "qs",
+    "captureArchitecture": "arm64",
+    "version": "6.16.0",
+    "fingerprint": "8f4e02eef6ccc43f2b7448c18ae209281c8e9af9807cad491df67450e3817a95",
+    "expression": "(params) => qs.stringify(params)",
+    "input": {
+      "limit": {
+        "$number": "-Infinity"
+      },
+      "startAt": {
+        "$number": "NaN"
+      },
+      "endAt": {
+        "$number": "Infinity"
+      },
+      "nil": null,
+      "absent": {
+        "$undefined": true
+      },
+      "list": [
+        {
+          "$number": "NaN"
+        },
+        {
+          "$number": "Infinity"
+        },
+        {
+          "$number": "-Infinity"
+        },
+        null,
+        {
+          "$undefined": true
+        },
+        "a b"
+      ]
+    },
+    "output": "limit=-Infinity&startAt=NaN&endAt=Infinity&nil=&list%5B0%5D=NaN&list%5B1%5D=Infinity&list%5B2%5D=-Infinity&list%5B3%5D=&list%5B5%5D=a%20b"
+  },
+  {
+    "file": "packages/safe-cex/src/exchanges/kucoin/kucoinspot.api.ts",
+    "renderer": "qs",
+    "captureArchitecture": "arm64",
+    "version": "6.16.0",
+    "fingerprint": "8f4e02eef6ccc43f2b7448c18ae209281c8e9af9807cad491df67450e3817a95",
+    "expression": "(params) => qs.stringify(params)",
+    "input": {
+      "list": [],
+      "empty": {},
+      "flag": false,
+      "zero": {
+        "$number": "-0"
+      },
+      "textZero": "-0",
+      "textOverflow": "1e400"
+    },
+    "output": "flag=false&zero=0&textZero=-0&textOverflow=1e400"
+  },
+  {
+    "file": "packages/safe-cex/src/exchanges/kucoin/kucoinspot.api.ts",
+    "renderer": "qs",
+    "captureArchitecture": "arm64",
+    "version": "6.16.0",
+    "fingerprint": "8f4e02eef6ccc43f2b7448c18ae209281c8e9af9807cad491df67450e3817a95",
+    "expression": "(params) => qs.stringify(params)",
+    "input": {
+      "list": [
+        [
+          {
+            "$number": "1"
+          },
+          {
+            "$undefined": true
+          }
+        ],
+        [
+          null,
+          {
+            "$number": "2"
+          }
+        ]
+      ],
+      "nested": {
+        "a": {
+          "$number": "NaN"
+        },
+        "b": {
+          "$undefined": true
+        },
+        "c": null
+      }
+    },
+    "output": "list%5B0%5D%5B0%5D=1&list%5B1%5D%5B0%5D=&list%5B1%5D%5B1%5D=2&nested%5Ba%5D=NaN&nested%5Bc%5D="
+  },
+  {
+    "file": "packages/safe-cex/src/exchanges/binance/binancespot.api.ts",
+    "renderer": "qs",
+    "captureArchitecture": "arm64",
+    "version": "6.16.0",
+    "fingerprint": "8f4e02eef6ccc43f2b7448c18ae209281c8e9af9807cad491df67450e3817a95",
+    "expression": "(params) => qs.stringify(params, { arrayFormat: 'repeat' })",
+    "input": {
+      "limit": {
+        "$number": "-Infinity"
+      },
+      "startAt": {
+        "$number": "NaN"
+      },
+      "endAt": {
+        "$number": "Infinity"
+      },
+      "nil": null,
+      "absent": {
+        "$undefined": true
+      },
+      "list": [
+        {
+          "$number": "NaN"
+        },
+        {
+          "$number": "Infinity"
+        },
+        {
+          "$number": "-Infinity"
+        },
+        null,
+        {
+          "$undefined": true
+        },
+        "a b"
+      ]
+    },
+    "output": "limit=-Infinity&startAt=NaN&endAt=Infinity&nil=&list=NaN&list=Infinity&list=-Infinity&list=&list=a%20b"
+  },
+  {
+    "file": "packages/safe-cex/src/exchanges/binance/binancespot.api.ts",
+    "renderer": "qs",
+    "captureArchitecture": "arm64",
+    "version": "6.16.0",
+    "fingerprint": "8f4e02eef6ccc43f2b7448c18ae209281c8e9af9807cad491df67450e3817a95",
+    "expression": "(params) => qs.stringify(params, { arrayFormat: 'repeat' })",
+    "input": {
+      "list": [],
+      "empty": {},
+      "flag": false,
+      "zero": {
+        "$number": "-0"
+      },
+      "textZero": "-0",
+      "textOverflow": "1e400"
+    },
+    "output": "flag=false&zero=0&textZero=-0&textOverflow=1e400"
+  },
+  {
+    "file": "packages/safe-cex/src/exchanges/binance/binancespot.api.ts",
+    "renderer": "qs",
+    "captureArchitecture": "arm64",
+    "version": "6.16.0",
+    "fingerprint": "8f4e02eef6ccc43f2b7448c18ae209281c8e9af9807cad491df67450e3817a95",
+    "expression": "(params) => qs.stringify(params, { arrayFormat: 'repeat' })",
+    "input": {
+      "list": [
+        [
+          {
+            "$number": "1"
+          },
+          {
+            "$undefined": true
+          }
+        ],
+        [
+          null,
+          {
+            "$number": "2"
+          }
+        ]
+      ],
+      "nested": {
+        "a": {
+          "$number": "NaN"
+        },
+        "b": {
+          "$undefined": true
+        },
+        "c": null
+      }
+    },
+    "output": "list=1&list=&list=2&nested%5Ba%5D=NaN&nested%5Bc%5D="
+  }
+]

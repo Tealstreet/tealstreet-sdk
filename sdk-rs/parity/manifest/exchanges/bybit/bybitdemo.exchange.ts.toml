@@ -1,0 +1,18 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/bybit/bybitdemo.exchange.ts"
+
+[[symbol]]
+ts = "BybitDemoExchange"
+kind = "class"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "BybitDemoExchange.get supportedCategories"
+kind = "accessor"
+layer = ""
+rs = ""
+status = "pending"
+note = ""

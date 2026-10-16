@@ -1,0 +1,539 @@
+use safe_cex_num::numeric_ingress::{JsNumberInput, js_from_str};
+use safe_cex_types::Market;
+use safe_cex_venue_woo::{
+    v3_contracts::{WooV3Endpoint, WooV3HttpMethod},
+    v3_public::WooV3FuturesRow,
+    v3_request::{
+        WooV3PreparedRequest, WooV3RequestAuth, WooV3RequestInput, prepare_woo_v3_request,
+        serialize_query,
+    },
+    v3_ticker::{
+        WooV3AuthoritativeTicker, WooV3AuthoritativeTickerInfo,
+        compose_woo_v3_authoritative_ticker, normalize_perpetual_symbol,
+        require_positive_finite_price,
+    },
+    v3_ws_quotes::{WooV3WsBbo, WooV3WsTrade},
+};
+use serde_json::Value;
+use std::{
+    future::Future,
+    process::Command,
+    sync::OnceLock,
+    task::{Context, Poll, Waker},
+};
+fn source() -> &'static Value {
+    static SOURCE: OnceLock<Value> = OnceLock::new();
+    SOURCE.get_or_init(|| {
+        let output = Command::new("node")
+            .arg(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/scripts/v3-request-ticker-oracle.cjs"
+            ))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "V3 source oracle: {}",
+            String::from_utf8_lossy(&output.stderr)
+        );
+        serde_json::from_slice(&output.stdout).unwrap()
+    })
+}
+fn raw(name: &str) -> &str {
+    source()["records"][name]["raw"].as_str().unwrap()
+}
+fn bits(number: f64, expected: &Value, assertion: &str) {
+    let actual = if number.is_nan() {
+        "7ff8000000000000".into()
+    } else {
+        format!("{:016x}", number.to_bits())
+    };
+    assert_eq!(actual, expected["$bits"].as_str().unwrap(), "{assertion}");
+}
+fn ready<T>(future: impl Future<Output = T>) -> T {
+    let mut future = std::pin::pin!(future);
+    match future
+        .as_mut()
+        .poll(&mut Context::from_waker(Waker::noop()))
+    {
+        Poll::Ready(value) => value,
+        Poll::Pending => panic!("V3 local request preparation suspended"),
+    }
+}
+fn bbo(value: &Value) -> WooV3WsBbo {
+    WooV3WsBbo {
+        symbol: value["symbol"].as_str().unwrap().into(),
+        ask_price: value["askPrice"].as_str().unwrap().into(),
+        ask_quantity: value["askQuantity"].as_str().unwrap().into(),
+        bid_price: value["bidPrice"].as_str().unwrap().into(),
+        bid_quantity: value["bidQuantity"].as_str().unwrap().into(),
+        timestamp: safe_cex_num::js_number(value.get("timestamp")).unwrap(),
+    }
+}
+fn trade(value: &Value) -> WooV3WsTrade {
+    WooV3WsTrade {
+        symbol: value["symbol"].as_str().unwrap().into(),
+        price: value["price"].as_str().unwrap().into(),
+        quantity: value["quantity"].as_str().unwrap().into(),
+        side: value["side"].as_str().unwrap().into(),
+        source: safe_cex_num::js_number(value.get("source")).unwrap(),
+        matched_rpi: value["matchedRpi"].as_bool().unwrap(),
+        timestamp: safe_cex_num::js_number(value.get("timestamp")).unwrap(),
+    }
+}
+fn check_info(actual: &WooV3AuthoritativeTickerInfo, expected: &Value) {
+    let stats = &actual.futures_stats;
+    let e = &expected["futuresStats"];
+    assert_eq!(
+        stats.id.as_deref(),
+        e["id"].as_str(),
+        "INFO native futures id"
+    );
+    assert_eq!(
+        stats.symbol.as_deref(),
+        e["symbol"].as_str(),
+        "INFO native futures symbol"
+    );
+    for (value, key) in [
+        (stats.index, "index"),
+        (stats.mark, "mark"),
+        (stats.open24h, "open24h"),
+        (stats.close24h, "close24h"),
+        (stats.high24h, "high24h"),
+        (stats.low24h, "low24h"),
+        (stats.percentage24h, "percentage24h"),
+        (stats.open_interest, "openInterest"),
+        (stats.estimated_funding_rate, "estimatedFundingRate"),
+        (stats.last_funding_rate, "lastFundingRate"),
+        (stats.funding_time, "fundingTime"),
+        (stats.volume24h, "volume24h"),
+        (stats.quote_volume24h, "quoteVolume24h"),
+    ] {
+        bits(value, &e[key], &format!("INFO native {key}"));
+    }
+    check_bbo(&actual.bbo, &expected["bbo"]);
+    check_trade(&actual.trade, &expected["trade"]);
+}
+fn check_bbo(actual: &WooV3WsBbo, expected: &Value) {
+    assert_eq!(
+        actual.ask_price, expected["askPrice"],
+        "BBO native ask price"
+    );
+    assert_eq!(
+        actual.bid_price, expected["bidPrice"],
+        "BBO native bid price"
+    );
+    assert_eq!(
+        actual.ask_quantity, expected["askQuantity"],
+        "BBO native ask quantity"
+    );
+    assert_eq!(
+        actual.bid_quantity, expected["bidQuantity"],
+        "BBO native bid quantity"
+    );
+    assert_eq!(actual.symbol, expected["symbol"], "BBO native symbol");
+    bits(
+        actual.timestamp,
+        &expected["timestamp"],
+        "BBO native timestamp",
+    );
+}
+fn check_trade(actual: &WooV3WsTrade, expected: &Value) {
+    assert_eq!(actual.price, expected["price"], "TRADE native price");
+    assert_eq!(
+        actual.quantity, expected["quantity"],
+        "TRADE native quantity"
+    );
+    assert_eq!(actual.symbol, expected["symbol"], "TRADE native symbol");
+    assert_eq!(actual.side, expected["side"], "TRADE native side");
+    assert_eq!(
+        actual.matched_rpi,
+        expected["matchedRpi"].as_bool().unwrap(),
+        "TRADE native RPI"
+    );
+    bits(actual.source, &expected["source"], "TRADE native source");
+    bits(
+        actual.timestamp,
+        &expected["timestamp"],
+        "TRADE native timestamp",
+    );
+}
+fn check_ticker(actual: &WooV3AuthoritativeTicker, expected: &Value) {
+    assert_eq!(actual.id, expected["id"], "TICKER native id");
+    assert_eq!(actual.symbol, expected["symbol"], "TICKER native symbol");
+    assert!(actual.mid_price.is_none(), "TICKER absent midpoint");
+    bits(actual.bid, &expected["bid"], "COMPOSE native bid");
+    for (value, key) in [
+        (actual.ask, "ask"),
+        (actual.last, "last"),
+        (actual.mark, "mark"),
+        (actual.index, "index"),
+        (actual.percentage, "percentage"),
+        (actual.open_interest, "openInterest"),
+        (actual.funding_rate, "fundingRate"),
+        (actual.funding_time, "fundingTime"),
+        (actual.volume, "volume"),
+        (actual.quote_volume, "quoteVolume"),
+    ] {
+        bits(value, &expected[key], &format!("TICKER native {key}"));
+    }
+    check_info(&actual.info, &expected["info"]);
+}
+#[test]
+fn request_declarations_decode_native_fields() {
+    let auth: WooV3RequestAuth = serde_json::from_str(raw("auth")).expect("AUTH native decode");
+    assert_eq!(auth.api_key, "key-distinct", "AUTH native api key");
+    assert_eq!(auth.api_secret, "secret-distinct", "AUTH native secret");
+    assert_eq!(
+        auth.timestamp.to_bits(),
+        (-0.0_f64).to_bits(),
+        "AUTH native timestamp"
+    );
+    let input: WooV3RequestInput = serde_json::from_str(raw("input")).expect("INPUT native decode");
+    assert!(
+        matches!(input.method, WooV3HttpMethod::Post),
+        "INPUT native method"
+    );
+    assert!(
+        matches!(input.path, WooV3Endpoint::TradeOrder),
+        "INPUT native endpoint"
+    );
+    let query: &JsNumberInput = input
+        .query
+        .as_ref()
+        .unwrap()
+        .get("queryField")
+        .expect("INPUT native query key");
+    assert_eq!(
+        query.clone().decode::<f64>().unwrap().to_bits(),
+        (-0.0_f64).to_bits(),
+        "INPUT native query bits"
+    );
+    let body = input
+        .body
+        .as_ref()
+        .unwrap()
+        .get("bodyField")
+        .expect("INPUT native body key");
+    assert_eq!(
+        body.clone().decode::<f64>().unwrap(),
+        f64::INFINITY,
+        "INPUT native body overflow"
+    );
+    let prepared: WooV3PreparedRequest =
+        serde_json::from_str(raw("prepared")).expect("PREPARED native decode");
+    assert!(
+        matches!(prepared.method, WooV3HttpMethod::Delete),
+        "PREPARED native method"
+    );
+    assert_eq!(
+        prepared.path, "/v3/trade/order?id=19",
+        "PREPARED native path"
+    );
+    assert_eq!(
+        prepared.body.as_deref(),
+        Some("body-distinct"),
+        "PREPARED native body"
+    );
+    assert_eq!(
+        prepared.signature_payload.as_deref(),
+        Some("payload-distinct"),
+        "PREPARED native payload"
+    );
+    assert_eq!(
+        prepared.headers["x-api-key"], "record-key",
+        "PREPARED native key"
+    );
+    assert_eq!(
+        prepared.headers["x-api-signature"], "record-signature",
+        "PREPARED native signature"
+    );
+    for text in ["[]", "null"] {
+        assert!(
+            serde_json::from_str::<WooV3RequestAuth>(text).is_err(),
+            "AUTH map-only"
+        );
+        assert!(
+            serde_json::from_str::<WooV3RequestInput>(text).is_err(),
+            "INPUT map-only"
+        );
+        assert!(
+            serde_json::from_str::<WooV3PreparedRequest>(text).is_err(),
+            "PREPARED map-only"
+        );
+    }
+    assert!(
+        serde_json::from_str::<WooV3RequestInput>(
+            "{\"method\":\"GET\",\"path\":\"/v3/public/futures\",\"query\":null}"
+        )
+        .is_err(),
+        "INPUT optional query excludes null"
+    );
+    let edge: WooV3RequestAuth =
+        js_from_str("{\"apiKey\":\"k\",\"apiSecret\":\"s\",\"timestamp\":1e400}").unwrap();
+    assert_eq!(edge.timestamp, f64::INFINITY, "AUTH native overflow");
+}
+#[test]
+fn quote_declarations_decode_native_fields() {
+    let actual: WooV3WsBbo = serde_json::from_str(raw("bbo")).expect("BBO native decode");
+    check_bbo(&actual, &source()["records"]["bbo"]["native"]);
+    let actual: WooV3WsTrade = serde_json::from_str(raw("trade")).expect("TRADE native decode");
+    check_trade(&actual, &source()["records"]["trade"]["native"]);
+    for text in ["[]", "null"] {
+        assert!(
+            serde_json::from_str::<WooV3WsBbo>(text).is_err(),
+            "BBO map-only"
+        );
+        assert!(
+            serde_json::from_str::<WooV3WsTrade>(text).is_err(),
+            "TRADE map-only"
+        );
+    }
+    let mut value: Value = serde_json::from_str(raw("trade")).unwrap();
+    value["side"] = Value::String("buy".into());
+    assert!(
+        serde_json::from_value::<WooV3WsTrade>(value).is_err(),
+        "TRADE closed side"
+    );
+    let mut value: Value = serde_json::from_str(raw("trade")).unwrap();
+    value["source"] = Value::from(2);
+    assert!(
+        serde_json::from_value::<WooV3WsTrade>(value).is_err(),
+        "TRADE closed source"
+    );
+    let edge = raw("trade").replace("\"source\":1", "\"source\":-0");
+    let actual: WooV3WsTrade = serde_json::from_str(&edge).unwrap();
+    assert_eq!(
+        actual.source.to_bits(),
+        (-0.0_f64).to_bits(),
+        "TRADE literal zero sign"
+    );
+}
+#[test]
+fn ticker_declarations_decode_native_fields() {
+    let info: WooV3AuthoritativeTickerInfo =
+        serde_json::from_str(raw("info")).expect("INFO native decode");
+    check_info(&info, &source()["records"]["info"]["native"]);
+    let ticker: WooV3AuthoritativeTicker =
+        serde_json::from_str(raw("ticker")).expect("TICKER native decode");
+    check_ticker(&ticker, &source()["records"]["ticker"]["native"]);
+    for text in ["[]", "null"] {
+        assert!(
+            serde_json::from_str::<WooV3AuthoritativeTickerInfo>(text).is_err(),
+            "INFO map-only"
+        );
+        assert!(
+            serde_json::from_str::<WooV3AuthoritativeTicker>(text).is_err(),
+            "TICKER map-only"
+        );
+    }
+}
+#[test]
+fn request_operations_match_source_native_descriptors() {
+    let cases = source()["queryCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 7, "QUERY independent corpus floor");
+    for case in cases {
+        let input: Value = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+        assert_eq!(
+            serialize_query(Some(&input)).unwrap(),
+            case["ok"],
+            "QUERY native serialized value"
+        );
+    }
+    let cases = source()["requestCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 23, "PREPARE independent corpus floor");
+    let (mut matched, mut refused) = (0, 0);
+    // Fixed independently from captured header objects, in the 23-case source order.
+    let header_counts = [
+        3, 0, 4, 4, 3, 4, 1, 0, 0, 0, 0, 0, 0, 0, 4, 4, 0, 0, 0, 0, 0, 0, 0,
+    ];
+    for (index, case) in cases.iter().enumerate() {
+        let input: Value = serde_json::from_str(case["raw"].as_str().unwrap()).unwrap();
+        let auth = case["auth"].as_str().map(|raw| {
+            let value: Value = serde_json::from_str(raw).unwrap();
+            WooV3RequestAuth {
+                api_key: value["apiKey"].as_str().unwrap().into(),
+                api_secret: value["apiSecret"].as_str().unwrap().into(),
+                timestamp: safe_cex_num::js_number(value.get("timestamp")).unwrap(),
+            }
+        });
+        let result = ready(prepare_woo_v3_request(
+            input.as_object().unwrap(),
+            auth.as_ref(),
+        ));
+        if case["label"] == "unsupported-method" {
+            assert_eq!(
+                case["ok"]["method"], "HEAD",
+                "PREPARE source unknown method accepted"
+            );
+            assert_eq!(
+                result.unwrap_err(),
+                "WOO V3 prepared method refuses an unsupported method",
+                "PREPARE explicit typed method refusal"
+            );
+            refused += 1;
+            continue;
+        }
+        if let Some(error) = case.get("error") {
+            assert_eq!(
+                result.unwrap_err(),
+                error["message"],
+                "PREPARE native error priority"
+            );
+        } else {
+            let mut actual = result.unwrap();
+            let expected = &case["ok"];
+            let expected_headers = expected["headers"].as_object().unwrap();
+            assert_eq!(
+                actual.headers.len(),
+                header_counts[index],
+                "PREPARE native independent header count"
+            );
+            let header_names: &[&str] = match header_counts[index] {
+                0 => &[],
+                1 => &["content-type"],
+                3 => &["x-api-key", "x-api-timestamp", "x-api-signature"],
+                4 => &[
+                    "x-api-key",
+                    "x-api-timestamp",
+                    "x-api-signature",
+                    "content-type",
+                ],
+                _ => unreachable!(),
+            };
+            assert_eq!(
+                actual
+                    .headers
+                    .keys()
+                    .map(String::as_str)
+                    .collect::<Vec<_>>(),
+                header_names,
+                "PREPARE native independent header order"
+            );
+            assert_eq!(
+                expected_headers.len(),
+                header_counts[index],
+                "PREPARE source independent header count"
+            );
+            for (key, value) in expected_headers {
+                assert_eq!(
+                    actual.headers[key],
+                    value.as_str().unwrap(),
+                    "PREPARE native header {key}"
+                );
+            }
+            let method = match actual.method {
+                WooV3HttpMethod::Get => "GET",
+                WooV3HttpMethod::Post => "POST",
+                WooV3HttpMethod::Put => "PUT",
+                WooV3HttpMethod::Delete => "DELETE",
+            };
+            assert_eq!(method, expected["method"], "PREPARE native method");
+            assert_eq!(actual.path, expected["path"], "PREPARE native path");
+            assert_eq!(
+                actual.body.as_deref(),
+                expected.get("body").and_then(Value::as_str),
+                "PREPARE native body"
+            );
+            assert_eq!(
+                actual.signature_payload.as_deref(),
+                expected.get("signaturePayload").and_then(Value::as_str),
+                "PREPARE native signature payload"
+            );
+            // Source is frozen; the owned native descriptor can be edited.
+            actual.path.push_str("-native-edit");
+            assert!(
+                actual.path.ends_with("-native-edit"),
+                "PREPARE native mutable descriptor"
+            );
+        }
+        matched += 1;
+    }
+    assert_eq!(
+        (matched, refused),
+        (22, 1),
+        "PREPARE independent admitted partition"
+    );
+    assert_eq!(
+        source()["alias"]["preparedFreezeError"],
+        "TypeError",
+        "PREPARE source frozen write"
+    );
+}
+#[test]
+fn ticker_operations_match_source_native_values() {
+    let cases = source()["normalized"].as_array().unwrap();
+    assert_eq!(cases.len(), 10, "NORMALIZE independent corpus floor");
+    for case in cases {
+        let actual = normalize_perpetual_symbol(case["input"].as_str().unwrap(), "symbol-path");
+        if let Some(error) = case.get("error") {
+            assert_eq!(
+                actual.unwrap_err(),
+                error["message"],
+                "NORMALIZE native error"
+            );
+        } else {
+            assert_eq!(actual.unwrap(), case["ok"], "NORMALIZE native symbol");
+        }
+    }
+    let cases = source()["priceCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 15, "PRICE independent corpus floor");
+    for case in cases {
+        let actual = require_positive_finite_price(case["input"].as_str().unwrap(), "price-path");
+        if let Some(error) = case.get("error") {
+            assert_eq!(actual.unwrap_err(), error["message"], "PRICE native error");
+        } else {
+            bits(actual.unwrap(), &case["ok"], "PRICE native bits");
+        }
+    }
+    let cases = source()["tickerCases"].as_array().unwrap();
+    assert_eq!(cases.len(), 14, "COMPOSE independent corpus floor");
+    for case in cases {
+        let args = case["args"].as_array().unwrap();
+        assert_eq!(args.len(), 4, "COMPOSE independent argument count");
+        let futures: WooV3FuturesRow = serde_json::from_str(args[0].as_str().unwrap()).unwrap();
+        let mut bbo = bbo(&serde_json::from_str(args[1].as_str().unwrap()).unwrap());
+        let mut trade = trade(&serde_json::from_str(args[2].as_str().unwrap()).unwrap());
+        let market: Market = serde_json::from_str(args[3].as_str().unwrap()).unwrap();
+        let result = compose_woo_v3_authoritative_ticker(&futures, &bbo, &trade, &market);
+        if let Some(error) = case.get("error") {
+            assert_eq!(
+                result.unwrap_err(),
+                error["message"],
+                "COMPOSE native error priority"
+            );
+        } else {
+            let mut actual = result.unwrap();
+            check_ticker(&actual, &case["ok"]);
+            if case["label"] == "ordinary" {
+                bbo.ask_price = "changed-after-composition".into();
+                trade.quantity = "changed-after-composition".into();
+                assert_eq!(
+                    actual.info.bbo.ask_price, "131",
+                    "INFO native owned BBO snapshot"
+                );
+                assert_eq!(
+                    actual.info.trade.quantity, "23",
+                    "INFO native owned Trade snapshot"
+                );
+                actual.bid = 999.0;
+                assert_eq!(actual.bid, 999.0, "TICKER native mutable descriptor");
+            }
+        }
+    }
+    assert_eq!(
+        source()["alias"]["after"]["info"]["bbo"]["askPrice"],
+        "changed-after-composition",
+        "INFO source live BBO alias"
+    );
+    assert_eq!(
+        source()["alias"]["after"]["info"]["trade"]["quantity"],
+        "changed-after-composition",
+        "INFO source live Trade alias"
+    );
+    assert_eq!(
+        source()["alias"]["freezeError"],
+        "TypeError",
+        "TICKER source frozen write"
+    );
+}

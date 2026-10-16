@@ -1,0 +1,47 @@
+{
+  "sha": "c244a26e4ee42201becb3dda54e044b531376ab2",
+  "env": {
+    "SAFE_CEX_TYPESCRIPT_PATH": "/Users/sam/cs/tealstreet-next/node_modules/typescript"
+  },
+  "gates": [
+    {
+      "gate": "scoped-check",
+      "command": [
+        "cargo",
+        "check",
+        "--manifest-path",
+        "sdk-rs/Cargo.toml",
+        "-p",
+        "safe-cex-types",
+        "-p",
+        "safe-cex-num",
+        "-p",
+        "safe-cex-store",
+        "--all-targets",
+        "--jobs",
+        "2"
+      ],
+      "sha": "c244a26e4ee42201becb3dda54e044b531376ab2",
+      "exit": 0,
+      "seconds": 10.59
+    },
+    {
+      "gate": "boxed-ticker",
+      "command": [
+        "cargo",
+        "test",
+        "--manifest-path",
+        "sdk-rs/Cargo.toml",
+        "-p",
+        "safe-cex-types",
+        "--test",
+        "boxed_ticker",
+        "--jobs",
+        "2"
+      ],
+      "sha": "c244a26e4ee42201becb3dda54e044b531376ab2",
+      "exit": 101,
+      "seconds": 20.96
+    }
+  ]
+}

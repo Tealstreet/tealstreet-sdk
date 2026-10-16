@@ -1,0 +1,157 @@
+# Bitrue venue
+
+Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/bitrue/CLAUDE.md).
+
+`types.rs` mirrors configuration exports. Runtime mapping consumers use the
+`interval`, `order_type`, `order_status`, and `order_side` lookups, which preserve
+inherited identities through shared `TableHit`. Retain the hit until applying the
+source branch; a typed own-entry array alone cannot represent inherited values.
+
+`wire.rs` mirrors declared response shapes, not unchecked Axios runtime values.
+Numbers are binary64. Record Deserialize implementations capture `JsNumberInput`
+before private map-only companions. Optional fields distinguish omission from
+present non-null values. `future_model` and transparent `OpaqueValue.value` are
+named passthroughs captured before Value construction. UTF-8 and opaque JSON
+boundaries are declared on the corresponding manifest rows.
+
+Oracles require `SAFE_CEX_TYPESCRIPT_PATH`. Configuration/type/utility oracles
+execute the complete actual TS module and workspace dependencies without stubs.
+The REST-read helper oracle transpiles unchanged actual class-field initializers
+and binds their recorded dependency context; it does not claim constructor or
+class integration. Quantity tests use the production DefaultStore and distinct
+requested symbols, multipliers and missing-market supplements. Type aliases erase at
+runtime: `type-schema.cjs` inventories actual declarations, while the runtime
+oracle captures native numeric bits before JSON projection. Rust observers
+access decoded fields explicitly, independently of Serde field names. Each
+oracle uses one Node process for its full corpus. Census controls preserve
+inherited required fields and refuse unsupported mixed unions; fixtures give
+same-typed fields distinct values and test symmetric Serde-name swaps.
+
+Run the scoped `configuration`, `tables`, and `wire` targets with `--jobs 1`.
+`configuration-controls.py` and `scripts/type-controls.py` mutate production
+code sequentially and restore after each case. Do not run another compiler or
+review mutable source while these controls execute. Full crate gates and separate
+host/wasm clippy belong at slice readiness.
+
+`createAPI` has a measured DOUBLE PARSE source defect: cite `f6de9ca8c4`,
+Binance GATE_EVIDENCE.md's blast-radius census. Bitrue combines bigInt HOW
+customParser with inherited Axios default transformation. Direct and HOW paths
+can return different native types for identical quoted JSON. Do not fix TS or
+rederive the reproduction. RestResponse currently erases parser provenance; the
+REST factory slice must preserve or explicitly mark this gap. No factory
+implementation is claimed by the constants/types slice.
+
+Compose subsequent runtime hooks with the shared exchange contract, numeric
+ingress, production store, crypto and transport; annotate only Bitrue manifests.
+
+`read_helpers.rs` ports the first five read-helper rows. The coercive helpers
+consume the JSON/undefined wire domain, with numeric ingress through shared
+OpaqueValue/Market decoding and coercion through safe-cex-num. Timestamp input
+is the declared optional Number domain. Callable objects, BigInt and Symbol are
+not wire inputs; the manifest discloses this scope and UTF-8 refusal.
+`scripts/read-helpers-controls.py` runs six sequential production mutations,
+including wrong-symbol selection; each must fail its named native assertion
+and pass after restoration. Capture headers record Node version and CPU arch.
+
+Leverage helpers reuse shared ECMAScript whitespace/number parsing, native
+ModelPatch and DefaultStore. The oracle executes actual venue and Store field
+initializers and observes fields, notification counts and market versions.
+Inherited prototype-key hits throw at the same source access point. Bracket
+reduction deliberately avoids JS engine argument-expansion stack limits; its
+CHOSEN note and live 200000-entry RangeError supplement must remain visible.
+
+Store writes/notifications are fallible. Do not flatten StoreMutationError or
+ignore a failed notification: writes commit first, fanout stops at the first
+subscriber error, and the original response remains observable. Leverage
+witnesses cover that ordering against the actual source notification body.
+
+The leverage setter propagates through shared ExchangeError::from. Its former
+box is redundant after structural subscriber IDs landed at 9af82bfeae. IDs
+remain ordered inner-to-outer, including equal IDs from different Stores.
+Fallback conversion retains message/response, not the opaque cause type.
+Independent fallback/recovered empty-ID-list controls must fail native identity
+assertions. Account guards retain shared bounded JSON ingress; a separately
+labelled depth-160 input documents the source-accepts/Rust-refuses boundary.
+
+Precision audit at d014129251: 0 implemented price-step reads, 0 amount-step
+reads, 0 two-axis formatter sites. This is a census; no fields were swapped
+and no payload field has a coverage verdict. fetchMarkets/formatCreateOrder
+remain pending. Implementing those rows requires an immutable original corpus
+(size/hash), labelled live fractional supplements across distinct step pairs,
+both sides/order types, and independent native step/payload assertions with a
+compiling mutation per applicable output field. Standalone triggerPrice uses
+pPrice in source; attached TP/SL currently copy raw options. Preserve that
+source distinction instead of adding rounding.
+
+Balance parsing takes a borrow of the production Store balance for the falsy
+input fallback. It uses shared JsObjectMap insertion order and math_max, and
+coerces only fields explicitly Number-coerced by source. Nonnumeric upnl is a
+CHOSEN shared-model refusal, after the entire source reduction (including
+replacements and later coercion failures). The witness inspects native fields,
+not serialized Balance bytes; every maximum candidate can independently win.
+
+Cardinality is asserted at source totals/subcorpora, per-case arrays, independent
+native lengths, and executed-comparison totals. Read tests/CARDINALITY-EVIDENCE.txt
+for the original leverage empty/subset/extra false greens and lookup extra-key
+gap. Oracle scripts/captures were preserved byte-identically. Frozen array-count
+metadata is a source census, not an independently generated value oracle. Run
+cardinality-controls.py and cardinality-production-controls.py sequentially;
+the latter temporarily mutates the real Store accessor and restores shared
+source after every control. Do not compile concurrently with these scripts.
+
+The consuming-array control is cardinality-consuming-control.py. It consumes
+all retained input before returning None, then repeats with both length guards
+bypassed. Direct decoded-value equality must still fail. This injects a decoder
+defect to test detection; it is not evidence of a live production defect.
+
+Position metadata ports the complete async source initializer with account-fetch
+and disposal dependencies supplied at its source boundary. Cache replacement is
+atomic after numeric coercions, even when disposal suppresses returned records.
+Empty supplied snapshots clear the cache; missing snapshots preserve it. String
+positionType "2" is CROSS (the source comparison is strict). Duplicate symbols
+replace their original Map slot and duplicate requested symbols repeat output.
+The position_metadata witness executes actual initializers in one Node corpus;
+its source counts, native lengths and record-comparison total are independent.
+Run scripts/position-metadata-controls.py sequentially and restore before gates.
+
+Metadata results share Rc<RefCell<PositionMetadata>> handles with the cache.
+Duplicate requests alias the same object; replacement detaches old handles
+without mutating them. The live identity supplement mutates a returned handle
+and checks the duplicate/cache, then verifies detached handles after refresh.
+Cache entries store their immutable Map key separately from the mutable record.
+Mutating a returned symbol must not cause a fetch or change lookup by old key.
+
+Leverage reads compose the existing source-matched bracket parser and fallible
+Store setter. The outer fetchAndSync source catch deliberately suppresses every
+failure, including notification failure after commit; its TS-BUG comment names
+that discard. Do not suppress errors in the shared setter. Public fallback reads
+the post-await Store maximum, so a caught subscriber failure can still yield the
+committed maximum. GET URL/config are produced by the implementation and
+observed natively, while API factory/signing integration remains pending. The
+200000-bracket CHOSEN supplement records the inherited iterative-max difference
+through all three wrappers, including their Store effect, not just the scalar.
+
+Account reads preserve the raw GET/catch/emission sequence. The catch does not
+catch its own emitAndLogError failure: the shared error (including subscriber
+IDs) propagates. The balance wrapper awaits the injected account hook before
+borrowing the current Store balance; falsy data preserves that native reference.
+The Store's Rust borrow lifetime is a declared restriction on JS mutable aliases.
+account_reads runs one actual-source Node corpus with fixed independent inputs
+and live per-case content checks. account-reads-controls.py checks production
+mutations, same-length replacement/reversal, and a native failure with source
+length/content admission removed. No transport factory integration is claimed.
+
+`fetch_balance` returns a retained Balance allocation after the awaited account
+fetch. Falsy data retains the Store current balance handle; parsed data gets its
+own allocation. The result holds no Store Ref guard and survives ticker writes,
+balance replacement and reset with the old object intact. The unchanged
+`tests/balance_retention.rs` regression must panic on the original guard-based
+path and pass after repair; pointer identity is part of its native assertions.
+
+
+Stateless WebSocket slice: ws_private.rs ports isSuccessfulCode and ping;
+ws_public.rs ports ping. SuccessCode preserves numbers and UTF-16 strings;
+all other JS values are strictly comparison-equivalent false without coercion.
+These are field-body ports; WebSocket construction, transport and callers remain
+pending. ws_primitives.rs executes actual source initializers and asserts native
+booleans/unit before inventory checks; one runtime discriminator per row is required.

@@ -1,0 +1,403 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/lighter/lighter.ws-private.ts"
+rust_files = [ "safe-cex-venue-lighter/src/ws_private.rs", "safe-cex-venue-lighter/src/ws_private_warnings.rs", "safe-cex-venue-lighter/src/ws_private_recovery.rs", "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs", "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs" ]
+
+[[symbol]]
+ts = "LighterPrivateWebsocket"
+kind = "class"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.shouldEnforcePongMissReconnect"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::should_enforce_pong_miss_reconnect"
+status = "ported"
+note = "Pure decision body in safe-cex-venue-lighter/src/ws_private.rs::should_enforce_pong_miss_reconnect with explicit boolean state and clock samples where needed. Actual TypeScript member/static-constant oracle covers all flag combinations, exact boundaries, nonfinite numbers and signed zero. Runtime clock acquisition, state ownership and websocket binding remain pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#getRateLimitWarningMessage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::get_rate_limit_warning_message"
+status = "ported"
+note = "Exact delegation body at required receiver-bound parent guidance host; preserves full UTF16 returned message and original getter/call exceptions. Full websocket owner remains pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#getReadonlyFallbackWarningKey"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::get_readonly_fallback_warning_key"
+status = "ported"
+note = "Reads deployment network before receiver-bound account-index call, concatenates original UTF16 units with colon, preserving lone surrogates and original host failures. Source class/runtime owner remains pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#emitReadonlyFallbackWarning"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::emit_readonly_fallback_warning"
+status = "ported"
+note = "Reads virtual clock before key; uses caller-supplied class-wide shared account map, JS numeric lastWarningAt||0 including NaN/negativezero, strict cooldown boundary, set before optional Warning log then forced-toast emit. Message is the source readonly constant, initialized once and never assigned by source; reflective overrides of that readonly field are outside this body contract. Native timestamps/text/effect order and map state after throws asserted; full websocket owner remains pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.isReadonlyFallbackActive"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::is_readonly_fallback_active"
+status = "ported"
+note = "Pure decision body in safe-cex-venue-lighter/src/ws_private.rs::is_readonly_fallback_active with explicit boolean state and clock samples where needed. Actual TypeScript member/static-constant oracle covers all flag combinations, exact boundaries, nonfinite numbers and signed zero. Runtime clock acquisition, state ownership and websocket binding remain pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#shouldUseRestOrderReconciliation"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::should_use_rest_order_reconciliation"
+status = "ported"
+note = "Pure decision body in safe-cex-venue-lighter/src/ws_private.rs::should_use_rest_order_reconciliation with explicit boolean state and clock samples where needed. Actual TypeScript member/static-constant oracle covers all flag combinations, exact boundaries, nonfinite numbers and signed zero. Runtime clock acquisition, state ownership and websocket binding remain pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#isWsProxyRouteEnabled"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::is_ws_proxy_route_enabled"
+status = "ported"
+note = "Typed source profile/options boundary with required parent/route host; short-circuits supportsWsProxy, nullish route/testnet defaults and resolver host JS truthiness, preserving original exceptions and read order. Does not port the transport resolver or websocket owner."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#shouldUseGeorestrictedConnectivityWarning"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::should_use_georestricted_connectivity_warning"
+status = "ported"
+note = "Calls route decision first, then fallible live owner flag getters (including route-callback state changes), positive failure count and policy flag OR in source order; unrestricted binary64 failure count. Native bools/read traces cover bounded flag/NaN cases; full owner remains pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#getPrivateStreamErrorWarningMessage"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::get_private_stream_error_warning_message"
+status = "ported"
+note = "Source policy/rate/georestriction precedence, repeated getter-aware rate reads, exact UTF16 guidance/direct-or-proxy warning templates and original host failures. Native values and read/call traces checked before source-only corpus pin; full class/runtime remains pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#getPingIntervalMs"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::get_ping_interval_ms"
+status = "ported"
+note = "Pure decision body in safe-cex-venue-lighter/src/ws_private.rs::get_ping_interval_ms with explicit boolean state and clock samples where needed. Actual TypeScript member/static-constant oracle covers all flag combinations, exact boundaries, nonfinite numbers and signed zero. Runtime clock acquisition, state ownership and websocket binding remain pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#getIdlePingThresholdMs"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::get_idle_ping_threshold_ms"
+status = "ported"
+note = "Pure decision body in safe-cex-venue-lighter/src/ws_private.rs::get_idle_ping_threshold_ms with explicit boolean state and clock samples where needed. Actual TypeScript member/static-constant oracle covers all flag combinations, exact boundaries, nonfinite numbers and signed zero. Runtime clock acquisition, state ownership and websocket binding remain pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#getIdleReconnectThresholdMs"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::get_idle_reconnect_threshold_ms"
+status = "ported"
+note = "Pure decision body in safe-cex-venue-lighter/src/ws_private.rs::get_idle_reconnect_threshold_ms with explicit boolean state and clock samples where needed. Actual TypeScript member/static-constant oracle covers all flag combinations, exact boundaries, nonfinite numbers and signed zero. Runtime clock acquisition, state ownership and websocket binding remain pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.getWatchdogStaleThresholdMs"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::get_watchdog_stale_threshold_ms"
+status = "ported"
+note = "Pure decision body in safe-cex-venue-lighter/src/ws_private.rs::get_watchdog_stale_threshold_ms with explicit boolean state and clock samples where needed. Actual TypeScript member/static-constant oracle covers all flag combinations, exact boundaries, nonfinite numbers and signed zero. Runtime clock acquisition, state ownership and websocket binding remain pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#isWsRateLimited"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::is_ws_rate_limited"
+status = "ported"
+note = "Pure decision body in safe-cex-venue-lighter/src/ws_private.rs::is_ws_rate_limited with explicit boolean state and clock samples where needed. Actual TypeScript member/static-constant oracle covers all flag combinations, exact boundaries, nonfinite numbers and signed zero. Runtime clock acquisition, state ownership and websocket binding remain pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#notePrivateStreamRateLimitError"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningState::note_private_stream_rate_limit_error"
+status = "ported"
+note = "Native owned state: firstSeen=now only when count===0 including negativezero; then binary64 count +=1 preserving source NaN/infinite/large-counter behavior. Direct native timestamp/count bits asserted, no wire roundtrip. Full websocket binding remains pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#clearPrivateStreamRateLimitErrorState"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_warnings.rs::PrivateWarningState::clear_private_stream_rate_limit_error_state"
+status = "ported"
+note = "Native owned state writes first-seen then count to positive zero; direct native bits checked for eight initial counter classes. Reflection/setter interception and full websocket class are not claimed."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#shouldForceToastPrivateStreamRateLimit"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::should_force_toast_private_stream_rate_limit"
+status = "ported"
+note = "Pure decision body in safe-cex-venue-lighter/src/ws_private.rs::should_force_toast_private_stream_rate_limit with explicit boolean state and clock samples where needed. Actual TypeScript member/static-constant oracle covers all flag combinations, exact boundaries, nonfinite numbers and signed zero. Runtime clock acquisition, state ownership and websocket binding remain pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.checkLastReceived"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#beginDiagnosticsLoop"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#stopDiagnosticsLoop"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::stop_diagnostics_loop"
+status = "ported"
+note = "Live owner timer truthiness; captures clearInterval callee before repeated timer read, then writes undefined only after successful call. Original handle/throw identity preserved at required timer host; full websocket owner pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#clearStreamRecoveryReconnectTimeout"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::clear_stream_recovery_reconnect_timeout"
+status = "ported"
+note = "Live recovery timer truthiness; captures clearTimeout before second handle read and clears owner field only after success, retaining opaque handle and original failures. Required timer/owner host, native oracle."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#clearRateLimitResubscribeTimeout"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::clear_rate_limit_resubscribe_timeout"
+status = "ported"
+note = "Live retry timer truthiness; captures clearTimeout before second handle read and clears owner field only after success, retaining opaque handle and original failures. Required timer/owner host, native oracle."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#scheduleRateLimitResubscribe"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::schedule_rate_limit_resubscribe"
+status = "ported"
+note = "Typed boolean/Number owner fields and ordinary Math/readonly constants: source guards, virtual-clock delay clamp/round log, clear-before-schedule and captured timer handle. Deferred callback clears handle before live guards, calls live rate-limit method, reschedules or eagerly invokes auth without await. Required full timer/call hosts; whole websocket/auth binding pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#scheduleStreamRecoveryReconnectFallback"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::schedule_stream_recovery_reconnect_fallback"
+status = "ported"
+note = "Clears prior timer before source grace scheduling; live deferred callback clears field before flags, reads virtual clock and repeated last-message getters, uses zero-count OR strict stale threshold, logs before receiver-bound reconnect. Typed fields/ordinary readonly constants and required captured timer/call hosts; native state/identity oracle."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#maybeRecoverPrivateStream"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::maybe_recover_private_stream"
+status = "ported"
+note = "Typed live flag/Number getters: strict recovery age boundaries; elapsed less than cooldown skips and equality is eligible, source repeated timestamp reads, attempt timestamp set before readonly/rate-limit exits, exact rounded reason logs and eager discarded auth then guarded fallback call. Ordinary Math/readonly constants; full owner/auth/timer binding remains pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.throttleFetchOrders"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::throttle_fetch_orders", "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::LighterPrivateFeedRuntime" ]
+status = "ported"
+note = "Native 500ms default, live owner scheduleThrottledTask callee capture/call with retained task and exact key/error prefix. Default binding calls the real native scheduler; getters/overrides and ignored override return are live. Captures original RPC callee/receiver, awaits result and preserves original store/fetch handles; imported parent RPC/store/timer/promise operations remain required capabilities. skipIfRecent and parent skip guard are evaluated before scheduling and again at firing; owner/parent disposal are checked after fetch before the full orders update."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.throttleFetchPositions"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::throttle_fetch_positions", "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::LighterPrivateFeedRuntime" ]
+status = "ported"
+note = "Native 500ms default, live owner scheduleThrottledTask callee capture/call with retained task and exact key/error prefix. Default binding calls the real native scheduler; getters/overrides and ignored override return are live. Captures original RPC callee/receiver, awaits result and preserves original store/fetch handles; imported parent RPC/store/timer/promise operations remain required capabilities. Full positions update and timestamp occur after fetch even if disposed, exactly as source; timestamp receiver is captured before virtual clock call."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.throttleFetchBalance"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::throttle_fetch_balance", "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::LighterPrivateFeedRuntime" ]
+status = "ported"
+note = "Native 500ms default, live owner scheduleThrottledTask callee capture/call with retained task and exact key/error prefix. Default binding calls the real native scheduler; getters/overrides and ignored override return are live. Captures original RPC callee/receiver, awaits result and preserves original store/fetch handles; imported parent RPC/store/timer/promise operations remain required capabilities. Passes allowRecentAccountSnapshot=false and includeAccountLimits=false, then discards the awaited balance result."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#resolveExplicitlyClosedPositionUpdates"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::resolve_explicitly_closed_position_updates", "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::LighterPrivateFeedRuntime" ]
+status = "ported"
+note = "Native explicit finite parseFloat zero gate, ordered aliases, last-null market ID behavior, market/string/symbol selection, unconditional sign coercion and strict symbol/contracts/side filtering. Shallow position copy resets exactly five numeric fields; finite realized-PnL override or original fallback, original raw info reference and current timestamp retained. Original/new/info identities and decoded native values are pinned; generic property/copy/array/intrinsic semantics remain required contracts."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#flattenByMarketPayload"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::flatten_by_market_payload"
+status = "divergent"
+note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. safe-cex-venue-lighter/src/ws_private.rs::flatten_by_market_payload preserves one-level array flattening, optional singleton objects, nested wire JSON values and shared JavaScript own-key order. Live source corpus includes missing/null/scalars, array payloads and own prototype-name keys; escaped witnesses retain TS surrogate outputs alongside Rust ingress refusal and positive scalar/astral/BOM/NEL cases."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#flattenOrdersByMarket"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::flatten_orders_by_market"
+status = "divergent"
+note = "CHOSEN sdk-rs/parity/MANIFEST-SPEC.md#shared-utf8-string-boundary. safe-cex-venue-lighter/src/ws_private.rs::flatten_orders_by_market preserves one-level array flattening, optional singleton objects, nested wire JSON values and shared JavaScript own-key order. Live source corpus includes missing/null/scalars, array payloads and own prototype-name keys; escaped witnesses retain TS surrogate outputs alongside Rust ingress refusal and positive scalar/astral/BOM/NEL cases."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#scheduleThrottledTask"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::schedule_throttled_task", "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::LighterPrivateFeedRuntime" ]
+status = "ported"
+note = "Native existing timer cancellation, replacement, clear-before-disposal callback and awaited task. Original task failures go to required console-error capability; callback prefix/disposal failures reject outside that catch. Captured owned callbacks/tasks survive observer drops. Timer scheduling/cancellation and promise primitives are required host contracts, not wall-clock/network proof."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#sendSubscribePayload"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::send_subscribe_payload", "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::LighterPrivateFeedRuntime" ]
+status = "ported"
+note = "Captures parent.log before channel/String argument evaluation, emits exact UTF-16 channel/auth message and info severity, then captures sendWithLog before JSON.stringify. Serialization throws prevent send. Live getter/method/intrinsic bindings remain required contracts; native log arguments precede subscribe wire assertions."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#noteAccountStreamActivity"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::note_account_stream_activity"
+status = "ported"
+note = "Live typed counters: reset only positives, binary64 count increment, virtual timestamp, ordered clear/recovery/rate-state/stats calls, then reread count for first-message UTF16 log with empty-channel fallback. Preserves lone surrogate units, getter/setter/call failures and their partial state at required owner/call hosts."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#isRecentStreamEvent"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private.rs::is_recent_stream_event"
+status = "ported"
+note = "Pure predicate safe-cex-venue-lighter/src/ws_private.rs::is_recent_stream_event; live actual-member oracle pins every observed numeric field, nonfinite inputs and exact timing boundaries. Wall and virtual clock samples remain distinct. Runtime store/clock acquisition remains on the pending class row."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#normalizeOrderStatus"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::normalize_order_status", "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::LighterPrivateFeedRuntime" ]
+status = "ported"
+note = "Native nullish status/order_status/state selection, then String/trim/uppercase; false, zero and empty primary values do not fall through. UTF-16 remains native; ECMAScript coercion/trim/uppercase are explicit intrinsic contracts."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#isUserCancelledReason"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::is_user_cancelled_reason", "safe-cex-venue-lighter/src/ws_private_feed_helpers.rs::LighterPrivateFeedRuntime" ]
+status = "ported"
+note = "Native nullish-empty String/trim/uppercase and exact USER_CANCELLED/USER_CANCELED checks. Uses the same explicit UTF-16 intrinsic contracts as status normalization."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.connectAndSubscribe"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.onOpen"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::on_open", "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::LighterPrivateStreamRuntime" ]
+status = "ported"
+note = "Native ordered field reset, recovery cleanup, clock capture, once-only readonly warning, diagnostics/ping/auth calls and config-controlled snapshot. Source void auth return ignored; required live method/import bindings supplied explicitly. Whole class assembly remains pending."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.onClose"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.onMessage"
+kind = "field-fn"
+layer = ""
+rs = ""
+status = "pending"
+note = ""
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.ping"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::ping", "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::LighterPrivateStreamRuntime" ]
+status = "ported"
+note = "Native disposal guard, rate-limit subtraction/comparisons and exact 20000/15000 imported class constants, live timestamp fields, skip logging, performance pingAt and serialized timestamp send. Full implicit arithmetic/serialization and imported clock/host operations required; no wall-clock/socket claim."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.handleAccountTopic"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::handle_account_topic", "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::LighterPrivateStreamRuntime" ]
+status = "ported"
+note = "Native ordered truthy orders/positions/fills dispatch, repeated live data reads and captured handler receivers; imported host property/call semantics remain explicit contracts."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.handleAccountAllTopic"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::handle_account_all_topic", "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::LighterPrivateStreamRuntime" ]
+status = "ported"
+note = "Native per-market flatten calls, positions object flag, trade field alias/nullish/String mapping, maker/side selection and timestamp Number with lazy Date.now. Live flatten/map/call/implicit template intrinsics remain required dependencies."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.handleOrderTopic"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::handle_order_topic", "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::LighterPrivateStreamRuntime" ]
+status = "ported"
+note = "Native some/forEach cancellation decision, REST guard, exact ID aliases and recent-cancel skip, original mapOrder handles, source status precedence, numeric fallbacks, recent fill/error notification and copied closed updates versus removal. Captures cancelled removal after ID mapping and filled updater before mapping. Original getter/array/store/emitter operations remain required host contracts."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.handlePositionTopic"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::handle_position_topic", "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::LighterPrivateStreamRuntime" ]
+status = "ported"
+note = "Native for-of mapping with per-item catch/log, mapped alias pair or spread explicit-close pairs, early empty guard, full update and captured parent timestamp target. Original throw identity and template-versus-explicit-String error conversion retained; iterator/store/clock primitives required."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.handleFillsTopic"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::handle_fills_topic", "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::LighterPrivateStreamRuntime" ]
+status = "ported"
+note = "Native recent-event guard, exact BUY direction branch, direct parseFloat input coercion, fill payload and readonly 250ms positions reconciliation after traversal. Captures live emitter/method before evaluating payload fields; imported array/emitter/intrinsic contracts remain explicit."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket#authenticateAndSubscribe"
+kind = "field-fn"
+layer = "adapted"
+rs = [ "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::authenticate_and_subscribe", "safe-cex-venue-lighter/src/ws_private_stream_handlers.rs::LighterPrivateStreamRuntime" ]
+status = "ported"
+note = "Native eager unauthenticated account subscription, channel/pending/ack/rate guards, 60-minute auth await and caught token failure logging, falsy token skip and pending flag before authenticated send. Retains original index/token handles and detached callback; template Symbol rejection distinct from explicit String. Required RPC/Promise/send bindings remain explicit; no auth/network execution claim."
+
+[[symbol]]
+ts = "LighterPrivateWebsocket.dispose"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-venue-lighter/src/ws_private_recovery.rs::dispose"
+status = "ported"
+note = "Source ordered diagnostic/recovery/retry helper calls, live positions and balance timer truthiness and post-callee rereads, then receiver-bound actual super.dispose. Deliberately leaves orders timer for base host, matching body; original failures stop later effects. Required full superclass/owner/timer bindings, native oracle."

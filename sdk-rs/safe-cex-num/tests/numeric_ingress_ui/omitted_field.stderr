@@ -1,0 +1,12 @@
+error: pattern requires `..` due to inaccessible fields
+ --> tests/numeric_ingress_ui/omitted_field.rs:8:9
+  |
+8 |         js_number_output!(self, struct { visible });
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |
+  = note: this error originates in the macro `js_number_output` (in Nightly builds, run with -Z macro-backtrace for more info)
+help: ignore the inaccessible and unused fields
+ --> src/numeric_ingress/eligibility.rs
+  |
+  |         let Self { $($field, ..),* } = $value;
+  |                            ++++

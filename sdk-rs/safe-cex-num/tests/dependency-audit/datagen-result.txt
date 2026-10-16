@@ -1,0 +1,11 @@
+2026-10-12T14:27:12.966Z WARN  [icu_provider_export] Filter applied to domain 'collator' multiple times; ignoring all but the last filter
+2026-10-12T14:27:12.966Z WARN  [icu_provider_export] Filter applied to domain 'segmenter' multiple times; ignoring all but the last filter
+2026-10-12T14:27:12.967Z INFO  [icu_provider_export::export_impl] Datagen configured with no deduplication, and these locales: ["und"]
+2026-10-12T14:27:13.103Z INFO  [icu_provider_export::export_impl] Generated marker CollationMetadataV1
+2026-10-12T14:27:13.140Z INFO  [icu_provider_export::export_impl] Generated marker CollationReorderingV1
+2026-10-12T14:27:13.150Z INFO  [icu_provider_export::export_impl] Generated marker CollationDiacriticsV1
+2026-10-12T14:27:13.156Z INFO  [icu_provider_export::export_impl] Generated marker CollationJamoV1
+2026-10-12T14:27:13.157Z INFO  [icu_provider_export::export_impl] Generated marker CollationSpecialPrimariesV1
+2026-10-12T14:27:32.614Z INFO  [icu_provider_export::export_impl] Generated marker CollationRootV1 (19.452s, flushed in 0.161s)
+2026-10-12T14:27:55.308Z INFO  [icu_provider_export::export_impl] Generated marker CollationTailoringV1 (42.205s, 'und-Hant/zhuyin' in 4.777s, flushed in 69.797ms)
+2026-10-12T14:27:55.309Z INFO  [icu_provider_baked::export] Writing macros module...

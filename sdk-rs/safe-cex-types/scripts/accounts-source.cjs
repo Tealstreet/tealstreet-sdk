@@ -1,0 +1,5 @@
+const fs=require('node:fs'),path=require('node:path'),ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');
+const dependencies = process.env.SAFE_CEX_TYPESCRIPT_PATH ? require('node:module').createRequire(path.join(path.dirname(process.env.SAFE_CEX_TYPESCRIPT_PATH), 'oracle.cjs')) : require;
+const root=path.resolve(__dirname,'../../..'),cache=new Map();
+function load(file){if(cache.has(file))return cache.get(file).exports;const module={exports:{}};cache.set(file,module);const code=ts.transpileModule(fs.readFileSync(file,'utf8'),{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS,esModuleInterop:true}}).outputText;const localRequire=specifier=>{if(specifier.startsWith('.')||specifier.startsWith('@tealstreet/')){const base=specifier.startsWith('.')?path.resolve(path.dirname(file),specifier):path.join(root,'packages',specifier.slice('@tealstreet/'.length));return load(fs.existsSync(base+'.ts')?base+'.ts':path.join(base,'index.ts'));}return dependencies(specifier);};new Function('require','module','exports',code)(localRequire,module,module.exports);return module.exports;}
+module.exports={root,load,ts,dependencies};

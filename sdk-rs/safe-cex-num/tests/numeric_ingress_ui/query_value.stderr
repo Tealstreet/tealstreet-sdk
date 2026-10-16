@@ -1,0 +1,20 @@
+error[E0277]: the trait bound `QueryValue: JsNumberOutput` is not satisfied
+ --> tests/numeric_ingress_ui/query_value.rs:8:9
+  |
+8 |         safe_cex_num::js_number_output!(self, struct { query });
+  |         ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  |         |
+  |         the trait `JsNumberOutput` is not implemented for `QueryValue`
+  |         required by a bound introduced by this call
+  |
+  = help: the following other types implement trait `JsNumberOutput`:
+            &T
+            ()
+            (A, B)
+            (A, B, C)
+            (A, B, C, D)
+            (A, B, C, D, E)
+            (A, B, C, D, E, F)
+            (A, B, C, D, E, F, G)
+          and $N others
+  = note: this error originates in the macro `safe_cex_num::js_number_output` (in Nightly builds, run with -Z macro-backtrace for more info)

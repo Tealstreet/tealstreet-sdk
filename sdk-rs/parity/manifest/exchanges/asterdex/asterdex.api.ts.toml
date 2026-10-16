@@ -1,0 +1,155 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/asterdex/asterdex.api.ts"
+rust_files = [ "safe-cex-venue-asterdex/src/api_helpers.rs", "safe-cex-venue-asterdex/src/api_runtime.rs" ]
+
+[[symbol]]
+ts = "isAsterdexRead"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::is_asterdex_read"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::is_asterdex_read uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "buildV3Nonce"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::build_v3_nonce"
+status = "ported"
+note = "Shared BigInt arithmetic preserves exact values: safe-cex-venue-asterdex/src/api_helpers.rs::build_v3_nonce . Live TypeScript oracle covers malformed input and integer boundaries. Caller supplies virtual-clock milliseconds; synchronized module signer state remains shared when native tasks change threads. Conversion errors leave previous nonce unchanged."
+
+[[symbol]]
+ts = "buildAsterDEXV3Nonce"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::build_aster_dex_v3_nonce"
+status = "ported"
+note = "Shared BigInt arithmetic preserves exact values: safe-cex-venue-asterdex/src/api_helpers.rs::build_aster_dex_v3_nonce . Live TypeScript oracle covers malformed input and integer boundaries. Caller supplies virtual-clock milliseconds; synchronized module signer state remains shared when native tasks change threads. Conversion errors leave previous nonce unchanged."
+
+[[symbol]]
+ts = "getAsterDEXCodeChainId"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::get_aster_dex_code_chain_id"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::get_aster_dex_code_chain_id uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "getAsterDEXAsterChain"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::get_aster_dex_aster_chain"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::get_aster_dex_aster_chain uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "buildAsterDEXCodeQueryString"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::build_aster_dex_code_query_string"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::build_aster_dex_code_query_string uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "generateAsterDEXCodeMessageSignature"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::generate_aster_dex_code_message_signature"
+status = "divergent"
+note = "CHOSEN: Native ExchangeError preserves Error versus TypeError through the actual ethers signer oracle (12 valid signatures plus nine malformed/invalid key cases). Shared EIP-712 signing remains the implementation. Error messages intentionally redact private-key material, including the ethers invalid-BytesLike error which embeds it; source diagnostic text is not copied into logs or user-visible errors. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy ."
+
+[[symbol]]
+ts = "generateV1Signature"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::generate_v1_signature"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::generate_v1_signature uses shared coercion and own-key ordering. Shared HMAC operation is async because it supports host signers; this local-secret path resolves on its first poll."
+
+[[symbol]]
+ts = "buildQueryString"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::build_query_string"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::build_query_string uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "buildV3SigningPayload"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::build_v3_signing_payload"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::build_v3_signing_payload uses shared coercion and own-key ordering. ts-bug: preserves silent loss of __proto__ string assignment on the plain-object output."
+
+[[symbol]]
+ts = "generateV3Signature"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_runtime.rs::generate_v3_signature"
+status = "ported"
+note = "Concrete venue adapter now owns business-param conversion, sorted payload JSON, nonce BigInt conversion, ABI type/value ordering, exact hash pipeline, key prefix and signing-key/Signature serialization. Delegates crypto operations to shared primitives through RuntimeHost. Native fixture asserts each actual-source preimage and primitive argument before serialization; cryptographic primitive accuracy belongs to shared crypto gates, not this dependency-capture fixture."
+
+[[symbol]]
+ts = "stripQueryString"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::strip_query_string"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::strip_query_string uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "isPublicEndpoint"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::is_public_endpoint"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::is_public_endpoint uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "isAsterDEXCodeSignedEndpoint"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::is_aster_dex_code_signed_endpoint"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::is_aster_dex_code_signed_endpoint uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "shouldSuppressUnknownOrderError"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::should_suppress_unknown_order_error"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::should_suppress_unknown_order_error uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "getAsterDEXErrorDetail"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_helpers.rs::get_aster_dex_error_detail"
+status = "ported"
+note = "Function-for-function request helper safe-cex-venue-asterdex/src/api_helpers.rs::get_aster_dex_error_detail uses shared coercion and own-key ordering."
+
+[[symbol]]
+ts = "createPublicAPI"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_runtime.rs::create_public_api"
+status = "ported"
+note = "Owns optional exchange/default Axios creation, production/testnet config, tunnel selection, shared read-only retry installation and 10/1000 rate limiter. RuntimeHost binds the existing shared/library transport/retry owners; no venue retry engine or concrete network backend is substituted."
+
+[[symbol]]
+ts = "createAPI"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_runtime.rs::create_api"
+status = "ported"
+note = "Owns both interceptors and factory configuration: public/remote bypass, optional time sync, unsigned cache, API key and V1/V3/code signing, timestamp resync/retry-once with unsigned data retention, lite/HTTP error formatting and suppression, status logs and read-only retry/rate setup. Primitive dependencies bind mapped helpers/shared crypto/clock/transport owners. Source floors 12 request, four fulfilled-response, twelve rejection and five retry cases; native values and original request/response/error identities precede wire observations."
+
+[[symbol]]
+ts = "createAPIInstances"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-venue-asterdex/src/api_runtime.rs::create_api_instances"
+status = "ported"
+note = "Owns per-primary/secondary auth conversion and shared secondary-key factory callback, retains secondary 5/1000 atop createAPI 20/1000, unlimited still 20/1000, then public creation. Three source constructor cases assert actual four native client-slot IDs and transport configuration."

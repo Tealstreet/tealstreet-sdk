@@ -1,0 +1,6 @@
+const fs=require('node:fs'),path=require('node:path'),ts=require(process.env.SAFE_CEX_TYPESCRIPT_PATH||'typescript');const root=path.resolve(__dirname,'../../..');
+const source=fs.readFileSync(path.join(root,'packages/safe-cex/src/utils/symbolConverter.ts'),'utf8');const code=ts.transpileModule(source,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS}}).outputText;const functions={};new Function('exports',code)(functions);
+const names=[...fs.readFileSync(path.join(root,'packages/safe-cex/src/types.ts'),'utf8').match(/export type ExchangeName =[\s\S]*?;/)[0].matchAll(/'([^']+)'/g)].map(v=>v[1]);
+const symbols=['BTCUSDT','BCHPERP','BTCUSD','XBTUSDTM','PF_XBTUSD','XYZ|NFLX-PERP','ETH-PERP-INTX','BTC_USDT_PERP','U1000SHIBUSDT','MNTUSDT-03APR26','ETHUSDU26','PURR/USDC','ETHUSDG','USDY','FDUSD','BTCFDUSD','foo','',':','_/X','🪙USD'];const rows=[];
+for(const symbol of symbols){rows.push({op:'parseBinanceSymbol',symbol,expected:functions.parseBinanceSymbol(symbol)});for(const from of names){for(const op of ['toBinance','fromBinance'])rows.push({op,symbol,from,expected:functions[op](symbol,from)});for(const to of names)rows.push({op:'convertSymbol',symbol,from,to,expected:functions.convertSymbol(symbol,from,to)});}}
+process.stdout.write(JSON.stringify({names:names.length,symbols:symbols.length,rows}));

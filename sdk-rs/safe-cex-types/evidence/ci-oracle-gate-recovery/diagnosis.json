@@ -1,0 +1,67 @@
+{
+  "measured_head": "7b00aabd3ee2bd28d16a1ef2146edd2bd02f9e1a",
+  "actual_integration_merge_base": "ac0f5fccf24207b26c279e67da2a88f2c72a7aae",
+  "base_head_source_oracles": [
+    {
+      "revision": "ac0f5fccf24207b26c279e67da2a88f2c72a7aae",
+      "tree": "archived merge base",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/api_runtime.cjs",
+      "exit": 1,
+      "expected_environment_error": true,
+      "script_sha256": "d98d0d9832de33a4566289a0c353311c758885e881b0d2302bd062f4dd189572"
+    },
+    {
+      "revision": "ac0f5fccf24207b26c279e67da2a88f2c72a7aae",
+      "tree": "archived merge base",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/trading.cjs",
+      "exit": 1,
+      "expected_environment_error": true,
+      "script_sha256": "b980e249e2b2322d7088f9dc0986389495d1bf0472e7e27be5d694efd89b64f0"
+    },
+    {
+      "revision": "7b00aabd3ee2bd28d16a1ef2146edd2bd02f9e1a",
+      "tree": "worktree head",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/api_runtime.cjs",
+      "exit": 1,
+      "expected_environment_error": true,
+      "script_sha256": "d98d0d9832de33a4566289a0c353311c758885e881b0d2302bd062f4dd189572"
+    },
+    {
+      "revision": "7b00aabd3ee2bd28d16a1ef2146edd2bd02f9e1a",
+      "tree": "worktree head",
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/trading.cjs",
+      "exit": 1,
+      "expected_environment_error": true,
+      "script_sha256": "b980e249e2b2322d7088f9dc0986389495d1bf0472e7e27be5d694efd89b64f0"
+    }
+  ],
+  "candidate_bundle_source_oracles": [
+    {
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/api_runtime.cjs",
+      "exit": 0,
+      "rows": 27
+    },
+    {
+      "script": "sdk-rs/safe-cex-venue-apexomni/scripts/trading.cjs",
+      "exit": 0,
+      "rows": 13
+    }
+  ],
+  "candidate_generator_sha256": "05fba833933302b067b8fa0549c5ab21100b5e54b77eafde9386cbdbe42b74f4",
+  "candidate_unit_sha256": "807e8d6fa2e4e897cb2daa4aab233a582c2d18023629b8fddd18799f374e928d",
+  "candidate_tests_against_current_generator": {
+    "exit": 1,
+    "passed": 1,
+    "failed": 3,
+    "skipped": 0
+  },
+  "candidate_frozen_dependency_install": {
+    "exit": 0,
+    "output": "Done in 13.65s."
+  },
+  "original_frozen_install": {
+    "exit": "not captured",
+    "output": "Done in 12.86s."
+  },
+  "scope": "Candidate generator and test bytes were evaluated before application. Native Apex Cargo targets remain unmeasured with the candidate bundle. No integration parity pass is implied."
+}

@@ -1,0 +1,18 @@
+[file]
+ts = "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.utils.ts"
+
+[[symbol]]
+ts = "symbolToCoin"
+kind = "function"
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::symbol_to_coin"
+status = "ported"
+note = "Source algorithm in Rust with opaque host primitive bindings: UTF-16 HIP-3 splitting/suffix/lowercase, ccxt/Precise precision math, finite quote/base/OI arithmetic, exact base64/raw-inflate/TextDecoder/JSON/object validation pipeline and tuple iterator/optional property/log effects as applicable. Native returned fields/units/f64 bits and receiver/argument values are asserted before any wire assertion; decoder and tuple member handles preserve identity. Actual-source oracle covers twelve fixed symbols and 275 cases through274, with real external library results. External primitive implementations remain host supplied; async fetches/live network are not claimed; no exhaustive cardinality claim."
+
+[[symbol]]
+ts = "calculatePricePrecision"
+kind = "function"
+layer = "adapted"
+rs = "safe-cex-venue-hyperliquid/src/market_helpers.rs::calculate_price_precision"
+status = "ported"
+note = "Source algorithm in Rust with opaque host primitive bindings: UTF-16 HIP-3 splitting/suffix/lowercase, ccxt/Precise precision math, finite quote/base/OI arithmetic, exact base64/raw-inflate/TextDecoder/JSON/object validation pipeline and tuple iterator/optional property/log effects as applicable. Native returned fields/units/f64 bits and receiver/argument values are asserted before any wire assertion; decoder and tuple member handles preserve identity. Actual-source oracle covers twelve fixed symbols and 275 cases through274, with real external library results. External primitive implementations remain host supplied; async fetches/live network are not claimed; no exhaustive cardinality claim."

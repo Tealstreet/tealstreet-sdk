@@ -1,0 +1,223 @@
+# GRVT venue port
+
+Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/exchanges/grvt/CLAUDE.md).
+
+The first slice implements five protocol tables: all 44 endpoint/URL/telemetry
+entries are compared in order with the actual TypeScript module at test time.
+Eleven protocol string enums now require string-only deserialization and compare
+44 literals against the live TypeScript checker, plus 748 refusal probes.
+Twenty-three top-level protocol records use the shared map-only decoder and private metadata
+companions. Optional typed fields reject explicit null; opaque payloads retain it. The 1,782-case TypeScript-checker
+corpus includes 264 deliberate lone-surrogate representation refusals; those
+rows cite the canonical shared UTF-8 boundary.
+All venue manifest rows now have mappings; each fixture establishes only its stated scope. Variants stay within this crate; consume
+the [shared exchange trait](../safe-cex-exchange/CLAUDE.md) and route missing
+runtime or signing primitives to their owner.
+
+The mandatory root gate is `yarn venue-oracle:grvt`. It requires an absolute
+isolated `SAFE_CEX_TYPESCRIPT_PATH`; missing compiler installation fails closed.
+See [LOOKUP_CENSUS.md](LOOKUP_CENSUS.md) for the initial 95-expression inventory,
+including ten direct wire-keyed reads needing source-path witnesses.
+
+GrvtInstrumentLite captures `JsNumberInput` inside its public Deserialize body
+before the private map-only codec. This is depth 2 adoption: bare raw, owned and
+borrowed Serde calls are covered, as are the shared entry helpers. Its bd/qd/fi
+fields are binary64 Number values, including signed zero, overflow and negative
+underflow; compare bits before serialization. The prior clean map-only candidate
+was never committed and is a fixture, not a shipped regression guard. The REST
+fetchMarkets implementation exists; type-entry evidence does not establish its adapter binding.
+
+GrvtSignature, OrderPayload, GrvtBuilderCheckResult and GrvtBuilderInfo use the
+same depth-2 capture. Signature v/nonce and builder raw fee/cap fields remain f64:
+TypeScript number does not imply an exact uint32/u64 acceptance contract. Type
+ports do not implement the signing or authorization runtime. Keep OrderLeg's
+recursive eligibility exhaustive when embedded by OrderPayload.
+
+WebSocket wire records use closed JSON-RPC/version and subscription-method
+unions and map-only nested params/error objects. Opaque params/result/error.data
+retain JsNumberInput, including explicit null and nonfinite Number values before
+wire serialization; they are a JSON data domain, not executable JS any. Optional
+opaque fields use present capture so null is not silently treated as absence.
+Socket runtime and dispatch are mapped; numeric tests exercise public
+Deserialize through bare and shared entry paths, not a socket lifecycle.
+
+Builder constants execute from actual grvt.builder.ts declarations in the live
+oracle: both network addresses, the mainnet legacy alias and default fee string.
+The unauthorized-reason union has a string-only decoder. These declarations do
+not claim browser authorization or wallet signing is ported.
+
+GrvtTriggerMetadata uses depth-2 public numeric capture and the shared
+OrderStopTriggerType, with a local closed GrvtTriggerKind for the inline union.
+The actual TypeScript enum supplies member expressions in checker probes; no
+string-enum acceptance is inferred from a handwritten list. triggerPrice retains
+Number bits on six public/shared ingress routes; order_semantics now implements
+the deriving helper against actual-source runtime cases.
+
+Builder address selection and fee conversion execute against their actual source
+functions in builder-helpers.cjs. Fee conversion delegates parseFloat and
+Math.round to shared num; it returns f64, not uint32. Preserve overflow created
+by multiplication after the source's finite-input check, and preserve signed zero.
+The Result error carries the source Error message; invalid string representation
+uses the canonical UTF-8 boundary rather than replacement characters. These pure
+helpers have no outgoing Store, reconnect, health or notification path.
+
+create_grvt_builder_info consumes those helpers and returns the existing builder
+record. None selects each source default; empty address/fee strings remain
+present. Preserve the original fee text independently of its converted Number.
+Actual-source tests cover every Unicode scalar in lowercase contexts; the UTF-8
+boundary remains declared. Their runtime bodies are mapped; these pure-helper tests do not establish their adapters.
+
+GrvtBuilderUnauthorizedError carries source name/code/reason and f64 cap values;
+its constructor uses shared Number stringification for the cap-too-low message.
+Absent authorized cap means unknown, while zero remains zero. An empty override
+is retained and Error display omits the colon in that case. The native error has
+no JS prototype or JS stack; both rows declare this separate chosen boundary.
+
+Order-semantics helpers accept plain JSON records, preserve nullish full/lite
+alias precedence and delegate Number conversion to shared num. Trigger price
+retains finite signed zero; nonfinite results are omitted as in source. Runtime
+host objects remain outside this chosen input representation. Order-mapping
+callers are mapped; neither pure-helper fixture establishes their Store effects.
+
+AST numeric and interface-derived union inventories refuse heritage clauses.
+Four permanent controls inject an inherited required number and require a named
+refusal, preventing a direct .members walk from silently measuring a subset.
+
+Record and union gates assert native field/variant identity before wire checks.
+Keep the explicit native-to-wire test mapping independent of Serde annotations;
+a roundtrip alone cannot detect a symmetric rename. Field-wise fixtures vary
+siblings independently; the audit and controls live in tests/FIELD_IDENTITY_AUDIT.md.
+Builder-error oracle captures canonicalize NaN only and label host architecture;
+finite values and signed zero remain bit-exact.
+
+Signing metadata validation extracts ih/bd/qd from JSON-data info. Hashes require
+lowercase 0x, 1..64 hex digits; exponents must be Number safe integers, including
+negative values and signed zero. Actual-method oracle checks native tuple fields
+and Error messages in one Node process per corpus. The mapped
+placeOrder signer and fetchMarkets have separate tests; this validator fixture
+carries no Store notification effects.
+The source nonnegative-exponent mutation and a compiling Rust bd/qd swap fail
+named SIGNING METADATA assertions; production is restored afterwards. The
+validator returns native fields, so serialization cannot undo a swapped result.
+
+Instrument-symbol conversion preserves the prefix and normalizes only a terminal
+ASCII case-insensitive _PERP. One actual-method corpus covers 1,128 strings and
+two double-escaped lone-surrogate refusals; no locale case folding or trimming.
+An unanchored source mutation and a compiling case-sensitive Rust mutation fail
+`INSTRUMENT SYMBOL suffix identity`; restoring production passes the same gate.
+
+Signing time-in-force conversion uses the closed GrvtTimeInForce enum and returns
+Number values 1/2/3/4. The sole placeOrder caller chooses three literal values;
+ALL_OR_NONE completes the declared union. Prototype keys and unknown fallbacks
+are unreachable from that caller; no arbitrary-string input contract is claimed.
+The executable source is authoritative over its stale zero-based comment: the
+zero-based source control and a compiling 2/3 Rust swap fail named native variant
+assertions. Both mutations are restored before reporting the slice.
+
+Legacy exported signing-clock helpers take one injected Date.now read per call.
+Nonce retains Number bits; expiration retains source operation order and Number
+stringification, without integer narrowing or nanosecond truncation. These unused
+exports are measured directly and do not claim the active GrvtSigner path.
+One Node process returns all 462 clock cases. Compiling nonce-sign and expiration
+truncation controls fail SIGNING CLOCK nonce bits and expiration text assertions;
+clock-read counts are checked before any serialization can hide their effects.
+
+Interval conversion preserves the twelve own mappings and delegates stock inherited
+lookups to TableHit; only missing entries take the one-minute fallback. The sole
+fetchOHLCV caller has closed Timeframe inputs covering exactly the twelve keys;
+inherited names and fallback inputs exercise the broader helper contract only.
+The actual-source oracle compares native variants and inherited identity before
+serialization, with three input-only UTF-8 refusals. The mapped OHLCV runtime has separate tests; this interval fixture does not prove its adapters.
+
+The collection-cardinality supplement repeats the admitted source element to
+exercise partial retention for all five Vec fields. It retains the original
+checker corpus unchanged; native lengths are checked before pairwise identity.
+
+Opaque WebSocket cardinality checks use two-element/member string collections
+for each payload field, independently of numeric projection tests. Compare full
+opaque values and count returned members; see tests/CARDINALITY_AUDIT.md.
+
+Builder EIP-712 domain construction preserves name GRVT Exchange, version 0
+and chain IDs 325/326. Do not substitute the legacy signOrder domain. The live
+source helper is measured independently; browser authorization has separate runtime evidence.
+
+Builder address selection returns the first shared-crypto-valid original string,
+without normalization. get_string_field does not coerce nonstrings or empty text.
+The actual-source oracle consumes SAFE_CEX_CRYPTO_ORACLE_DEPS (ethers 6.17.0),
+checks ordered candidates and native identity; browser/authentication bindings have separate evidence.
+Compiling last-candidate and empty-string-drop controls fail the native address
+and string identity assertions, respectively. Both mutations are restored.
+
+Supplementary refusal/boundary arrays have independent source and completed-check
+counts, using the shared num test-only walker. Their controls mutate captured
+expectations, not production collection outputs or original source artifacts.
+
+Builder proxy helpers consume the shared TransportRegistry on every invocation.
+Header resolution first-polls its pinned frame before return and retains the
+selected proxy across a pending result and registry replacement. Native prefix,
+counting-waker and header-value witnesses cover this path. The remaining shared
+PrivateProxy BTreeMap/borrowed-future limits are FORCED in the row, including
+sorted headers and discarded-future cancellation versus a retained JS Promise.
+Canonical classification: [MANIFEST-SPEC](../parity/MANIFEST-SPEC.md#divergence-taxonomy).
+
+fetchMarkets is no longer blocked on error-string visibility. Its source witness
+executes the complete common and GRVT Axios factories and extracted method body,
+with real Axios/retry and injected raw adapter, transport and telemetry observers.
+Eleven fixed raw cases pin response phase, distinct steps, signed-zero/overflow
+info and logging-failure order. Independent raw-input content and order checks
+reject same-length symbol replacement and reversal. This is source-path evidence,
+not constructor/rate-limit proof or a remote
+signing/browser claim. The mapped native fetchMarkets runtime has separate tests.
+
+Snapshot methods now consume the shared Store and caller-owned nonce maps.
+Preserve earliest nonce time and paired 200-entry eviction, native Number P&L
+order, position notifications before the live balance read, and original
+subscriber errors. Ticker snapshots and delegation hooks execute eager effects;
+account identity is read after its request awaits. Their configured client and
+socket hooks do not claim the constructor or unimplemented runtime dependencies.
+Fake-position inherited leverage is a declared closed typed output refusal.
+See tests/snapshots.cjs and snapshots.rs for the actual-source bounded corpus.
+
+Order snapshot helpers map raw JSON statuses to native OrderStatus and parse
+metadata creation times without narrowing nanosecond integers. Keep nullish
+create_time/ct precedence and divide the digit string before converting the
+quotient to Number; numeric inputs first use shared Number stringification.
+Actual-source native assertions cover 47 statuses and 1,450 timestamp inputs.
+These extracted helpers have no Store effects; mapOrder has separate runtime tests. JSON-data and shared UTF-8 input boundaries are declared in their rows.
+
+Market reads now use src/markets.rs and the shared optional Market.is_perpetual.
+The configured post hook supplies already transformed response.data. Keep native
+representation refusal after source mapping and logging; earlier malformed base
+fields must not conceal a later null row's source error. Refresh always replaces
+signing metadata before membership events. Its old snapshots and callback values
+are owned; the manifest names the measured difference from live JS aliases.
+
+Order controls now use src/order_controls.rs with bound SDK and socket hooks.
+Keep eager guard/log/first-call effects, sequential batch continuation, authentic
+builder-error short circuit, and replacement validation before cancellation.
+Missing/null trigger info keeps the source property-access error; typed update
+keys have an explicit diagnostic fieldCount difference in the manifest.
+These methods do not claim the SDK constructor or single-order placement path.
+
+GRVT public candles/books and account leverage are in `data_reads.rs`. Configured client hooks supply transformed HTTP data or SDK responses; KlineRequest keeps native f64 limits and optional IDs until serialization. Keep current-first order-book total accumulation and cache notification before the fresh position lookup. Leverage helpers declare owned Market/returned-cache alias boundaries in the manifest and assert corresponding source/native witnesses; the account getter is live after setter logging.
+
+Public websocket subscription methods are in `public_subscriptions.rs`; the full websocket constructor/connection has separate runtime tests. Keep native RPC fields visible to configured send hooks before their shared-JS JSON wire projection, and preserve SameValueZero subscription keys versus strict ticker-ID cleanup. Batch timer slots remain tombstoned while cancellation iterators are live so nested cancellation plus insertion does not skip new timers; compact only after the outermost iterator ends.
+
+Public websocket lifecycle is in `public_lifecycle.rs`: configured factory/listener/emitter/timer hooks preserve socket and callback rereads. Market event arrays and batch slices reference shared Market values through Rc/RefCell; drop all borrows before invoking hooks, reread live array length during scheduling and keep each captured row reference during callbacks. SubscriptionMap keeps tombstoned insertion slots while replay iterators are active so nested replay/clear/reinsert remains live; unused slots compact at the outermost iterator exit. Constructor and feed/listener handling have separate runtime tests.
+
+GRVT private websocket command ports live in `private_commands.rs`: authentication, guarded ping/open, retry-budget reset, fail-closed authentication, shared-feed subscription dispatch and disposal. Keep the feed `Rc` shared between sent and stored subscriptions; reread the healthy marker after clock callbacks, preserve default logger severity and the own undefined account slot before wire projection. Configured clock/logger/send/dispatch/timer/base-dispose hooks preserve observable ordering and errors; the private constructor, watchdog/refresh and update handlers have separate runtime tests. `private_commands` tests execute the actual TypeScript members and logging enum, assert native fields/state/identity before deferred wire assertions, and stop at 67 fixed cases.
+
+Public feed routing and listeners live in `public_feeds.rs`. Bind Value/property/coercion and live Store operations at source call sites; ticker symbol and selector slots can contain own undefined values from inherited lookups. Keep selected handler arrays, feed identity, shared Market/Position references and source read order across callbacks. HandlerSlot distinguishes holes from explicit undefined during spread/filter/forEach. Order-book totals start from the current amount before rereading prior levels; sparse output finishes source processing and visibly fails because shared OrderBook vectors cannot retain holes (FORCED output component of the MIXED listener). The actual-source/native floor stops at 78 cases; public class/constructor have separate runtime tests.
+
+The order-book listener resolves each live map member and invokes it with its
+original receiver and a retainable native projector. The projector retains
+opaque index/array arguments, repeats relational coercion and prior-element
+reads, and creates ordered own data fields with unchanged Number bits. Both
+map calls finish before pure dense-data admission to the shared OrderBook;
+sparse, nonarray or accessor output visibly refuses the whole callback without
+executing output getters. The ten-case supplement is public-map-source.cjs
+and custom_orderbook_map_native; it does not establish a concrete JS host.
+
+The 51-row divergent audit is DIVERGENCE_AUDIT.md. Its parsed-field unit
+witnesses do not establish executable structural-object parity or all caller
+bindings. Numeric-capture depth refusal is a separately priced local choice.
