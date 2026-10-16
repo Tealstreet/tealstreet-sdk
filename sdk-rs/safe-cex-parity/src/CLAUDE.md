@@ -229,3 +229,12 @@ source-pin and native evidence checks receive the same merged records. Keep the
 flat JSON maps deleted when merging older branches. See
 [`POLICY-FILES.md`](../accepted-set/POLICY-FILES.md) for table names, ownership,
 migration and complete cutover equality proof.
+
+
+`parity-check --invention-crate <package>` requires explicit `--manifest` and
+`--exempt` inputs. It builds the complete maintained workspace index, preserving
+canonical local/shared reexport resolution and every mapping target, then narrows
+only public invention obligations to that package. Status, target resolution and
+source-provenance checks still apply to every supplied row. Global/default gates
+are unchanged; report/progress do not accept this scope. The split-mapping CLI
+fixture also requires unmapped-item and missing-provenance failures and restoration.

@@ -1474,13 +1474,41 @@ per-crate contract contains this owner only; no shared policy row is exempted.
 The full inventory attempt still refused **25 unsupported Kraken receiver
 methods**. This is open review work, not a passing gate. The selected owner does
 not discharge other owners, aliases, local functions, construction or feature/
-wasm accepted coverage. The old seven-file `types-parity-check.py` wrapper also
-raises AttributeError on current list-valued manifest mappings before indexing;
-the maintained global checker was executed successfully instead: **7459 rows,
-17204 public Rust items**, including Kraken. Its compiled checker/dependency inputs
-are unchanged from the previously built and validated binary. The maintained
-seven-file TS extractor passes separately: **83 source symbols**. Neither
-structural gate claims behavioral parity.
+wasm accepted coverage. The old seven-file `types-parity-check.py` wrapper crashed on list-valued
+mappings before indexing. It now preserves complete split targets and notes,
+uses every committed Kraken manifest, and intersects only existing provenance
+declarations. All Kraken declarations, including unused ones that must fail,
+remain present. A mixed-crate split retains its already-declared external file;
+a missing declaration is never manufactured.
+
+The maintained checker builds the complete workspace index for canonical shared
+reexport resolution. Its explicit `--invention-crate` scope narrows only public
+invention obligations, with explicit manifest/exemption inputs and every target
+resolution record intact. Global/default behavior is unchanged; report/progress
+refuse this scope. **73 existing Rust gates and three new CLI regressions pass**,
+with zero ignored. The new fixture proves list-valued cross-crate resolution,
+shared reexports, default global rejection, scoped unmapped-item rejection,
+missing-provenance rejection, exact restoration and invalid-scope refusal.
+
+Two Python regressions pass. Reverting only scalar/list selection reproduces the
+original AttributeError in the named split regression; exact restoration passes
+both again. `scripts/manifest-controls.py` also ran against the actual Kraken API
+manifest: baseline passes, removing its committed rust_files declaration fails
+the named source-provenance gate, and exact restoration passes. No permanent
+manifest mapping or exemption changed.
+
+The maintained global gate previously passed **7459 rows / 17204 public Rust
+items**; the seven-file source extractor independently passed **83 symbols**.
+Final integrated structural counts are recorded below. These gates validate
+metadata claims, not behavioral parity.
 
 Read-only independent review found no actionable issue in the production fix,
 native fixture, selected probe, contract or mutation/restoration controller.
+
+
+Full scoped Kraken Cargo tests passed **141 tests, zero failures and zero ignored**
+across 28 target receipts including the empty doctest target. Separate native and
+wasm32-unknown-unknown all-targets Clippy runs passed with warnings denied. The
+changed parity tooling also passed native all-targets Clippy with warnings denied.
+These compile checks do not extend the one-owner native/default accepted proof
+to wasm behavior or other accepted owners.

@@ -74,9 +74,13 @@ Structural gates for the types slice:
 - Build the maintained indexer with `cargo build --manifest-path sdk-rs/Cargo.toml
   -p safe-cex-parity --bin parity-check --jobs 1`, then run
   `python3.12 sdk-rs/safe-cex-venue-kraken/scripts/types-parity-check.py`.
-  Its temporary source-index workspace includes only this crate as a member,
-  only this crate's implemented rows across seven manifests, and no exemptions. It does not validate the
-  inherited shared-crypto row or any other crate's implementation.
+  It retains the complete workspace source index for canonical reexport resolution,
+  then gates this crate's public invention obligations against its owned rows in
+  every committed Kraken manifest, with no exemptions. Scalar and split mappings
+  retain all original targets and notes; provenance comes from committed
+  rust_files declarations. It does not validate the inherited shared-crypto row
+  or another crate's invention obligations. The list-mapping regression runs with
+  `python3.12 sdk-rs/safe-cex-venue-kraken/scripts/types-parity-check-test.py`.
 
 
 `fills.rs` and `income.rs` map all ten utility rows individually; their chosen

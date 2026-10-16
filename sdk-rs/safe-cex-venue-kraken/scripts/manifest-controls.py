@@ -12,8 +12,9 @@ baseline=run()
 assert baseline.returncode==0,baseline.stdout
 original=manifest.read_bytes()
 source=original.decode()
-anchor='rust_files = [ "safe-cex-venue-kraken/src/helpers.rs" ]'
-assert source.count(anchor)==1,'provenance mutation anchor'
+anchors=[line for line in source.splitlines() if line.startswith('rust_files = ')]
+assert len(anchors)==1,'one committed provenance declaration required'
+anchor=anchors[0]
 try:
     manifest.write_text(source.replace(anchor,'rust_files = []'))
     broken=run()
