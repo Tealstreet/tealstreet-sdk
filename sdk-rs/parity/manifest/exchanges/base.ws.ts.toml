@@ -366,9 +366,9 @@ note = ""
 ts = "BaseWebSocket.handleWebSocketError"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_web_socket_error"
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::handle_web_socket_error", "safe-cex-exchange/src/websocket.rs::WsProtocol::on_error" ]
 status = "ported"
-note = ""
+note = " Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::on_error`. The socket error event reaches venue error listeners after this base handling, as TS fires every registered error listener whether or not the parent is disposed."
 
 [[symbol]]
 ts = "BaseWebSocket.send"
@@ -502,9 +502,9 @@ note = "CHOSEN: sdk-rs/parity/MANIFEST-SPEC.md#exchange-runtime-callback-choice.
 ts = "BaseWebSocket.dispose"
 kind = "method"
 layer = "adapted"
-rs = "safe-cex-exchange/src/websocket.rs::BaseWebSocket::dispose"
+rs = [ "safe-cex-exchange/src/websocket.rs::BaseWebSocket::dispose", "safe-cex-exchange/src/websocket.rs::WsProtocol::dispose" ]
 status = "ported"
-note = ""
+note = " Split member `safe-cex-exchange/src/websocket.rs::WsProtocol::dispose`. The venue protocol teardown hook the base dispose runs."
 
 [[symbol]]
 ts = "BaseWebSocket.reconnect"
