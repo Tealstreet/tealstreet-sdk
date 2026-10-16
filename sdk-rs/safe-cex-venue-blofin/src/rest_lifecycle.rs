@@ -214,6 +214,7 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                         min: 1.0,
                         max: parse(row.get("maxLeverage"))?,
                     },
+                    price: None,
                 },
                 contract_size: Some(contract),
                 is_expiring: None,
@@ -224,6 +225,7 @@ pub async fn fetch_markets<E: std::fmt::Display>(
                 info: Some(Value::Object(info)),
                 taker_fee: None,
                 maker_fee: None,
+                option: None,
             });
         }
         Ok(markets)

@@ -167,6 +167,10 @@
       "value": "tealstreet-dex"
     },
     {
+      "name": "Txflow",
+      "value": "txflow"
+    },
+    {
       "name": "What",
       "value": "what"
     },
@@ -291,6 +295,16 @@
     {
       "name": "Business",
       "value": "business"
+    }
+  ],
+  "OptionRight": [
+    {
+      "name": "Call",
+      "value": "call"
+    },
+    {
+      "name": "Put",
+      "value": "put"
     }
   ],
   "RequestOutcome": [

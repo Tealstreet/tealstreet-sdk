@@ -45,6 +45,14 @@ enableSpotMarkets?: boolean,
 /**
  * @ts-mutable
  */
+enableOptionMarkets?: boolean, 
+/**
+ * @ts-mutable
+ */
+enableInverseMarkets?: boolean, 
+/**
+ * @ts-mutable
+ */
 bybitSiteId?: "BRA_BTL", 
 /**
  * @ts-mutable

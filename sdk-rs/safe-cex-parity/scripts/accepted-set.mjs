@@ -145,6 +145,10 @@ for (const pkg of members) {
     }
     return { file, ident, line: Number(row), column: Number(column), label: `${path.relative(root, file)}::${ident}` };
   }).filter(Boolean);
+  // Same-name block-local types in different bodies are distinct declarations;
+  // their declaration position names them. Identical positions still fail closed.
+  const spellings = locals.reduce((counts, item) => counts.set(item.label, (counts.get(item.label) ?? 0) + 1), new Map());
+  for (const item of locals) if (spellings.get(item.label) > 1) item.label = `${item.label}@${item.line}:${item.column}`;
   assert.equal(new Set(locals.map(item => item.label)).size, locals.length, `${pkg.name}: ambiguous local type names need explicit scope support`);
   // Follow compiler identity, never the spelling of an alias. Scoped runs include
   // the complete owning package so its decoders receive ordinary runtime probes.
