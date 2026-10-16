@@ -75,6 +75,13 @@ pub fn merge_updates_using_last_update<T>(
         .collect()
 }
 
+/// ts: unknownSendOutcome.isUnsentSigningFailure. A hosted request that failed while
+/// getting its signature never reached the venue.
+pub fn is_unsent_signing_failure(message: Option<&str>) -> bool {
+    regex::Regex::new(r"(Signing request [^\t\n\v\f\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]+ timed out|Remote signer unavailable|Failed to send signing request|signing aborted)")
+        .expect("source regex")
+        .is_match(message.unwrap_or(""))
+}
 pub fn is_unknown_outcome(error: &Value) -> Result<bool, String> {
     use regex::Regex;
     if !error.is_object() && !error.is_array() {
@@ -89,8 +96,7 @@ pub fn is_unknown_outcome(error: &Value) -> Result<bool, String> {
         .map_err(|error| format!("{error:?}"))
     };
     let message = string(error.get("message"))?;
-    let not_sent = Regex::new(r"(Signing request [^\t\n\v\f\r \u{00a0}\u{1680}\u{2000}-\u{200a}\u{2028}\u{2029}\u{202f}\u{205f}\u{3000}\u{feff}]+ timed out|Remote signer unavailable|Failed to send signing request)").expect("source regex");
-    if not_sent.is_match(&message) {
+    if is_unsent_signing_failure(Some(&message)) {
         return Ok(false);
     }
     if let Some(response) = error
