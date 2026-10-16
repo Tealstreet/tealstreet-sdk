@@ -210,9 +210,7 @@ fn frozen_values_use_same_value_and_preserve_explicit_undefined() {
         .unwrap();
         assert!(object.has_own("x"));
         assert!(object.own_keys().is_empty());
-        let different = if matches!(value, Js::Number(v) if v.is_nan()) {
-            Js::Number(0.0)
-        } else if matches!(value, Js::Number(_)) {
+        let different = if matches!(value, Js::Number(_)) {
             Js::Number(0.0)
         } else {
             Js::object(vec![])
