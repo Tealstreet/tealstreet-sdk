@@ -1572,15 +1572,19 @@
         "async-block",
         "await",
         "async-block",
+        "await",
+        "async-block",
+        "await",
+        "async-block",
         "async-block",
         "await",
         "await",
         "async-block",
         "await"
       ],
-      "producer_sha256": "9c823dde1183ccf8569b86aab24cff297c5f1c747c734ac89715a103b52f96c1",
+      "producer_sha256": "de52870133d4a35bbbc1203e7b316ec99123198301e318ccb2d2d800a658f2cd",
       "classification": "no-owned-latch",
-      "reason": "JS BaseExchange method bodies delegate to the core owners (load_account_market_overlay and the base reads) and await caller-local promises; the on/off rows are synchronous listener bookkeeping, not an in-flight reservation."
+      "reason": "JS BaseExchange callbacks delegate private snapshot, order refresh and account overlay work to their existing core owners; each spawned Promise owns its venue/arguments. Secondary-client construction and provider accessors are synchronous and publish no in-flight latch. Reviewed after the master merge: no RefCell borrow spans an await."
     },
     {
       "owner": "src/js_runtime/builtins.rs::chain_value",
@@ -1693,9 +1697,9 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "fba85f1955da07aa3d3ef427452cb342378e893672d5b335be307868a7d102ac",
+      "producer_sha256": "ed25514b6b7230d530649b9a60b17f53791ffe3b4e99a5a44ba87ee72743db40",
       "classification": "no-owned-latch",
-      "reason": "Library builtins (Promise helpers, sleep, map/all) spawn js_runtime Promise bodies that own their values; no shared slot spans an await."
+      "reason": "Library Promise/sleep/map helpers own their captured values and delegate settlement to js_runtime Promise; no shared in-flight slot spans an await. The merged change only removes the duplicate synchronous Number.isFinite registration; async ownership is unchanged."
     },
     {
       "owner": "src/js_runtime/library.rs::sleep_promise",

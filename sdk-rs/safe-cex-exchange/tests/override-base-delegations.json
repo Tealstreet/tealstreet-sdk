@@ -8,6 +8,15 @@
   },
   "delegations": [
     {
+      "file": "safe-cex-venue-kraken/src/binding/host_typed.rs",
+      "finding": "dispose_base bypasses dynamic hook dispose through base",
+      "kind": "source-super",
+      "evidence": [
+        {"file": "packages/safe-cex/src/exchanges/kraken/kraken.exchange.ts", "contains": "super.dispose();"},
+        {"file": "sdk-rs/safe-cex-venue-kraken/src/binding/host_typed.rs", "contains": "fn dispose_base(&self) -> Result<(), ExchangeError> {\n        self.base().dispose()\n    }"}
+      ]
+    },
+    {
       "file": "safe-cex-venue-apexomni/src/exchange.rs",
       "finding": "dispose bypasses dynamic hook dispose through base",
       "kind": "source-super",
@@ -142,12 +151,6 @@
       "finding": "create bypasses dynamic hook dispose through base",
       "kind": "source-super",
       "evidence": [{"file": "packages/safe-cex/src/exchanges/bitget/bitget.exchange.ts", "contains": "super.dispose();"}]
-    },
-    {
-      "file": "safe-cex-exchange/src/js_runtime/sockets.rs",
-      "finding": "base_websocket bypasses dynamic hook dispose through base",
-      "kind": "socket-receiver",
-      "evidence": [{"file": "sdk-rs/safe-cex-exchange/src/js_runtime/sockets.rs", "contains": "pub base: OnceCell<Rc<BaseWebSocket>>,"}]
     },
     {
       "file": "safe-cex-venue-bitget/src/binding/hosts/assembly.rs",
