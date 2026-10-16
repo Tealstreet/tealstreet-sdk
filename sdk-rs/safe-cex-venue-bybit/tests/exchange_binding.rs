@@ -1303,3 +1303,30 @@ fn source_identity_flags_survive_demo_facade_construction() {
         h.venue().dispose().unwrap();
     }
 }
+
+#[test]
+fn primary_batch_uses_source_batch_endpoint_regression() {
+    let h = harness(options(), |w| {
+        w.ok(
+            "GET",
+            "/v5/position/list",
+            json!({"list": [], "nextPageCursor":""}),
+        );
+        w.ok(
+            "POST",
+            "/v5/order/create-batch",
+            json!({"list":[{"orderId":"batch-1"}]}),
+        );
+    });
+    seed_market(&h);
+    let opts: safe_cex_types::PlaceOrderOpts = serde_json::from_value(json!({
+        "symbol":"BTCUSDT", "type":"limit", "side":"buy", "amount":0.01, "price":25000
+    }))
+    .unwrap();
+    let venue = h.venue();
+    let ids = h
+        .drive(Box::pin(venue.base().place_orders(venue, vec![opts])))
+        .expect("primary batch source path");
+    assert_eq!(ids, ["batch-1"]);
+    assert_eq!(h.wire.calls("/v5/order/create-batch").len(), 1);
+}
