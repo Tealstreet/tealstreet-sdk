@@ -1680,3 +1680,77 @@ production verification passes **six actual runtime results / zero classificatio
 manual review returned a rate limit. The paginated review audit contains zero
 inline conversations and zero substantive review summaries at this checkpoint.
 This is six native/default owners, not complete venue or wasm behavioral coverage.
+
+## Four private request-record object boundaries (2026-10-17)
+
+The Futures/Spot candle Options, AccountLogParams and HistoricalOptions were each
+reviewed against their actual TS object declarations and existing host profiles.
+All four original derived decoders compiled and accepted independently authored
+complete valid positional arrays in declaration order. Their named native tests
+failed only the array rejection assertions, after valid object fields/presence
+had passed through all seven ordinary/qualified/shared numeric routes. This was
+an actual runtime baseline, rather than a compile error or invalid-array sample.
+
+The concrete owner now captures through the maintained shared numeric backend,
+then calls a private Serde remote schema through `strict_decode::object`.
+Serialize, camelCase AccountLog keys, original field order, optional/null rules,
+ignored unknown fields and JsNumberOutput registration are retained. No public
+mapper method body, transport, signer, Store or callback boundary changed.
+
+All four native owner tests pass through seven decoder routes. Native assertions
+read every actual field, Option presence and f64 bits before Serialize, including
+negative zero, 9007199254740993 rounding to binary64 2^53, the smallest subnormal,
+and positive/negative infinity from overflowing numeric tokens. Missing required
+fields, wrong typed values and the non-admitted snake_case AccountLog key fail.
+The complete arrays and scalar/null/empty-array shapes are rejected independently
+of generic map-sample ordering. The initial numeric supplement command launched
+from the repository root was stopped and is excluded from evidence; the successful
+receipt used sdk-rs and its pinned toolchain.
+
+The native controller completed four sequential guard-only removals, each
+requiring a compiled named failure containing that owner's exact valid array.
+Every exact restoration passed all four native tests. The controller was repeated
+successfully after extending the numeric witnesses, with the same four named
+array-admission failures, four restored passes and final exact guarded source bytes.
+No compiler failure or tooling refusal counts as a negative control.
+
+Fresh native/default private/hidden compiler inspection and actual production
+probes pass **four runtime results / zero classifications / zero failed owners**.
+Each remote companion is private and has no independent Deserialize/conversion
+trait or extra inherent API. Its sole generated helper takes the actual generic
+Serde deserializer and returns the exact reviewed owner identity and source span.
+Independent review caught a runner mistake requesting non-decoder companions as
+required decoder owners; only the four actual owners are now requested, and the
+complete companion compiler implementations are inspected separately. The first
+runner refusal happened before runtime probes and is excluded from passing proof.
+
+These are four concrete native/default record contracts. Other owners, aliases,
+local functions, construction, 25 receiver refusals and feature/wasm accepted
+behavior remain independent obligations under the maintained host profiles.
+
+
+Private-record readiness after integrating master `51015dc5f9` as `858950c865`:
+all eleven existing master Kraken contracts remain exactly preserved, with only
+the four reviewed record rows added. The test-only fixture module is loaded once
+at the crate root and shared by the three native unit modules; this fixes
+all-target Clippy's duplicate-module finding without changing the production
+schemas, guards, observations or control anchors.
+
+Fresh full scoped Kraken tests pass **155 / zero failures / zero ignored** across
+30 target receipts including docs. Separate native and wasm32 all-targets Clippy
+pass with warnings denied. Frozen install and workspace format pass. The scoped
+structural gate passes **134 rows / 539 public items / zero exemptions**; the global
+gate passes **7459 rows / 17206 public items**. Both reuse the maintained compiled
+indexer after comparing its actual Rust/Cargo/lock/config inputs. The maintained
+TS extractor checks **83 symbols across seven slice files**. Fresh production
+verification after the test-wiring fix again passes **four actual runtime results /
+zero classifications / zero failed owners**. Guard-removal/restoration controls
+remain the independently executed four-owner receipts described above.
+
+The additional shared cancellation inventory audit passes with CI's required
+`--all-features` profile: **one passed / zero failed / zero ignored** for
+`production_cancellable_future_classifications_are_current`. An earlier
+no-features invocation could not see its feature-gated health witness and is
+excluded from proof; no cancellation source or classification was changed.
+Independent review of the test-wiring fix is clean. CodeRabbit's manual request
+returned a rate limit, rather than an executed review.
