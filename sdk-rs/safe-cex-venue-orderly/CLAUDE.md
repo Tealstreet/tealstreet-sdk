@@ -192,13 +192,15 @@ passing restorations. The getter's own REST body remains separately rowed.
 shared Scope/Js layer. All 16 Exchange methods execute existing source bodies;
 the four inherited unsupported methods retain the exact `Not implemented`
 error. `fetchPositions` retains its source balance write. The mutable source
-disposal flag is set before socket disposal; native owned resources are then
-released through BaseExchange. Private subscriptions remain server-auth-gated.
+disposal flag is set before socket disposal; source disposal does not invoke
+BaseExchange cleanup. Private subscriptions remain server-auth-gated.
 P4 signing-exception recovery uses the shared authenticate_and_subscribe wrapper
 around the unchanged private onOpen body. This intentional difference and the
 native cleanup boundary are named in BINDING_GATES.md and the PR description.
 `tests/exchange_trait.rs` constructs production exchanges over scripted transport;
 its all-16 method witness and production-disabling controls are described in
 BINDING_GATES.md. The registry's native server test verifies exact Ed25519
-preimages for all six names. Hosted remoteSigner is explicitly refused until
-that separate native capability is wired.
+preimages for all six names. The native registry shares hosted HTTP signing and account metadata with typed
+availability. Source private HTTP still signs locally before the hosted adapter;
+private WS never reads remoteSigner. Empty secrets retain the source HTTP error
+and the already approved shared WS onOpen recovery. See HOSTED_SIGNER_EVIDENCE.md.
