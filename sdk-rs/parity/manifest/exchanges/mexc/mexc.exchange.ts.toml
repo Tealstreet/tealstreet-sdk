@@ -520,7 +520,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-mexc/src/exchange_runtime.rs::cancel_all_orders"
 status = "ported"
-note = "Source empty cancellation request and captured post receiver; after await, rereads live store orders and maps every id before canceled status update. Original failures preserve identity. Floor 5 through empty-orders. Method-body claim over the existing SessionRuntime/TaskHost primitives and required owner bindings; complete concrete exchange/socket composition is not claimed."
+note = "Source empty cancellation request and captured post receiver; after await, rereads live store orders and maps every id before canceled status update. Original failures preserve identity. Floor 5 through empty-orders. Method-body claim over the existing SessionRuntime/TaskHost primitives and required owner bindings; complete concrete exchange/socket composition is not claimed. Rename: the method body is a free function generic over ExchangeRuntimeHost so it runs over the shared SessionRuntime/TaskHost primitives instead of a MexcExchange receiver; the Rust target is safe-cex-venue-mexc/src/exchange_runtime.rs::cancel_all_orders ."
 
 [[symbol]]
 ts = "MexcExchange.fetchLeverageForSymbol"
@@ -560,7 +560,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-mexc/src/exchange_runtime.rs::change_margin_type"
 status = "ported"
-note = "Source required symbol/market guards, cached/derived config, isolated/cross choice, falsy leverage fallback 20 and clamp per side, ordered long/short requests with includeOpenTypeWithPositionId, response assertions before shared-config commit. Floor 12 through update-config-error. Method-body claim over the existing SessionRuntime/TaskHost primitives and required owner bindings; complete concrete exchange/socket composition is not claimed."
+note = "Source required symbol/market guards, cached/derived config, isolated/cross choice, falsy leverage fallback 20 and clamp per side, ordered long/short requests with includeOpenTypeWithPositionId, response assertions before shared-config commit. Floor 12 through update-config-error. Method-body claim over the existing SessionRuntime/TaskHost primitives and required owner bindings; complete concrete exchange/socket composition is not claimed. Rename: the method body is a free function generic over ExchangeRuntimeHost so it runs over the shared SessionRuntime/TaskHost primitives instead of a MexcExchange receiver; the Rust target is safe-cex-venue-mexc/src/exchange_runtime.rs::change_margin_type ."
 
 [[symbol]]
 ts = "MexcExchange#updateFetchedLeverage"
