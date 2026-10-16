@@ -226,7 +226,7 @@ test('moving registry back beside venues rejects its constructor dependency', ()
 });
 test('registry constructs only the listed venues', () => {
   const { policy, metadata } = inputs();
-  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-apexomni', 'safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitrue', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-bybit', 'safe-cex-venue-coinbase', 'safe-cex-venue-okx', 'safe-cex-venue-kraken', 'safe-cex-venue-grvt', 'safe-cex-venue-hyperliquid', 'safe-cex-venue-polymarket', 'safe-cex-venue-kucoin', 'safe-cex-venue-mexc', 'safe-cex-venue-woo', 'safe-cex-venue-orderly']);
+  assert.deepEqual(policy.registryConstructors.venues, ['safe-cex-venue-apexomni', 'safe-cex-venue-asterdex', 'safe-cex-venue-backpack', 'safe-cex-venue-binance', 'safe-cex-venue-bingx', 'safe-cex-venue-bitget', 'safe-cex-venue-bitrue', 'safe-cex-venue-bitunix', 'safe-cex-venue-blofin', 'safe-cex-venue-bybit', 'safe-cex-venue-coinbase', 'safe-cex-venue-cryptocom', 'safe-cex-venue-phemex', 'safe-cex-venue-okx', 'safe-cex-venue-kraken', 'safe-cex-venue-grvt', 'safe-cex-venue-hyperliquid', 'safe-cex-venue-polymarket', 'safe-cex-venue-kucoin', 'safe-cex-venue-mexc', 'safe-cex-venue-woo', 'safe-cex-venue-orderly']);
   const venue = addSyntheticVenue(policy, metadata);
   addEdge(metadata, 'safe-cex-registry', venue);
   assert.throws(() => validateLayers(policy, metadata), /^AssertionError \[ERR_ASSERTION\]: unlisted registry constructor: safe-cex-registry -> safe-cex-venue-unbound-control$/);

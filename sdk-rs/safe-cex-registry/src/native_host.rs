@@ -363,16 +363,12 @@ impl RustVenueHost for NativeVenueHost {
         self.remote.clone()
     }
     fn apexomni(&self) -> Result<safe_cex_venue_apexomni::ApexDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for apexomni on the native host",
-            ));
-        }
         Ok(safe_cex_venue_apexomni::ApexDependencies {
             runtime: self.runtime.clone(),
-            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+            http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
                 self.runtime.clone(),
                 (self.adapter)()?,
+                self.remote.clone(),
             ),
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
@@ -403,6 +399,41 @@ impl RustVenueHost for NativeVenueHost {
             external_public_data: Some(gateway_factory(self.runtime.clone())),
         })
     }
+
+    fn phemex(
+        &self,
+    ) -> Result<safe_cex_venue_phemex::binding::exchange::PhemexDependencies, ExchangeError> {
+        Ok(
+            safe_cex_venue_phemex::binding::exchange::PhemexDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                    self.remote.clone(),
+                ),
+                install_transport: None,
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
+    fn cryptocom(
+        &self,
+    ) -> Result<safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies, ExchangeError>
+    {
+        Ok(
+            safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies {
+                runtime: self.runtime.clone(),
+                http: safe_cex_exchange::js_runtime::client::rest_http_host_signed(
+                    self.runtime.clone(),
+                    (self.adapter)()?,
+                    self.remote.clone(),
+                ),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
     fn woo(&self) -> Result<safe_cex_venue_woo::WooDependencies, ExchangeError> {
         Ok(safe_cex_venue_woo::WooDependencies {
             runtime: self.runtime.clone(),
