@@ -27,6 +27,7 @@ export const exchangesWithoutSecondaryKey: ExchangeName[] = [
   'mode',
   'salsadex',
   'tealstreet-dex',
+  'txflow',
   'what',
 ];
 

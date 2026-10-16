@@ -48,6 +48,7 @@ export type ExchangeName =
   | 'mode'
   | 'salsadex'
   | 'tealstreet-dex'
+  | 'txflow'
   | 'what'
   | 'weex'
   | 'woo'
