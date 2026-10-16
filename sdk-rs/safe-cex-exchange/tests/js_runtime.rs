@@ -20,6 +20,7 @@ use std::{
 struct Runtime {
     jobs: RefCell<Vec<Pin<Box<dyn Future<Output = ()>>>>>,
     clock: std::cell::Cell<f64>,
+    wall_clock: std::cell::Cell<f64>,
     consoled: RefCell<Vec<(String, String)>>,
 }
 struct Task;
@@ -31,7 +32,7 @@ impl ExchangeRuntime for Runtime {
         self.clock.get()
     }
     fn now_ms(&self) -> f64 {
-        0.0
+        self.wall_clock.get()
     }
     fn sleep(&self, ms: u64) -> ExchangeFuture<'static, ()> {
         self.clock.set(self.clock.get() + ms as f64);
@@ -2565,4 +2566,24 @@ fn source_socket_fields_reach_typed_groups_and_track_replacement_and_removal() {
     a.base.dispose().unwrap();
     assert!(replacement_core.is_disposed());
     assert!(expected[1..].iter().all(|socket| socket.is_disposed()));
+}
+
+#[test]
+fn date_now_is_integer_while_performance_retains_fractional_milliseconds() {
+    let (runtime, shared) = scoped_globals();
+    for (wall, expected) in [
+        (1_735_689_600_000.75, 1_735_689_600_000.0),
+        (1234.125, 1234.0),
+    ] {
+        runtime.wall_clock.set(wall);
+        runtime.clock.set(7.625);
+        assert_eq!(
+            run(&shared.globals, "Date.now", vec![]).as_f64(),
+            Some(expected)
+        );
+        assert_eq!(
+            run(&shared.globals, "performance.now", vec![]).as_f64(),
+            Some(7.625)
+        );
+    }
 }
