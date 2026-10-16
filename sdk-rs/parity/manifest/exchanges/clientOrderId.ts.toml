@@ -67,6 +67,30 @@ status = "ported"
 note = "safe-cex-exchange/src/client_order_id.rs::ClientOrderIdPlaceOrderOpts safe-cex-exchange/src/client_order_id.rs::ClientOrderIdPlaceOrderOpts::new safe-cex-exchange/src/client_order_id.rs::ClientOrderIdPlaceOrderOpts::options safe-cex-exchange/src/client_order_id.rs::ClientOrderIdPlaceOrderOpts::into_options strengthen the merged TS field as an immutable wrapper whose constructor always installs a String client ID; accessors preserve that invariant."
 
 [[symbol]]
+ts = "ReplacementOrderIds"
+kind = "type"
+layer = "adapted"
+rs = "safe-cex-exchange/src/client_order_id.rs::ReplacementOrderIds"
+status = "divergent"
+note = "TS intersects string[] with an optional clientOrderId property; Rust carries the IDs and the optional client order ID as fields and Derefs to Vec<String>, so result[0]/length readers are unaffected. Exchange::update_order still returns Vec<String>; venues returning a replacement cloid use this type at their own boundary."
+
+[[symbol]]
+ts = "withReplacementClientOrderId"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/client_order_id.rs::with_replacement_client_order_id"
+status = "ported"
+note = ""
+
+[[symbol]]
+ts = "replacementClientOrderIdOf"
+kind = "const-fn"
+layer = "adapted"
+rs = "safe-cex-exchange/src/client_order_id.rs::replacement_client_order_id_of"
+status = "divergent"
+note = "TS accepts unknown and returns the property only when it is a non-empty string; the typed Rust input admits only ReplacementOrderIds, so the non-object and non-string branches are unrepresentable. The empty-string truthiness rule is kept."
+
+[[symbol]]
 ts = "ClientOrderLookup"
 kind = "type"
 layer = "adapted"

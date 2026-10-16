@@ -107,6 +107,7 @@ pub fn map_coinbase_rest_order(
     let filled = multiply(filled_native, contract_size);
     let remaining = multiply(remaining_native, contract_size);
     Some(Order {
+        client_order_id: None,
         id: raw_order.get("order_id")?.as_str()?.to_owned(),
         parent_id: Some(raw_order.get("client_order_id")?.as_str()?.to_owned()),
         status,

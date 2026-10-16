@@ -462,6 +462,7 @@ pub fn handle_user_event_orders<I: PrivateOrderInfo, E: PrivateOrderEventInput<I
         let now = host.current_time_ms()?;
         orders.borrow_mut().push(Rc::new(RefCell::new(SyncedOrder {
             fields: Order {
+                client_order_id: None,
                 id,
                 parent_id,
                 status,
