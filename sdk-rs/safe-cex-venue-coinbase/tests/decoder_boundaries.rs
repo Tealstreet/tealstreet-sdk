@@ -91,6 +91,18 @@ impl<'ast> Visit<'ast> for RetainedCalls {
 #[derive(Default)]
 struct Implementations<'ast>(Vec<&'ast syn::ItemImpl>);
 impl<'ast> Visit<'ast> for Implementations<'ast> {
+    fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+        if item.attrs.iter().any(|attribute| {
+            attribute.path().is_ident("cfg")
+                && attribute
+                    .parse_args::<syn::Path>()
+                    .is_ok_and(|path| path.is_ident("test"))
+        }) {
+            return;
+        }
+        syn::visit::visit_item_mod(self, item);
+    }
+
     fn visit_item_impl(&mut self, item: &'ast syn::ItemImpl) {
         self.0.push(item);
         syn::visit::visit_item_impl(self, item);
@@ -140,6 +152,147 @@ fn map_input(ty: &Type) {
         .collect();
     assert_eq!(names, ["String", "serde_json::Value"]);
 }
+// Exact production adapter census. These implementations supply imported host
+// capabilities to already classified bodies. Raw parsing remains delegation:
+// SocketHost's two json_parse methods call shared JSON.parse; CryptoHost imports
+// PKCS8 through the independently observed safe-cex-crypto Es256SigningKey owner.
+fn reviewed_binding_adapter(file: &str, imp: &syn::ItemImpl) {
+    let owner = path_name(&imp.self_ty);
+    let trait_name = imp
+        .trait_
+        .as_ref()
+        .map(|(path, _)| path.segments.last().unwrap().ident.to_string())
+        .unwrap_or_default();
+    let expected = match (file, owner.as_str(), trait_name.as_str()) {
+        ("api", "Host", "CoinbaseApiHost") => {
+            "safe_create serialize_repeat network_error_on_read retry install_interceptor install_transport_adapter replace_url_params mark_skip_remote_signing proxy_prefix headers sign"
+        }
+        ("classes", "Host", "CoinbaseConstructionHost") => {
+            "construct_base pattern_client_order_id_rule uuid create_secondary rate_limit construct_public_base construct_private_base"
+        }
+        ("crypto", "CryptoHost", "CdpSigningHost") => {
+            "prepare_pkcs8 import_key current_time_ms uuid sign_ed25519 sign_ecdsa"
+        }
+        ("exchange", "CoinbaseExchange", "") => "new fetch_balance",
+        ("exchange", "CoinbaseExchange", "Exchange") => {
+            "base capabilities is_public_data_only dispose place_order start get_account validate_account fetch_positions fetch_orders fetch_markets fetch_tickers fetch_symbol_max_leverage set_leverage change_position_mode change_margin_type update_order cancel_orders fetch_ohlcv listen_ohlcv listen_order_book sign_ws_auth class_name"
+        }
+        ("exchange", "Host", "ExchangeWsAuthHost") => "options sign_local",
+        ("lifecycle", "Host", "") => {
+            "async_js loaded publish tick market_values ticker_values position_values balance_value snapshot_values socket"
+        }
+        ("lifecycle", "Host", "LifecycleHost") => {
+            "is_disposed public_only init_external_public_data find_selected_portfolio fetch_markets fetch_tickers_intx fetch_balance fetch_open_orders_snapshot tick get_markets loaded update connect_public connect_private dispose_base dispose_public dispose_private clear_timeout set_timeout last_private_user_stream_message_at mark_private_user_stream_degraded merge_rest_orders_with_fresh_ws_state emit_orders_fetch_error emit_and_log_error log"
+        }
+        ("lifecycle", "Host", "TickHost") => {
+            "is_disposed fetch_tickers fetch_balance fetch_positions fetch_open_orders_snapshot loaded update public_message_handlers should_poll_orders merge_rest_orders_with_fresh_ws_state emit_orders_fetch_error emit_and_log_error get_tick_interval loop_again"
+        }
+        ("orders", "OrderHost", "") => "new",
+        ("orders", "Host", "") => {
+            "order_snapshot_receiver order_host schedule_reconcile schedule_write_check synced_order native_orders emit_orders_error should_poll merge_rest place cancel"
+        }
+        ("orders", "OrderHost", "CoinbaseOrderHost") => {
+            "now_ms orders_loaded orders market_by_symbol markets_by_id resolve_caller_client_order_id uuid post_create_order post_cancel_orders add_or_update_order update_orders_status schedule_open_orders_rest_reconciliation schedule_private_user_stream_write_check log_warning emit_and_log_error"
+        }
+        ("orders", "Host", "OrderSnapshotHost") => {
+            "public_only supported_types get_orders resolve_market_by_product map_rest_order now_ms emit_and_log_error emit_orders_fetch_error"
+        }
+        ("orders", "Host", "OrderEditHost") => {
+            "selected_portfolio_type orders market_by_symbol cancel_orders place_order post_edit schedule_reconciliation schedule_write_check emit_and_log_error"
+        }
+        ("reads", "Host", "") => {
+            "read_get read_markets read_market public_read_receiver emit_args cached_balance dayjs daily"
+        }
+        ("reads", "Host", "PortfolioHost") => {
+            "get emit_and_log_error cached_balance position_upnls"
+        }
+        ("reads", "Host", "MarketPositionHost") => {
+            "get error_response_items get_supported_types markets market_by_id cached_tickers cached_positions emit_and_log_error local_wall_time_to_utc"
+        }
+        ("reads", "Host", "PublicMarketReadHost") => {
+            "public_only get_supported_types get error_response_items cached_markets emit_and_log_error dayjs_value_of dayjs_subtract daily_candle set_daily_candle"
+        }
+        ("rt", "Host", "") => {
+            "new base receiver class promise register_client client xhr request emit options json_error runtime global public_only now"
+        }
+        ("sockets", "SocketHost", "") => {
+            "new call open handle listener stringify emit log_console order_values"
+        }
+        ("sockets", "SocketHost", "PublicStreamHost") => {
+            "is_disposed testnet reconnecting_enabled create_websocket add_listener reset_orderbook emit_ws_reconnected markets_symbols send_subscription track_last_received json_parse emit_error console_error_text console_error_frame handle_pong_event record_message_handler_stats"
+        }
+        ("sockets", "SocketHost", "PublicMarketListenerHost") => {
+            "is_connected public_data_only_option timeframe_seconds daily_candle set_daily_candle utc_end_of_day_ms fetch_ohlcv_detached dayjs_unix add warn set_timeout cleanup_message_handler_stats nanoid update_order_book sort_order_book calc_order_book_total"
+        }
+        ("sockets", "SocketHost", "PrivateStreamHost") => {
+            "is_disposed options exchange_name testnet resolve_private_route create_websocket add_listener reset_order_snapshot_assembly close_socket send_with_log sign_local track_last_received emit_ws_diagnostic_receive json_parse mark_private_user_stream_auth_failed mark_private_user_stream_message_received emit_and_log_error handle_user_event_orders handle_pong_event"
+        }
+        ("sockets", "SocketHost", "CoinbasePrivateClassHost") => {
+            "private_order_markets resolve_private_order_market private_order_console_error private_order_now_ms private_orders_loaded publish_private_order_snapshot add_private_orders emit_private_order_fill"
+        }
+        _ => panic!("unclassified binding adapter {file}::{owner}::{trait_name}"),
+    };
+    let actual: BTreeSet<_> = imp
+        .items
+        .iter()
+        .filter_map(|item| match item {
+            syn::ImplItem::Fn(method) => Some(method.sig.ident.to_string()),
+            _ => None,
+        })
+        .collect();
+    let expected: BTreeSet<_> = expected.split_whitespace().map(str::to_owned).collect();
+    assert_eq!(
+        actual, expected,
+        "reviewed adapter API {file}::{owner}::{trait_name}"
+    );
+    if (file, owner.as_str(), trait_name.as_str()) == ("crypto", "CryptoHost", "CdpSigningHost") {
+        let mut calls = RetainedCalls::default();
+        calls.visit_item_impl(imp);
+        assert!(
+            calls.functions.contains("Es256SigningKey::from_pkcs8_der"),
+            "raw key import delegates to observed primitive"
+        );
+        assert!(
+            calls
+                .functions
+                .contains("crate::utils::pem_to_pkcs8_der_with"),
+            "PEM import delegates to classified helper"
+        );
+    }
+    if file == "sockets"
+        && matches!(
+            trait_name.as_str(),
+            "PublicStreamHost" | "PrivateStreamHost"
+        )
+    {
+        struct Parser {
+            shared: bool,
+        }
+        impl<'ast> Visit<'ast> for Parser {
+            fn visit_expr_lit(&mut self, value: &'ast syn::ExprLit) {
+                if matches!(&value.lit, syn::Lit::Str(text) if text.value() == "JSON.parse") {
+                    self.shared = true;
+                }
+                syn::visit::visit_expr_lit(self, value);
+            }
+        }
+        let method = imp
+            .items
+            .iter()
+            .find_map(|item| match item {
+                syn::ImplItem::Fn(method) if method.sig.ident == "json_parse" => Some(method),
+                _ => None,
+            })
+            .unwrap();
+        let mut parser = Parser { shared: false };
+        parser.visit_impl_item_fn(method);
+        assert!(
+            parser.shared,
+            "websocket decoder delegates to shared JSON.parse"
+        );
+    }
+}
+
 #[test]
 fn every_public_wire_decoder_entrypoint_is_classified() {
     let directory = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("src");
@@ -268,6 +421,13 @@ fn every_public_wire_decoder_entrypoint_is_classified() {
         let mut implementations = Implementations::default();
         implementations.visit_file(&parsed);
         for imp in implementations.0 {
+            if path
+                .parent()
+                .is_some_and(|parent| parent.ends_with("binding"))
+            {
+                reviewed_binding_adapter(file, imp);
+                continue;
+            }
             let owner = path_name(&imp.self_ty);
             if !types.contains_key(&owner) {
                 // Only these outbound serializers may target a non-local type.
@@ -473,7 +633,7 @@ fn every_public_wire_decoder_entrypoint_is_classified() {
                                 (
                                     "portfolios_balances",
                                     "PortfolioThrown",
-                                    "from_value" | "store_mutation"
+                                    "from_value" | "store_mutation" | "from_native" | "native"
                                 ) | (
                                     "class_methods",
                                     "ClassMethodSlot",

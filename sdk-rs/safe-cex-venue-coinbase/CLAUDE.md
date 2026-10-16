@@ -32,8 +32,8 @@ It requires Node and TypeScript (`SAFE_CEX_TYPESCRIPT_PATH` selects CI's isolate
 compiler). The oracle never regenerates Rust or blesses a changed expectation.
 See [gate evidence](GATE_EVIDENCE.md) for mutation checks and limitations.
 
-Variants stay inside this crate. The exchange and socket implementations remain
-pending. Coinbase's TS read retry classification is `networkErrorOnRead()`;
+Variants stay inside this crate. The production `CoinbaseExchange` binding composes the existing native class
+and socket bodies; see [binding gates](BINDING_GATES.md). Starbase stays inert. Coinbase's TS read retry classification is `networkErrorOnRead()`;
 placement tests must consume the centrally supplied Store implementation rather
 than inventing a venue-local Store.
 
@@ -215,7 +215,7 @@ ASN.1 tag/length conversion (including the source's truncated two-byte length),
 and SEC1-to-PKCS8 wrapping. The live signing-helper oracle asserts native strings
 and byte vectors at length boundaries and malformed PEM inputs. PEM decode failure
 returns a unit `CoinbasePemDecodeError`; its CHOSEN row records the discarded
-platform DOMException metadata. Key import and JWT signing remain pending.
+platform DOMException metadata. Production key import and JWT signing are supplied by `binding/crypto.rs` over shared ES256/Ed25519 primitives; native/WebCrypto tests cover the assembled signing host.
 The native identity inventory compares all 116 record field sets against the
 production Rust AST, including multiline nested types.
 
@@ -225,6 +225,6 @@ The JSON duplicate-key grammar now maps to `json_key_scanner.rs` method by metho
 
 `starbase_auth.rs` and `starbase_ws_controller.rs` port the inert auth and WebSocket lifecycle controllers. Native completion Promises preserve identity and queued reactions; polling a returned handle cannot drive its producer. Host spawners must poll producers to their first suspension, enqueue wakes as FIFO microtasks, and run without requiring callers to await. Promise reactions share a registration-ordered queue across observer callbacks and Future waiters. Source await continuations and async Promise adoption are explicit. Auth keeps raw validated JSON and shared cache aliases; activation retains mutable policy references and checks its generation after each awaited stage. The live `auth-session.cjs`/`ws-controller.cjs` oracles cover cache boundaries, ignored calls, overlap, policy readback and queued disconnects. No current exchange or socket is activated.
 
-Coinbase create/cancel and REST fallback bodies are mapped individually in `order_create.rs`: amount/price precision formatter, optimistic native Order carrier, own typed market resolver, hot Promise placement/cancellation, order polling/backoff and fresh WS/REST merging. Full Exchange assembly stays pending. Explicit receiver capabilities preserve operation boundaries; transport returns native hot Promises. `CoinbaseOrderResponse` retains a shared root and shallow object/array field identities; primitive info fields copy. Tests use the actual installed p-iteration implementation, decoded native values and source error/timing/alias probes. String response IDs and own genuine Market records are the declared typed boundary; inherited non-Market prototype outputs are excluded.
+Coinbase create/cancel and REST fallback bodies are mapped individually in `order_create.rs`: amount/price precision formatter, optimistic native Order carrier, own typed market resolver, hot Promise placement/cancellation, order polling/backoff and fresh WS/REST merging. Production Exchange assembly lives in `binding/`; its gate scope and remaining notification findings are recorded in `BINDING_GATES.md`. Explicit receiver capabilities preserve operation boundaries; transport returns native hot Promises. `CoinbaseOrderResponse` retains a shared root and shallow object/array field identities; primitive info fields copy. Tests use the actual installed p-iteration implementation, decoded native values and source error/timing/alias probes. String response IDs and own genuine Market records are the declared typed boundary; inherited non-Market prototype outputs are excluded.
 
 Public frame classification is complete in `starbase_public_frames.rs`, using `json_key_scanner.rs` before a guarded native JSON.parse bridge. Retain UTF16 strings/keys, f64 overflow/underflow/signed-zero, shared array/object payloads and primitive copies; serde Value cannot replace this data carrier. Context remains a plain typed JSON record. This module owns no socket or dispatch. Gates: `FRAME_CLASSIFICATION_GATES.md`.
