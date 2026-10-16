@@ -39,6 +39,7 @@ pub(super) fn install(g: &Js, weak: Weak<Shared>) -> Result<(), Thrown> {
         Js::object(entries.iter().map(|(k, v)| (*k, Js::str(v))).collect())
     };
     g.define("ENDPOINTS", table(&crate::types::ENDPOINTS))?;
+    g.define("BASE_WS_URL", table(&crate::types::BASE_WS_URL))?;
     g.define("INTERVAL", table(&crate::types::INTERVAL))?;
     macro_rules! enums {
         ($name:literal,$rows:expr) => {
@@ -510,75 +511,90 @@ async fn leverage(h: &Rt, r: &Js, name: &str, symbol: Js) -> Result<Js, Thrown> 
         value.map_or(Js::Null, Js::Number)
     })
 }
-async fn metadata(h: &Rt, r: &Js, symbols: Js, supplied: Js) -> Result<Js, Thrown> {
-    let symbols: Vec<String> = super::host::items(&symbols)?
-        .iter()
-        .map(text)
-        .collect::<Result<_, _>>()?;
-    let supplied = if supplied.is_undefined() {
-        None
-    } else {
-        Some(to_json(&supplied)?)
-    };
-    let supplied = supplied
-        .as_ref()
-        .map(|v| {
-            v.as_array()
-                .ok_or_else(|| Thrown::type_error("position snapshots must be an array"))
-        })
-        .transpose()?;
-    let snapshots = supplied
-        .map(|rows| {
-            rows.iter()
-                .map(|row| {
-                    Ok(crate::account_helpers::AccountPositionSnapshot {
-                        symbol: row["symbol"].as_str().ok_or_else(|| {
-                            Thrown::type_error("position symbol must be a string")
-                        })?,
-                        side: serde_json::from_value(row["side"].clone())
-                            .map_err(|e| Thrown::type_error(&e.to_string()))?,
-                        leverage_level: &row["leverageLevel"],
-                        position_type: &row["positionType"],
-                    })
-                })
-                .collect::<Result<Vec<_>, Thrown>>()
-        })
-        .transpose()?;
-    let owner = r.clone();
-    let disposed = r.clone();
-    let rows = crate::position_metadata::fetch_position_metadata(
-        &h.shared.extra.metadata,
-        &symbols,
-        snapshots.as_deref(),
-        move || {
-            let p = owner
-                .call_method("fetchBalanceAndPositionsRaw", vec![])
-                .map_err(|e| e.to_exchange_error())?;
-            Ok(async move {
-                let v = await_js(p).await.map_err(|e| e.to_exchange_error())?;
-                if v.is_undefined() {
-                    Ok(None)
-                } else {
-                    to_json(&v).map(Some).map_err(|e| e.to_exchange_error())
-                }
-            })
-        },
-        || disposed.get("isDisposed").is_ok_and(|v| v.truthy()),
-    )
-    .await
-    .map_err(exchange_error)?;
-    Ok(Js::array(
-        rows.iter()
+async fn metadata(h: &Rt, r: &Js, symbols: Js, mut supplied: Js) -> Result<Js, Thrown> {
+    let symbols = super::host::items(&symbols)?;
+    if !supplied.truthy() {
+        let map = r.get("positionMetadataBySymbol")?;
+        let mut missing = false;
+        for symbol in &symbols {
+            if !map.call_method("has", vec![symbol.clone()])?.truthy() {
+                missing = true;
+                break;
+            }
+        }
+        if missing {
+            let account = await_js(r.call_method("fetchBalanceAndPositionsRaw", vec![])?).await?;
+            supplied = r.call_method("getAccountPositionSnapshots", vec![account])?;
+        }
+    }
+    if supplied.truthy() {
+        let supplied = to_json(&supplied)?;
+        let rows = supplied
+            .as_array()
+            .ok_or_else(|| Thrown::type_error("position snapshots must be an array"))?;
+        let snapshots = rows
+            .iter()
             .map(|row| {
-                let v = row.borrow();
-                Ok(Js::object(vec![
-                    ("symbol", Js::str(&v.symbol)),
-                    ("side", from_typed(&v.side)?),
-                    ("leverage", Js::Number(v.leverage)),
-                    ("positionMode", from_typed(&v.position_mode)?),
-                    ("marginType", from_typed(&v.margin_type)?),
-                ]))
+                Ok(crate::account_helpers::AccountPositionSnapshot {
+                    symbol: row["symbol"]
+                        .as_str()
+                        .ok_or_else(|| Thrown::type_error("position symbol must be a string"))?,
+                    side: serde_json::from_value(row["side"].clone())
+                        .map_err(|e| Thrown::type_error(&e.to_string()))?,
+                    leverage_level: &row["leverageLevel"],
+                    position_type: &row["positionType"],
+                })
             })
-            .collect::<Result<_, Thrown>>()?,
-    ))
+            .collect::<Result<Vec<_>, Thrown>>()?;
+        let names = symbols.iter().map(text).collect::<Result<Vec<_>, _>>()?;
+        let owner = r.clone();
+        // Reuse the existing typed metadata computation for a supplied snapshot.
+        // The public JS Map, rather than this numeric bridge, owns retained aliases.
+        crate::position_metadata::fetch_position_metadata(
+            &h.shared.extra.metadata,
+            &names,
+            Some(&snapshots),
+            move || {
+                let p = owner
+                    .call_method("fetchBalanceAndPositionsRaw", vec![])
+                    .map_err(|e| e.to_exchange_error())?;
+                Ok(async move {
+                    let v = await_js(p).await.map_err(|e| e.to_exchange_error())?;
+                    if v.is_undefined() {
+                        Ok(None)
+                    } else {
+                        to_json(&v).map(Some).map_err(|e| e.to_exchange_error())
+                    }
+                })
+            },
+            || false,
+        )
+        .await
+        .map_err(exchange_error)?;
+        let map = Js::Map(Rc::new(RefCell::new(vec![])));
+        for (key, row) in h.shared.extra.metadata.borrow().iter() {
+            let v = row.borrow();
+            let value = Js::object(vec![
+                ("symbol", Js::str(&v.symbol)),
+                ("side", from_typed(&v.side)?),
+                ("leverage", Js::Number(v.leverage)),
+                ("positionMode", from_typed(&v.position_mode)?),
+                ("marginType", from_typed(&v.margin_type)?),
+            ]);
+            map.call_method("set", vec![Js::str(key), value])?;
+        }
+        r.set("positionMetadataBySymbol", map)?;
+    }
+    if r.get("isDisposed")?.truthy() {
+        return Ok(Js::array(vec![]));
+    }
+    let map = r.get("positionMetadataBySymbol")?;
+    let mut out = vec![];
+    for symbol in symbols {
+        let value = map.call_method("get", vec![symbol])?;
+        if value.truthy() {
+            out.push(value)
+        }
+    }
+    Ok(Js::array(out))
 }

@@ -260,7 +260,23 @@ impl TradingHost for Rt {
         matches!(v, Js::Null)
     }
     fn has(&self, v: Js, key: &str) -> Result<bool, Thrown> {
-        global_call(self, "Reflect.has", vec![v, Js::str(key)]).map(|x| x.truthy())
+        if !v.is_object() {
+            return Err(Thrown::type_error("right-hand side of in is not an object"));
+        }
+        let mut value = v;
+        loop {
+            if value.has_own(key) || (value.is_array() && key == "length") {
+                return Ok(true);
+            }
+            let next = match &value {
+                Js::Object(o) => o.proto.borrow().clone(),
+                _ => None,
+            };
+            match next {
+                Some(parent) => value = parent,
+                None => return Ok(false),
+            }
+        }
     }
     fn flat_map(&self, v: Js, mut f: impl FnMut(Js) -> Result<Js, Thrown>) -> Result<Js, Thrown> {
         let mut out = vec![];

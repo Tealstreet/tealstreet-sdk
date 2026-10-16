@@ -121,6 +121,21 @@ impl BitrueExchange {
                 )
                 .map_err(err)?;
         }
+        // The shared facade omits this optional worker RPC member. Delegate to
+        // the existing BaseExchange owner so its timeout/listener cleanup stays shared.
+        let weak = Rc::downgrade(&shared);
+        receiver.define("callMethodInWorker", Js::function("callMethodInWorker", move |_, a| {
+            let rt = safe_cex_exchange::js_runtime::scope::scope_of(&weak)?;
+            let venue = rt.shared.sockets.venue.borrow().as_ref().and_then(std::rc::Weak::upgrade)
+                .ok_or_else(|| Thrown::error("Error", "exchange is not assembled"))?;
+            let method = to_typed(&safe_cex_exchange::js_runtime::value::arg(&a, 0))?;
+            let args = a.iter().skip(1).map(safe_cex_exchange::js_runtime::value::to_json).collect::<Result<Vec<_>, _>>()?;
+            Ok(rt.spawn(Box::pin(async move {
+                let value = venue.base().call_method_in_worker(venue.as_ref(), method, args).await
+                    .map_err(|e| Thrown::new(safe_cex_exchange::js_runtime::value::from_json(&serde_json::json!({"name":e.name,"message":e.message,"response":e.metadata.response}))))?;
+                Ok(safe_cex_exchange::js_runtime::value::from_json(&value))
+            })))
+        })).map_err(err)?;
         *shared.exchange.borrow_mut() = receiver.clone();
         let venue = Rc::new(Self {
             rt: rt.with_this(receiver),
