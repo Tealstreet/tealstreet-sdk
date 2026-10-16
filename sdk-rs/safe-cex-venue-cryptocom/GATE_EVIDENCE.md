@@ -188,3 +188,6 @@ The override inventory additionally records15 Polymarket component/trait calls
 and four updated facade body hashes. Actual Polymarket source calls super.dispose
 only; its one native dispose arm now has reviewed source-super evidence. No
 Crypto.com source-super exception is introduced.
+
+The post-master strict host all-target and wasm library Clippy runs passed.
+Canonical parity passed7459 rows /17096 public Rust items on the merged tree.
