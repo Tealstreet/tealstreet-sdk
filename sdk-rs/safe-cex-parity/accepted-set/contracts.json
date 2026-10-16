@@ -117063,5 +117063,447 @@
         }
       }
     ]
+  },
+  "safe_cex_parity::accepted_source::fragment_named": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "fragment_named",
+      "signature": {
+        "inputs": [
+          [
+            "tokens",
+            {
+              "resolved_path": {
+                "path": "proc_macro2::TokenStream",
+                "args": null
+              }
+            }
+          ],
+          [
+            "fragment",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Native parity source scanner fragment_named: a tooling predicate over an already parsed macro token stream and a requested fragment name. Independent macro-grammar cases cover a colon-bound item fragment, nested groups, a different fragment, and an unbound identifier; this is no SDK wire-decoder claim.",
+    "call": "serde_json::json!($type($value[\"tokens\"].as_str().unwrap().parse::<proc_macro2::TokenStream>().unwrap(), $value[\"fragment\"].as_str().unwrap()))",
+    "cases": [
+      {
+        "input": {
+          "tokens": "($value:item)",
+          "fragment": "item"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "tokens": "({($value:item)})",
+          "fragment": "item"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "tokens": "($value:expr)",
+          "fragment": "item"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "tokens": "item",
+          "fragment": "item"
+        },
+        "output": false
+      }
+    ]
+  },
+  "safe_cex_parity::accepted_source::local_types_with_recipes": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "local_types_with_recipes",
+      "signature": {
+        "inputs": [
+          [
+            "path",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "std::path::Path",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "macro_origins",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "std::collections::hash::set::HashSet",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "module_recipes",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_parity::accepted_source::ModuleRecipes",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "safe_cex_parity::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "tuple": [
+                                    {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    },
+                                    {
+                                      "primitive": "usize"
+                                    },
+                                    {
+                                      "primitive": "usize"
+                                    }
+                                  ]
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Native source-tooling local_types_with_recipes executes the production file scanner with reviewed fixed macro recipes. The existing independently authored local_types coordinate witnesses also apply to its delegated empty-recipe path; one additional literal-expression recipe exercises the supplied recipe map. Actual decoded local declaration names/positions and parser failure are observed; no universal macro-expansion claim.",
+    "call": "{ let source=$value[\"source\"].as_str().unwrap(); let mut recipes=crate::accepted_source::ModuleRecipes::new(); for row in $value[\"recipes\"].as_array().unwrap() { recipes.insert(row[0].as_str().unwrap().to_owned(),row[1].as_str().unwrap().parse::<proc_macro2::TokenStream>().unwrap()); } let path=std::env::temp_dir().join(format!(\"safe-cex-accepted-local-types-{}-{}.rs\",std::process::id(),std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_nanos())); let mut file=std::fs::OpenOptions::new().write(true).create_new(true).open(&path).unwrap(); std::io::Write::write_all(&mut file,source.as_bytes()).unwrap(); drop(file); let result=$type(&path,&std::collections::HashSet::new(),&recipes); std::fs::remove_file(&path).unwrap(); match result { Ok(rows)=>serde_json::json!({\"ok\":true,\"rows\":rows}),Err(_)=>serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": {
+          "source": "fn outer() {\n    struct Alpha;\n    enum Beta { Left, Right }\n}\n",
+          "recipes": []
+        },
+        "output": {
+          "ok": true,
+          "rows": [
+            [
+              "Alpha",
+              2,
+              17
+            ],
+            [
+              "Beta",
+              3,
+              29
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "source": "struct ModuleOnly;\nfn outer() {\n    struct Delta;\n}\n",
+          "recipes": []
+        },
+        "output": {
+          "ok": true,
+          "rows": [
+            [
+              "Delta",
+              3,
+              17
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "source": "fn invalid(",
+          "recipes": []
+        },
+        "output": {
+          "ok": false
+        }
+      },
+      {
+        "input": {
+          "source": "fn outer() { reviewed!(); }",
+          "recipes": [
+            [
+              "reviewed",
+              "true"
+            ]
+          ]
+        },
+        "output": {
+          "ok": true,
+          "rows": []
+        }
+      }
+    ]
+  },
+  "parity_trait_inventory::collect": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "collect",
+      "signature": {
+        "inputs": [
+          [
+            "items",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "syn::item::Item",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "prefix",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "output",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::collections::btree::map::BTreeMap",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "resolved_path": {
+                                "path": "alloc::string::String",
+                                "args": null
+                              }
+                            }
+                          },
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": null,
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "evidence": "Native parity-trait-inventory AST collector writes qualified public trait/member identities into its actual output map. Independent parsed-Rust fixtures cover trait/type namespace separation, private and cfg(test) exclusion, and nested modules. The adapter supplies an AST; it makes no claim that collect parses malformed source or proves SDK runtime behavior.",
+    "call": "{ let ast=syn::parse_file($value[\"source\"].as_str().unwrap()).unwrap(); let mut output=std::collections::BTreeMap::new(); $type(&ast.items,$value[\"prefix\"].as_str().unwrap(),&mut output); serde_json::json!(output) }",
+    "cases": [
+      {
+        "input": {
+          "source": "pub trait Host { type Value; const LIMIT: usize; fn send(&self); } pub struct Receiver; impl Receiver { pub fn send(&self) {} }",
+          "prefix": "fixture.rs::"
+        },
+        "output": {
+          "fixture.rs::Host": "trait",
+          "fixture.rs::Host::Value": "trait-member",
+          "fixture.rs::Host::LIMIT": "trait-member",
+          "fixture.rs::Host::send": "trait-member"
+        }
+      },
+      {
+        "input": {
+          "source": "trait Restricted { fn send(&self); } #[cfg(test)] pub trait Hidden { fn send(&self); } mod nested { pub trait Host { fn close(&self); } }",
+          "prefix": "nested.rs::"
+        },
+        "output": {
+          "nested.rs::nested::Host": "trait",
+          "nested.rs::nested::Host::close": "trait-member"
+        }
+      },
+      {
+        "input": {
+          "source": "#[cfg(test)] mod ignored { pub trait TestOnly {} } pub struct Host;",
+          "prefix": "empty.rs::"
+        },
+        "output": {}
+      }
+    ]
+  },
+  "safe_cex_parity::accepted_source::ModuleRecipes": {
+    "category": "non-decoder",
+    "evidence": "The actual concrete native compiler alias is HashMap<String, proc_macro2::TokenStream>. Ordinary alias probes must verify the selected HashMap/String sysroot and proc_macro2 artifact identities and execute Deserialize/alternate-conversion trait detection on this exact map; no generic alias or exemption-category bypass is used.",
+    "reason": "This source-analyzer recipe table stores already parsed opaque Rust macro token streams by macro name. It is not an input parser or SDK wire representation; the native trait probes enforce that this exact alias exposes no raw decoder traits.",
+    "target": {
+      "resolved_path": {
+        "path": "std::collections::hash::map::HashMap",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "proc_macro2::TokenStream",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "std::collections::hash::map::HashMap",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::string::String",
+                    "args": null
+                  }
+                }
+              },
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "proc_macro2::TokenStream",
+                    "args": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rs": "safe-cex-parity/src/accepted_source.rs::ModuleRecipes",
+    "exemption": "Exact native parity source-analysis helper declaration for the module macro recipe table; outside SDK public source-row accounting. This declaration claim does not exempt runtime alias trait probes or authorize other compiler maps."
   }
 }

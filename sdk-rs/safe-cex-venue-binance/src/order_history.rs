@@ -1,3 +1,4 @@
+use crate::private_event_value::EventOps;
 use safe_cex_num::{JsCoercionError, ProtoMember, js_string, parse_float};
 use serde_json::Value;
 
@@ -77,7 +78,7 @@ pub fn map_binance_historical_order_typed(
     // Run the complete source body before applying the requested output model.
     for field in ["type", "status", "positionSide"] {
         if let EventValue::Builtin(reference) = result
-            .get(field)
+            .read(field)
             .map_err(BinanceHistoricalOrderError::Native)?
             && let safe_cex_num::BuiltinIdentity::Object(member) = reference.member()
         {
@@ -86,17 +87,12 @@ pub fn map_binance_historical_order_typed(
     }
     // The typed optional fields deserialize a present value as T. Native own
     // undefined denotes an absent optional value at this explicit projection.
-    let EventValue::Object(record) = result else {
-        unreachable!("canonical history returns a record")
-    };
-    let record = record.borrow();
     let projected = EventValue::object_in_realm(
-        record.realm.clone(),
-        record
-            .fields
-            .iter()
+        realm,
+        result
+            .spread()
+            .into_iter()
             .filter(|(_, value)| !matches!(value, EventValue::Undefined))
-            .map(|(key, value)| (key.clone(), value.clone()))
             .collect(),
     );
     crate::class_decode::decode(projected)

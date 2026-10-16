@@ -81,4 +81,8 @@ test('alias evidence resolves compiler identity and source evidence rejects path
 test('CLI refuses contract destinations and duplicate flags before running Cargo', () => {
   assert.throws(() => main(['--crate=x', '--crate=y', '--census=x']), /duplicate --crate/);
   assert.throws(() => main(['--crate=x', '--census=x', `--out=${path.resolve('sdk-rs/safe-cex-parity/accepted-set/contracts.json')}`]), /output must be outside/);
+  for (const jobs of ['0', '3', '-1', '1.5', '01', 'unlimited']) {
+    assert.throws(() => main(['--crate=x', '--census=missing.json', `--jobs=${jobs}`]), /--jobs must be 1 or 2/);
+  }
+  assert.throws(() => main(['--crate=x', '--census=x', '--jobs=1', '--jobs=2']), /duplicate --jobs/);
 });

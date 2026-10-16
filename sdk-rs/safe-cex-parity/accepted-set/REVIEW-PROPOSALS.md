@@ -14,6 +14,12 @@ stdout. The helper runs fresh native/default rustdoc for the selected package's
 production targets. It reads the census, compiler declarations, source bodies
 and current classifications. It never writes contract or source files.
 
+Read the selected crate's nearest `CLAUDE.md` before running Cargo. The helper
+defaults to two Cargo jobs; add `--jobs=1` for crates such as Bitunix and Blofin
+that require one. This sets both the Cargo environment and rustdoc job flag.
+Targets run sequentially. Follow any crate restriction on concurrent Cargo
+processes when scheduling other commands alongside the helper.
+
 Each proposal includes the exact compiler owner/API, source spans and file
 hashes, bounded source excerpts, candidate classifications and required native
 witnesses. Text references in maintained test files are suggestions to inspect;

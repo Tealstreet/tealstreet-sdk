@@ -720,6 +720,138 @@
     "file": "safe-cex-transport/src/how.rs"
   },
   {
+    "function": "new",
+    "body": "c023da4e81457c3c",
+    "call": "v . start ()",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "new",
+    "body": "c023da4e81457c3c",
+    "call": "v . fetch_historical_fills (o)",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "start",
+    "body": "3b9b41079766f3f0",
+    "call": "self . inner . start ()",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "get_account",
+    "body": "bea3ae2cf5b554a5",
+    "call": "self . inner . get_account ()",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "validate_account",
+    "body": "21d6409e6242f98f",
+    "call": "self . inner . validate_account ()",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_positions",
+    "body": "09e8725679583b60",
+    "call": "self . inner . fetch_positions ()",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_orders",
+    "body": "7832b5a24387ea0f",
+    "call": "self . inner . fetch_orders ()",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_markets",
+    "body": "3cc6d76dc2fd73d5",
+    "call": "self . inner . fetch_markets ()",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "set_leverage",
+    "body": "bd59e5d8669cc091",
+    "call": "self . inner . set_leverage (& symbol , leverage)",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "update_order",
+    "body": "0e675b5c50a5ef96",
+    "call": "self . inner . update_order (& opts)",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "cancel_orders",
+    "body": "99f9ff4f6a605d7b",
+    "call": "self . inner . cancel_orders (& orders)",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "cancel_symbol_orders",
+    "body": "f255ac4da7979552",
+    "call": "self . inner . cancel_symbol_orders (& symbol , true)",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_ohlcv",
+    "body": "97c42be004f94c41",
+    "call": "self . inner . fetch_ohlcv (& opts)",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "fetch_historical_fills",
+    "body": "640557ed68bf49d6",
+    "call": "self . inner . fetch_historical_fills (& opts , & safe_cex_num :: JsJsonValue :: Undefined)",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "dd8c2f764666b712",
+    "call": "self . inner . listen_ohlcv (opts , Rc :: new (move | c | { callback (c) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "7b30598bae5c96d7",
+    "call": "self . inner . listen_order_book (& symbol , Rc :: new (move | b | { callback (b) ; Ok (()) }) ,)",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "dispose",
+    "body": "67b7be64939e56d3",
+    "call": "self . inner . dispose ()",
+    "file": "safe-cex-venue-apexomni/src/binding/exchange.rs"
+  },
+  {
+    "function": "dispose_websocket",
+    "body": "43a52922c39d41c4",
+    "call": "body . dispose ()",
+    "file": "safe-cex-venue-apexomni/src/binding/hosts.rs"
+  },
+  {
+    "function": "dispose_websocket",
+    "body": "43a52922c39d41c4",
+    "call": "body . host . dispose ()",
+    "file": "safe-cex-venue-apexomni/src/binding/hosts.rs"
+  },
+  {
+    "function": "public_data_only",
+    "body": "2b6767b032fae823",
+    "call": "self . base () . can_sign ()",
+    "file": "safe-cex-venue-apexomni/src/binding/hosts.rs"
+  },
+  {
+    "function": "listen_ohlcv",
+    "body": "2b934a0aad429b6d",
+    "call": "body . listen_ohlcv (opts , callback)",
+    "file": "safe-cex-venue-apexomni/src/binding/hosts.rs"
+  },
+  {
+    "function": "listen_order_book",
+    "body": "40d05de82c291474",
+    "call": "body . listen_order_book (symbol , callback)",
+    "file": "safe-cex-venue-apexomni/src/binding/hosts.rs"
+  },
+  {
     "function": "dispose",
     "body": "3ef4aa241028250c",
     "call": "self . base . dispose ()",
@@ -787,7 +919,7 @@
   },
   {
     "function": "throttle_fetch_positions",
-    "body": "19892d4a9e71e7bf",
+    "body": "6745f762c5e9276d",
     "call": "owner . parent . fetch_positions ()",
     "file": "safe-cex-venue-apexomni/src/ws_private.rs"
   },
@@ -1459,31 +1591,31 @@
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . fetch_markets ()",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . fetch_tickers ()",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . fetch_ohlcv (arg (0))",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . validate_account ()",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
     "function": "execute",
-    "body": "94f2238d931ce4d8",
+    "body": "53be547aa0d5e0d4",
     "call": "self . set_leverage (arg (0) . text () ? , arg (1) . number () ?)",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
@@ -1495,8 +1627,8 @@
   },
   {
     "function": "capture_store",
-    "body": "8263f22d1eb3da94",
-    "call": "owner . base . store . update_order (& arg (0) . get (\"id\") ? . text () ? , & patch (& arg (1)) ?)",
+    "body": "afa7a6dd7df55092",
+    "call": "owner . base . store . update_order (& arg (0) . read (\"id\") ? . text () ? , & patch (& arg (1)) ?)",
     "file": "safe-cex-venue-binance/src/exchange_classes.rs"
   },
   {
@@ -1639,13 +1771,13 @@
   },
   {
     "function": "start_fetch_throttled",
-    "body": "facdc5e46a2b7abc",
+    "body": "5c89d8e2e902ba2c",
     "reference": "class_jobs :: start",
     "file": "safe-cex-venue-binance/src/private_classes.rs"
   },
   {
     "function": "start_fetch_throttled",
-    "body": "facdc5e46a2b7abc",
+    "body": "5c89d8e2e902ba2c",
     "call": "retained . parent . fetch_orders ()",
     "file": "safe-cex-venue-binance/src/private_classes.rs"
   },
@@ -3487,79 +3619,79 @@
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: startup :: start",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: account :: get_account",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: account :: validate_account",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: controls :: set_leverage",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: controls :: change_position_mode",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: controls :: change_margin_type",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: markets :: fetch_markets",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: markets :: fetch_tickers",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: amend :: update_order",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "members :: cancel :: cancel_orders",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "snapshot :: fetch_orders",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "snapshot :: fetch_positions",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
   {
     "function": "install",
-    "body": "711c716ab03d25ff",
+    "body": "8adb93f50b6745a7",
     "reference": "snapshot :: fetch_and_set_private_snapshot",
     "file": "safe-cex-venue-bybit/src/binding/receiver.rs"
   },
@@ -3912,6 +4044,144 @@
     "file": "safe-cex-venue-grvt/src/api_runtime.rs"
   },
   {
+    "function": "capabilities",
+    "body": "f1784f0ab105e573",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-grvt/src/binding/exchange.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "account_runtime :: start",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "account_runtime :: validate_account",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "account_runtime :: fetch_positions",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: snapshots :: fetch_tickers",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: markets :: fetch_markets",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: snapshots :: get_account",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: markets :: refresh_markets",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: data_reads :: fetch_ohlcv",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "225a55b9f6dc8217",
+    "reference": "crate :: order_controls :: update_order",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "leverage",
+    "body": "23354b8fe9f1bb22",
+    "reference": "crate :: data_reads :: fetch_leverage_for_symbol",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "leverage",
+    "body": "23354b8fe9f1bb22",
+    "reference": "crate :: data_reads :: set_leverage",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "cancel",
+    "body": "df492b2c349de2fa",
+    "reference": "crate :: order_controls :: cancel_all_orders",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "cancel",
+    "body": "df492b2c349de2fa",
+    "reference": "crate :: order_controls :: cancel_symbol_orders",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "cancel",
+    "body": "df492b2c349de2fa",
+    "reference": "crate :: order_controls :: cancel_orders",
+    "file": "safe-cex-venue-grvt/src/binding/methods.rs"
+  },
+  {
+    "function": "base_dispose",
+    "body": "b2aa969d67d9f790",
+    "call": "base . dispose ()",
+    "file": "safe-cex-venue-grvt/src/binding/private.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "410c8dd347199725",
+    "call": "self . state . dispose (Js :: truthy , | timer | { self . host () . map_err (| e | e . to_exchange_error ()) ? . 0 . clear_timeout (timer) ; Ok (()) } , | | self . base_dispose () . map_err (| e | e . to_exchange_error ()) ,)",
+    "file": "safe-cex-venue-grvt/src/binding/private.rs"
+  },
+  {
+    "function": "start",
+    "body": "8a137f7d83260a76",
+    "reference": "SessionHost :: start",
+    "file": "safe-cex-venue-grvt/src/binding/private.rs"
+  },
+  {
+    "function": "start",
+    "body": "5d4187128ebb297c",
+    "reference": "SessionHost :: start",
+    "file": "safe-cex-venue-grvt/src/binding/private.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "7556ca4f8a627410",
+    "reference": "public_feeds :: listen_ohlcv",
+    "file": "safe-cex-venue-grvt/src/binding/public.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "7556ca4f8a627410",
+    "reference": "public_feeds :: listen_order_book",
+    "file": "safe-cex-venue-grvt/src/binding/public.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "7556ca4f8a627410",
+    "reference": "public_lifecycle :: dispose",
+    "file": "safe-cex-venue-grvt/src/binding/public.rs"
+  },
+  {
+    "function": "invoke",
+    "body": "7556ca4f8a627410",
+    "call": "base . dispose ()",
+    "file": "safe-cex-venue-grvt/src/binding/public.rs"
+  },
+  {
     "function": "get_connected_wallet_address",
     "body": "92c2f8c3a7e70fb8",
     "call": "host . start (Box :: pin (async move { let ethereum = get_ethereum_provider (h . as_ref ()) ? ; if ! h . truthy (& ethereum) { return Ok (h . null ()) ; } let result : JsResult < H :: Value > = async { let provider = h . browser_provider (& ethereum) ? ; let accounts = h . provider_send (& provider , \"eth_accounts\" , h . array (vec ! [])) ? . await ? ; let first = h . property (& accounts , \"0\") ? ; Ok (if h . truthy (& first) { first } else { h . null () }) } . await ; match result { Ok (v) => Ok (v) , Err (_) => Ok (h . null ()) , } }))",
@@ -4009,7 +4279,7 @@
   },
   {
     "function": "dispose",
-    "body": "45a8a8dba45efd57",
+    "body": "a57c48d8faa866ff",
     "call": "self . base . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/binding.rs"
   },
@@ -4345,13 +4615,19 @@
   },
   {
     "function": "base_exchange_class",
-    "body": "f16535160061e222",
+    "body": "d0b3260d4e9cb7dc",
     "call": "b . dispose ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
   {
     "function": "base_exchange_class",
-    "body": "f16535160061e222",
+    "body": "d0b3260d4e9cb7dc",
+    "call": "b . can_sign ()",
+    "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
+  },
+  {
+    "function": "base_exchange_class",
+    "body": "d0b3260d4e9cb7dc",
     "call": "b . name ()",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_exchange.rs"
   },
@@ -4363,7 +4639,7 @@
   },
   {
     "function": "store_object",
-    "body": "48f2b1686705ce57",
+    "body": "13a244caa990fb9f",
     "call": "s . update_order (& id , & changes)",
     "file": "safe-cex-venue-hyperliquid/src/realm/facade_store.rs"
   },
@@ -4474,6 +4750,12 @@
     "body": "2d287c9ee82edad0",
     "reference": "helper_tasks :: start",
     "file": "safe-cex-venue-hyperliquid/src/spot_account_reads.rs"
+  },
+  {
+    "function": "new",
+    "body": "15c83f5cece8b548",
+    "call": "venue . start ()",
+    "file": "safe-cex-venue-hyperliquid/src/spot_binding.rs"
   },
   {
     "function": "wait_for_token",

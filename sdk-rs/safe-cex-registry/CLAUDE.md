@@ -103,8 +103,11 @@ to the venue's declared fold/reported path, preserving account and time bounds.
 It must not inherit a TS wrapper's default rejection for a supported venue method.
 
 GRVT is constructed by the Rust table through `RustVenueHost::grvt`, with a fresh
-terminal HTTP host and the common public-data provider. Active GRVT SDK signing
-uses its local wallet; the native hosted-signer host refuses this venue visibly.
+terminal HTTP host and the common public-data provider. Its HTTP clients receive
+the shared hosted signer, including untagged public requests. Active GRVT SDK
+order signing still requires its local wallet; the hosted HTTP capability does
+not replace it. The hosted signer witness compares live source request inputs,
+real HTTP headers, callback refusal and the pre-HTTP SDK wallet guard.
 The registry construction test reads actual GRVT public-gateway market data.
 BingX is constructed by `rust_constructor` through its shared-js_runtime binding.
 The native host supplies a fresh HTTP host and the common gateway factory; remote
@@ -139,3 +142,9 @@ Kraken Futures/Spot native inputs use the shared hosted signer bridge for privat
 HTTP and Futures websocket challenges. Both retain the hosted account name with
 empty local secrets. The native witness verifies signed HTTP bytes and challenge
 subscription fields; the account metadata comes from live injected options.
+
+ApexOmni now has its own Rust table entry and native host factory. It uses the
+shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
+`tests/native_host_apexomni.rs` covers signed startup, placement, private WS order
+delivery and cancellation over local native transports; its constructor-removal
+control lives in the venue's scripts/registry-control.py.

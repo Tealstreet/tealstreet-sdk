@@ -1,5 +1,21 @@
 # Accepted-set gate evidence
 
+## Native source-tooling contract additions
+
+On source base `04171f4f19`, all production targets in `safe-cex-parity`
+produced 32 native/default receipts: 20 runtime results and 12 classifications.
+The new `fragment_named`, `local_types_with_recipes` and
+`parity_trait_inventory::collect` contracts execute actual native operations
+against independently authored token/file/AST witnesses. The concrete
+`ModuleRecipes` alias executes ordinary compiler identity and decoder/conversion
+trait probes; its exact native-tooling declaration claim does not skip them.
+
+All four new contracts pass. The package's five existing positional-array defect
+owners match the scoped standing ledger exactly, with no new or stale scoped
+shape failures. A plain package run reports those five known defects; the scoped
+ratchet comparison passes. This is native tooling evidence, not a full workspace
+or feature/wasm matrix result. The ledger and production Rust sources are unchanged.
+
 ## Initial native census
 
 Base: `7fcffd57e8`, branch `feat/rust-accepted-set-gate`. All 26 venue crates

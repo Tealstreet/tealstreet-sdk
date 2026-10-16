@@ -1,4 +1,5 @@
 //! Binance-family public event bodies over decoded live event arrays.
+use crate::private_event_value::EventOps;
 use safe_cex_exchange::runtime::ExchangeError;
 use safe_cex_num::get_key::{GetKeyUnknownValue, v_unknown};
 use serde_json::Value;
@@ -39,6 +40,7 @@ impl PublicEventArray for crate::private_event_value::EventArray {
             self.borrow()
                 .get(index)
                 .cloned()
+                .flatten()
                 .unwrap_or(crate::private_event_value::EventValue::Undefined),
         )
     }
@@ -112,7 +114,7 @@ fn json_parse_field(event: &PublicEvent, key: &str) -> Result<f64, Failure> {
 pub(crate) fn symbol_key(event: &PublicPayload) -> Result<String, Failure> {
     match event {
         PublicPayload::Json(v) => json_symbol_key(v),
-        PublicPayload::Native(v) => v.get("s")?.text(),
+        PublicPayload::Native(v) => v.read("s")?.text(),
     }
 }
 pub(crate) fn parse_field(event: &PublicPayload, key: &str) -> Result<f64, Failure> {
