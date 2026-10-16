@@ -1499,8 +1499,10 @@ manifest mapping or exemption changed.
 
 The maintained global gate previously passed **7459 rows / 17204 public Rust
 items**; the seven-file source extractor independently passed **83 symbols**.
-Final integrated structural counts are recorded below. These gates validate
-metadata claims, not behavioral parity.
+After integrating master f3691e05a6, the repaired Kraken wrapper passes
+**134 rows / 539 public Rust items** with no exemptions, and the freshly built
+global checker passes **7459 rows / 17204 public Rust items**. These gates
+validate metadata claims, not behavioral parity.
 
 Read-only independent review found no actionable issue in the production fix,
 native fixture, selected probe, contract or mutation/restoration controller.
@@ -1512,3 +1514,11 @@ wasm32-unknown-unknown all-targets Clippy runs passed with warnings denied. The
 changed parity tooling also passed native all-targets Clippy with warnings denied.
 These compile checks do not extend the one-owner native/default accepted proof
 to wasm behavior or other accepted owners.
+
+
+Integration `354acaa8b28435d975b2051303581a21198dc9cc` preserves the exact
+validated Kraken source/tests, parity CLI source/tests, Cargo manifests/lock,
+shared native dependencies and Kraken TypeScript oracle inputs. The full native
+and host/wasm Clippy receipts therefore remain applicable without repeating
+unchanged tests. Frozen installation and all-workspace formatting pass after
+integration; the selected production probe is rerun independently.
