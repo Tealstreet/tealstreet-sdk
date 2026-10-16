@@ -18,6 +18,14 @@ not represented; the future REST slice must retain raw responses separately for
 `info`, including unknown fields. These codecs cover declared response shapes,
 not arbitrary malformed JavaScript objects.
 
+Each response record, including the internal combined-instrument pair, guards
+its concrete `Deserialize` entrypoint with `strict_decode::object`. Private Serde
+remote companions retain the original field names, order and custom cash-array
+decoder for both serialization and decoding. The guard rejects complete positional
+arrays; it does not add a second numeric capture or change the existing shared
+numeric-ingress pipeline. Decoder mutation controls select the remote schemas so
+the public data fields cannot mask a mutation of the actual decoder.
+
 Constants representing source objects retain source entry order as key/value
 slices. Open-string consumers must use `safe_cex_num::js_table_lookup`, including
 its inherited-member result, rather than assuming absent own keys are undefined.

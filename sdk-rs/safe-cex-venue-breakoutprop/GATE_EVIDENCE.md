@@ -454,3 +454,48 @@ The expanded portfolio_reads target has six passing tests. Strict host and wasm
 clippy were rerun separately after adding this witness. Production is unchanged
 from the six successful mutation/restore pairs. The prior 11 tests are unchanged
 from their slice-boundary passing run; no newer full-suite measurement is claimed.
+
+### Accepted-contract review: concrete response object ingress
+
+The selected native/default census contains 55 owners and seven aliases before
+integration of the production binding in PR #193. Independently authored
+contracts cover those exact 62 keys. The focused production runner emitted 41
+runtime results and 21 explicit classification receipts. These selected results
+do not establish dependency discovery, new binding owners or the feature/wasm
+matrix. Ordinary scoped discovery initially refused a stale shared Exchange
+receiver source pin; PR #263 repairs that pin separately.
+
+All 23 existing record decoders (22 public response records and private
+`quotes::Combined`) accepted otherwise valid complete positional arrays before
+repair. The executed baseline reported exactly 46 native mismatches: each record's
+Value and raw-text full-array cases expected refusal but observed actual decoded
+fields. Positive objects, scalar/null refusal and the other runtime cases passed.
+Applying object guards through private remote Serde schemas gave zero failures
+across the same 62 selected receipts, with unchanged compiler owner/alias counts.
+The shared numeric ingress pipeline and custom cash-transaction decoder remain
+in place. Native number projections compare binary64 bits, with raw-text cases
+retaining signed zero through contract loading.
+
+Each guard then had its own isolated compiled control: remove only the concrete
+`strict_decode::object(...)` wrapper, require both named full-array native
+observations to fail, restore exact source bytes, and require a passing native
+receipt. All 23 removal/restoration pairs passed; compilation failures were not
+accepted as controls. The formatted multiline InstrumentDetailsResponse call
+initially stopped the control selector before mutation; its whitespace-preserving
+selector was corrected and its actual failure/restoration pair then passed.
+
+The controls used fresh real compiler declarations and `runProbes(..., {target:
+"native", features: [], jobs: 1})`. For repeated body-only controls, all production
+source bytes were checked against that baseline or exactly the named guard
+removal, preserving declaration spans and line counts. This reuse conveys no
+ordinary discovery or matrix permission. Final restoration compared every venue
+production Rust file byte-for-byte with the guarded baseline.
+
+Reproduce an individual control by removing only that owner's object wrapper,
+leaving its remote schema intact, and running its production accepted-set probes;
+the `nativeObservation` complete-array Value/text cases must report expected
+`{"ok":false}` versus observed `{"ok":true,...}`. Restore and rerun. Decoder-field
+mutation selectors now target the remote schemas, including exactly 13 typed Vec
+fields rather than the duplicate public data-field declarations. Their runtime
+corpora and the broader crate gates still need a post-integration run before this
+PR is ready.
