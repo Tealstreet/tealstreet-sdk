@@ -217,5 +217,10 @@
     "category": "non-decoder",
     "reason": "Reviewed external_provider_object::unsubscribe: wraps an existing ListenerCleanup in a single-consumption RefCell slot and exposes a zero-argument native function. Invoking it takes the existing cleanup and forwards its result; it accepts no serialized model input and constructs no decoded domain value.",
     "sourceSha256": "be2fb9f5f1e5aeac3575f3c0200739d02c297eba13f5fc8b8411de1bd1c9db8b"
+  },
+  "safe-cex-venue-grvt/src/binding/private.rs::LOCAL_FUNCTION:equal": {
+    "category": "non-decoder",
+    "reason": "Inside PrivateFeedHost::loose_number_equal: compares an existing native Js operand with an existing f64 operand and returns only boolean equality or the original coercion error. Undefined/null are false, Number uses numeric equality, BigInt compares finite integral Number values with canonical zero, String/Bool delegate to_number and objects delegate to_primitive before recursive comparison. This is the protocol code1000 control-flow predicate, not protocol record/model admission. The native_numeric_comparison_keeps_zero_coercion_and_original_errors test executes nineteen actual trait calls, including source1000 cases, signed zero, object coercion count and original thrown-object identity. The complete Private owner retains its independent compiler-selected API and runtime evidence obligations.",
+    "sourceSha256": "b29d3d6078f9ce5424d0c5d76ccbf538ff21b66c38b4658c167c1dc2d1037d5e"
   }
 }

@@ -123,6 +123,11 @@ general borrowed guard, key ownership or lifetime has changed.
 
 The stored total is 81 keys: 63 nominal/function owners and eighteen aliases.
 Remaining GRVT work is 119 nominal/function owners and Fields, with nested/local
-discovery tracked separately. After the import-origin repair, ordinary source
-discovery next refuses the unclassified nested equality function in
-binding/private.rs. This batch does not claim whole-crate gate completion.
+discovery tracked separately. The nested equality function in binding/private.rs
+has an exact non-decoder comparison classification, pinned to the reviewed whole
+file. It returns boolean equality or the original coercion error for already
+supplied native operands; it does not admit a protocol model. The native numeric
+comparison test executes nineteen trait calls, including signed zero, the source
+code1000 cases, object coercion count and original thrown-object identity. The
+complete Private owner retains its separate API obligations. This batch does not
+claim whole-crate gate completion.
