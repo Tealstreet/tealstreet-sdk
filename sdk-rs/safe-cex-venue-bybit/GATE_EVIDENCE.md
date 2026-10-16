@@ -4062,3 +4062,8 @@ registry tests, seven cancellation and six override checks pass. Final host and
 wasm clippy pass with warnings denied. Parity passes at 7459 rows/17204 public
 Rust items; the extractor still reports zero changes and all 88 layer checks
 pass. No venue production body changed in this master integration.
+
+The subsequent master 7fa2134823 merge preserves #315's per-crate policy shards
+byte-identically and adds no Bybit production or inventory change. All three
+Bybit native construction tests pass again after the MEXC host integration;
+parity and extractor remain green. No removed flat policy file is restored.
