@@ -58,6 +58,9 @@ controls and remaining scope are recorded in ACCEPTED_CONTRACT_REVIEW.md.
 their source/native witnesses. The selected runner and six compiled controls
 retain the separate obligations of lexical ordinary `Wire` decoders.
 
+`DECISION_CONTRACT_REVIEW.md` records eight account/exchange decision contracts,
+their 98 fixed TS/native observations and five isolated compiled controls.
+
 `native_exchange::AsterDEXExchange` implements Exchange on the shared js_runtime.
 Its private `binding` module supplies the existing RuntimeHost/AssemblyHost,
 AccountFetch/OrderExecution and public/private stream bodies; it never evaluates

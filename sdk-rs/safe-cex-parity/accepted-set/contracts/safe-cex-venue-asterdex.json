@@ -4428,5 +4428,1564 @@
     "category": "non-decoder",
     "reason": "The registry-supplied Rc factory receives a typed ExchangeOptions reference and returns an existing JsHttpHost handle or ExchangeError. It constructs a native dependency after options decoding, rather than decoding a JSON/string factory capability. Native probes check actual factory type/trait absence without constructing a client.",
     "evidence": "Reviewed safe-cex-venue-asterdex/src/native_exchange.rs::AsterDEXHttpFactory and its local consumers. The native gate verifies full compiler inventory, all selected external roots against actual check artifacts/sysroot, invariant type equality for fixed generic aliases, and actual Deserialize plus seven raw conversion traits. This is an individual capability classification, with no blanket source/receiver exemption."
+  },
+  "safe_cex_venue_asterdex::account_helpers::parse_finite_number": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_finite_number",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::option::Option",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.get(\"value\")).map(|n| format!(\"{:016x}\", n.to_bits())))",
+    "cases": [
+      {
+        "input": {},
+        "output": null
+      },
+      {
+        "input": {
+          "value": null
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": false
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": true
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": []
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": [
+            1
+          ]
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": {}
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": ""
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": " \t﻿"
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": ""
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": "12abc"
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": "Infinity"
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": "1e309"
+        },
+        "output": null
+      },
+      {
+        "input": {
+          "value": 0
+        },
+        "output": "0000000000000000"
+      },
+      {
+        "input": {
+          "value": -1
+        },
+        "output": "bff0000000000000"
+      },
+      {
+        "input": {
+          "value": 1.25
+        },
+        "output": "3ff4000000000000"
+      },
+      {
+        "input": {
+          "value": "-0"
+        },
+        "output": "8000000000000000"
+      },
+      {
+        "input": {
+          "value": " 0x10 "
+        },
+        "output": "4030000000000000"
+      },
+      {
+        "input": {
+          "value": "1e2"
+        },
+        "output": "4059000000000000"
+      },
+      {
+        "input": {
+          "value": " 1.25 "
+        },
+        "output": "3ff4000000000000"
+      }
+    ],
+    "evidence": "asterdex.ws-private.ts:330-335: only finite Number/string values, rejecting whitespace-only strings, booleans and containers. Observe actual binary64 bits including negative zero. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API."
+  },
+  "safe_cex_venue_asterdex::account_helpers::get_order_update_time": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_order_update_time",
+      "signature": {
+        "inputs": [
+          [
+            "order_data",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "current_time_ms",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "primitive": "f64"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "impl FnOnce() -> f64",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "primitive": "f64"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let mut calls = 0; let result = $type(&$value[\"data\"], || { calls += 1; $value[\"now\"].as_f64().unwrap() }); match result { Ok(n) => serde_json::json!({\"bits\":format!(\"{:016x}\", n.to_bits()),\"clockCalls\":calls}), Err(e) => serde_json::json!({\"error\":e.name,\"clockCalls\":calls}) } }",
+    "cases": [
+      {
+        "input": {
+          "data": {
+            "T": 2,
+            "E": 9
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "4000000000000000",
+          "clockCalls": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "T": 0,
+            "E": "3"
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "4008000000000000",
+          "clockCalls": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "T": "0",
+            "E": 3
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "4093480000000000",
+          "clockCalls": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "T": -1,
+            "E": 9
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "4093480000000000",
+          "clockCalls": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "T": "bad",
+            "E": 9
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "4093480000000000",
+          "clockCalls": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "T": null,
+            "E": "0x10"
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "4030000000000000",
+          "clockCalls": 0
+        }
+      },
+      {
+        "input": {
+          "data": {},
+          "now": 1234
+        },
+        "output": {
+          "bits": "4093480000000000",
+          "clockCalls": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "E": 1.25
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "3ff4000000000000",
+          "clockCalls": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "T": [],
+            "E": 8
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "4093480000000000",
+          "clockCalls": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "T": [
+              2
+            ],
+            "E": 8
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "4000000000000000",
+          "clockCalls": 0
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "T": "1e309",
+            "E": 8
+          },
+          "now": 1234
+        },
+        "output": {
+          "bits": "4093480000000000",
+          "clockCalls": 1
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "T": {
+              "toString": null
+            }
+          },
+          "now": 1234
+        },
+        "output": {
+          "error": "TypeError",
+          "clockCalls": 0
+        }
+      },
+      {
+        "input": {
+          "data": null,
+          "now": 1234
+        },
+        "output": {
+          "error": "TypeError",
+          "clockCalls": 0
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-private.ts:325-328: T || E before Number, finite positive test, and lazy virtualClock fallback. Native observation includes callback count and result bits. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API."
+  },
+  "safe_cex_venue_asterdex::account_helpers::get_position_side": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "get_position_side",
+      "signature": {
+        "inputs": [
+          [
+            "position",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "position_amount",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::PositionSide",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let amount = $value[\"amount\"].as_f64().unwrap_or_else(|| $value[\"amount\"].as_str().unwrap().parse::<f64>().unwrap()); match $type(&$value[\"position\"], amount) { Ok(side) => serde_json::json!({\"side\":match side { safe_cex_types::PositionSide::Long => \"long\", safe_cex_types::PositionSide::Short => \"short\" }}), Err(e) => serde_json::json!({\"error\":e.name}) } }",
+    "cases": [
+      {
+        "input": {
+          "position": {
+            "ps": "BOTH"
+          },
+          "amount": 1
+        },
+        "output": {
+          "side": "long"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "ps": "BOTH"
+          },
+          "amount": -1
+        },
+        "output": {
+          "side": "short"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "ps": "BOTH"
+          },
+          "amount": 0
+        },
+        "output": {
+          "side": "short"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "ps": "BOTH"
+          },
+          "amount": "-0"
+        },
+        "output": {
+          "side": "short"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "ps": "BOTH"
+          },
+          "amount": "NaN"
+        },
+        "output": {
+          "side": "short"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "ps": "LONG"
+          },
+          "amount": -1
+        },
+        "output": {
+          "side": "long"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "ps": "SHORT"
+          },
+          "amount": 1
+        },
+        "output": {
+          "side": "short"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "ps": "long"
+          },
+          "amount": 1
+        },
+        "output": {
+          "side": "short"
+        }
+      },
+      {
+        "input": {
+          "position": {
+            "ps": ""
+          },
+          "amount": 1
+        },
+        "output": {
+          "side": "short"
+        }
+      },
+      {
+        "input": {
+          "position": {},
+          "amount": 1
+        },
+        "output": {
+          "side": "short"
+        }
+      },
+      {
+        "input": {
+          "position": null,
+          "amount": 1
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      }
+    ],
+    "evidence": "asterdex.ws-private.ts:360-367: BOTH uses strictly positive amount; LONG is exact; other spellings are short. Observe native enum identity and null-property error. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::is_aster_dex_unknown_order_error": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_aster_dex_unknown_order_error",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "error_message",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "match $type($value.get(\"error\"), $value.get(\"instanceMessage\").and_then(serde_json::Value::as_str)) { Ok(v) => serde_json::json!({\"value\":v}), Err(e) => serde_json::json!({\"error\":e.name}) }",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "error": null
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "error": "code: -2011 UNKNOWN ORDER"
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "error": "code:-2011 unknown order"
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "error": "code: -2011 missing"
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "error": {
+            "message": "code: -2011 unknown order"
+          }
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "error": {
+            "toString": null
+          }
+        },
+        "output": {
+          "error": "TypeError"
+        }
+      },
+      {
+        "input": {
+          "error": [
+            "code: -2011",
+            "Unknown Order"
+          ]
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "instanceMessage": "code: -2011 Unknown Order",
+          "error": "ignored"
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "instanceMessage": "",
+          "error": "code: -2011 Unknown Order"
+        },
+        "output": {
+          "value": false
+        }
+      }
+    ],
+    "evidence": "asterdex.exchange.ts:82-85: Error.message versus String(error), exact code text and case-insensitive unknown-order text. JSON object message alone is not Error identity. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::is_algo_order": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "is_algo_order",
+      "signature": {
+        "inputs": [
+          [
+            "order_type",
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::OrderType",
+                "args": null
+              }
+            }
+          ],
+          [
+            "info",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "primitive": "bool"
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let kind = match $value[\"type\"].as_str().unwrap() { \"market\" => safe_cex_types::OrderType::Market, \"limit\" => safe_cex_types::OrderType::Limit, \"conditional\" => safe_cex_types::OrderType::Conditional, \"stop_market\" => safe_cex_types::OrderType::StopLoss, \"take_profit_market\" => safe_cex_types::OrderType::TakeProfit, \"trailing_stop_market\" => safe_cex_types::OrderType::TrailingStopLoss, _ => panic!(\"unreviewed order variant\") }; serde_json::json!($type(kind, $value.get(\"info\"))) }",
+    "cases": [
+      {
+        "input": {
+          "type": "market"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "type": "limit"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "type": "conditional"
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "type": "stop_market"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "type": "take_profit_market"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "type": "trailing_stop_market"
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": {
+            "type": "STOP"
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": {
+            "type": "STOP_MARKET"
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": {
+            "type": "TAKE_PROFIT"
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": {
+            "type": "TAKE_PROFIT_MARKET"
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": {
+            "type": "TRAILING_STOP_MARKET"
+          }
+        },
+        "output": true
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": null
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": {}
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": {
+            "type": "stop"
+          }
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": {
+            "type": 7
+          }
+        },
+        "output": false
+      },
+      {
+        "input": {
+          "type": "limit",
+          "info": {
+            "type": "TRAILING_STOP"
+          }
+        },
+        "output": false
+      }
+    ],
+    "evidence": "asterdex.exchange.ts:1541-1558: three native conditional order variants or five exact raw info.type strings, including absent/null/numeric raw-type rejection. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::reverse_map_time_in_force": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "reverse_map_time_in_force",
+      "signature": {
+        "inputs": [
+          [
+            "tif",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "borrowed_ref": {
+            "lifetime": null,
+            "is_mutable": false,
+            "type": {
+              "primitive": "str"
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "serde_json::json!($type($value.as_str().unwrap()))",
+    "cases": [
+      {
+        "input": "",
+        "output": "GTC"
+      },
+      {
+        "input": "GTC",
+        "output": "GTC"
+      },
+      {
+        "input": "PostOnly",
+        "output": "PostOnly"
+      },
+      {
+        "input": " ",
+        "output": " "
+      },
+      {
+        "input": "﻿",
+        "output": "﻿"
+      },
+      {
+        "input": "constructor",
+        "output": "constructor"
+      }
+    ],
+    "evidence": "asterdex.exchange.ts:1620-1623: typed string truthiness fallback only for empty string; no trimming or membership filter. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::parse_position_mode_response": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "parse_position_mode_response",
+      "signature": {
+        "inputs": [
+          [
+            "data",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "bool"
+                    }
+                  },
+                  {
+                    "type": {
+                      "tuple": [
+                        {
+                          "borrowed_ref": {
+                            "lifetime": "'static",
+                            "is_mutable": false,
+                            "type": {
+                              "primitive": "str"
+                            }
+                          }
+                        },
+                        {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      ]
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "match $type($value.get(\"data\")) { Ok(v) => serde_json::json!({\"value\":v}), Err((name,message)) => serde_json::json!({\"error\":name,\"message\":message}) }",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "error": "TypeError",
+          "message": "Cannot read properties of undefined (reading 'dualSidePosition')"
+        }
+      },
+      {
+        "input": {
+          "data": null
+        },
+        "output": {
+          "error": "TypeError",
+          "message": "Cannot read properties of null (reading 'dualSidePosition')"
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "dualSidePosition": true
+          }
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "dualSidePosition": false
+          }
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "dualSidePosition": "true"
+          }
+        },
+        "output": {
+          "value": true
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "dualSidePosition": "false"
+          }
+        },
+        "output": {
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "data": {}
+        },
+        "output": {
+          "error": "Error",
+          "message": "Unexpected position mode response: {}"
+        }
+      },
+      {
+        "input": {
+          "data": true
+        },
+        "output": {
+          "error": "Error",
+          "message": "Unexpected position mode response: true"
+        }
+      },
+      {
+        "input": {
+          "data": []
+        },
+        "output": {
+          "error": "Error",
+          "message": "Unexpected position mode response: []"
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "dualSidePosition": 1
+          }
+        },
+        "output": {
+          "error": "Error",
+          "message": "Unexpected position mode response: {\"dualSidePosition\":1}"
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "dualSidePosition": "TRUE"
+          }
+        },
+        "output": {
+          "error": "Error",
+          "message": "Unexpected position mode response: {\"dualSidePosition\":\"TRUE\"}"
+        }
+      },
+      {
+        "input": {
+          "data": {
+            "dualSidePosition": null
+          }
+        },
+        "output": {
+          "error": "Error",
+          "message": "Unexpected position mode response: {\"dualSidePosition\":null}"
+        }
+      }
+    ],
+    "evidence": "asterdex.exchange.ts:390-398 fetchPositionMode body: only exact booleans and lowercase boolean strings; nullish property errors and JSON.stringify error text remain distinct. This projection proves response parsing, not HTTP or logging. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API."
+  },
+  "safe_cex_venue_asterdex::exchange_helpers::fetch_symbol_max_leverage": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "fetch_symbol_max_leverage",
+      "signature": {
+        "inputs": [
+          [
+            "markets",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "tuple": [
+                      {
+                        "resolved_path": {
+                          "path": "alloc::string::String",
+                          "args": null
+                        }
+                      },
+                      {
+                        "resolved_path": {
+                          "path": "core::option::Option",
+                          "args": {
+                            "angle_bracketed": {
+                              "args": [
+                                {
+                                  "type": {
+                                    "primitive": "f64"
+                                  }
+                                }
+                              ],
+                              "constraints": []
+                            }
+                          }
+                        }
+                      }
+                    ]
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "call": "{ let markets: Vec<(String,Option<f64>)> = $value[\"markets\"].as_array().unwrap().iter().map(|row| (row[0].as_str().unwrap().to_owned(), if row[1].is_null() { None } else { Some(row[1].as_f64().unwrap_or_else(|| row[1].as_str().unwrap().parse::<f64>().unwrap())) })).collect(); match $type(&markets, $value[\"symbol\"].as_str().unwrap()) { Ok(n) => serde_json::json!({\"bits\":format!(\"{:016x}\", n.to_bits())}), Err(e) => serde_json::json!({\"error\":e}) } }",
+    "cases": [
+      {
+        "input": {
+          "markets": [
+            [
+              "BTC",
+              null
+            ],
+            [
+              "BTC",
+              99
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "bits": "4024000000000000"
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            [
+              "BTC",
+              0
+            ],
+            [
+              "BTC",
+              99
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "bits": "4024000000000000"
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            [
+              "BTC",
+              "-0"
+            ],
+            [
+              "BTC",
+              99
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "bits": "4024000000000000"
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            [
+              "BTC",
+              "NaN"
+            ],
+            [
+              "BTC",
+              99
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "bits": "4024000000000000"
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            [
+              "BTC",
+              -3.5
+            ],
+            [
+              "BTC",
+              99
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "bits": "c00c000000000000"
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            [
+              "BTC",
+              2.75
+            ],
+            [
+              "BTC",
+              99
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "bits": "4006000000000000"
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            [
+              "BTC",
+              "Infinity"
+            ],
+            [
+              "BTC",
+              99
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "bits": "7ff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            [
+              "BTC",
+              "-Infinity"
+            ],
+            [
+              "BTC",
+              99
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "bits": "fff0000000000000"
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            [
+              "ETH",
+              8
+            ],
+            [
+              "BTC",
+              5
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "bits": "4014000000000000"
+        }
+      },
+      {
+        "input": {
+          "markets": [
+            [
+              "ETH",
+              8
+            ]
+          ],
+          "symbol": "BTC"
+        },
+        "output": {
+          "error": "Market not found for symbol: BTC"
+        }
+      }
+    ],
+    "evidence": "asterdex.exchange.ts:694-708 fetchSymbolMaxLeverage body: first matching market, max || 10 (zero, negative-zero and NaN fall back, negative finite and infinities survive), missing-symbol error. Tuple adapter proves the native pure projection; HTTP/logging are outside this owner. Expectations are independently authored from the maintained TS body; fixtures adapt the actual typed function, without adding a production JSON API."
   }
 }
