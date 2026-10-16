@@ -440,10 +440,16 @@ fn store_remaining<H: CacheRuntimeHost>(
         let map = h.get(cache, "workerPrePlacementCache")?;
         method(h, &map, "set", |_| Ok(vec![key.clone(), remaining.clone()]))?;
         method(h, cache, "broadcastCacheUpdate", |h| {
-            Ok(vec![h.literal(&text("addPrePlacement")), key.clone(), remaining.clone()])
+            Ok(vec![
+                h.literal(&text("addPrePlacement")),
+                key.clone(),
+                remaining.clone(),
+            ])
         })?;
     }
-    method(h, cache, "writePrePlacementCache", |_| Ok(vec![record.clone()]))?;
+    method(h, cache, "writePrePlacementCache", |_| {
+        Ok(vec![record.clone()])
+    })?;
     Ok(())
 }
 /// ts: HyperliquidCrossCache.matchPrePlacementTrigger. No price match and no FIFO
@@ -472,7 +478,9 @@ pub fn match_pre_placement_trigger<H: CacheRuntimeHost>(
         Ok(vec![h.function(now, Callback::MatchValid)?])
     })?;
     let candidates = method(h, &valid, "filter", |h| {
-        Ok(vec![h.function(amount.clone(), Callback::TriggerCandidate)?])
+        Ok(vec![
+            h.function(amount.clone(), Callback::TriggerCandidate)?,
+        ])
     })?;
     let length = h.get(&candidates, "length")?;
     if !h.equal(&length, &h.number(1.)) {
@@ -661,7 +669,10 @@ pub fn remove_placement_record<H: CacheRuntimeHost>(
     }
     if h.truthy(&in_memory) {
         method(h, cache, "broadcastCacheUpdate", |h| {
-            Ok(vec![h.literal(&text("removePlacementRecord")), cloid.clone()])
+            Ok(vec![
+                h.literal(&text("removePlacementRecord")),
+                cloid.clone(),
+            ])
         })?;
     }
     Ok(())
@@ -755,7 +766,11 @@ pub fn run_callback<H: CacheRuntimeHost>(
         Callback::CloidMatch | Callback::CloidMismatch => {
             let cloid = h.get(&first, "cloid")?;
             let same = h.equal(&cloid, capture);
-            Ok(h.boolean(if body == Callback::CloidMatch { same } else { !same }))
+            Ok(h.boolean(if body == Callback::CloidMatch {
+                same
+            } else {
+                !same
+            }))
         }
         Callback::Method(body) => {
             match body {

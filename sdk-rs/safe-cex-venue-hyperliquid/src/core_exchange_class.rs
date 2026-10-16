@@ -1453,7 +1453,7 @@ pub fn call_core_exchange<H: CoreExchangeClassHost>(
             let a2 = arg(2);
             let a3 = arg(3);
             let a4 = arg(4);
-            cache_orders::exchange_add_to_pre_placement_cache(h, &a0, &a1, &a2, &a3, &a4)?;
+            cache_orders::exchange_add_to_pre_placement_cache(h, &a0, &a1, &a2, &a3, &a4, None)?;
             Ok(u)
         }
         CoreExchangeMethod::MatchPrePlacement => {

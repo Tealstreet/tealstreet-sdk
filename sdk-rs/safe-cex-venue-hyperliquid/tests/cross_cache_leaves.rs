@@ -568,6 +568,9 @@ impl safe_cex_venue_hyperliquid::cache_orders::CacheOrdersHost for Host {
     fn singleton(&mut self) -> Result<Native, Native> {
         self.take("singleton", json!([]))
     }
+    fn imported(&mut self, name: &str) -> Result<Native, Native> {
+        self.take("imported", json!([name]))
+    }
 }
 fn run_order_method(row: &Value) {
     use safe_cex_venue_hyperliquid::cache_orders::*;
@@ -617,7 +620,13 @@ fn run_order_method(row: &Value) {
             remove_pending_order(&mut h, &cache, &args[0]).map(|()| h.undefined())
         }
         "exchange.addToPrePlacementCache" => exchange_add_to_pre_placement_cache(
-            &mut h, &args[0], &args[1], &args[2], &args[3], &args[4],
+            &mut h,
+            &args[0],
+            &args[1],
+            &args[2],
+            &args[3],
+            &args[4],
+            args.get(5),
         )
         .map(|()| h.undefined()),
         "exchange.matchPrePlacement" => {

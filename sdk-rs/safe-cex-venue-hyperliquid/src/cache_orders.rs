@@ -20,6 +20,8 @@ pub trait CacheOrdersHost: CrossCacheHost {
     ) -> Result<bool, Self::Error>;
     /// Source getCrossCache dependency, including construction/errors, host-bound.
     fn singleton(&mut self) -> Result<Self::Value, Self::Error>;
+    /// A fresh imported module binding (placementRecordFromWire), host-bound.
+    fn imported(&mut self, name: &str) -> Result<Self::Value, Self::Error>;
 }
 fn text(s: &str) -> JsString {
     JsString(s.encode_utf16().collect())
@@ -168,7 +170,9 @@ pub fn exchange_add_to_pre_placement_cache<H: CacheOrdersHost>(
     kind: &H::Value,
     price: &H::Value,
     amount: &H::Value,
+    cloid: Option<&H::Value>,
 ) -> Result<(), H::Error> {
+    let cloid = cloid.cloned().unwrap_or_else(|| h.undefined());
     delegate(
         h,
         "addPrePlacement",
@@ -178,9 +182,86 @@ pub fn exchange_add_to_pre_placement_cache<H: CacheOrdersHost>(
             kind.clone(),
             price.clone(),
             amount.clone(),
+            cloid,
         ],
     )?;
     Ok(())
+}
+/// ts: HyperliquidExchange.forgetPrePlacement.
+pub fn exchange_forget_pre_placement<H: CacheOrdersHost>(
+    h: &mut H,
+    coin: &H::Value,
+    side: &H::Value,
+    cloid: &H::Value,
+) -> Result<(), H::Error> {
+    delegate(
+        h,
+        "removePrePlacementByCloid",
+        &[coin.clone(), side.clone(), cloid.clone()],
+    )?;
+    Ok(())
+}
+/// ts: HyperliquidExchange.recordPlacement: one record per wire carrying a cloid,
+/// all stamped with the same placedAt, through the shared cross cache.
+pub fn exchange_record_placement<H: CacheOrdersHost>(
+    h: &mut H,
+    wires: &H::Value,
+    symbol: &H::Value,
+) -> Result<(), H::Error> {
+    let placed_at = h.now()?;
+    let cache = h.singleton()?;
+    let iterator = h.entries(wires)?;
+    while let Some(wire) = h.iterator_step(&iterator)? {
+        let body = (|| {
+            let cloid = h.get(&wire, "c")?;
+            if h.truthy(&cloid) {
+                let add = h.get(&cache, "addPlacementRecord")?;
+                let cloid = h.get(&wire, "c")?;
+                let build = h.imported("placementRecordFromWire")?;
+                let undefined = h.undefined();
+                let record = h.call(
+                    &build,
+                    &undefined,
+                    &[wire.clone(), symbol.clone(), placed_at.clone()],
+                )?;
+                h.call(&add, &cache, &[cloid, record])?;
+            }
+            Ok(())
+        })();
+        if let Err(error) = body {
+            h.close_after_throw(&iterator);
+            return Err(error);
+        }
+    }
+    Ok(())
+}
+/// ts: HyperliquidExchange.getPlacementRecord.
+pub fn exchange_get_placement_record<H: CacheOrdersHost>(
+    h: &mut H,
+    cloid: &H::Value,
+) -> Result<H::Value, H::Error> {
+    delegate(h, "getPlacementRecord", &[cloid.clone()])
+}
+/// ts: HyperliquidExchange.forgetPlacementRecord.
+pub fn exchange_forget_placement_record<H: CacheOrdersHost>(
+    h: &mut H,
+    cloid: &H::Value,
+) -> Result<(), H::Error> {
+    delegate(h, "removePlacementRecord", &[cloid.clone()])?;
+    Ok(())
+}
+/// ts: HyperliquidExchange.matchPrePlacementTrigger.
+pub fn exchange_match_pre_placement_trigger<H: CacheOrdersHost>(
+    h: &mut H,
+    coin: &H::Value,
+    side: &H::Value,
+    amount: &H::Value,
+) -> Result<H::Value, H::Error> {
+    delegate(
+        h,
+        "matchPrePlacementTrigger",
+        &[coin.clone(), side.clone(), amount.clone()],
+    )
 }
 pub fn exchange_match_pre_placement<H: CacheOrdersHost>(
     h: &mut H,

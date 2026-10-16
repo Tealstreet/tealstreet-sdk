@@ -76,7 +76,11 @@ function orderedTransformer(context){const f=ts.factory;const visit=n=>{
  }
  return ts.visitEachChild(n,visit,context);
 };return s=>ts.visitNode(s,visit);}
-const context={...bindings,exports:{},getCrossCache:()=>invoke('singleton',[],()=>{if(globalCase.singletonThrows)throw globalCase.error;return globalCase.cache}),JSON:{parse:v=>invoke('parse',native(v),()=>JSON.parse(v)),stringify:v=>invoke('stringify',native(v),()=>JSON.stringify(v))},MAX_SEEN_FILLS:500,PRE_PLACEMENT_STORAGE_KEY:'tealstreet_hip3_prePlacement',PENDING_ORDERS_STORAGE_KEY:'tealstreet_hip3_pendingOrders'};
+// Every top-level module constant comes from the actual source declarations, so a new
+// storage key cannot silently resolve to a ReferenceError inside a source catch block.
+const moduleConstants={};for(const statement of source.statements){if(!ts.isVariableStatement(statement))continue;for(const d of statement.declarationList.declarations){if(!ts.isIdentifier(d.name)||!d.initializer)continue;if(!ts.isStringLiteral(d.initializer)&&!ts.isNumericLiteral(d.initializer)&&!ts.isBinaryExpression(d.initializer))continue;moduleConstants[d.name.text]=vm.runInNewContext(d.initializer.getText(source));}}
+assert.deepEqual(Object.keys(moduleConstants).sort(),['MAX_PLACEMENT_RECORDS','MAX_SEEN_FILLS','PENDING_ORDERS_STORAGE_KEY','PLACEMENT_RECORDS_STORAGE_KEY','PLACEMENT_RECORD_TTL_MS','PRE_PLACEMENT_STORAGE_KEY'],'cache module constant inventory');
+const context={...bindings,exports:{},getCrossCache:()=>invoke('singleton',[],()=>{if(globalCase.singletonThrows)throw globalCase.error;return globalCase.cache}),JSON:{parse:v=>invoke('parse',native(v),()=>JSON.parse(v)),stringify:v=>invoke('stringify',native(v),()=>JSON.stringify(v))},...moduleConstants};
 vm.runInNewContext(ts.transpileModule(`class Cache {${methods}}\nclass Exchange {${exchangeMethods}}\nexports.Cache=Cache;exports.Exchange=Exchange;`,{compilerOptions:{target:ts.ScriptTarget.ES2022,module:ts.ModuleKind.CommonJS},transformers:{before:[orderedTransformer,transformer]}}).outputText,context);
 const cases=[];
 function add(name,label,configure=()=>{},args=[]){
