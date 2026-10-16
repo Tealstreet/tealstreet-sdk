@@ -86,9 +86,9 @@ note = "Native value-level declaration with arbitrary UTF16 strings, full binary
 ts = "GetInactiveOrdersOptions"
 kind = "type"
 layer = "adapted"
-rs = [ "safe-cex-venue-lighter/src/sdk_order_queries.rs::GetInactiveOrdersOptions", "safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy", "safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy::as_str" ]
+rs = [ "safe-cex-venue-lighter/src/sdk_order_queries.rs::GetInactiveOrdersOptions", "safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy", "safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy::as_str", "safe-cex-venue-lighter/src/sdk_order_queries.rs::SortOrder", "safe-cex-venue-lighter/src/sdk_order_queries.rs::SortOrder::as_str" ]
 status = "ported"
-note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy`. Enum for the createdAt, updatedAt and price sortBy literal union. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy::as_str`. Returns the exact sortBy literal string for each variant."
+note = "Native value-level declaration with arbitrary UTF16 strings, full binary64/unbounded BigInt, optional effective fields, closed side/sort domains and ordered children. Actual source AST guards7 schemas, inline market stats and the actual inherited Trade import/base/redeclarations;28 native records directly assert each field/variant/tuple/child against distinct literals and independent counts. No JSON codec, aliases/reflection/property enumeration or wire DTO adoption claim. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy`. Enum for the createdAt, updatedAt and price sortBy literal union. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::InactiveSortBy::as_str`. Returns the exact sortBy literal string for each variant. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::SortOrder`. Inline asc | desc literal union typing the sortOrder field of GetInactiveOrdersOptions. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::SortOrder::as_str`. Inline asc | desc literal union typing the sortOrder field of GetInactiveOrdersOptions."
 
 [[symbol]]
 ts = "GetTradesOptions"
@@ -110,9 +110,9 @@ note = "CHOSEN: native class carries explicit client, FIFO runtime, property/ret
 ts = "OrderApi.constructor"
 kind = "constructor"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderApi::new"
+rs = [ "safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderApi::new", "safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderQuerySemantics", "safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderQuerySemantics::to_string_method" ]
 status = "ported"
-note = "Native partial class constructor retains the original shared client without validation or dependency calls; explicit native runtime/property/return-resolution/toString hosts supply ambient operations. Rc handle retention and actual-source receiver witnesses. Whole class and raw getOrderBookOrders remain pending."
+note = "Native partial class constructor retains the original shared client without validation or dependency calls; explicit native runtime/property/return-resolution/toString hosts supply ambient operations. Rc handle retention and actual-source receiver witnesses. Whole class and raw getOrderBookOrders remain pending. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderQuerySemantics`. toString capability the OrderApi constructor stores in its query field for query parameter coercion in the method bodies. Split member `safe-cex-venue-lighter/src/sdk_order_queries.rs::OrderQuerySemantics::to_string_method`. toString capability the OrderApi constructor stores in its query field for query parameter coercion in the method bodies."
 
 [[symbol]]
 ts = "OrderApi.getAccountActiveOrders"

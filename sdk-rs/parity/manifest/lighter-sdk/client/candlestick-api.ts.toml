@@ -38,9 +38,9 @@ note = "Value-level DTO: UTF16 code units, unrestricted f64 numbers, ordered arr
 ts = "CandlestickApi"
 kind = "class"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_market_api.rs::CandlestickApi"
+rs = [ "safe-cex-venue-lighter/src/sdk_market_api.rs::CandlestickApi", "safe-cex-venue-lighter/src/sdk_market_api.rs::MarketApiErrors", "safe-cex-venue-lighter/src/sdk_market_api.rs::MarketApiErrors::construct" ]
 status = "divergent"
-note = "CHOSEN: native client retains its source client and requires explicit HTTP, FIFO Promise Resolve, property-access and LighterApiError constructor hosts; Rust reflection/prototype surface differs. All source methods mapped separately."
+note = "CHOSEN: native client retains its source client and requires explicit HTTP, FIFO Promise Resolve, property-access and LighterApiError constructor hosts; Rust reflection/prototype surface differs. All source methods mapped separately. Split member `safe-cex-venue-lighter/src/sdk_market_api.rs::MarketApiErrors`. LighterApiError constructor capability passed to the CandlestickApi constructor and used by getCandlesticks and getFundings error paths. Split member `safe-cex-venue-lighter/src/sdk_market_api.rs::MarketApiErrors::construct`. LighterApiError constructor capability passed to the CandlestickApi constructor and used by getCandlesticks and getFundings error paths."
 
 [[symbol]]
 ts = "CandlestickApi.constructor"

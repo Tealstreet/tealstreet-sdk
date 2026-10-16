@@ -6,9 +6,9 @@ rust_files = [ "safe-cex-venue-lighter/src/http_models.rs", "safe-cex-venue-ligh
 ts = "LighterApiClientConfig"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/http_models.rs::LighterApiClientConfig"
+rs = [ "safe-cex-venue-lighter/src/http_models.rs::LighterApiClientConfig", "safe-cex-venue-lighter/src/http_models.rs::Utf16Record" ]
 status = "ported"
-note = "Native value-level declaration mapping: exact fields, optional effective values, UTF16 strings/record keys, unbounded BigInt, full binary64 and unrestricted generic payloads. Live source schema plus 27 decoded native records pin fields, array order/duplicates and three status variants. No JSON codec, HTTP client adoption, JS alias/property enumeration or reflection claim."
+note = "Native value-level declaration mapping: exact fields, optional effective values, UTF16 strings/record keys, unbounded BigInt, full binary64 and unrestricted generic payloads. Live source schema plus 27 decoded native records pin fields, array order/duplicates and three status variants. No JSON codec, HTTP client adoption, JS alias/property enumeration or reflection claim. Split member `safe-cex-venue-lighter/src/http_models.rs::Utf16Record`. UTF-16 keyed ordered record alias that types the Record<string, string> headers field of LighterApiClientConfig and the other http-types record fields."
 
 [[symbol]]
 ts = "ApiKey"

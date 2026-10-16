@@ -46,9 +46,9 @@ note = "Native value-level declaration: exact fields and enum domains, full bina
 ts = "Deposit"
 kind = "type"
 layer = "adapted"
-rs = "safe-cex-venue-lighter/src/sdk_transaction_api.rs::Deposit"
+rs = [ "safe-cex-venue-lighter/src/sdk_transaction_api.rs::Deposit", "safe-cex-venue-lighter/src/sdk_transaction_api.rs::DepositStatus", "safe-cex-venue-lighter/src/sdk_transaction_api.rs::DepositStatus::as_str" ]
 status = "ported"
-note = "Native value-level declaration: exact fields and enum domains, full binary64, arbitrary UTF16 strings, optional effective values and ordered arrays. Actual source AST checks11 schemas plus inline deposit filter;45 decoded native records assert all fields, status/type variants and asymmetric duplicate children with independent counts. No JSON decoding/encoding, JS alias/reflection/property enumeration claim."
+note = "Native value-level declaration: exact fields and enum domains, full binary64, arbitrary UTF16 strings, optional effective values and ordered arrays. Actual source AST checks11 schemas plus inline deposit filter;45 decoded native records assert all fields, status/type variants and asymmetric duplicate children with independent counts. No JSON decoding/encoding, JS alias/reflection/property enumeration claim. Split member `safe-cex-venue-lighter/src/sdk_transaction_api.rs::DepositStatus`. Inline pending | confirming | completed | failed literal union typing the status field of Deposit. Split member `safe-cex-venue-lighter/src/sdk_transaction_api.rs::DepositStatus::as_str`. Inline pending | confirming | completed | failed literal union typing the status field of Deposit."
 
 [[symbol]]
 ts = "DepositHistoryResponse"
