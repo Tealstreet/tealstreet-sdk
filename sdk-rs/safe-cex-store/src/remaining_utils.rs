@@ -18,6 +18,7 @@ pub const EXCHANGES_WITHOUT_SECONDARY_KEY: &[&str] = &[
     "mode",
     "salsadex",
     "tealstreet-dex",
+    "txflow",
     "what",
 ];
 pub fn exchange_supports_secondary_key(exchange: &str) -> bool {

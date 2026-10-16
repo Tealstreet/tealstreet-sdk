@@ -143,6 +143,10 @@
       "features": []
     },
     {
+      "package": "safe-cex-venue-txflow",
+      "features": []
+    },
+    {
       "package": "safe-cex-registry",
       "features": []
     },

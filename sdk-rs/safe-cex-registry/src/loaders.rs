@@ -466,6 +466,14 @@ pub fn native_tealstreet_dex(host: &dyn NativeModuleHost) -> NativeConstructorRe
     )
 }
 
+// ts: exchangeRegistry.txflow (web and native source files)
+pub fn web_txflow(host: &dyn WebModuleHost) -> ConstructorFuture<'_> {
+    module_host::web_load(host, "./txflow/txflow.exchange", "TxFlowExchange")
+}
+pub fn native_txflow(host: &dyn NativeModuleHost) -> NativeConstructorResult {
+    module_host::native_load(host, "./txflow/txflow.exchange", "TxFlowExchange")
+}
+
 // ts: exchangeRegistry.what (web and native source files)
 pub fn web_what(host: &dyn WebModuleHost) -> ConstructorFuture<'_> {
     module_host::web_load(
@@ -723,6 +731,11 @@ pub const EXCHANGE_LOADERS: &[ExchangeLoaderRegistration] = &[
         name: ExchangeName::TealstreetDex,
         web: web_tealstreet_dex,
         native: native_tealstreet_dex,
+    },
+    ExchangeLoaderRegistration {
+        name: ExchangeName::Txflow,
+        web: web_txflow,
+        native: native_txflow,
     },
     ExchangeLoaderRegistration {
         name: ExchangeName::What,

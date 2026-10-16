@@ -41,6 +41,7 @@ members = [
     "safe-cex-venue-bingx",
     "safe-cex-venue-phemex",
     "safe-cex-venue-breakoutprop",
+    "safe-cex-venue-txflow",
 ]
 
 [workspace.package]

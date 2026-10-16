@@ -5,7 +5,7 @@ use safe_cex_types::{ExchangeName, exchange_metadata::*};
 #[test]
 fn full_metadata_native_fields_unified_mobile_and_domains() {
     let table = exchange_metadata();
-    assert_eq!(table.len(), 47); // independently counted source object entries, stopped at record 47.
+    assert_eq!(table.len(), 48); // independently counted source object entries, stopped at record 48.
     let grvt = get_exchange_metadata("grvt", false).unwrap();
     assert!(grvt.requires_cors, "native GRVT requiresCors");
     assert!(!grvt.forbid_cors, "native GRVT forbidCors");

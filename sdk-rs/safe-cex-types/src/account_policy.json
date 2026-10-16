@@ -523,6 +523,19 @@
     "requiresCors": false,
     "defaultProxyRegion": "SG"
   },
+  "txflow": {
+    "prettyName": "TxFlow",
+    "requiresNoSecret": false,
+    "requiresPassphrase": false,
+    "requiresApplicationId": true,
+    "requiresApiKeyIndex": false,
+    "requiresOmniKeySeed": false,
+    "supportsVault": false,
+    "supportsTestnet": true,
+    "enabled": false,
+    "requiresCors": false,
+    "defaultProxyRegion": "SG"
+  },
   "apexomni": {
     "prettyName": "ApeX Omni",
     "requiresNoSecret": false,
