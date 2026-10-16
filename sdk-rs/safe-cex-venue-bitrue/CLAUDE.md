@@ -7,6 +7,18 @@ Behavioral reference: [TypeScript venue guidance](../../packages/safe-cex/src/ex
 inherited identities through shared `TableHit`. Retain the hit until applying the
 source branch; a typed own-entry array alone cannot represent inherited values.
 
+`BitrueOrderType` and `FetchOrdersResponseDataItemSide` admit strings before
+private Serde remote metadata companions. Their TypeScript literal unions do not
+admit externally tagged objects. `accepted_enum_shapes` checks all six native
+variants and existing serialization, then rejects tagged maps and other shapes
+through owned, borrowed, text and qualified decoders. Run
+`scripts/accepted-enum-controls.py` serially: each concrete guard removal must
+compile and fail its named tagged-object assertion, and exact restoration must
+pass. The two numeric trigger enums retain their separate numeric domains.
+The two accepted-set contracts do not classify other Bitrue owners or aliases.
+The ordinary inventory still refuses 32 unreviewed trait methods on
+`Scope<binding::Extra>`; selected owner receipts do not clear that receiver boundary.
+
 `wire.rs` mirrors declared response shapes, not unchecked Axios runtime values.
 Numbers are binary64. Record Deserialize implementations capture `JsNumberInput`
 before private map-only companions. Optional fields distinguish omission from

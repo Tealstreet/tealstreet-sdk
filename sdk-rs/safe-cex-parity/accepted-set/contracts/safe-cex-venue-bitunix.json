@@ -37382,5 +37382,4549 @@
       }
     ],
     "evidence": "The actual history wrapper executes native/default with bounded String rows and ready page futures. Public-only short circuit, exact endpoint/options/selectors and actual selector function-pointer outputs are observed. Mapping and timestamp read order plus native descending result bits are observed; the actual account callback executes for every row, including the skipped mapper result. These typed callback fixtures do not claim the concrete REST/page/mapper implementations, which retain separate contracts."
+  },
+  "safe_cex_venue_bitunix::rest_writes::change_position_mode": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "change_position_mode",
+      "signature": {
+        "inputs": [
+          [
+            "hedged",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "position_contracts",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::iter::traits::collect::IntoIterator",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Item",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "primitive": "f64"
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "post",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "set_setting",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "primitive": "bool"
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "emit_literal",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "report",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "R",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl IntoIterator<Item = Result<f64, E>>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::iter::traits::collect::IntoIterator",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [],
+                            "constraints": [
+                              {
+                                "name": "Item",
+                                "args": null,
+                                "binding": {
+                                  "equality": {
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "core::result::Result",
+                                        "args": {
+                                          "angle_bracketed": {
+                                            "args": [
+                                              {
+                                                "type": {
+                                                  "primitive": "f64"
+                                                }
+                                              },
+                                              {
+                                                "type": {
+                                                  "generic": "E"
+                                                }
+                                              }
+                                            ],
+                                            "constraints": []
+                                          }
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ]
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, JsJsonValue) -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, bool) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "primitive": "bool"
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&E) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "E"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "generic": "R"
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(future:F)->F::Output{let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){std::task::Poll::Ready(value)=>value,_=>panic!(\"bounded ready host future must settle\")}}fn observe(v:safe_cex_num::JsJsonValue)->serde_json::Value {use safe_cex_num::JsJsonValue as J;match v{J::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),J::Null=>serde_json::json!({\"kind\":\"null\"}),J::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),J::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),J::String(v)=>serde_json::json!({\"kind\":\"string\",\"value\":v}),J::Array(values)=>serde_json::json!({\"kind\":\"array\",\"values\":values.into_iter().map(observe).collect::<Vec<_>>()}),J::Object(values)=>serde_json::json!({\"kind\":\"object\",\"fields\":values.into_iter().map(|(key,value)|serde_json::json!({\"key\":key,\"value\":observe(value)})).collect::<Vec<_>>()}),J::BigInt(_)=>panic!(\"outside JSON fixture domain\")}}let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let contracts=$value[\"contracts\"].as_array().unwrap().iter().map(|n|n.as_f64().ok_or(\"contract failed\".to_owned())).collect::<Vec<_>>();let result=run($type($value[\"hedged\"]==true,contracts,|url,body|{trace.borrow_mut().push(serde_json::json!({\"post\":url,\"body\":observe(body)}));std::future::ready(if $value[\"postFail\"]==true{Err(\"post failed\".to_owned())}else{Ok(())})},|key,setting|{trace.borrow_mut().push(serde_json::json!({\"setting\":key,\"value\":setting}));if $value[\"settingFail\"]==true{Err(\"setting failed\".to_owned())}else{Ok(())}},|message|{trace.borrow_mut().push(serde_json::json!({\"emit\":message}));if $value[\"emitFail\"]==true{Err(\"emit failed\".to_owned())}else{Ok(())}},|error|{trace.borrow_mut().push(serde_json::json!({\"report\":error}));if $value[\"reportFail\"]==true{Err(\"report failed\".to_owned())}else{Ok(())}}));serde_json::json!({\"error\":result.err(),\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {
+          "hedged": true,
+          "contracts": [
+            -1,
+            0
+          ]
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "post": "/api/v1/futures/account/change_position_mode",
+              "body": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "positionMode",
+                    "value": {
+                      "kind": "string",
+                      "value": "HEDGE"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "setting": "isHedged",
+              "value": true
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "hedged": false,
+          "contracts": []
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "post": "/api/v1/futures/account/change_position_mode",
+              "body": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "positionMode",
+                    "value": {
+                      "kind": "string",
+                      "value": "ONE_WAY"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "setting": "isHedged",
+              "value": false
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "contracts": [
+            0,
+            2
+          ]
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "emit": "Please close all positions before switching position mode"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "contracts": [
+            2,
+            "bad"
+          ]
+        },
+        "output": {
+          "error": "contract failed",
+          "trace": []
+        }
+      },
+      {
+        "input": {
+          "contracts": [
+            1
+          ],
+          "emitFail": true
+        },
+        "output": {
+          "error": "emit failed",
+          "trace": [
+            {
+              "emit": "Please close all positions before switching position mode"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "hedged": true,
+          "contracts": [],
+          "postFail": true
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "post": "/api/v1/futures/account/change_position_mode",
+              "body": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "positionMode",
+                    "value": {
+                      "kind": "string",
+                      "value": "HEDGE"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "report": "post failed"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "hedged": true,
+          "contracts": [],
+          "settingFail": true,
+          "reportFail": true
+        },
+        "output": {
+          "error": "report failed",
+          "trace": [
+            {
+              "post": "/api/v1/futures/account/change_position_mode",
+              "body": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "positionMode",
+                    "value": {
+                      "kind": "string",
+                      "value": "HEDGE"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "setting": "isHedged",
+              "value": true
+            },
+            {
+              "report": "setting failed"
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "Actual native generic write orchestration executes with bounded ready POST futures and fallible callbacks. Both literal modes, complete preflight projection before open-position warning, request property order, post-before-setting and distinct emit/report failure propagation are observed directly. This does not claim arbitrary host iterator or transport behavior."
+  },
+  "safe_cex_venue_bitunix::rest_writes::change_margin_type": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "change_margin_type",
+      "signature": {
+        "inputs": [
+          [
+            "isolated",
+            {
+              "primitive": "bool"
+            }
+          ],
+          [
+            "symbol",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "slice": {
+                                "primitive": "u16"
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "post",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "slice": {
+                                    "primitive": "u16"
+                                  }
+                                }
+                              }
+                            },
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "reject_missing",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "reject_post",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "R",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, &[u16], &'static str, &'static str) -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "slice": {
+                                      "primitive": "u16"
+                                    }
+                                  }
+                                }
+                              },
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str) -> Result<E, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&E) -> Result<E, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "E"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "generic": "R"
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(future:F)->F::Output{let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){std::task::Poll::Ready(value)=>value,_=>panic!(\"bounded ready host future must settle\")}}let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let symbol:Option<Vec<u16>>=$value.get(\"symbol\").map(|s|s.as_array().unwrap().iter().map(|n|n.as_u64().unwrap()as u16).collect());let result=run($type($value[\"isolated\"]==true,symbol.as_deref(),|url,units,mode,coin|{trace.borrow_mut().push(serde_json::json!({\"post\":url,\"symbol\":units,\"mode\":mode,\"coin\":coin}));std::future::ready(if $value[\"postFail\"]==true{Err(\"post failed\".to_owned())}else{Ok(())})},|message|{trace.borrow_mut().push(serde_json::json!({\"missing\":message}));if $value[\"hookFail\"]==true{Err(\"missing hook failed\".to_owned())}else{Ok(\"missing rejection\".to_owned())}},|error|{trace.borrow_mut().push(serde_json::json!({\"reject\":error}));if $value[\"hookFail\"]==true{Err(\"post hook failed\".to_owned())}else{Ok(\"post rejection\".to_owned())}}));serde_json::json!({\"error\":result.err(),\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "error": "missing rejection",
+          "trace": [
+            {
+              "missing": "Symbol is required"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "symbol": [],
+          "hookFail": true
+        },
+        "output": {
+          "error": "missing hook failed",
+          "trace": [
+            {
+              "missing": "Symbol is required"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "symbol": [
+            55296
+          ],
+          "isolated": true
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "post": "/api/v1/futures/account/change_margin_mode",
+              "symbol": [
+                55296
+              ],
+              "mode": "ISOLATION",
+              "coin": "USDT"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "symbol": [
+            66,
+            84,
+            67
+          ]
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "post": "/api/v1/futures/account/change_margin_mode",
+              "symbol": [
+                66,
+                84,
+                67
+              ],
+              "mode": "CROSS",
+              "coin": "USDT"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "symbol": [
+            0,
+            57343
+          ],
+          "postFail": true
+        },
+        "output": {
+          "error": "post rejection",
+          "trace": [
+            {
+              "post": "/api/v1/futures/account/change_margin_mode",
+              "symbol": [
+                0,
+                57343
+              ],
+              "mode": "CROSS",
+              "coin": "USDT"
+            },
+            {
+              "reject": "post failed"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "symbol": [
+            65
+          ],
+          "isolated": true,
+          "postFail": true,
+          "hookFail": true
+        },
+        "output": {
+          "error": "post hook failed",
+          "trace": [
+            {
+              "post": "/api/v1/futures/account/change_margin_mode",
+              "symbol": [
+                65
+              ],
+              "mode": "ISOLATION",
+              "coin": "USDT"
+            },
+            {
+              "reject": "post failed"
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "Native margin-type orchestration retains full UTF-16 symbol units, including NUL and isolated surrogates, rather than a lossy String conversion. Both literal modes and USDT coin, missing/empty admission, original transport error input to the rejection hook and hook-failure precedence are directly observed using ready futures."
+  },
+  "safe_cex_venue_bitunix::rest_writes::set_leverage": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "set_leverage",
+      "signature": {
+        "inputs": [
+          [
+            "symbol",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "input_leverage",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "__arg2",
+            {
+              "tuple": [
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "core::option::Option",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "borrowed_ref": {
+                                                          "lifetime": "'a",
+                                                          "is_mutable": false,
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "safe_cex_types::Market",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                },
+                {
+                  "impl_trait": [
+                    {
+                      "trait_bound": {
+                        "trait": {
+                          "path": "core::ops::function::FnOnce",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "primitive": "str"
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "core::option::Option",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "borrowed_ref": {
+                                                          "lifetime": "'a",
+                                                          "is_mutable": false,
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "safe_cex_types::Position",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "E"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": [],
+                        "modifier": "none"
+                      }
+                    }
+                  ]
+                }
+              ]
+            }
+          ],
+          [
+            "post",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "update_positions",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "array": {
+                                "type": {
+                                  "tuple": [
+                                    {
+                                      "resolved_path": {
+                                        "path": "alloc::string::String",
+                                        "args": null
+                                      }
+                                    },
+                                    {
+                                      "primitive": "f64"
+                                    }
+                                  ]
+                                },
+                                "len": "2"
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "report",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::result::Result",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "tuple": []
+                                      }
+                                    },
+                                    {
+                                      "type": {
+                                        "generic": "E"
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "tuple": []
+                    }
+                  },
+                  {
+                    "type": {
+                      "generic": "E"
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "R",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&str) -> Result<Option<&'a Market>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "borrowed_ref": {
+                                                        "lifetime": "'a",
+                                                        "is_mutable": false,
+                                                        "type": {
+                                                          "resolved_path": {
+                                                            "path": "safe_cex_types::Market",
+                                                            "args": null
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&str) -> Result<Option<&'a Position>, E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "core::option::Option",
+                                            "args": {
+                                              "angle_bracketed": {
+                                                "args": [
+                                                  {
+                                                    "type": {
+                                                      "borrowed_ref": {
+                                                        "lifetime": "'a",
+                                                        "is_mutable": false,
+                                                        "type": {
+                                                          "resolved_path": {
+                                                            "path": "safe_cex_types::Position",
+                                                            "args": null
+                                                          }
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                ],
+                                                "constraints": []
+                                              }
+                                            }
+                                          }
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, JsJsonValue) -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "safe_cex_num::json_stringify::JsJsonValue",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce([(String, f64); 2]) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "array": {
+                                  "type": {
+                                    "tuple": [
+                                      {
+                                        "resolved_path": {
+                                          "path": "alloc::string::String",
+                                          "args": null
+                                        }
+                                      },
+                                      {
+                                        "primitive": "f64"
+                                      }
+                                    ]
+                                  },
+                                  "len": "2"
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&E) -> Result<(), E>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "E"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::result::Result",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "tuple": []
+                                        }
+                                      },
+                                      {
+                                        "type": {
+                                          "generic": "E"
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "E"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::From",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "alloc::string::String",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          },
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "generic": "R"
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(future:F)->F::Output{let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){std::task::Poll::Ready(value)=>value,_=>panic!(\"bounded ready host future must settle\")}}fn observe(v:safe_cex_num::JsJsonValue)->serde_json::Value {use safe_cex_num::JsJsonValue as J;match v{J::Undefined=>serde_json::json!({\"kind\":\"undefined\"}),J::Null=>serde_json::json!({\"kind\":\"null\"}),J::Bool(v)=>serde_json::json!({\"kind\":\"bool\",\"value\":v}),J::Number(v)=>serde_json::json!({\"kind\":\"number\",\"bits\":format!(\"{:016x}\",v.to_bits())}),J::String(v)=>serde_json::json!({\"kind\":\"string\",\"value\":v}),J::Array(values)=>serde_json::json!({\"kind\":\"array\",\"values\":values.into_iter().map(observe).collect::<Vec<_>>()}),J::Object(values)=>serde_json::json!({\"kind\":\"object\",\"fields\":values.into_iter().map(|(key,value)|serde_json::json!({\"key\":key,\"value\":observe(value)})).collect::<Vec<_>>()}),J::BigInt(_)=>panic!(\"outside JSON fixture domain\")}}let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let market: safe_cex_types::Market=serde_json::from_value(serde_json::json!({\"id\":\"BTC/USDT\",\"symbol\":\"BTC\",\"base\":\"BTC\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"amount\":0.001,\"price\":0.01},\"limits\":{\"amount\":{\"min\":0,\"max\":100},\"leverage\":{\"min\":1,\"max\":10}}})).unwrap();let mut position:safe_cex_types::Position=serde_json::from_value(serde_json::json!({\"id\":\"BTC:long\",\"symbol\":\"BTC\",\"side\":\"long\",\"entryPrice\":1,\"notional\":2,\"leverage\":3,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0})).unwrap();position.leverage=$value.get(\"existing\").and_then(|n|n.as_f64()).unwrap_or(3.0);let input=$value.get(\"bits\").and_then(|n|n.as_str()).map(|s|f64::from_bits(u64::from_str_radix(s,16).unwrap())).unwrap_or(4.0);let result=run($type(\"BTC\",input,(|symbol|{trace.borrow_mut().push(serde_json::json!({\"market\":symbol}));Ok::<_,String>(if $value[\"noMarket\"]==true{None}else{Some(&market)})},|symbol|{trace.borrow_mut().push(serde_json::json!({\"position\":symbol}));Ok(if $value[\"noPosition\"]==true{None}else{Some(&position)})}),|url,body|{trace.borrow_mut().push(serde_json::json!({\"post\":url,\"body\":observe(body)}));std::future::ready(if $value[\"postFail\"]==true{Err(\"post failed\".to_owned())}else{Ok(())})},|updates|{trace.borrow_mut().push(serde_json::json!({\"updates\":updates.map(|(id,n)|(id,format!(\"{:016x}\",n.to_bits())))}));if $value[\"updateFail\"]==true{Err(\"update failed\".to_owned())}else{Ok(())}},|error|{trace.borrow_mut().push(serde_json::json!({\"report\":error}));if $value[\"reportFail\"]==true{Err(\"report failed\".to_owned())}else{Ok(())}}));serde_json::json!({\"error\":result.err(),\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {},
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "market": "BTC"
+            },
+            {
+              "position": "BTC"
+            },
+            {
+              "post": "/api/v1/futures/account/change_leverage",
+              "body": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "marginCoin",
+                    "value": {
+                      "kind": "string",
+                      "value": "USDT"
+                    }
+                  },
+                  {
+                    "key": "symbol",
+                    "value": {
+                      "kind": "string",
+                      "value": "BTC"
+                    }
+                  },
+                  {
+                    "key": "leverage",
+                    "value": {
+                      "kind": "number",
+                      "bits": "4010000000000000"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "updates": [
+                [
+                  "BTC:long",
+                  "4010000000000000"
+                ],
+                [
+                  "BTC:short",
+                  "4010000000000000"
+                ]
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "bits": "4034000000000000"
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "market": "BTC"
+            },
+            {
+              "position": "BTC"
+            },
+            {
+              "post": "/api/v1/futures/account/change_leverage",
+              "body": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "marginCoin",
+                    "value": {
+                      "kind": "string",
+                      "value": "USDT"
+                    }
+                  },
+                  {
+                    "key": "symbol",
+                    "value": {
+                      "kind": "string",
+                      "value": "BTC"
+                    }
+                  },
+                  {
+                    "key": "leverage",
+                    "value": {
+                      "kind": "number",
+                      "bits": "4024000000000000"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "updates": [
+                [
+                  "BTC:long",
+                  "4024000000000000"
+                ],
+                [
+                  "BTC:short",
+                  "4024000000000000"
+                ]
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "bits": "8000000000000000"
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "market": "BTC"
+            },
+            {
+              "position": "BTC"
+            },
+            {
+              "post": "/api/v1/futures/account/change_leverage",
+              "body": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "marginCoin",
+                    "value": {
+                      "kind": "string",
+                      "value": "USDT"
+                    }
+                  },
+                  {
+                    "key": "symbol",
+                    "value": {
+                      "kind": "string",
+                      "value": "BTC"
+                    }
+                  },
+                  {
+                    "key": "leverage",
+                    "value": {
+                      "kind": "number",
+                      "bits": "3ff0000000000000"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "updates": [
+                [
+                  "BTC:long",
+                  "3ff0000000000000"
+                ],
+                [
+                  "BTC:short",
+                  "3ff0000000000000"
+                ]
+              ]
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "bits": "4008000000000000"
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "market": "BTC"
+            },
+            {
+              "position": "BTC"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "noMarket": true,
+          "noPosition": true
+        },
+        "output": {
+          "error": "Market BTC not found",
+          "trace": [
+            {
+              "market": "BTC"
+            },
+            {
+              "position": "BTC"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "noPosition": true
+        },
+        "output": {
+          "error": "Position BTC not found",
+          "trace": [
+            {
+              "market": "BTC"
+            },
+            {
+              "position": "BTC"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "postFail": true
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            {
+              "market": "BTC"
+            },
+            {
+              "position": "BTC"
+            },
+            {
+              "post": "/api/v1/futures/account/change_leverage",
+              "body": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "marginCoin",
+                    "value": {
+                      "kind": "string",
+                      "value": "USDT"
+                    }
+                  },
+                  {
+                    "key": "symbol",
+                    "value": {
+                      "kind": "string",
+                      "value": "BTC"
+                    }
+                  },
+                  {
+                    "key": "leverage",
+                    "value": {
+                      "kind": "number",
+                      "bits": "4010000000000000"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "report": "post failed"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "updateFail": true,
+          "reportFail": true
+        },
+        "output": {
+          "error": "report failed",
+          "trace": [
+            {
+              "market": "BTC"
+            },
+            {
+              "position": "BTC"
+            },
+            {
+              "post": "/api/v1/futures/account/change_leverage",
+              "body": {
+                "kind": "object",
+                "fields": [
+                  {
+                    "key": "marginCoin",
+                    "value": {
+                      "kind": "string",
+                      "value": "USDT"
+                    }
+                  },
+                  {
+                    "key": "symbol",
+                    "value": {
+                      "kind": "string",
+                      "value": "BTC"
+                    }
+                  },
+                  {
+                    "key": "leverage",
+                    "value": {
+                      "kind": "number",
+                      "bits": "4010000000000000"
+                    }
+                  }
+                ]
+              }
+            },
+            {
+              "updates": [
+                [
+                  "BTC:long",
+                  "4010000000000000"
+                ],
+                [
+                  "BTC:short",
+                  "4010000000000000"
+                ]
+              ]
+            },
+            {
+              "report": "update failed"
+            }
+          ]
+        }
+      }
+    ],
+    "evidence": "Actual native Market and Position inputs retain typed fields. Bounded ready callbacks observe both lookups even on absent market, lower/upper clamp bit results, equal-value no-op, ordered POST data, updates to both long/short IDs only after successful POST, and distinct update/report failures. These finite selected cases do not claim every NaN or arbitrary host callback input."
+  },
+  "safe_cex_venue_bitunix::rest_reads::fetch_markets": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "fetch_markets",
+      "signature": {
+        "inputs": [
+          [
+            "cached",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "alloc::vec::Vec",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_types::Market",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "read",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "trace",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::Market",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Vec<Market>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::Market",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, Value) -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&E)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "E"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "E"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::From",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          },
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "core::option::Option",
+                                                  "args": {
+                                                    "angle_bracketed": {
+                                                      "args": [
+                                                        {
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "serde_json::value::Value",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      ],
+                                                      "constraints": []
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(future:F)->F::Output{let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){std::task::Poll::Ready(value)=>value,_=>panic!(\"bounded ready host future must settle\")}}#[derive(Debug)]struct HostError(String);impl From<safe_cex_num::JsCoercionError> for HostError{fn from(e:safe_cex_num::JsCoercionError)->Self{Self(format!(\"{}:{}\",e.name,e.message))}}let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let markets=run($type(||{trace.borrow_mut().push(serde_json::json!(\"cached\"));serde_json::from_value(serde_json::json!([{\"id\":\"OLD1/USDT\",\"symbol\":\"OLD1USDT\",\"base\":\"OLD1\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"amount\":1,\"price\":0.5},\"limits\":{\"amount\":{\"min\":0,\"max\":50},\"leverage\":{\"min\":1,\"max\":5}}},{\"id\":\"OLD2/USDT\",\"symbol\":\"OLD2USDT\",\"base\":\"OLD2\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"amount\":1,\"price\":0.5},\"limits\":{\"amount\":{\"min\":0,\"max\":50},\"leverage\":{\"min\":1,\"max\":5}}}])).unwrap()},|endpoint,config|{trace.borrow_mut().push(serde_json::json!({\"get\":endpoint,\"config\":config}));std::future::ready(if $value[\"transportFail\"]==true{Err(HostError(\"transport\".into()))}else{Ok(Some($value[\"response\"].clone()))})},|error|trace.borrow_mut().push(serde_json::json!({\"report\":error.0}))));let output=markets.into_iter().map(|m|{assert!(m.pretty_symbol.is_none()&&m.contract_size.is_none()&&m.is_expiring.is_none()&&m.is_inverse.is_none()&&m.is_spot.is_none()&&m.is_perpetual.is_none()&&m.is_read_only.is_none()&&m.info.is_none()&&m.taker_fee.is_none()&&m.maker_fee.is_none()&&m.option.is_none()&&m.limits.price.is_none());serde_json::json!({\"id\":m.id,\"symbol\":m.symbol,\"base\":m.base,\"quote\":m.quote,\"active\":m.active,\"numbers\":([m.precision.amount,m.precision.price,m.limits.amount.min,m.limits.amount.max,m.limits.leverage.min,m.limits.leverage.max].map(|n|format!(\"{:016x}\",n.to_bits())))})}).collect::<Vec<_>>();serde_json::json!({\"markets\":output,\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {
+          "response": {
+            "data": [
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "CLOSED",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USD",
+                "isApiSupported": true,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": false,
+                "base": "BTC",
+                "symbol": "BTCUSDT",
+                "basePrecision": 3,
+                "quotePrecision": 2,
+                "maxLimitOrderVolume": "125.5"
+              },
+              {
+                "symbolStatus": "OPEN",
+                "quote": "USDT",
+                "isApiSupported": true,
+                "base": "ETH",
+                "symbol": "ETHUSDT",
+                "basePrecision": 0,
+                "quotePrecision": 1,
+                "maxLimitOrderVolume": 77
+              }
+            ]
+          }
+        },
+        "output": {
+          "markets": [
+            {
+              "id": "BTC/USDT",
+              "symbol": "BTCUSDT",
+              "base": "BTC",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3f50624dd2f1a9fc",
+                "3f847ae147ae147b",
+                "0000000000000000",
+                "405f600000000000",
+                "3ff0000000000000",
+                "4059000000000000"
+              ]
+            },
+            {
+              "id": "ETH/USDT",
+              "symbol": "ETHUSDT",
+              "base": "ETH",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3ff0000000000000",
+                "3fb999999999999a",
+                "0000000000000000",
+                "4053400000000000",
+                "3ff0000000000000",
+                "4059000000000000"
+              ]
+            }
+          ],
+          "trace": [
+            {
+              "get": "/api/v1/futures/market/trading_pairs",
+              "config": {}
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "response": {
+            "data": null
+          }
+        },
+        "output": {
+          "markets": [
+            {
+              "id": "OLD1/USDT",
+              "symbol": "OLD1USDT",
+              "base": "OLD1",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3ff0000000000000",
+                "3fe0000000000000",
+                "0000000000000000",
+                "4049000000000000",
+                "3ff0000000000000",
+                "4014000000000000"
+              ]
+            },
+            {
+              "id": "OLD2/USDT",
+              "symbol": "OLD2USDT",
+              "base": "OLD2",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3ff0000000000000",
+                "3fe0000000000000",
+                "0000000000000000",
+                "4049000000000000",
+                "3ff0000000000000",
+                "4014000000000000"
+              ]
+            }
+          ],
+          "trace": [
+            {
+              "get": "/api/v1/futures/market/trading_pairs",
+              "config": {}
+            },
+            {
+              "report": "TypeError:Market response data must be an array"
+            },
+            "cached"
+          ]
+        }
+      },
+      {
+        "input": {
+          "transportFail": true
+        },
+        "output": {
+          "markets": [
+            {
+              "id": "OLD1/USDT",
+              "symbol": "OLD1USDT",
+              "base": "OLD1",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3ff0000000000000",
+                "3fe0000000000000",
+                "0000000000000000",
+                "4049000000000000",
+                "3ff0000000000000",
+                "4014000000000000"
+              ]
+            },
+            {
+              "id": "OLD2/USDT",
+              "symbol": "OLD2USDT",
+              "base": "OLD2",
+              "quote": "USDT",
+              "active": true,
+              "numbers": [
+                "3ff0000000000000",
+                "3fe0000000000000",
+                "0000000000000000",
+                "4049000000000000",
+                "3ff0000000000000",
+                "4014000000000000"
+              ]
+            }
+          ],
+          "trace": [
+            {
+              "get": "/api/v1/futures/market/trading_pairs",
+              "config": {}
+            },
+            {
+              "report": "transport"
+            },
+            "cached"
+          ]
+        }
+      }
+    ],
+    "evidence": "Actual native market reads execute bounded ready GET callbacks. Two distinct complete Market outputs retain native precision/limit bits and each optional-field absence, while closed, wrong-quote and unsupported rows are independently excluded. Exact empty request configuration and report-before-cached fallback and complete nonempty cached vectors are observed; arbitrary host objects and transport scheduling remain out of scope."
+  },
+  "safe_cex_venue_bitunix::rest_reads::fetch_tickers": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "fetch_tickers",
+      "signature": {
+        "inputs": [
+          [
+            "cached",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "alloc::vec::Vec",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "resolved_path": {
+                                          "path": "safe_cex_types::Ticker",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "market_by_symbol",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          ],
+                          "output": {
+                            "resolved_path": {
+                              "path": "core::option::Option",
+                              "args": {
+                                "angle_bracketed": {
+                                  "args": [
+                                    {
+                                      "type": {
+                                        "borrowed_ref": {
+                                          "lifetime": "'a",
+                                          "is_mutable": false,
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_types::Market",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      }
+                                    }
+                                  ],
+                                  "constraints": []
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "read",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "trace",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::vec::Vec",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::Ticker",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Vec<Ticker>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "alloc::vec::Vec",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "resolved_path": {
+                                            "path": "safe_cex_types::Ticker",
+                                            "args": null
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&str) -> Option<&'a Market>",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": {
+                              "resolved_path": {
+                                "path": "core::option::Option",
+                                "args": {
+                                  "angle_bracketed": {
+                                    "args": [
+                                      {
+                                        "type": {
+                                          "borrowed_ref": {
+                                            "lifetime": "'a",
+                                            "is_mutable": false,
+                                            "type": {
+                                              "resolved_path": {
+                                                "path": "safe_cex_types::Market",
+                                                "args": null
+                                              }
+                                            }
+                                          }
+                                        }
+                                      }
+                                    ],
+                                    "constraints": []
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, Value) -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&E)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "E"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "E"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::From",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          },
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "core::option::Option",
+                                                  "args": {
+                                                    "angle_bracketed": {
+                                                      "args": [
+                                                        {
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "serde_json::value::Value",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      ],
+                                                      "constraints": []
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(future:F)->F::Output{let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){std::task::Poll::Ready(value)=>value,_=>panic!(\"bounded ready host future must settle\")}}#[derive(Debug)]struct HostError(String);impl From<safe_cex_num::JsCoercionError> for HostError{fn from(e:safe_cex_num::JsCoercionError)->Self{Self(format!(\"{}:{}\",e.name,e.message))}}fn market(symbol:&str,id:&str)->safe_cex_types::Market{serde_json::from_value(serde_json::json!({\"id\":id,\"symbol\":symbol,\"base\":\"B\",\"quote\":\"USDT\",\"active\":true,\"precision\":{\"amount\":1,\"price\":1},\"limits\":{\"amount\":{\"min\":0,\"max\":1},\"leverage\":{\"min\":1,\"max\":2}}})).unwrap()}fn cached_ticker(symbol:&str,id:&str,last:f64)->safe_cex_types::Ticker{safe_cex_types::Ticker{id:id.into(),symbol:symbol.into(),bid:last,ask:last+1.0,last,mark:last+2.0,index:last+3.0,percentage:-1.0,funding_rate:0.25,funding_time:17.0,volume:8.0,quote_volume:9.0,open_interest:10.0,mid_price:None,info:None,timestamp:None}}let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let markets=[market(\"BTCUSDT\",\"BTC/USDT\"),market(\"ETHUSDT\",\"ETH/USDT\")];let tickers=run($type(||{trace.borrow_mut().push(serde_json::json!(\"cached\"));vec![cached_ticker(\"OLD1USDT\",\"OLD1/USDT\",27.0),cached_ticker(\"OLD2USDT\",\"OLD2/USDT\",31.0)]},|symbol|{trace.borrow_mut().push(serde_json::json!({\"market\":symbol}));markets.iter().find(|m|m.symbol==symbol)},|endpoint,config|{trace.borrow_mut().push(serde_json::json!({\"get\":endpoint,\"config\":config}));std::future::ready(if $value[\"transportFail\"]==true{Err(HostError(\"transport\".into()))}else{Ok(Some($value[\"response\"].clone()))})},|error|trace.borrow_mut().push(serde_json::json!({\"report\":error.0}))));let output=tickers.into_iter().map(|t|{assert!(t.mid_price.is_none()&&t.info.is_none()&&t.timestamp.is_none());serde_json::json!({\"id\":t.id,\"symbol\":t.symbol,\"numbers\":([t.bid,t.ask,t.last,t.mark,t.index,t.percentage,t.funding_rate,t.funding_time,t.volume,t.quote_volume,t.open_interest].map(|n|format!(\"{:016x}\",if n.is_nan(){0x7ff8_0000_0000_0000}else{n.to_bits()})))})}).collect::<Vec<_>>();serde_json::json!({\"tickers\":output,\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {
+          "response": {
+            "data": [
+              {
+                "symbol": "BTCUSDT",
+                "last": "12.5tail",
+                "open": "10",
+                "markPrice": "11",
+                "baseVol": "4.25",
+                "quoteVol": "53.125"
+              },
+              {
+                "symbol": "UNKNOWN"
+              },
+              {
+                "symbol": "ETHUSDT",
+                "last": "-0",
+                "open": "0",
+                "markPrice": "3.5",
+                "baseVol": "9",
+                "quoteVol": "31.5"
+              }
+            ]
+          }
+        },
+        "output": {
+          "tickers": [
+            {
+              "id": "BTC/USDT",
+              "symbol": "BTCUSDT",
+              "numbers": [
+                "4029000000000000",
+                "4029000000000000",
+                "4029000000000000",
+                "4026000000000000",
+                "4026000000000000",
+                "4039000000000000",
+                "0000000000000000",
+                "0000000000000000",
+                "4011000000000000",
+                "404a900000000000",
+                "0000000000000000"
+              ]
+            },
+            {
+              "id": "ETH/USDT",
+              "symbol": "ETHUSDT",
+              "numbers": [
+                "8000000000000000",
+                "8000000000000000",
+                "8000000000000000",
+                "400c000000000000",
+                "400c000000000000",
+                "0000000000000000",
+                "0000000000000000",
+                "0000000000000000",
+                "4022000000000000",
+                "403f800000000000",
+                "0000000000000000"
+              ]
+            }
+          ],
+          "trace": [
+            {
+              "get": "/api/v1/futures/market/tickers",
+              "config": {}
+            },
+            {
+              "market": "BTCUSDT"
+            },
+            {
+              "market": "UNKNOWN"
+            },
+            {
+              "market": "ETHUSDT"
+            }
+          ]
+        }
+      },
+      {
+        "input": {
+          "response": {
+            "data": [
+              null
+            ]
+          }
+        },
+        "output": {
+          "tickers": [
+            {
+              "id": "OLD1/USDT",
+              "symbol": "OLD1USDT",
+              "numbers": [
+                "403b000000000000",
+                "403c000000000000",
+                "403b000000000000",
+                "403d000000000000",
+                "403e000000000000",
+                "bff0000000000000",
+                "3fd0000000000000",
+                "4031000000000000",
+                "4020000000000000",
+                "4022000000000000",
+                "4024000000000000"
+              ]
+            },
+            {
+              "id": "OLD2/USDT",
+              "symbol": "OLD2USDT",
+              "numbers": [
+                "403f000000000000",
+                "4040000000000000",
+                "403f000000000000",
+                "4040800000000000",
+                "4041000000000000",
+                "bff0000000000000",
+                "3fd0000000000000",
+                "4031000000000000",
+                "4020000000000000",
+                "4022000000000000",
+                "4024000000000000"
+              ]
+            }
+          ],
+          "trace": [
+            {
+              "get": "/api/v1/futures/market/tickers",
+              "config": {}
+            },
+            {
+              "report": "TypeError:Ticker row must not be null"
+            },
+            "cached"
+          ]
+        }
+      },
+      {
+        "input": {
+          "transportFail": true
+        },
+        "output": {
+          "tickers": [
+            {
+              "id": "OLD1/USDT",
+              "symbol": "OLD1USDT",
+              "numbers": [
+                "403b000000000000",
+                "403c000000000000",
+                "403b000000000000",
+                "403d000000000000",
+                "403e000000000000",
+                "bff0000000000000",
+                "3fd0000000000000",
+                "4031000000000000",
+                "4020000000000000",
+                "4022000000000000",
+                "4024000000000000"
+              ]
+            },
+            {
+              "id": "OLD2/USDT",
+              "symbol": "OLD2USDT",
+              "numbers": [
+                "403f000000000000",
+                "4040000000000000",
+                "403f000000000000",
+                "4040800000000000",
+                "4041000000000000",
+                "bff0000000000000",
+                "3fd0000000000000",
+                "4031000000000000",
+                "4020000000000000",
+                "4022000000000000",
+                "4024000000000000"
+              ]
+            }
+          ],
+          "trace": [
+            {
+              "get": "/api/v1/futures/market/tickers",
+              "config": {}
+            },
+            {
+              "report": "transport"
+            },
+            "cached"
+          ]
+        }
+      }
+    ],
+    "evidence": "Two complete native Ticker outputs independently preserve all declared number bits, signed-zero bid/ask/last, zero-open branch and optional absence. Three source-order symbol lookups include an unknown skipped row; source parseFloat prefixes are exercised. Exact request configuration and complete nonempty cached vectors and null-row/transport report-before-fallback order use bounded ready callbacks, not a transport scheduling claim."
+  },
+  "safe_cex_venue_bitunix::rest_reads::fetch_balance": {
+    "category": "decoder",
+    "api": {
+      "kind": "function",
+      "name": "fetch_balance",
+      "signature": {
+        "inputs": [
+          [
+            "cached",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "resolved_path": {
+                              "path": "safe_cex_types::Balance",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "positions",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [],
+                          "output": {
+                            "borrowed_ref": {
+                              "lifetime": "'a",
+                              "is_mutable": false,
+                              "type": {
+                                "slice": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::Position",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "account_position_mode",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": true,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_types::PositionMode",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "read",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnOnce",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": "'static",
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            },
+                            {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          ],
+                          "output": {
+                            "generic": "F"
+                          }
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ],
+          [
+            "report",
+            {
+              "impl_trait": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::ops::function::FnMut",
+                      "args": {
+                        "parenthesized": {
+                          "inputs": [
+                            {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "generic": "E"
+                                }
+                              }
+                            }
+                          ],
+                          "output": null
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ]
+            }
+          ]
+        ],
+        "output": {
+          "tuple": [
+            {
+              "resolved_path": {
+                "path": "safe_cex_types::Balance",
+                "args": null
+              }
+            },
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "slice": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Position",
+                      "args": null
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          },
+          {
+            "name": "E",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "F",
+            "kind": {
+              "type": {
+                "bounds": [],
+                "default": null,
+                "is_synthetic": false
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> Balance",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Balance",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce() -> &'a [Position]",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [],
+                            "output": {
+                              "borrowed_ref": {
+                                "lifetime": "'a",
+                                "is_mutable": false,
+                                "type": {
+                                  "slice": {
+                                    "resolved_path": {
+                                      "path": "safe_cex_types::Position",
+                                      "args": null
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnOnce(&'static str, Value) -> F",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnOnce",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": "'static",
+                                  "is_mutable": false,
+                                  "type": {
+                                    "primitive": "str"
+                                  }
+                                }
+                              },
+                              {
+                                "resolved_path": {
+                                  "path": "serde_json::value::Value",
+                                  "args": null
+                                }
+                              }
+                            ],
+                            "output": {
+                              "generic": "F"
+                            }
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          },
+          {
+            "name": "impl FnMut(&E)",
+            "kind": {
+              "type": {
+                "bounds": [
+                  {
+                    "trait_bound": {
+                      "trait": {
+                        "path": "core::ops::function::FnMut",
+                        "args": {
+                          "parenthesized": {
+                            "inputs": [
+                              {
+                                "borrowed_ref": {
+                                  "lifetime": null,
+                                  "is_mutable": false,
+                                  "type": {
+                                    "generic": "E"
+                                  }
+                                }
+                              }
+                            ],
+                            "output": null
+                          }
+                        }
+                      },
+                      "generic_params": [],
+                      "modifier": "none"
+                    }
+                  }
+                ],
+                "default": null,
+                "is_synthetic": true
+              }
+            }
+          }
+        ],
+        "where_predicates": [
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "E"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::convert::From",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [
+                            {
+                              "type": {
+                                "resolved_path": {
+                                  "path": "safe_cex_types::js_coercion::JsCoercionError",
+                                  "args": null
+                                }
+                              }
+                            }
+                          ],
+                          "constraints": []
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          },
+          {
+            "bound_predicate": {
+              "type": {
+                "generic": "F"
+              },
+              "bounds": [
+                {
+                  "trait_bound": {
+                    "trait": {
+                      "path": "core::future::future::Future",
+                      "args": {
+                        "angle_bracketed": {
+                          "args": [],
+                          "constraints": [
+                            {
+                              "name": "Output",
+                              "args": null,
+                              "binding": {
+                                "equality": {
+                                  "type": {
+                                    "resolved_path": {
+                                      "path": "core::result::Result",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [
+                                            {
+                                              "type": {
+                                                "resolved_path": {
+                                                  "path": "core::option::Option",
+                                                  "args": {
+                                                    "angle_bracketed": {
+                                                      "args": [
+                                                        {
+                                                          "type": {
+                                                            "resolved_path": {
+                                                              "path": "serde_json::value::Value",
+                                                              "args": null
+                                                            }
+                                                          }
+                                                        }
+                                                      ],
+                                                      "constraints": []
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            },
+                                            {
+                                              "type": {
+                                                "generic": "E"
+                                              }
+                                            }
+                                          ],
+                                          "constraints": []
+                                        }
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      }
+                    },
+                    "generic_params": [],
+                    "modifier": "none"
+                  }
+                }
+              ],
+              "generic_params": []
+            }
+          }
+        ]
+      }
+    },
+    "call": "{fn run<F:std::future::Future>(future:F)->F::Output{let mut future=std::pin::pin!(future);match future.as_mut().poll(&mut std::task::Context::from_waker(std::task::Waker::noop())){std::task::Poll::Ready(value)=>value,_=>panic!(\"bounded ready host future must settle\")}}#[derive(Debug)]struct HostError(String);impl From<safe_cex_num::JsCoercionError> for HostError{fn from(e:safe_cex_num::JsCoercionError)->Self{Self(format!(\"{}:{}\",e.name,e.message))}}let trace=std::cell::RefCell::new(Vec::<serde_json::Value>::new());let positions:Vec<safe_cex_types::Position>=serde_json::from_value(serde_json::json!([{\"id\":\"BTC:long\",\"symbol\":\"BTC\",\"side\":\"long\",\"entryPrice\":1,\"notional\":2,\"leverage\":3,\"unrealizedPnl\":0,\"contracts\":1,\"liquidationPrice\":0},{\"id\":\"ETH:short\",\"symbol\":\"ETH\",\"side\":\"short\",\"entryPrice\":5,\"notional\":6,\"leverage\":7,\"unrealizedPnl\":8,\"contracts\":9,\"liquidationPrice\":10}])).unwrap();let mut mode=safe_cex_types::PositionMode::OneWay;let(balance,returned)=run($type(||{trace.borrow_mut().push(serde_json::json!(\"cached\"));safe_cex_types::Balance{total:99.0,free:9.0,used:7.0,upnl:-0.0,info:None,currencies:None,coins:None}},||{trace.borrow_mut().push(serde_json::json!(\"positions\"));positions.as_slice()},&mut mode,|endpoint,config|{trace.borrow_mut().push(serde_json::json!({\"get\":endpoint,\"config\":config}));std::future::ready(if $value[\"transportFail\"]==true{Err(HostError(\"transport\".into()))}else{Ok(Some($value[\"response\"].clone()))})},|error|trace.borrow_mut().push(serde_json::json!({\"report\":error.0}))));assert!(balance.info.is_none()&&balance.currencies.is_none()&&balance.coins.is_none());assert!(std::ptr::eq(returned.as_ptr(),positions.as_ptr()));serde_json::json!({\"balance\":([balance.total,balance.free,balance.used,balance.upnl].map(|n|format!(\"{:016x}\",n.to_bits()))),\"positions\":returned.iter().map(|p|p.id.clone()).collect::<Vec<_>>(),\"hedged\":mode==safe_cex_types::PositionMode::Hedged,\"trace\":trace.into_inner()})}",
+    "cases": [
+      {
+        "input": {
+          "response": {
+            "data": {
+              "positionMode": "one_way",
+              "available": "5",
+              "margin": "2",
+              "frozen": "3",
+              "crossUnrealizedPNL": "1.25",
+              "isolationUnrealizedPNL": "-0.25",
+              "unrealizedPNL": 999
+            }
+          }
+        },
+        "output": {
+          "balance": [
+            "4024000000000000",
+            "4014000000000000",
+            "4000000000000000",
+            "3ff0000000000000"
+          ],
+          "positions": [
+            "BTC:long",
+            "ETH:short"
+          ],
+          "hedged": false,
+          "trace": [
+            {
+              "get": "/api/v1/futures/account",
+              "config": {
+                "params": {
+                  "marginCoin": "USDT"
+                }
+              }
+            },
+            "positions"
+          ]
+        }
+      },
+      {
+        "input": {
+          "response": {
+            "data": {
+              "positionMode": "HEDGE",
+              "available": 0,
+              "availableBalance": 99,
+              "used": "4",
+              "locked": "2",
+              "upnl": "-0"
+            }
+          }
+        },
+        "output": {
+          "balance": [
+            "4018000000000000",
+            "0000000000000000",
+            "4010000000000000",
+            "8000000000000000"
+          ],
+          "positions": [
+            "BTC:long",
+            "ETH:short"
+          ],
+          "hedged": true,
+          "trace": [
+            {
+              "get": "/api/v1/futures/account",
+              "config": {
+                "params": {
+                  "marginCoin": "USDT"
+                }
+              }
+            },
+            "positions"
+          ]
+        }
+      },
+      {
+        "input": {
+          "transportFail": true
+        },
+        "output": {
+          "balance": [
+            "4058c00000000000",
+            "4022000000000000",
+            "401c000000000000",
+            "8000000000000000"
+          ],
+          "positions": [
+            "BTC:long",
+            "ETH:short"
+          ],
+          "hedged": false,
+          "trace": [
+            {
+              "get": "/api/v1/futures/account",
+              "config": {
+                "params": {
+                  "marginCoin": "USDT"
+                }
+              }
+            },
+            {
+              "report": "transport"
+            },
+            "cached",
+            "positions"
+          ]
+        }
+      }
+    ],
+    "evidence": "Actual native Balance fields and account PositionMode are read independently before serialization; cross/isolated sum precedence and explicit zero field precedence, total arithmetic and signed-zero fallback are observed. The returned borrowed Position slice retains pointer identity and both distinct ordered IDs, including fallback. Account request parameters and report/cached/positions ordering use bounded ready callbacks; Store and transport implementation remain separate owners."
   }
 }
