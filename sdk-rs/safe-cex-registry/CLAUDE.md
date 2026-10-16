@@ -60,7 +60,7 @@ parent notification; copy it only when constructing a parent update. The
 reentrant seed witness is in tests/public_data_providers.rs. Provider policy
 choices cite MANIFEST-SPEC.md#public-data-provider-choice.
 
-`native_host::native_venue_host()` is the production `RustVenueHost` (direct
+`native_host::native_venue_host(limiter)` is the production `RustVenueHost` (direct
 transport, real HTTP); `native_venue_host_with` takes a runtime and adapter
 factory. Native registry builds always carry it, since a feature cannot be
 enabled for this crate's own tests without a lateral self-edge; wasm builds do
@@ -103,6 +103,15 @@ The native host supplies a fresh HTTP host and the common gateway factory; remot
 signer hosts fail visibly until BingX signing is connected.
 `tests/native_host_bingx.rs` starts it on loopback HTTP/WS, verifies a signed order
 payload and caller client ID, and cancels the resulting order.
+
+
+Hyperliquid is constructed through the native Rust table with options-aware
+transport composition. All native host constructors require the same caller-owned
+`Rc<HyperliquidRateLimiter>` across accounts. The FFI command LocalSet creates one
+via `hyperliquid_rate_limiter()` and forwards it through `NativeAccountSpec`;
+never create a fresh budget per hosted account. The Hyperliquid adapter preserves
+the transport-resolved baseURL, repeat query serialization, hosted action signing
+and info skip-signing. Its local HTTP proof is `tests/native_host_hyperliquid.rs`.
 
 KuCoin futures/Spot and MEXC registry entries reuse their concrete constructors.
 Their native host inputs retain each API's signing/transport/retry middleware.

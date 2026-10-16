@@ -53,7 +53,7 @@ def main():
         return result
 
     baseline = run("baseline")
-    assert baseline.returncode == 0 and "13 passed; 0 failed" in baseline.stdout, baseline.stdout
+    assert baseline.returncode == 0 and "14 passed; 0 failed" in baseline.stdout, baseline.stdout
     try:
         for name, dispatch, test in CONTROLS:
             # Restrict mutation to this one trait override, never a helper or
@@ -77,9 +77,9 @@ def main():
     finally:
         SOURCE.write_bytes(original)
     restored = run("restored")
-    assert restored.returncode == 0 and "13 passed; 0 failed" in restored.stdout, restored.stdout
+    assert restored.returncode == 0 and "14 passed; 0 failed" in restored.stdout, restored.stdout
     assert SOURCE.read_bytes() == original
-    print("16/16 compiling dispatch controls failed their named test; restored 13/13 pass", flush=True)
+    print("16/16 compiling dispatch controls failed their named test; restored 14/14 pass", flush=True)
 
 
 if __name__ == "__main__":

@@ -51,6 +51,7 @@ publish = false
 # License remains unset until the overseer resolves public/licensing decision D4.
 
 [workspace.dependencies]
+safe-cex-venue-hyperliquid = { path = "safe-cex-venue-hyperliquid" }
 # Exact regex pin is deliberate: cargo update cannot take security patches; bump this requirement explicitly.
 regex = "=1.13.1"
 # Shared signing primitives for transport and venue authentication.
