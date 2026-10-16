@@ -349,12 +349,14 @@ fn observed_context(request: &RestRequest) -> Value {
         query_profile,
         skip_remote_signing,
         sign_ms,
+        config_extensions,
     } = request;
     assert!(
         query_params.is_none()
             && query_profile.is_none()
             && !skip_remote_signing
-            && sign_ms.is_none(),
+            && sign_ms.is_none()
+            && config_extensions.is_empty(),
         "WOO-AUDIT native unused context fields"
     );
     json!({"method":method,"url":url,"params":params,"body":body.as_ref().map(|b| b.untransformed().unwrap()),"headers":headers,"baseURL":base_url,"timeout":timeout_ms})
