@@ -60,7 +60,7 @@ parent notification; copy it only when constructing a parent update. The
 reentrant seed witness is in tests/public_data_providers.rs. Provider policy
 choices cite MANIFEST-SPEC.md#public-data-provider-choice.
 
-`native_host::native_venue_host()` is the production `RustVenueHost` (direct
+`native_host::native_venue_host(limiter)` is the production `RustVenueHost` (direct
 transport, real HTTP); `native_venue_host_with` takes a runtime and adapter
 factory. Native registry builds always carry it, since a feature cannot be
 enabled for this crate's own tests without a lateral self-edge; wasm builds do
@@ -109,3 +109,11 @@ table. The native host gives each instance a transport registry seeded from its
 runtime, fresh terminal HTTP and OS signing entropy. Hosted remote signing is
 refused because this binding uses the local SDK signer. Construction tests cover
 both names and their deployment-specific REST origins and quote currencies.
+
+Hyperliquid is constructed through the native Rust table with options-aware
+transport composition. All native host constructors require the same caller-owned
+`Rc<HyperliquidRateLimiter>` across accounts. The FFI command LocalSet creates one
+via `hyperliquid_rate_limiter()` and forwards it through `NativeAccountSpec`;
+never create a fresh budget per hosted account. The Hyperliquid adapter preserves
+the transport-resolved baseURL, repeat query serialization, hosted action signing
+and info skip-signing. Its local HTTP proof is `tests/native_host_hyperliquid.rs`.
