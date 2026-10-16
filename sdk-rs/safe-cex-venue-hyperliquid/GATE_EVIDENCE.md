@@ -32,6 +32,17 @@ remaining alias families, runtime decoder owners, local helpers, dependency and
 feature/target obligations retain their separate reviews. No package acceptance is
 claimed by these six contracts.
 
+The refreshed ordinary package gate now advances beyond all six projections to
+`spot_account_reads::AccountFuture`, where the unreviewed local-future shape is
+refused. Every original census key remains indexed. All 51 master contract rows
+were retained exactly; the shard now contains 51 owner contracts and six reviewed
+aliases, alongside two existing Clone reviews: **59 reviewed of 572 entries,
+513 unreviewed**. Earlier cohort sections below record their original snapshots.
+
+Strict native all-targets clippy and formatting pass. Parity passes with
+7459 rows, 17206 public items and zero findings. The final independent review
+found no issues after the evidence status was updated.
+
 # Two waiting-status owner reviews
 
 `OrderResponseStatusCase3` admits only `waitingForFill`; `OrderResponseStatusCase4`
