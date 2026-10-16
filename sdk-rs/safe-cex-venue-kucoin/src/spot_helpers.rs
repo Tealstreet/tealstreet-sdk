@@ -32,6 +32,7 @@ pub fn fetch_positions(store: &dyn Store, symbols: Option<&[String]>) -> Vec<Pos
             margin_size: None,
             extra: None,
             last_update: None,
+            option: None,
         })
         .collect()
 }

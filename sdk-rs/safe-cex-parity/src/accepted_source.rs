@@ -333,6 +333,122 @@ fn local_macro_body(tokens: proc_macro2::TokenStream) -> Option<syn::Block> {
     syn::parse2::<syn::Block>(TokenStream::from(TokenTree::Group(body))).ok()
 }
 
+/// Module-scope `macro_rules!` recipes proven to expand to expressions only,
+/// keyed by name, with every arm's transcriber for nested-invocation checks.
+pub type ModuleRecipes = HashMap<String, proc_macro2::TokenStream>;
+
+fn fragment_named(tokens: proc_macro2::TokenStream, fragment: &str) -> bool {
+    let tokens: Vec<_> = tokens.into_iter().collect();
+    tokens.iter().enumerate().any(|(index, token)| match token {
+        proc_macro2::TokenTree::Ident(name) => {
+            name == fragment
+                && index > 0
+                && matches!(&tokens[index - 1], proc_macro2::TokenTree::Punct(p) if p.as_char() == ':')
+        }
+        proc_macro2::TokenTree::Group(group) => fragment_named(group.stream(), fragment),
+        _ => false,
+    })
+}
+
+// Every arm must transcribe without a declaration keyword or `item` fragment;
+// arguments are keyword-checked per invocation, so no expansion declares items.
+fn expression_recipe(tokens: proc_macro2::TokenStream) -> Option<proc_macro2::TokenStream> {
+    use proc_macro2::TokenTree;
+    let tokens: Vec<_> = tokens.into_iter().collect();
+    let mut transcribers = proc_macro2::TokenStream::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        let (
+            TokenTree::Group(matcher),
+            Some(TokenTree::Punct(equal)),
+            Some(TokenTree::Punct(arrow)),
+            Some(TokenTree::Group(body)),
+        ) = (
+            &tokens[index],
+            tokens.get(index + 1),
+            tokens.get(index + 2),
+            tokens.get(index + 3),
+        )
+        else {
+            return None;
+        };
+        if equal.as_char() != '='
+            || arrow.as_char() != '>'
+            || fragment_named(matcher.stream(), "item")
+            || declarations_in_tokens(body.stream())
+        {
+            return None;
+        }
+        transcribers.extend(body.stream());
+        index += 4;
+        match tokens.get(index) {
+            Some(TokenTree::Punct(separator)) if separator.as_char() == ';' => index += 1,
+            None => {}
+            Some(_) => return None,
+        }
+    }
+    (index > 0).then_some(transcribers)
+}
+
+/// Collects module-scope recipes across one compiler target's source files.
+/// A name is usable only when EVERY definition of it is an unconditional
+/// expression recipe that does not shadow a trusted builtin spelling.
+pub fn module_recipes(paths: &[&Path]) -> super::Result<ModuleRecipes> {
+    #[derive(Default)]
+    struct Collector(Vec<(String, Option<proc_macro2::TokenStream>)>);
+    impl<'ast> Visit<'ast> for Collector {
+        fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
+            if !super::test_only(&item.attrs) {
+                visit::visit_item_mod(self, item);
+            }
+        }
+        fn visit_item_fn(&mut self, _: &'ast syn::ItemFn) {}
+        fn visit_item_impl(&mut self, _: &'ast syn::ItemImpl) {}
+        fn visit_item_trait(&mut self, _: &'ast syn::ItemTrait) {}
+        fn visit_item_const(&mut self, _: &'ast syn::ItemConst) {}
+        fn visit_item_static(&mut self, _: &'ast syn::ItemStatic) {}
+        fn visit_item_macro(&mut self, item: &'ast syn::ItemMacro) {
+            let Some(name) = item.ident.as_ref() else {
+                return;
+            };
+            if !item.mac.path.is_ident("macro_rules") || super::test_only(&item.attrs) {
+                return;
+            }
+            let name = name.to_string().trim_start_matches("r#").to_owned();
+            let unconditional = item.attrs.iter().all(|attr| {
+                attr.path().get_ident().is_some_and(|name| {
+                    matches!(name.to_string().as_str(), "allow" | "doc" | "macro_export")
+                })
+            });
+            let trusted = expression_macro(&name) || name == "js_number_output";
+            let recipe = (unconditional && !trusted)
+                .then(|| expression_recipe(item.mac.tokens.clone()))
+                .flatten();
+            self.0.push((name, recipe));
+        }
+    }
+    let mut collector = Collector::default();
+    for path in paths {
+        let source = fs::read_to_string(path).map_err(|error| error.to_string())?;
+        let syntax = syn::parse_file(&source).map_err(|error| error.to_string())?;
+        collector.visit_file(&syntax);
+    }
+    let mut recipes: HashMap<String, Option<proc_macro2::TokenStream>> = HashMap::new();
+    for (name, recipe) in collector.0 {
+        match (recipes.get_mut(&name), recipe) {
+            (None, recipe) => {
+                recipes.insert(name, recipe);
+            }
+            (Some(Some(existing)), Some(recipe)) => existing.extend(recipe),
+            (Some(slot), _) => *slot = None,
+        }
+    }
+    Ok(recipes
+        .into_iter()
+        .filter_map(|(name, recipe)| recipe.map(|recipe| (name, recipe)))
+        .collect())
+}
+
 #[derive(Default)]
 struct LocalTypes {
     depth: usize,
@@ -350,6 +466,11 @@ struct LocalTypes {
     generated_provider_module: bool,
     number_output_used: bool,
     number_output_glob: bool,
+    number_output_imported: bool,
+    number_output_shadowed: bool,
+    module_recipes: ModuleRecipes,
+    foreign_imports: HashSet<String>,
+    inspected_recipes: HashSet<String>,
 }
 impl LocalTypes {
     fn verified_thread_local(&self, item: &syn::Macro) -> bool {
@@ -426,7 +547,15 @@ impl LocalTypes {
                         && item.path.segments[0].ident == "crate"
                         && self
                             .verified_macro_origins
-                            .contains("safe_cex_num::js_number_output::self")));
+                            .contains("safe_cex_num::js_number_output::self")))
+                || (item.path.segments.len() == 1
+                    && item.path.leading_colon.is_none()
+                    && item.path.segments[0].arguments.is_empty()
+                    && self.number_output_imported
+                    && !self.number_output_shadowed
+                    && self
+                        .verified_macro_origins
+                        .contains("safe_cex_num::js_number_output"));
             if !verified || !number_output_grammar(item.tokens.clone()) {
                 let end = item.span().end();
                 self.names.push((
@@ -480,6 +609,49 @@ impl LocalTypes {
                 self.inspect_macro(&invocation);
             }
             self.inside_local_recipe = false;
+            return;
+        }
+        let local_path = item.path.leading_colon.is_none()
+            && item
+                .path
+                .segments
+                .iter()
+                .rev()
+                .skip(1)
+                .enumerate()
+                .all(|(index, part)| {
+                    index + 2 < item.path.segments.len()
+                        || matches!(part.ident.to_string().as_str(), "crate" | "self" | "super")
+                });
+        let recipe_name = item
+            .path
+            .segments
+            .last()
+            .map(|part| part.ident.to_string().trim_start_matches("r#").to_owned())
+            .unwrap_or_default();
+        if local_path
+            && !(!qualified && self.foreign_imports.contains(&recipe_name))
+            && let Some(transcriber) = self.module_recipes.get(&recipe_name).cloned()
+        {
+            if !qualified {
+                self.unqualified_macro = true;
+            }
+            if declarations_in_tokens(item.tokens.clone()) {
+                let end = item.span().end();
+                self.names.push((
+                    format!("UNSUPPORTED_LOCAL_MACRO:{recipe_name}"),
+                    end.line,
+                    end.column,
+                ));
+            }
+            if self.inspected_recipes.insert(recipe_name) {
+                for nested in nested_macro_invocations(transcriber) {
+                    self.inspect_macro(&nested);
+                }
+            }
+            for nested in nested_macro_invocations(item.tokens.clone()) {
+                self.inspect_macro(&nested);
+            }
             return;
         }
         let name = item
@@ -669,7 +841,10 @@ impl<'ast> Visit<'ast> for LocalTypes {
                         (!conditional).then(|| item.mac.tokens.clone()),
                     );
                 }
-            } else {
+            } else if !item.ident.as_ref().is_some_and(|name| {
+                self.module_recipes
+                    .contains_key(name.to_string().trim_start_matches("r#"))
+            }) {
                 let end = item.span().end();
                 self.names.push((
                     format!(
@@ -785,6 +960,63 @@ impl<'ast> Visit<'ast> for LocalTypes {
             }
         }
         self.number_output_glob |= glob(&item.tree);
+        // Only a direct `safe_cex_num::js_number_output` binding authorizes the
+        // unqualified spelling; any other binding of that name revokes it.
+        fn number_output_bindings(
+            tree: &syn::UseTree,
+            parent: Option<&syn::Ident>,
+            verified: &mut bool,
+            other: &mut bool,
+        ) {
+            match tree {
+                syn::UseTree::Name(name) if name.ident == "js_number_output" => {
+                    if parent.is_some_and(|parent| parent == "safe_cex_num") {
+                        *verified = true;
+                    } else {
+                        *other = true;
+                    }
+                }
+                syn::UseTree::Rename(name)
+                    if name.rename == "js_number_output" || name.ident == "js_number_output" =>
+                {
+                    *other = true
+                }
+                syn::UseTree::Group(group) => {
+                    for tree in &group.items {
+                        number_output_bindings(tree, parent, verified, other);
+                    }
+                }
+                syn::UseTree::Path(path) => {
+                    number_output_bindings(&path.tree, Some(&path.ident), verified, other)
+                }
+                _ => {}
+            }
+        }
+        let (mut verified, mut other) = (false, false);
+        number_output_bindings(&item.tree, None, &mut verified, &mut other);
+        let rooted = matches!(&item.tree, syn::UseTree::Path(path) if path.ident == "safe_cex_num");
+        self.number_output_imported |= verified && rooted;
+        self.number_output_shadowed |= other || (verified && !rooted);
+        fn foreign_leaves(tree: &syn::UseTree, local: bool, output: &mut HashSet<String>) {
+            match tree {
+                syn::UseTree::Name(name) if !local => {
+                    output.insert(name.ident.to_string().trim_start_matches("r#").to_owned());
+                }
+                syn::UseTree::Rename(name) if !local => {
+                    output.insert(name.rename.to_string().trim_start_matches("r#").to_owned());
+                }
+                syn::UseTree::Group(group) => {
+                    for tree in &group.items {
+                        foreign_leaves(tree, local, output);
+                    }
+                }
+                syn::UseTree::Path(path) => foreign_leaves(&path.tree, local, output),
+                _ => {}
+            }
+        }
+        let local_root = item.leading_colon.is_none()
+            && matches!(&item.tree, syn::UseTree::Path(path) if matches!(path.ident.to_string().as_str(), "crate" | "self" | "super"));
+        foreign_leaves(&item.tree, local_root, &mut self.foreign_imports);
         fn namespace_alias(tree: &syn::UseTree, parent: Option<&syn::Ident>) -> bool {
             match tree {
                 syn::UseTree::Name(name) => {
@@ -1282,10 +1514,19 @@ pub fn local_types(
     path: &Path,
     macro_origins: &HashSet<String>,
 ) -> super::Result<Vec<(String, usize, usize)>> {
+    local_types_with_recipes(path, macro_origins, &ModuleRecipes::new())
+}
+
+pub fn local_types_with_recipes(
+    path: &Path,
+    macro_origins: &HashSet<String>,
+    module_recipes: &ModuleRecipes,
+) -> super::Result<Vec<(String, usize, usize)>> {
     let source = fs::read_to_string(path).map_err(|error| error.to_string())?;
     let syntax = syn::parse_file(&source).map_err(|error| error.to_string())?;
     let mut visitor = LocalTypes {
         verified_macro_origins: macro_origins.clone(),
+        module_recipes: module_recipes.clone(),
         generated_provider_file: path
             .ends_with(Path::new("safe-cex-num/src/collation_data/provider.rs"))
             && source.starts_with(
@@ -1310,6 +1551,41 @@ pub fn local_types(
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn number_output_unqualified_spelling_requires_a_direct_verified_import() {
+        let scan = |source: &str| {
+            let mut visitor = LocalTypes {
+                verified_macro_origins: ["safe_cex_num::js_number_output".into()].into(),
+                ..LocalTypes::default()
+            };
+            visitor.visit_file(&syn::parse_file(source).unwrap());
+            visitor.names
+        };
+        let call = "fn check(&self) { js_number_output!(self, struct {} passthrough { value }); }";
+        for import in [
+            "use safe_cex_num::js_number_output;",
+            "use safe_cex_num::{js_number_output, numeric_ingress::JsNumberOutput};",
+        ] {
+            let names = scan(&format!("{import} {call}"));
+            assert!(names.is_empty(), "{import}: {names:?}");
+        }
+        for import in [
+            "",
+            "use vendor::js_number_output;",
+            "use safe_cex_num::js_number_output; use vendor::js_number_output;",
+            "use safe_cex_num::other::js_number_output;",
+            "use safe_cex_num::{js_number_output, js_number_output as other};",
+            "use vendor::hidden as js_number_output; use safe_cex_num::js_number_output;",
+        ] {
+            let names = scan(&format!("{import} {call}"));
+            assert!(
+                names
+                    .iter()
+                    .any(|(name, _, _)| name == "UNSUPPORTED_NUMBER_OUTPUT_ORIGIN_OR_GRAMMAR"),
+                "{import}: {names:?}"
+            );
+        }
+    }
     #[test]
     fn number_output_accepts_only_the_verified_self_registration_subset() {
         for registration in [
@@ -1936,5 +2212,76 @@ mod tests {
                 .collect::<Vec<_>>(),
             ["Manual"]
         );
+    }
+
+    fn scan_with_module_recipes(source: &str) -> Vec<(String, usize, usize)> {
+        let directory = std::env::temp_dir().join(format!(
+            "accepted-module-recipes-{}-{}",
+            std::process::id(),
+            source.len()
+        ));
+        fs::create_dir_all(&directory).unwrap();
+        let path = directory.join("lib.rs");
+        fs::write(&path, source).unwrap();
+        let recipes = module_recipes(&[path.as_path()]).unwrap();
+        let origins = ["std", "core", "serde_json", "syn"]
+            .into_iter()
+            .map(str::to_owned)
+            .collect();
+        let names = local_types_with_recipes(&path, &origins, &recipes).unwrap();
+        fs::remove_dir_all(&directory).unwrap();
+        names
+    }
+
+    #[test]
+    fn module_expression_recipes_are_accepted_only_when_no_expansion_can_declare() {
+        for source in [
+            "macro_rules! call { ($h:expr, $name:expr) => {{ let selected = $h.select($name)?; $h.call(selected) }}; } fn owner(h: &H) -> R { call!(h, \"a\") }",
+            "#[allow(unused_macros)] macro_rules! join { ($host:expr; $($part:expr),* $(,)?) => {{ let mut parts = Vec::new(); $(parts.push($part);)* $host.join(parts) }}; } fn owner() { let _ = crate::join!(h; 1, 2); }",
+            "macro_rules! outer { ($v:expr) => { inner!($v) }; } macro_rules! inner { ($v:expr) => { vec![$v] }; } fn owner() { let _ = outer!(1); }",
+        ] {
+            let names = scan_with_module_recipes(source);
+            assert!(names.is_empty(), "{source}: {names:?}");
+        }
+        for (source, expected) in [
+            (
+                "macro_rules! make { () => { fn decode(_: &str) -> bool { true } }; } fn owner() { make!(); }",
+                "UNSUPPORTED_MODULE_MACRO:make",
+            ),
+            (
+                "macro_rules! wrap { ($i:item) => { $i }; } fn owner() { wrap!(); }",
+                "UNSUPPORTED_MODULE_MACRO:wrap",
+            ),
+            (
+                "#[cfg(not(doc))] macro_rules! call { ($v:expr) => { $v }; } fn owner() { call!(1); }",
+                "UNSUPPORTED_MODULE_MACRO:call",
+            ),
+            (
+                "macro_rules! call { ($v:expr) => { $v }; } mod inner { macro_rules! call { () => { struct Hidden; }; } } fn owner() { call!(1); }",
+                "UNSUPPORTED_LOCAL_MACRO:call",
+            ),
+            (
+                "macro_rules! call { ($($t:tt)*) => { $($t)* }; } fn owner() { call!({ struct Hidden; 1 }); }",
+                "UNSUPPORTED_LOCAL_MACRO:call",
+            ),
+            (
+                "macro_rules! call { ($v:expr) => { vendor::hidden!($v) }; } fn owner() { call!(1); }",
+                "UNSUPPORTED_LOCAL_MACRO:hidden",
+            ),
+            (
+                "use vendor::call; macro_rules! call { ($v:expr) => { $v }; } fn owner() { call!(1); }",
+                "UNSUPPORTED_LOCAL_MACRO:call",
+            ),
+            (
+                "macro_rules! format { ($v:expr) => { $v }; } fn owner() { format!(1); }",
+                "UNSUPPORTED_MODULE_MACRO:format",
+            ),
+        ] {
+            let names = scan_with_module_recipes(source);
+            assert!(
+                names.iter().any(|row| row.0 == expected),
+                "{source}: {names:?}"
+            );
+        }
     }
 }

@@ -147,7 +147,7 @@ fn mexc_mapper_alias_typescript_control_is_observed() {
 }
 
 #[test]
-fn mexc_balance_prototype_write_finding() {
+fn mexc_balance_prices_heterogeneous_prototype_reads() {
     let output = std::process::Command::new("node")
         .arg(concat!(
             env!("CARGO_MANIFEST_DIR"),
@@ -166,6 +166,12 @@ fn mexc_balance_prototype_write_finding() {
         .unwrap()
         .currencies
         .unwrap();
+    assert_eq!(currencies.keys().collect::<Vec<_>>(), vec!["constructor"]);
+    assert_eq!(currencies["constructor"].free, 2.0);
+    // Shared dictionary writes are routed: matching own keys does not recreate
+    // the prototype-backed numeric read from this typed currency map.
+    assert!(!currencies.contains_key("free"));
+    assert!(!currencies.contains_key("__proto__"));
     assert_eq!(source["ownKeys"], json!(["constructor"]));
     assert_eq!(source["hasOwnFree"], false);
     assert_eq!(
@@ -174,10 +180,4 @@ fn mexc_balance_prototype_write_finding() {
     );
     assert_eq!(source["prototypeTotal"], 9);
     assert_eq!(source["constructorFree"], 2);
-    assert_eq!(currencies.keys().collect::<Vec<_>>(), vec!["constructor"]);
-    assert_eq!(currencies["constructor"].free, 2.0);
-    // Shared dictionary writes are routed: matching own keys does not recreate
-    // the prototype-backed numeric read from this typed currency map.
-    assert!(!currencies.contains_key("free"));
-    assert!(!currencies.contains_key("__proto__"));
 }

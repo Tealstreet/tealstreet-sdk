@@ -238,7 +238,6 @@ fn active_symbols_keep_original_strings_and_auth_backoff_caps_without_gating_his
     }
     assert_eq!(venue.base.auth_failure_streak(), 7);
     assert_eq!(venue.base.get_tick_interval(), Some(60_000.0));
-    assert!(!venue.base.settings.supports_executions_history);
     assert!(
         ready(venue.capabilities.fetch_income_history.call(&venue, None))
             .unwrap()

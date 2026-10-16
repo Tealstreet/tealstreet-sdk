@@ -129,6 +129,7 @@ pub fn map_order<E>(
         BackpackOrderTimeInForce::Po => "PO",
     };
     Ok(Order {
+        client_order_id: None,
         id: order.id.clone(),
         symbol: order.symbol.clone(),
         r#type: order_type,

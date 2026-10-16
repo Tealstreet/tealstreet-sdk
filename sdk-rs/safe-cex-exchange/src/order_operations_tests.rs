@@ -41,6 +41,49 @@ fn client_lookup_uses_every_mapper_field_and_js_numeric_coercion() {
 }
 
 #[test]
+fn client_lookup_matches_the_top_level_client_order_id() {
+    let mut order = order();
+    order.client_order_id = Some("0x0123456789abcdef0123456789abcdef".into());
+    assert!(carries_client_id(
+        &order,
+        "0x0123456789abcdef0123456789abcdef"
+    ));
+    assert!(!carries_client_id(
+        &order,
+        "0x0123456789abcdef0123456789abcdee"
+    ));
+    order.client_order_id = Some("0".into());
+    assert!(!carries_client_id(&order, "0"));
+    order.client_order_id = None;
+    let mut wire = serde_json::to_value(&order).unwrap();
+    wire["clientOrderId"] = json!("0xfeed");
+    let decoded: Order = serde_json::from_value(wire).unwrap();
+    assert_eq!(decoded.client_order_id.as_deref(), Some("0xfeed"));
+    assert!(carries_client_id(&decoded, "0xfeed"));
+    assert_eq!(
+        serde_json::to_value(&decoded).unwrap()["clientOrderId"],
+        "0xfeed"
+    );
+}
+
+#[test]
+fn replacement_ids_stay_an_id_list_and_carry_a_truthy_client_order_id() {
+    use crate::client_order_id::{
+        ReplacementOrderIds, replacement_client_order_id_of, with_replacement_client_order_id,
+    };
+    let ids = with_replacement_client_order_id(vec!["7".into()], "0xabc".into());
+    assert_eq!(ids[0], "7");
+    assert_eq!(ids.len(), 1);
+    assert_eq!(replacement_client_order_id_of(&ids), Some("0xabc"));
+    let empty = with_replacement_client_order_id(vec![], String::new());
+    assert_eq!(replacement_client_order_id_of(&empty), None);
+    assert_eq!(
+        replacement_client_order_id_of(&ReplacementOrderIds::default()),
+        None
+    );
+}
+
+#[test]
 fn client_lookup_rejects_sentinel_ids_even_if_venue_matches() {
     for sentinel in ["", "0", "undefined"] {
         let mut order = order();

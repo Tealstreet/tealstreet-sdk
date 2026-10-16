@@ -75,7 +75,6 @@ impl BingxExchange {
             runtime,
             ExchangeSettings {
                 supports_public_only: true,
-                supports_executions_history: true,
                 tick_interval: Some(2000.0),
                 client_order_id_rule: Some(ClientOrderIdRule {
                     label: "BingX".into(),
