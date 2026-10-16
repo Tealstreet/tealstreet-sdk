@@ -458,3 +458,39 @@ fn library_qs_stringify_and_hmac_digest() {
         r#""97yD9DBThCSxMpjmqm+xQ+9NWaFJRhdZl0edvC0aPNg=""#
     );
 }
+
+fn regex(pattern: &str, flags: &str) -> Js {
+    let units = |s: &str| s.encode_utf16().collect::<Vec<u16>>();
+    safe_cex_exchange::js_runtime::regexp::regexp(&units(pattern), &units(flags)).unwrap()
+}
+
+fn string_method(receiver: &str, name: &str, args: Vec<Js>) -> Js {
+    Js::str(receiver).call_method(name, args).unwrap()
+}
+
+#[test]
+fn string_methods_dispatch_a_regexp_argument_to_its_symbol_method() {
+    // ts: normalizeSymbolForMatching(symbol).replace(/[-_/]/g, '')
+    let replaced = string_method("eth-usd_x/y", "replace", vec![regex("[-_/]", "g"), Js::str("")]);
+    assert_eq!(replaced.to_display(), "ethusdxy");
+    // Captures are spliced into a regex split, as interval parsing relies on.
+    let parts = string_method("1h30m", "split", vec![regex(r"(\d+)", "")]);
+    assert_eq!(to_json(&parts).unwrap(), json!(["", "1", "h", "30", "m"]));
+    let address = format!("addr 0x{}", "aB".repeat(20));
+    let found = string_method(&address, "match", vec![regex("0x[a-fA-F0-9]{40}", "")]);
+    assert_eq!(found.get("0").unwrap().to_display(), &address[5..]);
+    assert!(matches!(
+        string_method("no address", "match", vec![regex("0x[a-f0-9]{40}", "")]),
+        Js::Null
+    ));
+    assert_eq!(
+        string_method("abc", "search", vec![regex("c", "")]).to_number().unwrap(),
+        2.0
+    );
+    // A plain string pattern keeps the first-occurrence string semantics.
+    assert_eq!(string_method("a-b-c", "replace", vec![Js::str("-"), Js::str("+")]).to_display(), "a+b-c");
+    assert_eq!(
+        to_json(&string_method("a,b", "split", vec![Js::str(",")])).unwrap(),
+        json!(["a", "b"])
+    );
+}
