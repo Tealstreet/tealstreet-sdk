@@ -1053,7 +1053,16 @@ impl OrderWorkflowHost for Host {
                 };
                 Js::Number(safe_cex_num::adjust(a(0).to_number()?, step))
             }
-            "uuid" => Js::str(&self.runtime.unique_id().replace(['-', '_'], "")),
+            "uuid" => {
+                let id = safe_cex_crypto::uuid::uuid_with_entropy(|bytes| {
+                    for byte in bytes {
+                        *byte = (self.runtime.random() * 64.0) as u8;
+                    }
+                    Ok(())
+                })
+                .map_err(|message| Thrown::error("Error", &message))?;
+                Js::str(&id)
+            }
             "now" => Js::Number(self.runtime.now_ms()),
             "sleep" => {
                 let runtime = self.runtime.clone();
