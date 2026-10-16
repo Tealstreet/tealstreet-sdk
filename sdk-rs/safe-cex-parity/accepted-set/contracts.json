@@ -125010,5 +125010,916 @@
         }
       }
     }
+  },
+  "safe_cex_venue_bitunix::ohlcv_subscription::OhlcvSubscription": {
+    "shape": "observed",
+    "instantiation": "OhlcvSubscription<(),usize>",
+    "evidence": "Bitunix futures listenOHLCV parser updates an existing ticker before projecting callback Candle fields. Fixed callback/parser instantiation executes actual parse; independent native bits preserve parseFloat prefixes and signed zero, missing ticker, null event errors and callback-failure effects. Retained JSON and numeric timestamp domain match the declared shared representation boundary; subscribe/cancel are not raw decoder candidates in this compiler inventory.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "parse",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "host",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "H"
+                    }
+                  }
+                }
+              ],
+              [
+                "json",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual raw event parser and observe callback values, identity, host order and failure state."
+      }
+    ],
+    "call": "{\n struct Host { ticker:bool, fail:bool, trace:Vec<serde_json::Value>, candle:Option<safe_cex_types::Candle> }\n impl super::OhlcvHost<()> for Host {\n type Parser=usize; type Ticker=usize;\n fn allocate_parser(&mut self)->usize {panic!(\"unused\")}\n fn connected(&mut self)->Result<bool,String> {panic!(\"unused\")}\n fn handlers(&mut self,_:&str)->Result<Vec<usize>,String> {panic!(\"unused\")}\n fn set_handlers(&mut self,_:&str,_:Vec<usize>)->Result<(),String> {panic!(\"unused\")}\n fn topic_count(&mut self,_:&str)->Result<f64,String> {panic!(\"unused\")}\n fn set_topic_count(&mut self,_:&str,_:f64)->Result<(),String> {panic!(\"unused\")}\n fn send(&mut self,_:&safe_cex_num::JsJsonValue)->Result<(),String> {panic!(\"unused\")}\n fn wait(&mut self,_:f64)->Result<(),String> {panic!(\"unused\")}\n fn cleanup_stats(&mut self,_:&str)->Result<(),String> {panic!(\"unused\")}\n fn ticker(&mut self,symbol:&str)->Result<Option<usize>,String> {self.trace.push(serde_json::json!([\"ticker\",symbol]));Ok(self.ticker.then_some(7))}\n fn update_last(&mut self,t:usize,last:f64)->Result<(),String> {self.trace.push(serde_json::json!([\"last\",t,format!(\"{:016x}\",last.to_bits())]));Ok(())}\n fn call(&mut self,_:&(),c: safe_cex_types::Candle)->Result<(),String> {self.trace.push(serde_json::json!([\"call\"]));self.candle=Some(c);if self.fail {Err(\"callback failure\".into())}else{Ok(())}}\n }\n let subscription:$type=super::OhlcvSubscription {options:std::rc::Rc::new(std::cell::RefCell::new(super::OhlcvOptions {symbol:\"BTCUSDT\".into(),interval:\"1m\".into()})),callback:(),parser:3,handler:\"retained\".into(),topic:\"topic\".into(),frame:safe_cex_num::JsJsonValue::Null};\n let mut host=Host {ticker:$value[\"ticker\"].as_bool().unwrap(),fail:$value[\"fail\"].as_bool().unwrap_or(false),trace:vec![],candle:None};\n let error=subscription.parse(&mut host,&$value[\"raw\"]).err();\n let candle=host.candle.map(|c|serde_json::json!({\"bits\":([c.timestamp,c.open,c.high,c.low,c.close,c.volume].map(|n|format!(\"{:016x}\",n.to_bits()))),\"lastSideAbsent\":c.last_side.is_none()}));\n serde_json::json!({\"error\":error,\"trace\":host.trace,\"candle\":candle})\n}",
+    "cases": [
+      {
+        "input": {
+          "ticker": true,
+          "raw": {
+            "data": {
+              "time": 100,
+              "open": "1prefix",
+              "high": "4",
+              "low": "-0",
+              "close": "2.5suffix",
+              "volume": "8"
+            }
+          }
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            [
+              "ticker",
+              "BTCUSDT"
+            ],
+            [
+              "last",
+              7,
+              "4004000000000000"
+            ],
+            [
+              "call"
+            ]
+          ],
+          "candle": {
+            "bits": [
+              "4059000000000000",
+              "3ff0000000000000",
+              "4010000000000000",
+              "8000000000000000",
+              "4004000000000000",
+              "4020000000000000"
+            ],
+            "lastSideAbsent": true
+          }
+        }
+      },
+      {
+        "input": {
+          "ticker": false,
+          "raw": {
+            "data": {
+              "time": 200,
+              "open": "2",
+              "high": "8",
+              "low": "1",
+              "close": "4",
+              "volume": "16"
+            }
+          }
+        },
+        "output": {
+          "error": null,
+          "trace": [
+            [
+              "ticker",
+              "BTCUSDT"
+            ],
+            [
+              "call"
+            ]
+          ],
+          "candle": {
+            "bits": [
+              "4069000000000000",
+              "4000000000000000",
+              "4020000000000000",
+              "3ff0000000000000",
+              "4010000000000000",
+              "4030000000000000"
+            ],
+            "lastSideAbsent": true
+          }
+        }
+      },
+      {
+        "input": {
+          "ticker": true,
+          "raw": null
+        },
+        "output": {
+          "error": "Cannot read candle data from null",
+          "trace": [
+            [
+              "ticker",
+              "BTCUSDT"
+            ]
+          ],
+          "candle": null
+        }
+      },
+      {
+        "input": {
+          "ticker": false,
+          "raw": {
+            "data": null
+          }
+        },
+        "output": {
+          "error": "Cannot read candle fields from null",
+          "trace": [
+            [
+              "ticker",
+              "BTCUSDT"
+            ]
+          ],
+          "candle": null
+        }
+      },
+      {
+        "input": {
+          "ticker": true,
+          "raw": {
+            "data": {
+              "time": 200,
+              "open": "2",
+              "high": "8",
+              "low": "1",
+              "close": "4",
+              "volume": "16"
+            }
+          },
+          "fail": true
+        },
+        "output": {
+          "error": "callback failure",
+          "trace": [
+            [
+              "ticker",
+              "BTCUSDT"
+            ],
+            [
+              "last",
+              7,
+              "4010000000000000"
+            ],
+            [
+              "call"
+            ]
+          ],
+          "candle": {
+            "bits": [
+              "4069000000000000",
+              "4000000000000000",
+              "4020000000000000",
+              "3ff0000000000000",
+              "4010000000000000",
+              "4030000000000000"
+            ],
+            "lastSideAbsent": true
+          }
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_bitunix::orderbook_subscription::BookSubscription": {
+    "shape": "observed",
+    "instantiation": "BookSubscription<(),usize,()>",
+    "evidence": "Bitunix futures listenOrderBook parser replaces bids then asks, computes independent cumulative amounts and calls back with the original shared book. Actual parse executes at the fixed unit callback/timer and usize parser instantiation; observations cover both sides, signed zero, same-Rc identity, callback errors and retained partially updated state when asks refuse. Native fields precede JSON observations; no serialized production owner is used.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "parse",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "host",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "H"
+                    }
+                  }
+                }
+              ],
+              [
+                "raw",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "resolved_path": {
+                        "path": "serde_json::value::Value",
+                        "args": null
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "tuple": []
+                        }
+                      },
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "alloc::string::String",
+                            "args": null
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual raw event parser and observe callback values, identity, host order and failure state."
+      }
+    ],
+    "call": "{\n struct Host {expected:std::rc::Rc<std::cell::RefCell<super::OrderBook>>,called:bool,same:bool,fail:bool}\n impl super::OrderBookHost<()> for Host {\n type Parser=usize;type Timer=();\n fn precision(&mut self,_:&str)->Result<Option<serde_json::Value>,String> {panic!(\"unused\")}\n fn allocate_parser(&mut self)->usize {panic!(\"unused\")}\n fn connected(&mut self)->Result<bool,String> {panic!(\"unused\")}\n fn handlers(&mut self,_:&str)->Result<Vec<usize>,String> {panic!(\"unused\")}\n fn set_handlers(&mut self,_:&str,_:Vec<usize>)->Result<(),String> {panic!(\"unused\")}\n fn topic_count(&mut self,_:&str)->Result<f64,String> {panic!(\"unused\")}\n fn set_topic_count(&mut self,_:&str,_:f64)->Result<(),String> {panic!(\"unused\")}\n fn send(&mut self,_:&safe_cex_num::JsJsonValue)->Result<(),String> {panic!(\"unused\")}\n fn wait(&mut self,_:f64)->Result<(),String> {panic!(\"unused\")}\n fn timer_truthy(&mut self,_:&())->bool {panic!(\"unused\")}\n fn clear(&mut self,_:())->Result<(),String> {panic!(\"unused\")}\n fn cleanup_stats(&mut self,_:&str)->Result<(),String> {panic!(\"unused\")}\n fn call(&mut self,_:&(),book:std::rc::Rc<std::cell::RefCell<super::OrderBook>>)->Result<(),String> {self.called=true;self.same=std::rc::Rc::ptr_eq(&book,&self.expected);if self.fail {Err(\"callback failure\".into())}else{Ok(())}}\n }\n let book=std::rc::Rc::new(std::cell::RefCell::new(super::OrderBook {bids:vec![super::BookLevel{price:99.0,amount:7.0,total:7.0}],asks:vec![super::BookLevel{price:101.0,amount:9.0,total:9.0}]}));\n let subscription:$type=super::BookSubscription {callback:(),parser:3,handler:\"retained\".into(),topic:\"topic\".into(),frame:safe_cex_num::JsJsonValue::Null,book:book.clone(),timeout:None};\n let mut host=Host{expected:book.clone(),called:false,same:false,fail:$value[\"fail\"].as_bool().unwrap_or(false)};\n let error=subscription.parse(&mut host,&$value[\"raw\"]).err();\n let book=book.borrow();\n let side=|levels:&[super::BookLevel]|levels.iter().map(|l|[l.price,l.amount,l.total].map(|n|format!(\"{:016x}\",n.to_bits()))).collect::<Vec<_>>();\n serde_json::json!({\"error\":error,\"called\":host.called,\"same\":host.same,\"bids\":side(&book.bids),\"asks\":side(&book.asks)})\n}",
+    "cases": [
+      {
+        "input": {
+          "raw": {
+            "data": {
+              "bids": [
+                [
+                  "10",
+                  "2"
+                ],
+                [
+                  "9",
+                  "3"
+                ]
+              ],
+              "asks": [
+                [
+                  "11",
+                  "4"
+                ],
+                [
+                  "12",
+                  "5"
+                ]
+              ]
+            }
+          }
+        },
+        "output": {
+          "error": null,
+          "called": true,
+          "same": true,
+          "bids": [
+            [
+              "4024000000000000",
+              "4000000000000000",
+              "4000000000000000"
+            ],
+            [
+              "4022000000000000",
+              "4008000000000000",
+              "4014000000000000"
+            ]
+          ],
+          "asks": [
+            [
+              "4026000000000000",
+              "4010000000000000",
+              "4010000000000000"
+            ],
+            [
+              "4028000000000000",
+              "4014000000000000",
+              "4022000000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "raw": {
+            "data": {
+              "bids": [
+                [
+                  "-0",
+                  "-0"
+                ]
+              ],
+              "asks": []
+            }
+          }
+        },
+        "output": {
+          "error": null,
+          "called": true,
+          "same": true,
+          "bids": [
+            [
+              "8000000000000000",
+              "8000000000000000",
+              "0000000000000000"
+            ]
+          ],
+          "asks": []
+        }
+      },
+      {
+        "input": {
+          "raw": {
+            "data": {
+              "bids": [
+                [
+                  "10",
+                  "2"
+                ]
+              ],
+              "asks": null
+            }
+          }
+        },
+        "output": {
+          "error": "Book side must be an array",
+          "called": false,
+          "same": false,
+          "bids": [
+            [
+              "4024000000000000",
+              "4000000000000000",
+              "0000000000000000"
+            ]
+          ],
+          "asks": [
+            [
+              "4059400000000000",
+              "4022000000000000",
+              "4022000000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "raw": {}
+        },
+        "output": {
+          "error": "Missing book data",
+          "called": false,
+          "same": false,
+          "bids": [
+            [
+              "4058c00000000000",
+              "401c000000000000",
+              "401c000000000000"
+            ]
+          ],
+          "asks": [
+            [
+              "4059400000000000",
+              "4022000000000000",
+              "4022000000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "raw": {
+            "data": {
+              "bids": [],
+              "asks": [
+                [
+                  "12",
+                  "5"
+                ]
+              ]
+            }
+          },
+          "fail": true
+        },
+        "output": {
+          "error": "callback failure",
+          "called": true,
+          "same": true,
+          "bids": [],
+          "asks": [
+            [
+              "4028000000000000",
+              "4014000000000000",
+              "4014000000000000"
+            ]
+          ]
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_bitunix::ohlcv_subscription::float": {
+    "category": "decoder",
+    "evidence": "Private futures OHLCV numeric projection uses parseFloat(String(raw)); prefix and negative-zero cases distinguish Number conversion. Undefined and empty-array produce NaN. Observed bits retain native values; JSON domain follows shared numeric ingress.",
+    "call": "{ match $type($value.get(\"v\")) {Ok(n)=>serde_json::json!({\"bits\":format!(\"{:016x}\",n.to_bits())}),Err(e)=>serde_json::json!({\"error\":e})} }",
+    "cases": [
+      {
+        "input": {
+          "v": "2.5suffix"
+        },
+        "output": {
+          "bits": "4004000000000000"
+        }
+      },
+      {
+        "input": {
+          "v": "-0"
+        },
+        "output": {
+          "bits": "8000000000000000"
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "bits": "7ff8000000000000"
+        }
+      },
+      {
+        "input": {
+          "v": []
+        },
+        "output": {
+          "bits": "7ff8000000000000"
+        }
+      }
+    ],
+    "api": {
+      "kind": "function",
+      "name": "float",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "primitive": "f64"
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_bitunix::ohlcv_subscription::field": {
+    "category": "decoder",
+    "evidence": "Private OHLCV event-field adapter distinguishes absent fields from present null/false and throws on absent/null event data before numeric projection; this is the retained JSON representation of the source parser property accesses.",
+    "call": "{ match $type(&$value[\"raw\"],$value[\"key\"].as_str().unwrap()) {Ok(v)=>serde_json::json!({\"present\":v.is_some(),\"value\":v}),Err(e)=>serde_json::json!({\"error\":e})} }",
+    "cases": [
+      {
+        "input": {
+          "raw": {
+            "data": {
+              "close": false
+            }
+          },
+          "key": "close"
+        },
+        "output": {
+          "present": true,
+          "value": false
+        }
+      },
+      {
+        "input": {
+          "raw": {
+            "data": {}
+          },
+          "key": "close"
+        },
+        "output": {
+          "present": false,
+          "value": null
+        }
+      },
+      {
+        "input": {
+          "raw": null,
+          "key": "x"
+        },
+        "output": {
+          "error": "Cannot read candle data from null"
+        }
+      },
+      {
+        "input": {
+          "raw": {},
+          "key": "x"
+        },
+        "output": {
+          "error": "Missing candle data"
+        }
+      },
+      {
+        "input": {
+          "raw": {
+            "data": null
+          },
+          "key": "x"
+        },
+        "output": {
+          "error": "Cannot read candle fields from null"
+        }
+      }
+    ],
+    "api": {
+      "kind": "function",
+      "name": "field",
+      "signature": {
+        "inputs": [
+          [
+            "json",
+            {
+              "borrowed_ref": {
+                "lifetime": "'a",
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "core::option::Option",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "borrowed_ref": {
+                                    "lifetime": "'a",
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "serde_json::value::Value",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [
+          {
+            "name": "'a",
+            "kind": {
+              "lifetime": {
+                "outlives": []
+              }
+            }
+          }
+        ],
+        "where_predicates": []
+      }
+    }
+  },
+  "safe_cex_venue_bitunix::orderbook_subscription::levels": {
+    "category": "decoder",
+    "evidence": "Private snapshot-side projection requires array rows, applies parseFloat to retained price/amount values and initializes total to zero before the separate cumulative pass. Independently specified native bits, empty collection and both structural failures execute directly.",
+    "call": "{ match $type($value.get(\"v\")) {Ok(rows)=>serde_json::json!({\"rows\":rows.iter().map(|l|[l.price,l.amount,l.total].map(|n|format!(\"{:016x}\",n.to_bits()))).collect::<Vec<_>>()}),Err(e)=>serde_json::json!({\"error\":e})} }",
+    "cases": [
+      {
+        "input": {
+          "v": [
+            [
+              "1.5x",
+              "2.5x"
+            ],
+            [
+              "-0",
+              "4"
+            ]
+          ]
+        },
+        "output": {
+          "rows": [
+            [
+              "3ff8000000000000",
+              "4004000000000000",
+              "0000000000000000"
+            ],
+            [
+              "8000000000000000",
+              "4010000000000000",
+              "0000000000000000"
+            ]
+          ]
+        }
+      },
+      {
+        "input": {
+          "v": []
+        },
+        "output": {
+          "rows": []
+        }
+      },
+      {
+        "input": {},
+        "output": {
+          "error": "Book side must be an array"
+        }
+      },
+      {
+        "input": {
+          "v": [
+            {}
+          ]
+        },
+        "output": {
+          "error": "Book level must be an array"
+        }
+      }
+    ],
+    "api": {
+      "kind": "function",
+      "name": "levels",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::vec::Vec",
+                        "args": {
+                          "angle_bracketed": {
+                            "args": [
+                              {
+                                "type": {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_bitunix::orderbook_subscription::BookLevel",
+                                    "args": null
+                                  }
+                                }
+                              }
+                            ],
+                            "constraints": []
+                          }
+                        }
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    }
   }
 }
