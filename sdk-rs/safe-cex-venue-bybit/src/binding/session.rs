@@ -96,7 +96,10 @@ impl SessionHost for Rt {
         let member = bound_member(&owner, key)?;
         if owner.is_array()
             && member.is_callable()
-            && matches!(key, "map" | "filter" | "some" | "find" | "reduce")
+            && matches!(
+                key,
+                "map" | "filter" | "some" | "find" | "reduce" | "forEach"
+            )
         {
             member.define(OWNER, owner)?;
             member.define(NAME, Js::str(key))?;
@@ -125,6 +128,74 @@ impl SessionHost for Rt {
             "typeof" => Ok(Js::str(arg(&args, 0).type_of())),
             "subtract" => {
                 safe_cex_exchange::js_runtime::ops::subtract(&arg(&args, 0), &arg(&args, 1))
+            }
+            "add" | "addition" => {
+                safe_cex_exchange::js_runtime::ops::add(&arg(&args, 0), &arg(&args, 1))
+            }
+            "multiply" => {
+                safe_cex_exchange::js_runtime::ops::multiply(&arg(&args, 0), &arg(&args, 1))
+            }
+            "divide" => safe_cex_exchange::js_runtime::ops::divide(&arg(&args, 0), &arg(&args, 1)),
+            "remainder" => Ok(Js::Number(
+                arg(&args, 0).to_number()? % arg(&args, 1).to_number()?,
+            )),
+            "greater" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::greater_than(
+                &arg(&args, 0),
+                &arg(&args, 1),
+            )?)),
+            "lessEqual" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::less_equal(
+                &arg(&args, 0),
+                &arg(&args, 1),
+            )?)),
+            "keyGet" | "computed property" => arg(&args, 0).get_key(&arg(&args, 1).to_js_string()?),
+            "property key" => Ok(Js::String(arg(&args, 0).to_js_string()?)),
+            "computed assignment" => {
+                let object = arg(&args, 0);
+                object.set_key(&arg(&args, 1).to_js_string()?, arg(&args, 2))?;
+                Ok(object)
+            }
+            "suffixTemplate" => safe_cex_exchange::js_runtime::ops::add(
+                &Js::String(arg(&args, 0).to_js_string()?),
+                &arg(&args, 1),
+            ),
+            "has" => Ok(Js::Bool(arg(&args, 0).has_own(&text(&arg(&args, 1))?))),
+            "arraySpread" => {
+                let mut out = vec![];
+                for value in args {
+                    out.extend(
+                        value
+                            .array_values()
+                            .ok_or_else(|| Thrown::type_error("value is not iterable"))?,
+                    );
+                }
+                Ok(Js::array(out))
+            }
+            "capturedMember" => {
+                let selected = arg(&args, 1);
+                selected.define(OWNER, arg(&args, 0))?;
+                selected.define(NAME, Js::str("map"))?;
+                Ok(selected)
+            }
+            "destructure2" => {
+                let values = arg(&args, 0)
+                    .array_values()
+                    .ok_or_else(|| Thrown::type_error("value is not iterable"))?;
+                Ok(Js::array(vec![
+                    values.first().cloned().unwrap_or(Js::Undefined),
+                    values.get(1).cloned().unwrap_or(Js::Undefined),
+                ]))
+            }
+            "greaterEqual" => Ok(Js::Bool(safe_cex_exchange::js_runtime::ops::greater_equal(
+                &arg(&args, 0),
+                &arg(&args, 1),
+            )?)),
+            "intervalRegex" => safe_cex_exchange::js_runtime::regexp::regexp(
+                &r"(\d+)([a-zA-Z]+)".encode_utf16().collect::<Vec<_>>(),
+                &[],
+            ),
+            "missingMarket" => Js::Undefined.get("limits"),
+            "virtualClock" | "Date" | "Math" | "ENDPOINTS" | "JSON" => {
+                self.shared.globals.get(name)
             }
             // Object.assign(target, source) over own enumerable data properties.
             "copyOwnDataProperties" => {
@@ -273,5 +344,70 @@ impl SpotOrderHost for Rt {
             }
             Ok(Js::array(out))
         })
+    }
+}
+
+impl crate::variant_account_refresh::AccountRefreshHost for Rt {
+    fn spread(&self, base: Js, fields: Vec<(&'static str, Js)>) -> Result<Js, Thrown> {
+        let out = <Self as SpotOrderHost>::spread(self, base)?;
+        for (key, value) in fields {
+            out.set(key, value)?;
+        }
+        Ok(out)
+    }
+    fn then(&self, promise: Js, fulfilled: Js) -> Result<Js, Thrown> {
+        promise.call_method("then", vec![fulfilled])
+    }
+    fn all(&self, promises: Vec<Js>) -> Result<Js, Thrown> {
+        Ok(self.spawn(Box::pin(super::promise::all(promises))))
+    }
+}
+
+impl crate::spot_exchange_reads::SpotExchangeHost for Rt {
+    fn destructure(&self, value: Js, skip: usize, count: usize) -> Result<Vec<Js>, Thrown> {
+        // These bindings consume wire arrays (candle tuples and split strings).
+        let values = value.array_values().ok_or_else(|| {
+            Thrown::type_error(&format!("{} is not iterable", value.to_display()))
+        })?;
+        Ok((skip..skip + count)
+            .map(|index| values.get(index).cloned().unwrap_or(Js::Undefined))
+            .collect())
+    }
+    fn for_each<F>(&self, method: Js, mut body: F) -> Result<(), Thrown>
+    where
+        F: FnMut(Js, usize) -> Result<(), Thrown>,
+    {
+        for (index, value) in selected_owner(&method, "forEach")?.into_iter().enumerate() {
+            body(value, index)?;
+        }
+        Ok(())
+    }
+    fn times<F>(&self, callee: Js, count: Js, mut body: F) -> Result<Js, Thrown>
+    where
+        F: FnMut(Js) -> Result<Js, Thrown>,
+    {
+        // Invoke the shared imported lodash operation; this host only bridges its
+        // synchronous callback into the borrowed generic body.
+        let indices = callee.call(
+            Js::Undefined,
+            vec![
+                count,
+                Js::function("timesIndex", |_, args| Ok(arg(&args, 0))),
+            ],
+        )?;
+        let mut out = vec![];
+        for index in indices
+            .array_values()
+            .ok_or_else(|| Thrown::type_error("times result is not iterable"))?
+        {
+            out.push(body(index)?);
+        }
+        Ok(Js::array(out))
+    }
+    fn new_error(&self, constructor: Js, message: Js) -> Result<Thrown, Thrown> {
+        Ok(Thrown::new(constructor.call(Js::Undefined, vec![message])?))
+    }
+    fn key_set(&self, object: &Js, key: Js, value: Js) -> Result<(), Thrown> {
+        object.set_key(&key.to_js_string()?, value)
     }
 }

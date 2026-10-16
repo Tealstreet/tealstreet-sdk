@@ -98,7 +98,7 @@ need positive witnesses and forbidden-input probes. Compiler failures never
 count as mutation-control success. `--inventory`, `--census`, and `--measure`
 are diagnostics; only the matrix command enforces the standing ratchet.
 
-Classify new owners in `../accepted-set/contracts.json` with TS/tooling evidence,
+Classify new owners in `../accepted-set/contracts/<compiler-crate>.json` with TS/tooling evidence,
 shape, positive JSON fixtures, and exact compiler entrypoint signatures. Free
 functions have explicit decoder/non-decoder classifications. Decoder adapters
 observe actual outputs, preserving fallback results and tagged non-finite values;
@@ -149,3 +149,43 @@ invention diagnostics, restores exact bytes and requires the focused tests to
 pass. A second batch falsely claims explicitly unassigned capabilities and must
 fail both native ownership and canonical-remainder assertions. These are
 annotation checks, not fresh runtime behavior proofs.
+
+Two exact nongeneric function-pointer aliases (`RetryCondition` in Bitunix and
+`BlofinApiFactory` in Blofin) have reviewed compiler signatures in
+`../accepted-set/function-pointer-aliases.json`. Their source identity, complete
+raw/expanded ASTs, every nested authenticated compiler root and selected workspace
+package are pinned. Native probes require invariant equality with independently
+authored Rust types and execute the ordinary alias Serde/conversion checks. This
+is capability classification, not callback execution or permission for other
+function pointers. Contracts cannot supply expected signatures or probe modes.
+
+The concrete WEEX `WeexKlineRow` protocol tuple has its own finite policy in
+`../scripts/accepted-weex-kline-alias.mjs`: all eleven ordered raw/expanded slots,
+eight repeated authenticated String roots and the sized invariant Rust type are
+pinned. Its native control observes every decoded slot and executes the ordinary
+Serde/conversion probes. Expanded-slot, native-identity and removed-policy
+controls must fail before restoration passes. This policy grants no permission
+to other tuples; callers cannot redirect its expected type, suffix or probe mode.
+
+
+Accepted contracts now live in one JSON file per compiler crate under
+`../accepted-set/contracts/`, for example `safe-cex-venue-okx.json` for
+`safe_cex_venue_okx::...`. The gate and review helper both use
+`scripts/accepted-contract-files.mjs`; imports needing the whole reviewed set
+must call `loadContracts()` rather than read a former monolithic file. Binary
+crate namespaces have their own files too. Directory loading rejects misplaced
+or duplicate owners, empty shards, unexpected files and symlink entries.
+Explicit `--contracts=<file.json>` fixture inputs remain supported; a directory
+is also accepted. Storage changes no contract classification or native proof.
+
+Eleven GRVT aliases use the existing reviewed fixed-instantiation registry in
+`../accepted-set/generic-aliases.json`. Each pins its exact source, raw/expanded
+compiler targets, original generics (including defaults/lifetimes), canonical
+root and independently authored invariant Rust type. The selected arguments
+are explicit bool or bool/bool, and static lifetimes for three unsized FnMut
+capabilities; these scopes do not classify other instantiations or silently
+select a source generic default. AddedMarkets<bool> and JsResult<bool,bool> are
+actual decoders, not callback exemptions. Fields<bool> preserves its original
+static borrowed string keys: its reviewed type identity does not grant
+DeserializeOwned or bypass the existing borrowed-alias refusal. Decoder
+classifications and borrowed production-path coverage remain separate obligations.

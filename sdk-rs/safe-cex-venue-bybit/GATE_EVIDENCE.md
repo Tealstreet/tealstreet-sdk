@@ -3704,6 +3704,34 @@ No startup mutation ran, and its row remains pending with zero new row credit.
 Final checkpoint formatting and workspace build must be measured against the
 checkpoint SHA separately from the accepted three-row local-order delivery.
 
+## Spot production facade and registry (ddi2il-18, first variant)
+
+`tests/spot_binding.rs` constructs `BybitExchange::create(Bybitspot, ...)`, then
+calls the concrete Exchange trait and typed core preflight over scripted HTTP
+and real core socket orchestration. Five E2Es pin spot/1x market mapping,
+tickers, account and validation/balance, empty positions with no position query,
+order reads/placement/batch/amend/cancel, exact inherited refusals, public/private
+startup, loaded flags, order-only private subscribe after auth, both socket
+closures and Brazil's local order retirement. Caller IDs are sent verbatim;
+invalid and split IDs reject before any write.
+
+`python3 sdk-rs/safe-cex-venue-bybit/scripts/spot-binding-controls.py` compiled
+17 independent trait-consumer mutations: start, get_account, validate_account,
+fetch_positions, fetch_orders, fetch_markets, fetch_tickers, place_order,
+place_orders, update_order, cancel_orders, set_leverage, change_position_mode,
+change_margin_type, fetch_symbol_max_leverage, schedule_cancel and
+fetch_public_trades. Each failed an executed assertion, with no compiler error;
+source restored byte-identically and all five Spot tests passed. The runner
+writes temporary output under `/tmp`, never repository evidence artifacts.
+Removing the Bybitspot RUST_VENUES entry separately compiled and failed the
+exact registry membership assertion, then the entry was restored.
+
+The existing source-driven Spot read/write and variant account-refresh oracles
+remain separate from these production construction proofs. The source class is
+carried by the discriminated Rust `BybitExchange` type with a distinct Spot
+receiver and class_name; that API representation choice is declared on its
+class/constructor rows. No Inverse or HyroTrader constructor claim is made here.
+
 ## Production private event delivery (ddi2il-27)
 
 The private socket previously used WsProtocol's unimplemented message default.
@@ -3749,3 +3777,148 @@ Deleting just that three-line registration reproduces the previous receiver
 file byte-identically. The selector dynamically calls the already-bound
 category/option/inverse members; it does not capture a BaseExchange method.
 No delegation classification or bypass exemption is added.
+
+
+## Spot facade and registry composition
+
+Production checkpoint `2fb414e5e1`, witness/mapping checkpoint `86e247c10e`:
+`exchange_binding` 22, `option_binding` 1, `private_event_delivery` 6 and
+`spot_binding` 6 all pass, including ignored live source comparisons. The primary
+order-write oracle retains 92 cases; private delivery independently asserts 48
+source/native compositions (two actual handlers/mappers, four flag modes, six
+scenes). Spot private frames publish live orders and replay-suppressed fills;
+position/execution/wallet topics retain the source ignores. Valid-array corpus
+coverage does not establish malformed-frame error-message parity.
+
+The serial Spot control runner compiled and caught 17 trait consumer mutations
+plus removal of the early source isSpot initializer. It restored exact production
+bytes and all six Spot E2Es passed. The typed base now receives is_spot=true before
+Rc publication through the single shared factory from #233; no venue-name policy
+is placed in core. Unsupported source BaseExchange hooks retain their exact
+Not implemented rejection, including max-leverage lookup, public trades and
+schedule cancel; market metadata separately advertises Spot leverage 1.
+
+The override inventory review retains all existing references and adds only eight
+Bybit references: six actual Spot helper-body delegates plus emitter name reads
+for order-only subscriptions and Spot ticker projection. The 13 existing receiver
+references retain their targets; only its enclosing install body changes when
+Spot members are installed. Account validation keeps the primary consumer while
+selecting the existing derived validator for Spot. No delegation exemption is
+added, and foreign inventory rows are preserved.
+
+At the Spot checkpoint, FINDING ddi2il-38 recorded the unwired Spot active
+selector, change callbacks and retained topics. The separate public-topic
+checkpoint below repairs that composition. Remaining dedicated Inverse/HyroTrader
+constructors and unrelated public class members stay separate claims.
+
+Final scoped gates: native Bybit registry 3 passed (local/hosted signing and
+untouched demo origin), registry constructors 14 passed, core cancellation
+inventory 6 passed plus one explicit export ignored, override contract 4 passed
+plus one existing live-source inventory ignored. Host all-targets and wasm library
+clippy for Bybit/registry passed. Parity reports 7459 rows / 17145 public items
+with zero findings; extractor reports zero changed/added/orphaned. Registry-data
+and layers checks pass. The 1073 existing override entries are retained and the
+eight reviewed Bybit entries give a total of 1081; the incoming eight-row Binance
+repair is the owner's commit 04bfb16ccf, not an independent reclassification.
+
+
+## Concrete public ticker subscriptions (ddi2il-38)
+
+Production checkpoint `1fb65d0b57`, with witnesses/manifests in `eaad2472d4`.
+`PublicProtocol` now composes the existing topic and lifecycle bodies through
+`ws_public/topics.rs`. Source policy differs deliberately: primary linear and
+inverse sockets subscribe every non-option market in their category, while Spot
+calls its live parent selector and retains the union of previous/desired topics.
+The primary class has no active-symbol callback. Spot registers that callback in
+construction before any dial; all profiles replace their own markets callback
+on open. Source duplicate market additions and absence of unsubscribe are kept.
+The canonical subscribe and Spot market-addition bodies now execute their first
+send and sleep factory eagerly, preserving first-chunk/ping/later-chunk order.
+Core owns the remaining tails; listener/tail captures keep the venue/socket weak.
+
+Four concrete tests in `public_topic_binding` pass. Two assert physical wire
+frames for primary category/option filtering and Spot pre-dial, live/offline
+active changes, reopen retention, duplicate market additions and disposal. A
+third runs exactly 24 maintained-source constructor/handler/parent-selector
+compositions (three connection profiles by eight initial active states), with
+15 snapshots each and independently counted native executions: 360 snapshots.
+The fourth disposes during each pending initial-subscription/market-addition tail
+and requires no later send or retained venue. Malformed executable market objects
+are outside this typed native Market emitter profile; the full public OHLCV,
+order-book and recovery-timer class bindings remain pending.
+
+`scripts/public-topic-controls.py` compiled six production faults: omitted initial
+sync, missing constructor active registration, missing live active send, missing
+markets registration, discarded retained topics, and reversed primary option
+filtering. Every fault failed its named runtime assertion; compilation failures
+were rejected. Exact production bytes were restored and the positive tests pass.
+The initial-sync fault is caught by the source-composition test (the standalone
+Spot scenario had already synchronized its topics before open). The original
+public_ticker_topics/public_ws_lifecycle live helper targets also pass, separately
+from these actual facade consumers. The integrated include-ignored run passes
+primary binding 22 (including 92 actual-source order-write cases), private delivery
+6 (including 48 source compositions), Spot binding 6 and both live public helper
+targets. Shared cancellation inventory is 6 passed/one export ignored; override
+contract is 5 passed/one existing live inventory ignored. Bybit host all-targets
+and wasm library clippy pass. Global parity is zero (7459 rows/17162 public items);
+extractor check reports zero changed/added/orphaned manifests.
+
+The override inventory retains all 1101 incoming rows and adds one reviewed
+Bybit reference, `self.topics.dispose()` inside `PublicProtocol::dispose`: the
+core protocol cleanup calls the source Spot active-listener removal
+(`packages/safe-cex/src/exchanges/bybit/bybitspot.ws-public.ts:144-147`,
+`BybitPublicWebsocket.dispose`) before core
+socket cleanup, with no BaseExchange dispatch bypass. Six existing Spot helper
+references keep identical targets; their enclosing installer fingerprint changes
+from `d269ecf6e0eb661f` to `0858624e3dde1a3b` solely because the two source selector
+members are installed there. No foreign row or delegation exemption is changed.
+
+## Primary batch receiver (ddi2il-40)
+
+The real `BaseExchange.place_orders` -> `Exchange::place_orders` -> JS receiver
+entrypoint previously failed with `object.placeOrders is not a function` before
+any HTTP request. `primary_batch_uses_source_batch_endpoint_regression` failed
+on the old receiver and passes on the new `/v5/order/create-batch` path.
+
+`primary_batch_binding` has five physical transport tests. Its fixed 24-case
+source composition runs the actual TS `placeOrders`, `placeBatchOrders`,
+`placeBatchOrdersForCategory`, `processBatch`, `formatOrderForBatch`,
+`getOrderExecutionParams`, `getOrderPositionIdx`, category selector and venue
+error formatter. It imports maintained execution controls, symbol classifiers,
+math and object helpers and the installed Lodash chunk implementation. Only
+HTTP, position-mode input and host recording are scripted. Native requests,
+returned IDs and diagnostics agree; native cache results are observed again
+through `fetchOrders`. The corpus covers 0/1/2/10/11/21 orders, per-request TP/SL,
+conditional limit/market and missing/rounded-zero triggers, caller IDs, hedged
+buy/sell/reduce-only indices, missing middle markets, partial agreement errors,
+and first category order. Its source-only record/sleep arrays are diagnostics,
+not a claim that raw native objects alias JS source objects.
+
+Separate real-facade cases cover whole-batch rejection before any HTTP, batch
+failure followed by a failed and a successful single write, special orders
+before regular batches (BBO and options plus a failing trailing stop), and
+cancellation during a pending inter-batch delay. Primary 23 and Spot 6 tests
+pass, including the existing 92-case maintained-source order-write comparison
+when SAFE_CEX_TYPESCRIPT_PATH names the installed compiler.
+
+`scripts/primary-batch-controls.py` compiles eight consumer faults: missing
+receiver installation, missing atomic validation, missing 1200ms delay, missing
+result IDs, missing cache publication, discarded formatter output, BBO routed
+as a regular batch, and stripped TP/SL. Each must fail a named runtime assertion;
+compiler failures do not count. Exact source bytes are restored and the five
+positive tests pass. Host all-targets and wasm library clippy pass.
+
+The reviewed override inventory retains all 1136 incoming entries, with no new
+call, removed call or delegation exemption. Exactly 13 references in the primary
+receiver installer retain their callees and change enclosing fingerprint from
+`10c6c5db2f90d512` to `0045656008997cb5`. Removing only the new batch installer call
+reproduces the complete base receiver file byte for byte. The new module installs
+live JS members and calls no BaseExchange override directly; Spot still replaces
+its own methods after common installation. Shared cancellation inventory passes;
+its creator classifications are unchanged.
+
+The async native profile retains the shared typed options/Store snapshot and
+UTF-8 boundaries, and Scope cancellation stops tails that a source Promise can
+continue after disposal. No arbitrary executable option getter/mutation claim is
+made. The dedicated Inverse formatter/submission and HyroTrader facade remain
+separate work; this change enables primary Bybit and Demo batching only.

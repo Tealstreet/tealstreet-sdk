@@ -1072,3 +1072,36 @@ items; layers88/88; live source registry48 ordered names. Read-only extractor
 freshness reports0 changed manifests,0 added and0 orphaned symbols after taking
 the author's formatting-only #190. Five shared typed-edge findings stay marked
 under ddi2il-10; these gates do not reclassify them as ported.
+
+## Native tunnel transport provider (2026-10-17)
+
+The production native host supplies Phemex's requested installer through shared
+`js_runtime::client::factory::install_transport_adapter` using the same HTTP host,
+runtime transport provider, options/name, and source default adapter variant.
+`safe-cex-registry/tests/native_host_tunnel.rs` reads markets and a signed account
+query over a real local tradetunnel. It verifies rpc.auth token, two rpc.http
+requests, independent SHA256 HMAC over observed query/expiry bytes, distinct
+amount/price steps, Store read purity and zero direct-origin HTTP.
+
+Before the fix, the new witness failed101 at construction with the exact missing
+installTransportAdapter-provider error. The restored implementation passes that
+witness and the existing Binance tunnel test. Permanent compiling absent/no-op
+provider controls live in registry/scripts/phemex-tunnel-controls.py.
+
+## Direct flattened-envelope numeric decoding (2026-10-17)
+
+The complete-record witness initially passed Account, Position and PositionsResponse
+but failed PhemexApiResponse<PositionsResponse> at direct text decoding with
+`invalid type: map, expected f64`. Serde flatten had buffered lexical numeric
+payload fields through Content. The replacement streams metadata and payload
+fields from the original map without adding payload trait bounds or a dependency.
+
+Seven native witnesses now pass: all 49 declared account/position fields and their
+numeric bits, complete valid Serde-order arrays, text/owned/borrowed/qualified and
+numeric-ingress paths, borrowed payloads, metadata presence/duplicates/order and
+custom payload early completion. The existing live-source type corpus also passes
+its 450 native comparisons. Host all-target and wasm library Clippy pass. The
+permanent envelope-controls.py restores the former derive: it compiles and fails
+the named numeric witness with exit101, then exact restoration passes. Canonical
+parity passes (7459 rows,17183 public Rust items). These observations do not clear
+the existing surrogate FINDING rows or classify private helper decoders.

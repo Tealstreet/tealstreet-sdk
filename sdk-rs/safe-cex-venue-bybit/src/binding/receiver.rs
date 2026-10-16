@@ -514,5 +514,9 @@ pub(crate) fn install(rt: &Rt) -> Result<(), Thrown> {
         snapshot::sync_balance_upnl_from_positions(rt, &rt.this)?;
         Ok(Js::Undefined)
     });
+    members::batch::install(rt)?;
+    if venue(rt)?.base.name == safe_cex_types::ExchangeName::Bybitspot {
+        members::spot::install(rt)?;
+    }
     Ok(())
 }

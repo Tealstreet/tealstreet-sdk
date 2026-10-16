@@ -93,6 +93,11 @@ place it last. Rust-only position_size_before_fee metadata selects the order,
 is omitted from TypeScript bindings and wire output, and defaults false on
 record decode. Numeric values and optional-field nullability are unchanged.
 
+CurrencyBalance uses the same private remote-companion pattern as the records
+below, with the object guard at its concrete Deserialize implementation. It
+retains declared Balance and available/locked payloads without normalization and
+has no hidden function-local decoder.
+
 The field checker refuses interface heritage in both dependency discovery and
 shape enumeration. Required inherited fields must never disappear behind a
 successful member count; a permanent inherited-number control pins this refusal.

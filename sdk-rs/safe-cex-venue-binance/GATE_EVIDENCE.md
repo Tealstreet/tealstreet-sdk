@@ -3351,3 +3351,71 @@ no self-referential tip SHA or unexecuted preservation result is asserted here.
 See [GATE-CLASS-OWNERS.md](GATE-CLASS-OWNERS.md) for the final twelve-row census,
 SHA-bound scoped gates, discriminating controls, review findings and accepted
 omissions. Raw measured records are in [gate-evidence/class-owners](gate-evidence/class-owners).
+
+### Independent record ingress witnesses
+
+The generated Futures risk, PM risk, income record and income options decoders
+use private Serde remote schemas through `strict_decode::object`, inside their
+existing `JsNumberInput` capture. Public fields and every remote field, rename,
+default and presence attribute were compared byte for byte with the previous
+schema. The generator remains the source of the Rust declarations.
+
+`tests/accepted_record_shapes.rs` replaces the serialization-derived positional
+sequence builder with four independently authored complete arrays in declaration
+order: 21 Futures risk fields, 17 PM risk fields, eight income fields and five
+option fields. Seven decode routes inspect every native field, optional presence
+and numeric bits, and reject the ordered array and scalar/null shapes. Options
+also retain absent versus present-null behavior.
+The original pre-refactor source passes these same four independent fixtures;
+this refactor preserves the existing public object admission boundary.
+
+`python3 sdk-rs/safe-cex-venue-binance/scripts/record-shape-controls.py` completed
+four compiled controls. Removing only each owner's object guard admits its full
+valid positional array and fails that owner's named assertion; restoring the
+source passes the same test. All four source restorations passed.
+
+The restored `accepted_record_shapes`, `types` and `numeric_ingress` targets pass
+13 tests with `--include-ignored`, including the live TypeScript tables, income
+variants, numeric corpus and direct field-identity observations. Generator
+freshness, both formatter-toolchain tests, formatting and whitespace checks pass.
+Fresh ordinary native/default inventory retains seven Deserialize owners and
+adds no Deserialize owner for the private remote schemas. Its 235 owners,
+80 aliases and two construction policies are a discovery count; individual
+accepted-contract review continues beyond these four records.
+
+The four selected accepted contracts execute against actual production libraries
+with zero failed owners. Reproduce fresh discovery and that scoped execution with
+`node sdk-rs/safe-cex-venue-binance/scripts/record-contracts.mjs`; run accepted
+probes serially. Scoped all-target Clippy passes with warnings denied, and the
+invention/status checker passes 7,459 rows and 17,181 public Rust items. These
+results cover this record tranche; the other accepted contracts remain under review.
+
+After merging master `ce4111da95`, all 13 selected live/native tests, four
+production contract probes, formatting and parity-check pass again. The merge
+preserves every master contract entry and re-applies only these four reviewed
+Binance records. The compiled guard controls and all-target Clippy ran before
+this merge; the Binance implementation files are byte-identical across it.
+
+A second integration of master `55e98b428e` preserves every master contract
+entry and places the same four Binance records before the existing table to
+avoid other lanes' append location. Binance and all native dependency source
+files, venue tests and scripts compare unchanged against `9501adec0c`; the
+existing compiled targets execute all 13 live/native tests successfully again.
+Fresh ordinary discovery and four production contract probes pass with zero
+failed owners; parity-check passes 7,459 rows and 17,183 public Rust items.
+
+
+After the shared per-crate contract cutover, the four reviewed record rows live
+in `accepted-set/contracts/safe-cex-venue-binance.json`. The integration preserves
+all 16 existing master shards byte for byte and leaves the deleted monolithic
+`contracts.json` absent. The maintained record runner imports shared
+`loadContracts()`; no old reader or duplicate contract set is retained.
+
+The post-cutover selected native/live TypeScript run passes all 13 tests with
+zero ignored. Generator freshness, formatting and parity-check pass again
+(7,459 rows; 17,183 public Rust items). Binance and all native dependency source
+files and venue tests are unchanged from the previous validated record revision.
+The migrated maintained runner completes fresh ordinary native/default discovery
+and all four production record probes with zero failed owners. The frozen Yarn
+install also passes. Compiled guard controls and all-target Clippy retain their
+previous execution provenance; no source change requires rerunning them here.

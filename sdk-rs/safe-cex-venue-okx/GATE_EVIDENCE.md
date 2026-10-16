@@ -20,7 +20,8 @@ wire literals declared only there and checked-in public declarations visible to
 the invention gate. No permissive inherent public decoder, FromStr or public
 conversion from wire input is exposed. Public qualified-call regressions reject
 objects; the live gate rejects arrays/null/booleans/numbers, unknown literals,
-case changes, whitespace and U+FEFF. Injecting an alias in RegionWire fails
+case changes, whitespace and U+FEFF. Injecting an alias in the actual
+RegionWireSchema decoder fails
 `derived_accepted_sets_match_typescript` at 101 with OKX_ALIAS explicitly named.
 Restoring default wide decoding fails the protocol table gate on {okx:null}.
 The draft anonymous TickerMarkInput also now rejects positional arrays and null
@@ -778,3 +779,35 @@ traffic, browser checks, credential checks, deployment or PR creation/merge.
 Generated logs remain ignored under target/; this manually authored gate sheet
 is tracked. This receipt changes documentation only and retains the archive
 above as a byte-exact prefix.
+
+## Private literal-wire owner repair
+
+The compiler census independently exposes `types::RegionWire` and
+`types::InstrumentWire`. Their former derived decoders accepted tagged-null maps
+although the maintained TypeScript literal unions admit strings. Both owners
+remain in the census and now require `String::deserialize` before delegating to
+private Serde remote schemas, following
+[the shared string-only enum recipe](../safe-cex-parity/accepted-set/MAP-ONLY-INGRESS.md#string-only-literal-enums).
+Serialization, native variants and typed `From` mappings remain covered. The
+remote schema declarations introduce no independent `Deserialize` owner.
+
+The original native tests failed both named tagged-map assertions before repair.
+After repair, all four library tests and both table tests pass, including the
+live TypeScript literal inventory. Each literal has native-variant and existing
+serialization checks through owned, borrowed, qualified and text entry paths;
+each tagged-null form is refused through those paths. Fresh compiler discovery
+still reports 145 owners and four aliases. Two selected actual production
+accepted-set probes pass with zero failed owners, using the independently
+reviewed contracts for these private owners.
+
+Run `python3 safe-cex-venue-okx/tests/private_wire_controls.py` from `sdk-rs`
+with the normal live TypeScript oracle setup. The checked-in control separately
+removes each actual owner's string frontdoor, requires successful compilation
+and its named tagged-map regression failure, then restores exact source bytes
+and passes. It also adds `OKX_ALIAS` to the actual remote schema and proves the
+complete TypeScript literal inventory fails before exact restoration passes.
+Separately executed production-probe controls removed each guard independently:
+only that owner's native receipt failed, and both receipts passed after each
+restoration. Compiler failures never count as a successful negative control.
+This closes these two owner contracts; it does not claim the remaining OKX
+compiler inventory is fully classified.

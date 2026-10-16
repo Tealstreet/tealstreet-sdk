@@ -22,8 +22,16 @@
       "unresolved selected Fn compiler identity refuses before any path-name approval",
       "hosted signer tuple retains its exact native type and compiler roles"
     ],
+    "accepted-constant-output-native.test.mjs": [
+      "reviewed serializer constants execute actual production values and reject native drift"
+    ],
     "accepted-construction-chain-native.test.mjs": [
       "selected candle-cache inventory closes every construction owner and rejects both error policy mutations"
+    ],
+    "accepted-contract-files.test.mjs": [
+      "per-crate contracts preserve every legacy value and explicit fixture file",
+      "contract directories reject missing malformed misplaced duplicate and hidden inputs",
+      "contract shard namespace and complete merge checks reject executed mutations"
     ],
     "accepted-contracts.test.mjs": [
       "new public or private Deserialize owner fails closed by name",
@@ -80,6 +88,9 @@
       "every required sysroot role refuses missing wrong-kind and foreign artifact identities",
       "workspace payload identities refuse wrong package registry missing and mismatched owner IDs",
       "missing live context source identity and serde origin remain refusals"
+    ],
+    "accepted-function-pointer-native.test.mjs": [
+      "reviewed function pointers execute actual SDK alias identity and trait probes"
     ],
     "accepted-future-alias-native.test.mjs": [
       "local future aliases execute the actual fixed native probe and reject root identity drift"
@@ -148,7 +159,9 @@
       "sibling introductions cannot launder delayed debt but genuine new-owner merges pass"
     ],
     "accepted-reviewed-aliases.test.mjs": [
-      "reviewed generic aliases return only their spec-owned fixed instantiation"
+      "reviewed generic aliases return only their spec-owned fixed instantiation",
+      "reviewed function pointers retain exact signatures and every nested compiler role",
+      "reviewed function pointer source signature roots and caller guards are load bearing"
     ],
     "accepted-scanner.test.mjs": [
       "scanner receipts bind the SDK package and actual fresh executable",
@@ -158,14 +171,15 @@
     "accepted-telemetry-defaults.test.mjs": [
       "telemetry defaults execute inherited native results and reject body drift"
     ],
+    "accepted-weex-kline-alias.test.mjs": [
+      "exact Weex kline tuple policy refuses slot root and caller redirects",
+      "Weex kline tuple executes actual native slots identity and trait probes"
+    ],
     "accepted-ws-auth-helper.test.mjs": [
       "WS auth helper uses actual parent native fields and detects swap and null loss"
     ],
     "accepted-ws-auth-native.test.mjs": [
       "WS four native families reject field and presence mutations before wire assertions"
-    ],
-    "accepted-constant-output-native.test.mjs": [
-      "reviewed serializer constants execute actual production values and reject native drift"
     ]
   },
   "mutations": [
@@ -301,6 +315,17 @@
     "constant serializer adapter pin",
     "constant serializer native witness pin",
     "constant serializer unit native value",
-    "constant serializer tuple native state"
+    "constant serializer tuple native state",
+    "function pointer source identity",
+    "function pointer expanded signature",
+    "function pointer nested root identity",
+    "function pointer caller redirection",
+    "function pointer retry native identity",
+    "function pointer factory native identity",
+    "Weex kline expanded slots",
+    "Weex kline native identity",
+    "Weex kline policy routing",
+    "contract shard namespace",
+    "contract shard complete merge"
   ]
 }

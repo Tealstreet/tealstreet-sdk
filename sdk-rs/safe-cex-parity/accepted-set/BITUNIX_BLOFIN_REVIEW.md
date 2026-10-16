@@ -61,3 +61,107 @@ prices instead of amounts. Each fails its named owner; exact restoration passes
 both owners. These are runtime assertion failures, not compiler failures, and
 the real production source bytes are unchanged. This follow-up leaves 128 of
 the original Bitunix owners for subsequent review.
+
+## Concrete helper and error-conversion follow-up
+
+Another 47 Bitunix owners execute native/default probes: 46 concrete functions
+and the three inventoried conversions on `adapter::Fault`. Their expectations
+observe numeric precision and rounding, own-property order and Undefined/null
+identity, first/last table precedence, historical UTF-16 selectors, REST field
+selection, retry short-circuit order, response-body phases, TP/SL precedence and
+native error class/message/response metadata. All 47 owner receipts pass.
+
+Compiled copied-production controls remove inverse-table reverse precedence and
+invert account-mode selection. Both fail their named native owner and pass
+after exact restoration. Production source bytes remain unchanged. The query
+fixture was also checked against the source's actual `qs` dependency: repeated
+array keys and null's empty assignment remain observable.
+
+Nine Blofin callback/factory aliases separately pass their actual native
+Deserialize/conversion trait probes under specific nondecoder classifications.
+Eight use the existing fixed `serde_json::Value` error-parameter callable policy;
+`CommonHttpFactory` is concrete. Exact compiler targets and authenticated roots
+are retained. These are capability classifications, without callback execution,
+other generic arguments or permission for neighboring host methods.
+
+This follow-up has 56 receipts: 47 runtime owners and nine explicit alias
+classifications. On the original compiler inventory, 81 Bitunix owners and its
+retry function-pointer alias remain, alongside all 163 Blofin owners and its
+API-factory function-pointer alias. The existing Future specifications and every
+previous contract remain unchanged.
+
+## Historical result mappers
+
+The trade-to-income, closed-position and historical-order functions now have
+three further native/default runtime receipts. Expectations inspect canonical
+enum variants, all mapped numeric bits, IDs, account/asset/provenance fields,
+optional presence and source null/empty guards. The closed-position cases keep
+closed quantity distinct from peak quantity, with separately chosen close prices.
+The trade cases distinguish commission from rebate and verify PnL-before-fee
+ordering. Historical orders retain zero-as-undefined price/time fields.
+
+All three actual production owners pass. Three compiled copied-source controls
+invert fee sign, replace notional's close price with quantity, and invert the
+market-order test. Each fails its named owner; exact restoration passes all
+three. Real production source bytes are unchanged. This leaves 78 original
+Bitunix owners, alongside the previously listed pointer and Blofin scope.
+
+## Blofin wire records and concrete helpers
+
+Another 49 Blofin native/default owners execute directly: twelve response/data
+records and 37 private numeric, property, error, response and stream helpers.
+Record observations inspect every native field individually, including nested
+row order, distinct string fields, optional omission versus null, and all three
+batch-side enum variants. Complete valid arrays in Serde declaration order
+refuse the map-only boundary. These classify the maintained schema; erased TS
+types do not validate arbitrary runtime values.
+
+Helper observations distinguish number bits, nullish and truthy selection,
+error class/message, first-element selection, stream sequence/level fields and
+nonempty book levels. All 49 runtime owner receipts pass with fresh compiler
+inventory and jobs1. Compiled copied-production controls drop the parsed levels
+and remove only FetchMarginModeResponseData's map guard. Both fail their native
+owner; exact restoration passes both. Real production source bytes are unchanged.
+
+Two additional receipts classify the exact Bitunix RetryCondition and Blofin
+BlofinApiFactory pointers as nondecoders. The shared reviewed pointer registry
+checks their compiler signatures, authenticated roots and invariant native type
+equality, plus actual Serde/conversion traits. This makes no callback-execution,
+generic, local, feature or WASM claim.
+
+Together with the preceding batch-side repair, 50 of the original 163 Blofin
+owners now have these selected native contracts, leaving 113. All thirteen
+Blofin aliases and both Bitunix aliases have bounded native classifications.
+The remaining 78 Bitunix owners and complete package/matrix gates remain owed.
+
+## Retained inputs, selectors and native state
+
+A further 66 native/default owner contracts cover 17 Bitunix and 49 Blofin
+owners. Forty concrete helper functions observe timestamp units, number bits,
+property selection, first-match order, query fields, native order overlays and
+reference equality. Cursor expectations preserve the maintained source's
+length-then-lexical ordering without normalizing leading zeros. Query numbers
+are inspected through their native binary64 bits.
+
+Six Blofin retained-input owners inspect actual Value variants, nested payloads,
+property order and number bits. Their borrowed accessors execute separately.
+The topic owner observes its actual ordered keys and values; three error owners
+execute coercion conversions at String host errors. These specific open-JSON
+contracts do not grant the downstream mappers an open schema.
+
+Eleven Blofin mapper/store owners observe actual income, closed-position and
+historical-order native fields and enum variants, resolver/raw-symbol fallback,
+production Store indices, lot-size truthiness and mode callbacks. Five Bitunix
+state owners observe retained info, live-ID/cache precedence, pre-format callback
+ordering, canonical zero-position defaults and account-mode REST requests.
+Native callback futures use bounded deterministic fixtures, without a claim
+about real transport scheduling.
+
+All 66 selected native owner receipts pass. Four compiled copied-production
+controls change event timestamp units, the strict history threshold, live-ID
+truthiness and closed-position absolute fees. Each fails its named owner; exact
+restoration passes all four, with real production sources unchanged.
+
+This leaves 61 original Bitunix owners and 64 Blofin owners for subsequent
+review. Complete discovery, locals, features and WASM matrix coverage remain
+separate obligations; none of the 66 receipts is classification-only.

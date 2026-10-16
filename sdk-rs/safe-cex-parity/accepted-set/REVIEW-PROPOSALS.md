@@ -48,8 +48,9 @@ targets; expanded aliases, root identity and actual conversion traits still
 need their normal checks. Selected census keys do not establish complete
 discovery, local-scope coverage or the feature/wasm matrix.
 
-For positional-array widening of TS object records, use the shared
-[object-only ingress recipe and proof requirements](MAP-ONLY-INGRESS.md).
+For positional-array widening of TS object records or tagged-map widening of
+string-literal enums, use the shared
+[ingress recipes and proof requirements](MAP-ONLY-INGRESS.md).
 
 Use the maintained boundary decisions when reviewing
 [strings](../../parity/MANIFEST-SPEC.md#shared-utf8-string-boundary),
@@ -61,3 +62,13 @@ Use the maintained boundary decisions when reviewing
 After manually editing reviewed contracts, run their scoped native probes and
 the accepted-set gates required for the change. Proposal generation is not a
 passing gate or permission to accept a missing contract.
+
+
+Reviewed classifications live in `contracts/<compiler-crate>.json`, using the
+compiler namespace with underscores replaced by hyphens. For example,
+`safe_cex_venue_okx::types::RegionWire` belongs in
+`contracts/safe-cex-venue-okx.json`. Edit only your crate file; retain the existing
+flat owner-to-contract JSON shape. The former shared `contracts.json` is removed.
+The gate and this helper load the complete directory through
+`../scripts/accepted-contract-files.mjs`; native proof and all validation rules
+are unchanged. Custom fixture files still work with `--contracts=<file.json>`.

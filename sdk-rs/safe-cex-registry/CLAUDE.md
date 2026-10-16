@@ -146,7 +146,9 @@ read purity. The module-host construction path remains the default.
 Phemex's Rust constructor receives the shared Js HTTP host and external-data
 factory. Its local HTTP witness checks amount/price precision independently and
 verifies the account-query HMAC against the bytes observed by the server. Native
-Phemex tunnel construction fails explicitly without a transport installer.
+Phemex tunnel construction supplies the shared default transport installer.
+The tunnel witness observes authenticated rpc.http, signed account bytes and zero
+direct-origin traffic; absent and no-op provider controls must both fail.
 
 Kraken Futures/Spot native inputs use the shared hosted signer bridge for private
 HTTP and Futures websocket challenges. Both retain the hosted account name with
@@ -159,6 +161,11 @@ shared js_runtime binding and safe-cex-crypto's real seed-only zkLink signer.
 delivery and cancellation over local native transports; its constructor-removal
 control lives in the venue's scripts/registry-control.py.
 
+The Bybit host also constructs `Bybitspot` after its distinct Spot receiver is
+bound. Native Bybit loopback HTTP coverage includes Spot for local and hosted
+signing; its existing registry dependency edge and caller-owned limiter API
+remain shared across these constructors. Inverse/HyroTrader await their bindings.
+
 ApexOmni's signed native host shares the account capability with HTTP and private
 WS auth, retaining remote accountName while keeping the API secret in the browser.
 `native_host_apexomni` verifies both signed wire paths and pending-signature
@@ -169,3 +176,16 @@ gateway factory through their existing `external_public_data` dependency. The
 loopback `native_host_bitget_external_data` test covers all three names: gateway
 market/ticker startup, book/candle callbacks, unsubscribe cleanup and disposal,
 with no venue REST or private/public venue sockets in public-only mode.
+
+
+Paradex's native constructor supplies shared runtime HTTP and gateway inputs.
+Its loopback test observes distinct market precision axes and source read purity.
+Hosted remoteSigner remains an explicit refusal until SDK signing is bound.
+
+WEEX is registered through its concrete native binding and the shared signed HTTP
+host, gateway factory and UTC host date profile. `tests/native_host_weex.rs` checks
+its account read and exact request HMAC over loopback HTTP.
+
+TxFlow is constructible only as the source Phase-0 scaffold. Native inputs build
+its HTTP client, while start emits the exact refusal before IO. Keep its existing
+source start boundary and test both mainnet/testnet construction without network.
