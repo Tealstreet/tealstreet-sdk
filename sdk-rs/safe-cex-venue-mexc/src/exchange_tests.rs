@@ -1570,6 +1570,7 @@ fn mexc_fetch_balance_matches_live_source() {
         currencies
             .iter()
             .map(|(key, row)| {
+                let row = row.as_balance().unwrap();
                 (
                     key.clone(),
                     json!({

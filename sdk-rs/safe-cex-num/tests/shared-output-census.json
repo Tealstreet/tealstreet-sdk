@@ -12,6 +12,7 @@
     "ClosedPnlEntryNotional",
     "ClosedPnlEntryUnrealizedPnl",
     "CoinBalance",
+    "CurrencyBalance",
     "DataProvenance",
     "ExchangeName",
     "ExchangeOptions",
@@ -413,7 +414,7 @@
     "Order": "info: Option<Value>; named passthrough { info }; canonical retained_json capture in the private types wire companion; absent None, present null Some(Value::Null)",
     "Position": "info: Option<Value>; named passthrough { info }; canonical retained_json capture in the private types wire companion; absent None, present null Some(Value::Null)",
     "Ticker": "info: Option<Value>; named passthrough { info }; canonical retained_json capture in the private types wire companion; absent None, present null Some(Value::Null)",
-    "Balance": "info: Option<Value>; named passthrough { info }; canonical retained_json capture in the private types wire companion; absent None, present null Some(Value::Null)"
+    "Balance": "info: Option<Value>; named passthrough { info }; canonical retained_json capture in the private types wire companion; absent None, present null Some(Value::Null); currencies recurse through CurrencyBalance::Declared, while AvailableLocked contains only its two f64 fields"
   },
   "uninhabited_capability_graphs": [
     "ExchangeOptions",
