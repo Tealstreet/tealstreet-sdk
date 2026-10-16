@@ -438,6 +438,8 @@ fn rest_request(config: &Js) -> Result<RestRequest, Thrown> {
         params = Js::Undefined;
     }
     let timeout = config.get("timeout")?;
+    // ts: markSkipRemoteSigning tags a public request a hosted signer need not see.
+    let skip_remote_signing = config.get("safeCexSkipRemoteSigning")?.truthy();
     Ok(RestRequest {
         method: optional_text(config, "method")?
             .unwrap_or_else(|| "get".into())
@@ -455,6 +457,7 @@ fn rest_request(config: &Js) -> Result<RestRequest, Thrown> {
         } else {
             Some(to_json(&params)?)
         },
+        skip_remote_signing,
         ..Default::default()
     })
 }

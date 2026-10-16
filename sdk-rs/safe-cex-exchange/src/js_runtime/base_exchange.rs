@@ -9,8 +9,9 @@ use crate::{
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     external::ExternalPublicData,
-    runtime::ExchangeRuntime,
+    runtime::{ExchangeRuntime, RemoteSigner},
 };
+use safe_cex_transport::signing::RemoteSignerRequest;
 use safe_cex_store::Store;
 use safe_cex_types::{
     ExchangeName, ExchangeOptions, ExchangeOptionsExternalPublicData, Market, PlaceOrderOpts,
@@ -30,6 +31,39 @@ pub struct BaseExchangeParts {
     pub settings: ExchangeSettings,
     /// Required when `options.externalPublicData` is set.
     pub external_public_data: Option<ExternalPublicDataFactory>,
+    /// A hosted signer and its accountName: the account holds no secret.
+    pub remote_signer: Option<HostedSigner>,
+}
+
+/// exchange-server's browser relay for one account, with that account's name.
+pub type HostedSigner = (Rc<dyn RemoteSigner>, Option<String>);
+
+/// ts: options.remoteSigner, `{ accountName, sign(request) }` over the hosted signer.
+fn js_remote_signer(
+    signer: Rc<dyn RemoteSigner>,
+    account: Option<String>,
+    runtime: Rc<dyn ExchangeRuntime>,
+) -> Js {
+    let sign = Js::function("sign", move |_, a| {
+        let request: RemoteSignerRequest = serde_json::from_value(to_json(&arg(&a, 0))?)
+            .map_err(|e| Thrown::type_error(&e.to_string()))?;
+        let signer = signer.clone();
+        Ok(Js::Promise(Promise::spawn(
+            &runtime,
+            Box::pin(async move {
+                let response = signer.sign(request).await.map_err(|e| {
+                    Thrown::error("Error", &e.to_string())
+                })?;
+                let value = serde_json::to_value(&response)
+                    .map_err(|e| Thrown::type_error(&e.to_string()))?;
+                Ok(super::value::from_json(&value))
+            }),
+        )))
+    });
+    Js::object(vec![
+        ("accountName", account.map_or(Js::Undefined, |a| Js::str(&a))),
+        ("sign", sign),
+    ])
 }
 
 fn assembled_venue(context: &Weak<JsSocketContext>) -> Result<Rc<dyn Exchange>, Thrown> {
@@ -59,13 +93,21 @@ pub fn create(
         ));
     }
     let external_public_data = parts.external_public_data;
-    let base = Rc::new(BaseExchange::new(
+    let mut core = BaseExchange::new(
         parts.name,
         parts.options,
         parts.store,
         runtime.clone(),
         parts.settings,
-    ));
+    );
+    if let Some((signer, account)) = parts.remote_signer {
+        core.signers.remote_signer = Some(signer.clone());
+        options.set(
+            "remoteSigner",
+            js_remote_signer(signer, account, runtime.clone()),
+        )?;
+    }
+    let base = Rc::new(core);
     let this = Js::object_with_class(
         "BaseExchange",
         vec![

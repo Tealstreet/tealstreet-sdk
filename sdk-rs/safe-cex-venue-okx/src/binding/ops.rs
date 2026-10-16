@@ -20,7 +20,7 @@ use safe_cex_exchange::{
     },
     exchange::ExchangeSettings,
     js_runtime::{
-        base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory},
+        base_exchange::{self, BaseExchangeParts, ExternalPublicDataFactory, HostedSigner},
         promise::await_js,
         scope::{Scope, ScopeShared, bound_member, scope_of},
         value::{Js, Thrown, arg, from_typed, to_json, to_typed},
@@ -34,6 +34,7 @@ pub(crate) struct OkxExtra {
     pub name: ExchangeName,
     pub options: ExchangeOptions,
     pub external_public_data: Option<ExternalPublicDataFactory>,
+    pub remote_signer: Option<HostedSigner>,
 }
 
 impl OkxExtra {
@@ -99,6 +100,7 @@ fn base_constructor(scope: &OkxScope) -> Js {
             store: shared.store.clone(),
             settings: settings(&shared.extra.name, Rc::downgrade(&shared))?,
             external_public_data: shared.extra.external_public_data.clone(),
+            remote_signer: shared.extra.remote_signer.clone(),
         };
         let (this, base) =
             base_exchange::create(&shared.sockets, parts, arg(&a, 0), arg(&a, 1), arg(&a, 2))?;

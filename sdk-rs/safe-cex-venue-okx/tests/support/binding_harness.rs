@@ -315,6 +315,7 @@ pub fn harness(
             runtime: runtime.clone(),
             http: http.clone(),
             external_public_data: None,
+            remote_signer: None,
         },
     )
     .expect("OkxExchange constructs from real options");
