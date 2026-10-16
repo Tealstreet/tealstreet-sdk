@@ -387,6 +387,14 @@ status = "divergent"
 note = "CHOSEN: native_tealstreet_dex selects the actual source module ./orderly/exchanges/tealstreet-dex/tealstreet-dex.exchange and export TealstreetDEXExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_tealstreet_dex. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
 
 [[symbol]]
+ts = "exchangeRegistry.txflow"
+kind = "field-fn"
+layer = "adapted"
+rs = "safe-cex-registry/src/loaders.rs::native_txflow"
+status = "divergent"
+note = "CHOSEN: native_txflow selects the actual source module ./txflow/txflow.exchange and export TxFlowExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_txflow. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+
+[[symbol]]
 ts = "exchangeRegistry.what"
 kind = "field-fn"
 layer = "adapted"

@@ -139,7 +139,7 @@ fn rest_native_stamps_aggregates_and_bounds() {
     assert_eq!(sample.body_kind, "cloudfront");
     assert_eq!(
         sample.body_snippet.as_deref(),
-        Some("<html>CloudFront denied <redacted></html>")
+        Some("CloudFront denied <redacted>")
     );
     assert_eq!(sample.headers.len(), 2);
     assert_eq!(sample.headers["server"], "edge");
@@ -147,6 +147,47 @@ fn rest_native_stamps_aggregates_and_bounds() {
     assert_eq!(sample.total_ms, Some(200.0));
     assert_eq!(sample.signature_age_ms, Some(200.0));
     assert!(drain_venue_rest_failure_samples().is_empty());
+    reset_venue_rest_diagnostics();
+    let signing = |response| RestDiagnosticError {
+        response,
+        message: Some("Signing request abc timed out".into()),
+        ..Default::default()
+    };
+    note_rest_failure("signer", Some(&signing(None)), 5.0);
+    let unsent = &get_venue_rest_stats(5.0)["signer"];
+    assert_eq!(
+        (unsent.requests, unsent.failures, unsent.unsent_signing),
+        (0.0, 0.0, 1.0),
+        "REST unsent signing is not a venue failure"
+    );
+    assert!(unsent.status_counts.is_empty());
+    note_rest_failure(
+        "signer",
+        Some(&signing(Some(RestDiagnosticResponse::default()))),
+        6.0,
+    );
+    let answered = &get_venue_rest_stats(6.0)["signer"];
+    assert_eq!(
+        (
+            answered.requests,
+            answered.failures,
+            answered.unsent_signing
+        ),
+        (1.0, 1.0, 1.0),
+        "REST a venue response means the request was sent"
+    );
+    let flags: Vec<_> = drain_venue_rest_failure_samples()
+        .iter()
+        .map(|sample| sample.unsent_signing)
+        .collect();
+    assert_eq!(flags, [true, false]);
+    assert_eq!(
+        visible_text(
+            "<html><head><style>p{}</style><SCRIPT>x</script></head><body> Reason \n here </body></html>"
+        ),
+        "Reason here"
+    );
+    assert_eq!(visible_text("<html><style>a<p>b</p>"), "a b");
     assert_eq!(
         scrub("WebSocket disconnected — signing aborted"),
         "WebSocket disconnected — signing aborted"
@@ -248,4 +289,19 @@ fn rest_native_signed_zero_extrema() {
         }
     }
     reset_venue_rest_diagnostics();
+}
+#[test]
+fn rest_and_ws_literals_hold_in_actual_typescript_source() {
+    let output = std::process::Command::new("node")
+        .arg(concat!(
+            env!("CARGO_MANIFEST_DIR"),
+            "/tests/diagnostics_oracle.cjs"
+        ))
+        .output()
+        .expect("Node required; the diagnostics source oracle never skips");
+    assert!(
+        output.status.success(),
+        "diagnostics source oracle failed:\n{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
 }

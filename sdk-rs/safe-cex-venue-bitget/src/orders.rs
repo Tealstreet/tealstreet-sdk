@@ -84,6 +84,7 @@ struct PendingOrder {
 }
 fn project(order: PendingOrder, info: &Value) -> Result<Order, ExchangeError> {
     Ok(Order {
+        client_order_id: None,
         id: order
             .id
             .as_ref()

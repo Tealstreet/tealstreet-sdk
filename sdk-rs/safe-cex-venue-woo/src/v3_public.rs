@@ -448,6 +448,7 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
                         min: 1.0,
                         max: (1.0 / base_imr).floor(),
                     },
+                    price: None,
                 },
                 info: Some(serde_json::to_value(row).map_err(|e| e.to_string())?),
                 pretty_symbol: None,
@@ -459,6 +460,7 @@ pub fn map_woo_v3_markets(rows: &[WooV3Instrument]) -> Result<Vec<safe_cex_types
                 is_read_only: None,
                 taker_fee: None,
                 maker_fee: None,
+                option: None,
             })
         })
         .collect()

@@ -30,6 +30,7 @@ pub async fn fire_market_remainder(exchange: &dyn Exchange, options: &TwapOption
         client_order_id: None,
         max_slippage_pct: None,
         close: None,
+        implied_volatility: None,
     };
     // The source awaits placement but swallows its rejection so later slices can run.
     let _ = exchange.base().place_order(exchange, order).await;

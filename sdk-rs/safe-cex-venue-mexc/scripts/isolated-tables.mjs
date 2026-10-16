@@ -44,6 +44,7 @@ const files=[
   'sdk-rs/safe-cex-venue-mexc/tests/string_boundary_oracle.mjs',
   'packages/safe-cex/src/remoteSigningAdapter.ts',
   'packages/safe-cex/src/utils/retryReadsOnly.ts',
+  'packages/safe-cex/src/utils/signatureRejection.ts',
   'packages/json-parse/src/jsonParse.ts',
   'packages/safe-cex/src/exchanges/mexc/mexc.utils.ts',
   'packages/safe-cex/src/exchanges/mexc/mexc.api.ts',

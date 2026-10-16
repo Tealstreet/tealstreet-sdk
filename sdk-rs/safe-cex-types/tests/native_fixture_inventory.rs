@@ -110,17 +110,22 @@ fn dynamic_bucket(function: &str) -> &'static str {
         | "update_order_union_retains_both_declared_fields"
         | "snapshot_health_flags_and_leverage_keep_native_identity"
         | "market"
-        | "order" => "decoded-record",
+        | "order"
+        | "boxed_ticker_keeps_native_fields_and_untagged_wire_shapes"
+        | "market_perpetual_native_boolean_and_absence"
+        | "inherited_instrument_members_keep_native_identity_tags" => "decoded-record",
         "union" | "reject_shapes" | "string_union" => "rejected-shape",
         "current_source_accounts"
         | "model_utilities_typescript_differential"
         | "symbol_conversion_typescript_differential"
-        | "actual_validation_method_retains_non_string_error_values" => "operation-result",
+        | "actual_validation_method_retains_non_string_error_values"
+        | "native_unknown_send_veto_response_precedence_and_codes" => "operation-result",
         "tagged"
         | "encoded"
         | "encoded_number"
         | "json_comparator_ignores_only_object_key_order"
-        | "live_typescript_risk_and_returns" => "numeric-observation",
+        | "live_typescript_risk_and_returns"
+        | "rest_native_signed_zero_extrema" => "numeric-observation",
         "classification_retains_unknown_and_bybit_wire_values"
         | "javascript_trim_and_prototype_lookup_bugs_are_preserved"
         | "first_subscriber_failure_surfaces_after_committed_setting_and_skips_fanout"
@@ -129,7 +134,8 @@ fn dynamic_bucket(function: &str) -> &'static str {
         | "sequenced_book_live_typescript_every_value_and_transition"
         | "frozen_typescript_terminal_oracle"
         | "prototype_risk_error_is_catchable_and_store_clearing_is_observable"
-        | "production_dictionary_write_mechanisms_and_safe_local_outcomes" => "effect-observation",
+        | "production_dictionary_write_mechanisms_and_safe_local_outcomes"
+        | "redaction_ordinary_assignment_omits_prototype_key" => "effect-observation",
         _ => panic!("DYNAMIC-DISPOSITION unclassified macro in {function}"),
     }
 }
@@ -221,10 +227,10 @@ fn parse_native_test_fixtures_and_bit_comparison_functions() {
     assert_eq!(
         inventory.dynamic_buckets,
         BTreeMap::from([
-            ("decoded-record", 13),
-            ("effect-observation", 17),
-            ("numeric-observation", 9),
-            ("operation-result", 15),
+            ("decoded-record", 16),
+            ("effect-observation", 19),
+            ("numeric-observation", 10),
+            ("operation-result", 16),
             ("rejected-shape", 17),
         ]),
         "DYNAMIC-DISPOSITION complete bucket coverage"
