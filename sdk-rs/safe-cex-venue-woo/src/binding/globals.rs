@@ -86,6 +86,17 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
             ("baseURL", Js::str(base_url)),
             ("timeout", Js::Number(timeout)),
             (
+                "paramsSerializer",
+                Js::object(vec![(
+                    "serialize",
+                    Js::function("serialize", |_, a| {
+                        crate::api::sorted_query(&to_json(&arg(&a, 0))?, false)
+                            .map(|q| Js::str(&q))
+                            .map_err(|e| Thrown::error("Error", &e))
+                    }),
+                )]),
+            ),
+            (
                 "headers",
                 Js::object(vec![
                     ("cache-control", Js::str("no-cache")),
@@ -105,7 +116,10 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
     let remote = rt.shared.extra.options.remote_signer.is_some();
     let runtime = rt.shared.runtime.clone();
     let interceptor = Js::function("", move |_, a| {
-        let config = to_json(&arg(&a, 0))?;
+        // The signer works on the JSON view; callables (paramsSerializer) ride across.
+        let original = arg(&a, 0);
+        let serializer = original.get("paramsSerializer")?;
+        let config = to_json(&original)?;
         let typed = typed.clone();
         let runtime = runtime.clone();
         Ok(Js::Promise(super::promise::Promise::spawn(
@@ -121,7 +135,11 @@ fn create_api(rt: &Rt, options: Js) -> Result<Js, Thrown> {
                 )
                 .await
                 .map_err(|e| Thrown::error("Error", &e))?;
-                Ok(from_json(&next))
+                let next = from_json(&next);
+                if !serializer.is_undefined() {
+                    next.set("paramsSerializer", serializer)?;
+                }
+                Ok(next)
             }),
         )))
     });

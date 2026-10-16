@@ -188,11 +188,37 @@ impl WsRuntime for Runtime {
     }
 }
 
+/// application/x-www-form-urlencoded component decoding.
+fn decode(text: &str) -> String {
+    let bytes = text.as_bytes();
+    let mut out = Vec::with_capacity(bytes.len());
+    let mut i = 0;
+    while i < bytes.len() {
+        match bytes[i] {
+            b'+' => out.push(b' '),
+            b'%' if i + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[i + 1..i + 3]).unwrap_or("");
+                match u8::from_str_radix(hex, 16) {
+                    Ok(b) => {
+                        out.push(b);
+                        i += 2;
+                    }
+                    Err(_) => out.push(b'%'),
+                }
+            }
+            b => out.push(b),
+        }
+        i += 1;
+    }
+    String::from_utf8_lossy(&out).into_owned()
+}
+
 /// One recorded HTTP request after the request interceptors ran.
 #[derive(Clone, Debug)]
 pub struct Request {
     pub method: String,
     pub url: String,
+    pub query: Option<String>,
     pub params: Value,
     pub data: Value,
     pub headers: Value,
@@ -243,11 +269,31 @@ impl JsHttpHost for Http {
                 .unwrap_or(Value::Null)
         };
         let method = read("method").as_str().unwrap_or("get").to_uppercase();
-        let url = read("url").as_str().unwrap_or_default().to_owned();
+        // The WOO signers serialize params into the URL; routes match the path and
+        // `params` carries the query (decoded strings) when no params object remains.
+        let full = read("url").as_str().unwrap_or_default().to_owned();
+        let (url, query) = match full.split_once('?') {
+            Some((path, query)) => (path.to_owned(), Some(query.to_owned())),
+            None => (full.clone(), None),
+        };
+        let params = match (read("params"), &query) {
+            (Value::Null, Some(query)) => Value::Object(
+                query
+                    .split('&')
+                    .filter(|pair| !pair.is_empty())
+                    .map(|pair| {
+                        let (k, v) = pair.split_once('=').unwrap_or((pair, ""));
+                        (decode(k), Value::String(decode(v)))
+                    })
+                    .collect(),
+            ),
+            (params, _) => params,
+        };
         self.requests.borrow_mut().push(Request {
             method: method.clone(),
             url: url.clone(),
-            params: read("params"),
+            query,
+            params,
             data: read("data"),
             headers: read("headers"),
         });
