@@ -34,17 +34,36 @@ fn json_quote(text: &[u16], out: &mut Vec<u16>) {
     out.push(b'"' as u16);
 }
 
-/// JSON.stringify(value) without replacer/indent; `None` is the undefined result.
-fn json_stringify(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
-    let mut value = value.clone();
-    if value.is_object() || value.is_array() {
+/// SerializeJSONProperty with an optional callable replacer; `None` is undefined.
+fn json_stringify(
+    holder: &Js,
+    key: &[u16],
+    replacer: Option<&Js>,
+    stack: &mut Vec<Js>,
+) -> Result<Option<Vec<u16>>, Thrown> {
+    let mut value = holder.get_key(key)?;
+    if value.is_object()
+        || value.is_array()
+        || value.is_callable()
+        || matches!(value, Js::BigInt(_))
+    {
         let to_json_member = value.get("toJSON")?;
         if to_json_member.is_callable() {
-            value = to_json_member.call(value.clone(), vec![Js::str("")])?;
+            value = to_json_member.call(value.clone(), vec![Js::utf16(key)])?;
         }
     }
+    if let Some(replacer) = replacer {
+        value = replacer.call(holder.clone(), vec![Js::utf16(key), value])?;
+    }
+    let container = value.is_object() || value.is_array();
+    if container {
+        if stack.iter().any(|ancestor| ancestor.same_reference(&value)) {
+            return Err(Thrown::type_error("Converting circular structure to JSON"));
+        }
+        stack.push(value.clone());
+    }
     let lit = |t: &str| Ok(Some(t.encode_utf16().collect()));
-    match &value {
+    let result = match &value {
         Js::Undefined | Js::Function(_) => Ok(None),
         Js::Null => lit("null"),
         Js::Bool(b) => lit(if *b { "true" } else { "false" }),
@@ -57,13 +76,15 @@ fn json_stringify(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
             Ok(Some(out))
         }
         Js::Array(items) => {
-            let items: Vec<Option<Js>> = items.borrow().clone();
+            // Capture length once, then read each live slot after earlier replacer calls.
+            let length = items.borrow().len();
             let mut out = vec![b'[' as u16];
-            for (i, item) in items.iter().enumerate() {
+            for i in 0..length {
                 if i > 0 {
                     out.push(b',' as u16);
                 }
-                match item.as_ref().map(json_stringify).transpose()?.flatten() {
+                let key: Vec<u16> = i.to_string().encode_utf16().collect();
+                match json_stringify(&value, &key, replacer, stack)? {
                     Some(text) => out.extend(text),
                     None => out.extend("null".encode_utf16()),
                 }
@@ -74,8 +95,9 @@ fn json_stringify(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
         Js::Object(_) => {
             let mut out = vec![b'{' as u16];
             let mut first = true;
-            for (key, member) in value.own_entries()? {
-                let Some(text) = json_stringify(&member)? else {
+            // Key enumeration precedes traversal; getters/replacers can alter later values.
+            for key in value.own_keys() {
+                let Some(text) = json_stringify(&value, &key, replacer, stack)? else {
                     continue;
                 };
                 if !first {
@@ -90,7 +112,11 @@ fn json_stringify(value: &Js) -> Result<Option<Vec<u16>>, Thrown> {
             Ok(Some(out))
         }
         Js::Promise(_) | Js::Map(_) | Js::Set(_) => lit("{}"),
+    };
+    if container {
+        stack.pop();
     }
+    result
 }
 
 /// GetIterator's values over the iterables the runtime models; `None` has no @@iterator.
@@ -338,11 +364,14 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
             })
         }),
     );
+    // ts: Number(value) is ToNumeric, then a BigInt rounds to the nearest double.
     let number = Js::function("Number", |_, a| {
-        Ok(Js::Number(if a.is_empty() {
-            0.0
-        } else {
-            a[0].to_number()?
+        Ok(Js::Number(match a.first() {
+            None => 0.0,
+            Some(value) => match super::ops::to_numeric(value)? {
+                Js::BigInt(n) => n.to_string().parse().unwrap_or(f64::NAN),
+                numeric => numeric.to_number()?,
+            },
         }))
     });
     for (key, value) in [
@@ -536,10 +565,15 @@ pub fn install_builtins<X: 'static>(g: &Js, rt: Weak<ScopeShared<X>>) {
                 "stringify",
                 Js::function("stringify", |_, a| {
                     let v = arg(&a, 0);
-                    if v.is_undefined() || v.is_callable() {
-                        return Ok(Js::Undefined);
-                    }
-                    Ok(json_stringify(&v)?.map_or(Js::Undefined, |t| Js::utf16(&t)))
+                    let replacer = arg(&a, 1);
+                    let holder = Js::object(vec![("", v)]);
+                    Ok(json_stringify(
+                        &holder,
+                        &[],
+                        replacer.is_callable().then_some(&replacer),
+                        &mut Vec::new(),
+                    )?
+                    .map_or(Js::Undefined, |t| Js::utf16(&t)))
                 }),
             ),
             (

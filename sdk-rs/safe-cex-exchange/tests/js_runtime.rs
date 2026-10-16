@@ -3,7 +3,7 @@ use safe_cex_exchange::{
     js_runtime::{
         client::{self, JsHttpHost},
         promise::{JsFuture, Promise, await_js},
-        value::{Js, Thrown, arg, to_json},
+        value::{Js, Thrown, arg, to_json, utf16},
     },
     runtime::{ExchangeError, ExchangeFuture, ExchangeRuntime, ExchangeTask},
 };
@@ -358,6 +358,217 @@ fn json_stringify_prints_numbers_and_escapes_like_javascript() {
     assert_eq!(
         stringify(body),
         r#"{"qty":1,"px":0.1,"big":1e+21,"nan":null,"s":"a\"\n","list":[null,0]}"#
+    );
+}
+
+#[test]
+fn function_bind_retains_receiver_and_prepends_arguments_for_array_map() {
+    let receiver = Js::object(vec![("offset", Js::Number(10.0))]);
+    let expected_receiver = receiver.clone();
+    let mapper = Js::function("mapPosition", move |this, args| {
+        assert!(this.same_reference(&expected_receiver));
+        Ok(Js::Number(
+            this.get("offset")?.to_number()?
+                + arg(&args, 0).to_number()?
+                + arg(&args, 1).to_number()?,
+        ))
+    });
+    let bound = mapper
+        .call_method("bind", vec![receiver.clone(), Js::Number(100.0)])
+        .unwrap();
+    receiver.set("offset", Js::Number(20.0)).unwrap();
+    let mapped = Js::array(vec![Js::Number(1.0), Js::Number(2.0)])
+        .call_method("map", vec![bound.clone()])
+        .unwrap();
+    assert_eq!(to_json(&mapped).unwrap(), json!([121.0, 122.0]));
+    assert_eq!(bound.get("name").unwrap().to_display(), "bound mapPosition");
+    let rebound = bound
+        .call_method("bind", vec![Js::Null, Js::Number(7.0)])
+        .unwrap();
+    assert_eq!(
+        rebound
+            .call(Js::Undefined, vec![])
+            .unwrap()
+            .to_number()
+            .unwrap(),
+        127.0
+    );
+    assert!(!mapper.same_reference(&bound));
+}
+
+#[test]
+fn function_bind_uses_its_call_receiver_and_preserves_original_errors() {
+    let sentinel = Js::object(vec![("failure", Js::Bool(true))]);
+    let thrown = sentinel.clone();
+    let target = Js::function("throws", move |this, args| {
+        assert!(this.is_nullish());
+        assert!(arg(&args, 0).is_undefined());
+        Err(Thrown::new(thrown.clone()))
+    });
+    let bind = target.get("bind").unwrap();
+    let bound = bind.call(target.clone(), vec![]).unwrap();
+    assert!(
+        bound
+            .call(Js::Bool(true), vec![])
+            .unwrap_err()
+            .value
+            .same_reference(&sentinel)
+    );
+    assert!(bind.call(Js::Number(1.0), vec![]).is_err());
+    target.define("bind", Js::Number(42.0)).unwrap();
+    assert_eq!(target.get("bind").unwrap().to_number().unwrap(), 42.0);
+}
+
+#[test]
+fn json_stringify_callable_replacer_handles_bigint_and_root_replacement() {
+    let g = library();
+    let json = g.get("JSON").unwrap();
+    let big = Js::BigInt(Rc::new(123_u32.into()));
+    let replace = Js::function("replacer", |_, args| {
+        let value = arg(&args, 1);
+        if matches!(value, Js::BigInt(_)) {
+            Ok(Js::String(value.to_js_string()?))
+        } else if arg(&args, 0).strict_equals(&Js::str("omit")) {
+            Ok(Js::Undefined)
+        } else {
+            Ok(value)
+        }
+    });
+    let value = Js::object(vec![
+        ("amount", big.clone()),
+        ("omit", Js::Bool(true)),
+        ("list", Js::holey_array(vec![None, Some(big.clone())])),
+    ]);
+    assert!(json.call_method("stringify", vec![value.clone()]).is_err());
+    assert_eq!(
+        json.call_method("stringify", vec![value, replace.clone()])
+            .unwrap()
+            .to_display(),
+        r#"{"amount":"123","list":[null,"123"]}"#
+    );
+    assert_eq!(
+        json.call_method("stringify", vec![big, replace])
+            .unwrap()
+            .to_display(),
+        "\"123\""
+    );
+    let from_undefined = Js::function("replaceRoot", |holder, args| {
+        assert!(arg(&args, 0).strict_equals(&Js::str("")));
+        assert!(holder.has_own(""));
+        Ok(Js::Number(7.0))
+    });
+    assert_eq!(
+        json.call_method("stringify", vec![Js::Undefined, from_undefined])
+            .unwrap()
+            .to_display(),
+        "7"
+    );
+}
+
+#[test]
+fn json_stringify_replacer_observes_holders_live_siblings_and_to_json_keys() {
+    let g = library();
+    let visits = Rc::new(RefCell::new(Vec::new()));
+    let sink = visits.clone();
+    let nested = Js::object(vec![]);
+    nested
+        .define(
+            "toJSON",
+            Js::function("toJSON", |_, args| Ok(arg(&args, 0))),
+        )
+        .unwrap();
+    let input = Js::object(vec![
+        ("first", Js::Number(1.0)),
+        ("later", Js::Number(2.0)),
+        ("nested", nested),
+    ]);
+    let receiver = input.clone();
+    let replace = Js::function("replacer", move |holder, args| {
+        let key = arg(&args, 0).to_display();
+        sink.borrow_mut().push(key.clone());
+        if key == "first" {
+            assert!(holder.same_reference(&receiver));
+            holder.set("later", Js::Number(9.0))?;
+            holder.set("added", Js::Number(10.0))?;
+        }
+        Ok(arg(&args, 1))
+    });
+    let result = g
+        .get("JSON")
+        .unwrap()
+        .call_method("stringify", vec![input, replace])
+        .unwrap();
+    assert_eq!(
+        result.to_display(),
+        r#"{"first":1,"later":9,"nested":"nested"}"#
+    );
+    assert_eq!(*visits.borrow(), ["", "first", "later", "nested"]);
+}
+
+#[test]
+fn json_stringify_replacer_visits_holes_and_preserves_thrown_identity() {
+    let g = library();
+    let array = Js::holey_array(vec![None, Some(Js::Number(2.0))]);
+    let receiver = array.clone();
+    let replace = Js::function("replacer", move |holder, args| {
+        if arg(&args, 0).strict_equals(&Js::str("0")) {
+            assert!(holder.same_reference(&receiver));
+            assert!(arg(&args, 1).is_undefined());
+            holder.set("1", Js::Number(8.0))?;
+            return Ok(Js::Number(3.0));
+        }
+        Ok(arg(&args, 1))
+    });
+    assert_eq!(
+        g.get("JSON")
+            .unwrap()
+            .call_method("stringify", vec![array, replace])
+            .unwrap()
+            .to_display(),
+        "[3,8]"
+    );
+    let sentinel = Js::object(vec![]);
+    let thrown = sentinel.clone();
+    let replace = Js::function("throws", move |_, _| Err(Thrown::new(thrown.clone())));
+    assert!(
+        g.get("JSON")
+            .unwrap()
+            .call_method("stringify", vec![Js::Null, replace])
+            .unwrap_err()
+            .value
+            .same_reference(&sentinel)
+    );
+}
+
+#[test]
+fn json_stringify_replacer_can_remove_cycles_and_repeat_shared_objects() {
+    let g = library();
+    let cycle = Js::object(vec![]);
+    cycle.define("self", cycle.clone()).unwrap();
+    let json = g.get("JSON").unwrap();
+    let error = json
+        .call_method("stringify", vec![cycle.clone()])
+        .unwrap_err();
+    assert!(error.message().contains("circular structure"));
+    let replacer = Js::function("skipSelf", |_, args| {
+        if arg(&args, 0).strict_equals(&Js::str("self")) {
+            Ok(Js::Undefined)
+        } else {
+            Ok(arg(&args, 1))
+        }
+    });
+    assert_eq!(
+        json.call_method("stringify", vec![cycle.clone(), replacer])
+            .unwrap()
+            .to_display(),
+        "{}"
+    );
+    cycle.delete(&utf16("self"));
+    assert_eq!(
+        json.call_method("stringify", vec![Js::array(vec![cycle.clone(), cycle])])
+            .unwrap()
+            .to_display(),
+        "[{},{}]"
     );
 }
 
@@ -1753,4 +1964,150 @@ fn create_xhr_with_secondary_key_proxy_precedence() {
     );
     // Direct transport has no public CORS proxy: the key is set to undefined.
     assert_eq!(overrides(keys, Js::Undefined), (Value::Null, json!(true)));
+}
+
+#[test]
+fn store_facade_update_positions_patches_each_pair_by_position_id() {
+    use safe_cex_store::store::DefaultStore;
+    let store = Rc::new(DefaultStore::new());
+    let position = |id: &str| {
+        serde_json::from_value(json!({"id":id,"symbol":id,"side":"long","entryPrice":1,
+            "notional":1,"leverage":1,"unrealizedPnl":0,"contracts":1,"liquidationPrice":0}))
+        .unwrap()
+    };
+    store
+        .add_or_update_positions(vec![position("BTC"), position("ETH")])
+        .unwrap();
+    let facade = safe_cex_exchange::js_runtime::store::facade(store.clone());
+    // ts: updatePositions(updates: Array<[Pick<Position, 'id'>, Partial<Position>]>)
+    let pair = |id: &str, pnl: f64| {
+        Js::array(vec![
+            Js::object(vec![("id", Js::str(id))]),
+            Js::object(vec![("unrealizedPnl", Js::Number(pnl))]),
+        ])
+    };
+    facade
+        .call_method(
+            "updatePositions",
+            vec![Js::array(vec![pair("ETH", 7.0), pair("BTC", 3.0)])],
+        )
+        .unwrap();
+    let pnl: Vec<f64> = store.positions().iter().map(|p| p.unrealized_pnl).collect();
+    assert_eq!(pnl, [3.0, 7.0]);
+}
+
+#[test]
+fn number_converts_bigint_like_ecmascript() {
+    let g = library();
+    let number = |args: Vec<Js>| run(&g, "Number", args).as_f64().unwrap();
+    let big = |text: &str| Js::BigInt(Rc::new(text.parse().unwrap()));
+    assert_eq!(number(vec![big("5")]), 5.0, "Number(5n) === 5");
+    assert_eq!(number(vec![big("-42")]), -42.0);
+    // 2^53 + 1 is not a double; the nearest-even double is 2^53.
+    assert_eq!(
+        number(vec![big("9007199254740993")]),
+        9_007_199_254_740_992.0
+    );
+    assert_eq!(number(vec![]), 0.0, "Number() is 0");
+    assert_eq!(number(vec![Js::str(" 12 ")]), 12.0);
+}
+
+#[test]
+fn function_name_reads_its_function_data_name() {
+    let f = Js::function("handleTickers", |_, _| Ok(Js::Undefined));
+    assert_eq!(f.get("name").unwrap().to_display(), "handleTickers");
+    f.define("name", Js::str("renamed")).unwrap();
+    assert_eq!(f.get("name").unwrap().to_display(), "renamed");
+}
+
+#[test]
+fn client_rejection_handlers_follow_the_axios_promise_chain() {
+    let runtime = Rc::new(Runtime::default());
+    let http = Rc::new(Http {
+        runtime: runtime.clone(),
+        sent: RefCell::default(),
+    });
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    let interceptors = xhr.get("interceptors").unwrap();
+    let order = Rc::new(RefCell::new(Vec::<String>::new()));
+    let log = |tag: &'static str, result: fn(Js) -> Result<Js, Thrown>| {
+        let order = order.clone();
+        Js::function("", move |_, a| {
+            order.borrow_mut().push(tag.into());
+            result(arg(&a, 0))
+        })
+    };
+    let throws: fn(Js) -> Result<Js, Thrown> = |_| Err(Thrown::error("Error", "boom"));
+    let passes: fn(Js) -> Result<Js, Thrown> = Ok;
+    let recovers: fn(Js) -> Result<Js, Thrown> =
+        |error| Ok(Js::object(vec![("recovered", error.get("message")?)]));
+    let rethrows: fn(Js) -> Result<Js, Thrown> = |error| Err(Thrown::new(error));
+    let request = interceptors.get("request").unwrap();
+    let response = interceptors.get("response").unwrap();
+    // LIFO: "outer" runs first and throws, so "inner"'s onRejected sees it.
+    request
+        .call_method(
+            "use",
+            vec![log("inner ok", passes), log("inner rejected", rethrows)],
+        )
+        .unwrap();
+    request
+        .call_method(
+            "use",
+            vec![log("outer ok", throws), log("outer rejected", rethrows)],
+        )
+        .unwrap();
+    response
+        .call_method(
+            "use",
+            vec![log("first ok", passes), log("first rejected", rethrows)],
+        )
+        .unwrap();
+    response
+        .call_method(
+            "use",
+            vec![log("second ok", passes), log("second rejected", recovers)],
+        )
+        .unwrap();
+    response
+        .call_method("use", vec![log("third ok", passes), Js::Undefined])
+        .unwrap();
+    let result = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/ok")]).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(
+        *order.borrow(),
+        [
+            "outer ok",
+            "inner rejected",
+            "first rejected",
+            "second rejected",
+            "third ok"
+        ]
+    );
+    assert_eq!(result.get("recovered").unwrap().to_display(), "boom");
+    assert!(
+        http.sent.borrow().is_empty(),
+        "a rejected request is never sent"
+    );
+
+    // An adapter-side failure (non-2xx) reaches the response rejection handlers.
+    let xhr = client::create(http.clone(), Js::object(vec![]));
+    let response = xhr.get("interceptors").unwrap().get("response").unwrap();
+    response
+        .call_method("use", vec![Js::Undefined, log("status rejected", recovers)])
+        .unwrap();
+    order.borrow_mut().clear();
+    let result = settle(
+        &runtime,
+        xhr.call_method("get", vec![Js::str("/fail")]).unwrap(),
+    )
+    .unwrap();
+    assert_eq!(*order.borrow(), ["status rejected"]);
+    assert_eq!(
+        result.get("recovered").unwrap().to_display(),
+        "Request failed with status code 500"
+    );
 }

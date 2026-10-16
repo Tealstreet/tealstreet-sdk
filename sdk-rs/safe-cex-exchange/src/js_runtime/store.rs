@@ -5,7 +5,7 @@ use super::{
     value::{Getter, Js, Thrown, from_typed, to_json, to_typed},
 };
 use crate::runtime::ExchangeError;
-use safe_cex_store::{Store, StoreUpdate};
+use safe_cex_store::{Store, StoreUpdate, model_patch::ModelPatch};
 use safe_cex_types::{Order, OrderStatus, Position};
 use std::rc::Rc;
 
@@ -123,6 +123,18 @@ pub fn facade(store: Rc<dyn Store>) -> Js {
         Rc::new(|st, a| {
             st.update_position(&id_of(&arg(&a, 0))?, &patch(&arg(&a, 1))?)
                 .map_err(mutation)?;
+            Ok(Js::Undefined)
+        }),
+    );
+    method(
+        "updatePositions",
+        Rc::new(|st, a| {
+            let mut updates = vec![];
+            for pair in arg(&a, 0).array_values().unwrap_or_default() {
+                let (position, changes) = (pair.get("0")?, pair.get("1")?);
+                updates.push((id_of(&position)?, ModelPatch::from(patch(&changes)?)));
+            }
+            st.update_positions(&updates).map_err(mutation)?;
             Ok(Js::Undefined)
         }),
     );

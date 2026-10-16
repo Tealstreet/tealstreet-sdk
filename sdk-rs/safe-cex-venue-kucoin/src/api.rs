@@ -21,7 +21,7 @@ pub async fn create_api(
     registry: &TransportRegistry,
     clock: VirtualClock,
     retry_clock: Rc<dyn RateLimitClock>,
-) -> Result<impl RestAdapter, TransportError> {
+) -> Result<impl RestAdapter + use<>, TransportError> {
     create(http, registry, clock, retry_clock, false).await
 }
 // ts: createKucoinSpotAPI
@@ -30,7 +30,7 @@ pub async fn create_kucoin_spot_api(
     registry: &TransportRegistry,
     clock: VirtualClock,
     retry_clock: Rc<dyn RateLimitClock>,
-) -> Result<impl RestAdapter, TransportError> {
+) -> Result<impl RestAdapter + use<>, TransportError> {
     create(http, registry, clock, retry_clock, true).await
 }
 struct Api {
