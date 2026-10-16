@@ -311,6 +311,21 @@ fn v3_clients_sign_both_the_abi_reads_and_exact_code_query_order_writes() {
         132,
         "ABI request gets a full recoverable signature"
     );
+    let mut nonce = [0; 32];
+    let observed_nonce = params["nonce"].as_str().unwrap().parse::<u128>().unwrap();
+    nonce[16..].copy_from_slice(&observed_nonce.to_be_bytes());
+    let unsigned=json!({"recvWindow":safe_cex_num::js_number_string(params["recvWindow"].as_f64().unwrap()),"timestamp":safe_cex_num::js_number_string(params["timestamp"].as_f64().unwrap())}).to_string();
+    let encoded = safe_cex_crypto::ethereum::encode_string_address_address_uint256(
+        &unsigned, user, &signer, &nonce,
+    )
+    .unwrap();
+    let hash = safe_cex_crypto::ethereum::keccak256(&encoded);
+    let digest = safe_cex_crypto::ethereum::ethereum_message_hash(&hash);
+    assert_eq!(
+        params["signature"],
+        json!(safe_cex_crypto::ethereum::sign_digest(&digest, &secret).unwrap()),
+        "ABI signing binds the exact timestamp/window payload, user, signer and observed nonce"
+    );
     take(&wire);
     let opts: PlaceOrderOpts = serde_json::from_value(
         json!({"symbol":"BTCUSDT","type":"limit","side":"buy","amount":0.012,"price":101.37}),
