@@ -64,7 +64,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/private_topics.rs::mark_ws_positions"
 status = "ported"
-note = "Preserves clock read, snapshot time then Set assignment, live position traversal and Map timestamp writes. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof."
+note = "Preserves clock read, snapshot time then Set assignment, live position traversal and Map timestamp writes. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof. Renamed Rust target: safe-cex-venue-bitget/src/private_topics.rs::mark_ws_positions."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket#mergeRestPositionsWithFreshWsState"
@@ -80,7 +80,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/socket_runtime.rs::connect_and_subscribe"
 status = "ported"
-note = "Preserves activity/attempt counters, transport fallback lookup, UTA bypass of fallback-flag read, route-specific URL, swallowed telemetry error, socket assignment and ordered listener captures. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof."
+note = "Preserves activity/attempt counters, transport fallback lookup, UTA bypass of fallback-flag read, route-specific URL, swallowed telemetry error, socket assignment and ordered listener captures. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof. Renamed Rust target: safe-cex-venue-bitget/src/socket_runtime.rs::connect_and_subscribe."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.onOpen"
@@ -88,7 +88,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/private_recovery.rs::on_open"
 status = "ported"
-note = "Exact synchronous field body over supplied fallible source property/call sites. Typed JS-number cooldown arithmetic, lazy routing/fallback guard, timestamp/write/log/reconnect order and UTF-16 reason retained; auth/ping and orders invocation are not awaited. Source capture and 403 independent native cases, including 15 injected operation failures. Concrete private socket assembly, routing resolver and called SDK method implementations remain independently mapped."
+note = "Exact synchronous field body over supplied fallible source property/call sites. Typed JS-number cooldown arithmetic, lazy routing/fallback guard, timestamp/write/log/reconnect order and UTF-16 reason retained; auth/ping and orders invocation are not awaited. Source capture and 403 independent native cases, including 15 injected operation failures. Concrete private socket assembly, routing resolver and called SDK method implementations remain independently mapped. Renamed Rust target: safe-cex-venue-bitget/src/private_recovery.rs::on_open."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.ping"
@@ -104,7 +104,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/private_recovery.rs::recover_missing_private_stream"
 status = "ported"
-note = "Exact synchronous field body over supplied fallible source property/call sites. Typed JS-number cooldown arithmetic, lazy routing/fallback guard, timestamp/write/log/reconnect order and UTF-16 reason retained; auth/ping and orders invocation are not awaited. Source capture and 403 independent native cases, including 15 injected operation failures. Concrete private socket assembly, routing resolver and called SDK method implementations remain independently mapped."
+note = "Exact synchronous field body over supplied fallible source property/call sites. Typed JS-number cooldown arithmetic, lazy routing/fallback guard, timestamp/write/log/reconnect order and UTF-16 reason retained; auth/ping and orders invocation are not awaited. Source capture and 403 independent native cases, including 15 injected operation failures. Concrete private socket assembly, routing resolver and called SDK method implementations remain independently mapped. Renamed Rust target: safe-cex-venue-bitget/src/private_recovery.rs::recover_missing_private_stream."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.onMessage"
@@ -112,7 +112,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/socket_runtime.rs::on_private_message"
 status = "ported"
-note = "Preserves track/diagnostic/pong order and non-heartbeat counter. Source parses/dispatches even when disposed; preserves login success/error getter paths, UTA topic precedence, normalized Classic channels and subscription-ack suppression. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof."
+note = "Preserves track/diagnostic/pong order and non-heartbeat counter. Source parses/dispatches even when disposed; preserves login success/error getter paths, UTA topic precedence, normalized Classic channels and subscription-ack suppression. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof. Renamed Rust target: safe-cex-venue-bitget/src/socket_runtime.rs::on_private_message."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.handleOrderTopic"
@@ -120,7 +120,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/private_topics.rs::handle_order_topic"
 status = "ported"
-note = "Preserves explicit versus ambiguous fill statuses, normal hedge/reduce-only side correction, raw price value, parsed volume, independent terminal/open transitions and final order reconciliation. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof."
+note = "Preserves explicit versus ambiguous fill statuses, normal hedge/reduce-only side correction, raw price value, parsed volume, independent terminal/open transitions and final order reconciliation. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof. Renamed Rust target: safe-cex-venue-bitget/src/private_topics.rs::handle_order_topic."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.handleUtaOrderTopic"
@@ -128,7 +128,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/private_topics.rs::handle_uta_order_topic"
 status = "ported"
-note = "Preserves guarded repeated data read, outer/row spread, orderStatus/avgPrice remapping and nullish baseVolume fallback before calling the normal handler. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof."
+note = "Preserves guarded repeated data read, outer/row spread, orderStatus/avgPrice remapping and nullish baseVolume fallback before calling the normal handler. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof. Renamed Rust target: safe-cex-venue-bitget/src/private_topics.rs::handle_uta_order_topic."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.handleAlgoOrdersTopic"
@@ -136,7 +136,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/private_topics.rs::handle_algo_orders_topic"
 status = "ported"
-note = "Preserves algo-specific hedge side correction, parent-only store transition before fills, explicit-fill/actual-size rules and repeated balance reconciliation. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof."
+note = "Preserves algo-specific hedge side correction, parent-only store transition before fills, explicit-fill/actual-size rules and repeated balance reconciliation. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof. Renamed Rust target: safe-cex-venue-bitget/src/private_topics.rs::handle_algo_orders_topic."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.handlePositionsTopic"
@@ -144,7 +144,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/private_topics.rs::handle_positions_topic"
 status = "ported"
-note = "Preserves repeated guarded action/data reads, object filtering, empty/full snapshots versus individual updates, aliases and pending/reconciliation order. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof."
+note = "Preserves repeated guarded action/data reads, object filtering, empty/full snapshots versus individual updates, aliases and pending/reconciliation order. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof. Renamed Rust target: safe-cex-venue-bitget/src/private_topics.rs::handle_positions_topic."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.handleUtaPositionsTopic"
@@ -152,7 +152,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/private_topics.rs::handle_uta_positions_topic"
 status = "ported"
-note = "Preserves the UTA mapper with the same guarded filtering, snapshot/individual-update branches and ordered reconciliation effects. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof."
+note = "Preserves the UTA mapper with the same guarded filtering, snapshot/individual-update branches and ordered reconciliation effects. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof. Renamed Rust target: safe-cex-venue-bitget/src/private_topics.rs::handle_uta_positions_topic."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.handleAccountTopic"
@@ -160,7 +160,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/private_topics.rs::handle_account_topic"
 status = "ported"
-note = "Preserves first matching margin coin, finite-number fallbacks, NaN rejection, calculated PnL, subtraction and original account info in the balance patch. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof."
+note = "Preserves first matching margin coin, finite-number fallbacks, NaN rejection, calculated PnL, subtraction and original account info in the balance patch. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof. Renamed Rust target: safe-cex-venue-bitget/src/private_topics.rs::handle_account_topic."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket.handleUtaAccountTopic"
@@ -168,7 +168,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/private_topics.rs::handle_uta_account_topic"
 status = "ported"
-note = "Preserves array-first-row versus repeated non-array data reads, invalid/NaN balance throttles, UTA field precedence and post-update pending/throttle order. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof."
+note = "Preserves array-first-row versus repeated non-array data reads, invalid/NaN balance throttles, UTA field precedence and post-update pending/throttle order. Executable source body over supplied fallible native-value/receiver operations; opaque Clone retains reference identity, UTF-16 and nonfinite numbers. Native expectations precede actual-source comparisons; PRIVATE_TOPICS_EVIDENCE.md binds floors, compiling controls and review. Array methods/iterators, object/property/prototype semantics, separately mapped callees and concrete private WebSocket binding remain supplied contracts, not exhaustive binding/scheduling proof. Renamed Rust target: safe-cex-venue-bitget/src/private_topics.rs::handle_uta_account_topic."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket#throttledFetchPositions"
@@ -176,7 +176,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/private_throttles.rs::throttled_fetch_positions"
 status = "ported"
-note = "Exact field body and source timer callback over supplied fallible typed bool/number receiver operations. Date.now precedes disposed guard; balance-only pending write, lazy guards, distinct throttle reads, raw f64 delay, captured receiver and detached fetch invocation retained. 190 independent native/source cases. Concrete private socket/scheduler and execute*Fetch implementations remain independently mapped."
+note = "Exact field body and source timer callback over supplied fallible typed bool/number receiver operations. Date.now precedes disposed guard; balance-only pending write, lazy guards, distinct throttle reads, raw f64 delay, captured receiver and detached fetch invocation retained. 190 independent native/source cases. Concrete private socket/scheduler and execute*Fetch implementations remain independently mapped. Renamed Rust target: safe-cex-venue-bitget/src/private_throttles.rs::throttled_fetch_positions."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket#executePositionFetch"
@@ -184,7 +184,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/socket_runtime.rs::execute_position_fetch"
 status = "ported"
-note = "Preserves Date.now versus virtual request clock, pending reset before fetch, disposed post-await guard, outer store callable captured before merge call, snapshot alias and silent catch. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof."
+note = "Preserves Date.now versus virtual request clock, pending reset before fetch, disposed post-await guard, outer store callable captured before merge call, snapshot alias and silent catch. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof. Renamed Rust target: safe-cex-venue-bitget/src/socket_runtime.rs::execute_position_fetch."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket#throttledFetchBalance"
@@ -192,7 +192,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/private_throttles.rs::throttled_fetch_balance"
 status = "ported"
-note = "Exact field body and source timer callback over supplied fallible typed bool/number receiver operations. Date.now precedes disposed guard; balance-only pending write, lazy guards, distinct throttle reads, raw f64 delay, captured receiver and detached fetch invocation retained. 190 independent native/source cases. Concrete private socket/scheduler and execute*Fetch implementations remain independently mapped."
+note = "Exact field body and source timer callback over supplied fallible typed bool/number receiver operations. Date.now precedes disposed guard; balance-only pending write, lazy guards, distinct throttle reads, raw f64 delay, captured receiver and detached fetch invocation retained. 190 independent native/source cases. Concrete private socket/scheduler and execute*Fetch implementations remain independently mapped. Renamed Rust target: safe-cex-venue-bitget/src/private_throttles.rs::throttled_fetch_balance."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket#executeBalanceFetch"
@@ -200,7 +200,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/socket_runtime.rs::execute_balance_fetch"
 status = "ported"
-note = "Preserves timestamp/pending reset, preferFast options, post-await guard, captured update before loaded spread/own balance flag definition, original balance alias and silent catch. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof."
+note = "Preserves timestamp/pending reset, preferFast options, post-await guard, captured update before loaded spread/own balance flag definition, original balance alias and silent catch. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof. Renamed Rust target: safe-cex-venue-bitget/src/socket_runtime.rs::execute_balance_fetch."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket#throttledFetchOrders"
@@ -208,7 +208,7 @@ kind = "field-fn"
 layer = "mirror"
 rs = "safe-cex-venue-bitget/src/private_throttles.rs::throttled_fetch_orders"
 status = "ported"
-note = "Exact field body and source timer callback over supplied fallible typed bool/number receiver operations. Date.now precedes disposed guard; balance-only pending write, lazy guards, distinct throttle reads, raw f64 delay, captured receiver and detached fetch invocation retained. 190 independent native/source cases. Concrete private socket/scheduler and execute*Fetch implementations remain independently mapped."
+note = "Exact field body and source timer callback over supplied fallible typed bool/number receiver operations. Date.now precedes disposed guard; balance-only pending write, lazy guards, distinct throttle reads, raw f64 delay, captured receiver and detached fetch invocation retained. 190 independent native/source cases. Concrete private socket/scheduler and execute*Fetch implementations remain independently mapped. Renamed Rust target: safe-cex-venue-bitget/src/private_throttles.rs::throttled_fetch_orders."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket#executeOrdersFetch"
@@ -216,7 +216,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/socket_runtime.rs::execute_orders_fetch"
 status = "ported"
-note = "Preserves prefix request sequence, timestamp/pending reset, disposed/stale reply guards, pruning/current Map, open tombstone/current-terminal suppression, fetched Set and preservation of WS algo/recent-open rows, ordered spread and silent catch. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof."
+note = "Preserves prefix request sequence, timestamp/pending reset, disposed/stale reply guards, pruning/current Map, open tombstone/current-terminal suppression, fetched Set and preservation of WS algo/recent-open rows, ordered spread and silent catch. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof. Renamed Rust target: safe-cex-venue-bitget/src/socket_runtime.rs::execute_orders_fetch."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket#pruneOrderLifecycleCaches"
@@ -248,7 +248,7 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/socket_runtime.rs::auth"
 status = "ported"
-note = "Preserves virtual unix time, repeated signer reads and captured signer method before nonce/account fields, request schema, repeated error reads and Remote WS signing unavailable wording, capture/literal ordering in remote/local login, HMAC sha256/update/digest base64 chain and error forwarding. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof."
+note = "Preserves virtual unix time, repeated signer reads and captured signer method before nonce/account fields, request schema, repeated error reads and Remote WS signing unavailable wording, capture/literal ordering in remote/local login, HMAC sha256/update/digest base64 chain and error forwarding. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof. Renamed Rust target: safe-cex-venue-bitget/src/socket_runtime.rs::auth."
 
 [[symbol]]
 ts = "BitgetPrivateWebsocket#subscribe"
@@ -256,4 +256,4 @@ kind = "field-fn"
 layer = "adapted"
 rs = "safe-cex-venue-bitget/src/socket_runtime.rs::subscribe"
 status = "ported"
-note = "Preserves UTA topic versus Classic channel schemas and order, four independent uppercase product reads in Classic mode, and branch-specific payload/captured send/stringify ordering. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof."
+note = "Preserves UTA topic versus Classic channel schemas and order, four independent uppercase product reads in Classic mode, and branch-specific payload/captured send/stringify ordering. Executable body over supplied native receiver/callable-owner, property/array/map/set/iterator/imported/clock/crypto operations and independently owned started work. Opaque clones preserve native references and UTF-16/nonfinite values. SOCKET_RUNTIME_EVIDENCE.md binds native-before-wire floors, controls and review/gate SHA. Message argument prologues supply data; async bodies are polled at the original execution boundary. Concrete socket/Exchange/HTTP assembly, eager scheduling/lifetime/cancellation, arbitrary overridden/proxy/prototype/coercion and complete calendar/crypto-input domains remain separate binding obligations, not exhaustive fixture proof. Renamed Rust target: safe-cex-venue-bitget/src/socket_runtime.rs::subscribe."

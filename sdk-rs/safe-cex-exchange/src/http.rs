@@ -225,7 +225,7 @@ fn restore_codec_config(current: &mut RestRequest, wire: &RestRequest, retry: Re
         current.body = retry.body;
     }
 }
-#[expect(clippy::arc_with_non_send_sync)]
+#[allow(clippy::arc_with_non_send_sync)]
 fn with_params_serializer(
     inner: Arc<dyn RestAdapter>,
     serializer: Option<&ParamsSerializer>,
@@ -279,7 +279,7 @@ pub struct HttpClientOptions {
     pub signing_now: Arc<dyn Fn() -> u64>,
 }
 // Transport adapters deliberately use Arc while browser futures remain local.
-#[expect(clippy::arc_with_non_send_sync)]
+#[allow(clippy::arc_with_non_send_sync)]
 pub fn maybe_install_remote_signing_adapter(
     options: &HttpClientOptions,
 ) -> Option<Arc<RemoteSigningAdapter>> {

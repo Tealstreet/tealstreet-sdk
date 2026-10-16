@@ -53,7 +53,7 @@ export function runProbes(root, metadata, packages, contracts, configuration = {
   fs.symlinkSync(path.join(repo, 'packages'), path.join(sandbox, 'packages'), 'dir');
   const results = [];
   const wasm = configuration.target === 'wasm32-unknown-unknown';
-  const nativePolicy = JSON.parse(fs.readFileSync(new URL('../../../.github/rust-wasm.json', import.meta.url), 'utf8'));
+  const nativePolicy = JSON.parse(fs.readFileSync(new URL('../../rust-wasm.json', import.meta.url), 'utf8'));
   for (const pkg of packages) {
     const owners = [...pkg.types, ...(pkg.publicAliases ?? []).map(alias => ({ ...alias, kind: 'alias' })), ...(pkg.defaultWitnesses ?? [])];
     if (!owners.length && !pkg.locals?.length) continue;

@@ -1253,10 +1253,6 @@ rs = "safe-cex-exchange/src/websocket.rs::WsRuntime"
 reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
 
 [[exempt]]
-rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::monotonic_ms"
-reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
-
-[[exempt]]
 rs = "safe-cex-exchange/src/websocket.rs::WsRuntime::transport"
 reason = "Host boundary contract adapting external runtime facilities; the SDK selects policy in mapped source methods, while the host supplies I/O, scheduling, callbacks or imported service implementations. Trait declarations add no routing, retry or venue behavior."
 
