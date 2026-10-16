@@ -459,3 +459,49 @@ fn each_family_constructor_preserves_its_source_order_tag_and_normalized_key() {
         venue.dispose().unwrap();
     }
 }
+
+#[test]
+fn disposal_updates_the_shared_flag_and_preserves_source_listeners() {
+    use std::{cell::Cell, rc::Rc};
+    let (venue, rt, _, wire) = support::fixture(
+        json!({"key":"fixture-key","secret":"11111111111111111111111111111111","applicationId":"fixture-account"}),
+    );
+    script(&wire);
+    drive(&rt, venue.start()).unwrap();
+    for _ in 0..8 {
+        rt.pump();
+    }
+    let calls = Rc::new(Cell::new(0));
+    let seen = calls.clone();
+    venue.base().on(
+        "fill",
+        Rc::new(move |_, _| {
+            seen.set(seen.get() + 1);
+            Ok(())
+        }),
+    );
+    assert!(!venue.base().is_disposed());
+    assert!(
+        rt.sockets
+            .borrow()
+            .iter()
+            .any(|(_, socket)| !socket.closed.get())
+    );
+    venue.dispose().unwrap();
+    assert!(
+        venue.base().is_disposed(),
+        "source write reaches the shared disposal flag"
+    );
+    assert!(
+        rt.sockets
+            .borrow()
+            .iter()
+            .all(|(_, socket)| socket.closed.get()),
+        "source disposes both sockets"
+    );
+    venue
+        .base()
+        .emit("fill", json!({"source":"disposal witness"}))
+        .unwrap();
+    assert_eq!(calls.get(), 1, "source disposal retains emitter listeners");
+}

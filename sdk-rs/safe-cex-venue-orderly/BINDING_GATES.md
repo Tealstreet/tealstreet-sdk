@@ -49,11 +49,14 @@ row in `parity/manifest/exchanges/base.ws.ts.toml`, whose split target includes
 runs inside that shared recovery operation. Signing exceptions send no frames,
 disregard silence and attempt reconnect; actual subscriptions still wait for
 the server's successful auth reply. The onOpen row is divergent and the overseer
-accepted this choice on 2026-10-16. Source disposal sets its mutable flag and
-disposes sockets first, then native BaseExchange releases owned resources; this
-ordering was also accepted and the dispose manifest row names the native cleanup
-as a CHOSEN divergence. No extra read or disposal guards were added.
+accepted this choice on 2026-10-16. Source disposal sets the shared writable flag
+and disposes its public and private sockets in source order; it does not invoke
+BaseExchange disposal. No extra read or disposal guards were added.
 
+The constructed disposal regression observes the shared flag, closed sockets and
+retained emitter listeners. Independent compiled controls restoring either the
+extra base cleanup or the own flag shadow fail their intended assertion (101);
+exact restoration passes.
 
 Commands (run sequentially to keep Cargo processes scoped):
 

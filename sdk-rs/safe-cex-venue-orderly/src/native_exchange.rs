@@ -232,7 +232,7 @@ impl Exchange for OrderlyExchange {
     }
     fn dispose(&self) -> Result<(), ExchangeError> {
         self.rt.this.call_method("dispose", vec![])?;
-        self.rt.base().dispose()
+        Ok(())
     }
 }
 
