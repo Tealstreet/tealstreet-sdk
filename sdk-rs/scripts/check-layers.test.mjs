@@ -211,7 +211,8 @@ test('moving registry back beside venues rejects its constructor dependency', ()
   policy.exceptions = policy.exceptions.filter(edge => !(edge.from === 'safe-cex-registry' && edge.to === 'safe-cex-exchange'));
   policy.layers.find(layer => layer.name === 'venues').packages.push('safe-cex-registry');
   addEdge(metadata, 'safe-cex-registry', 'safe-cex-venue-bybit');
-  assert.throws(() => validateLayers(policy, metadata), /lateral dependency: safe-cex-registry -> safe-cex-venue-bybit/);
+  // The registry's real constructor-table edges (backpack, binance) may fail first.
+  assert.throws(() => validateLayers(policy, metadata), /lateral dependency: safe-cex-registry -> safe-cex-venue-/);
 });
 test('venue cannot depend upward on constructor registry', () => {
   const { policy, metadata } = inputs();

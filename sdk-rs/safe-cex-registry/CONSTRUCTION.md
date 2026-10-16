@@ -1,6 +1,7 @@
 # Rust venue construction through the registry
 
-Status: design, 2026-10-16. Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
+Status: implemented for `backpack` and `binance`, 2026-10-16 (`src/rust_venues.rs`,
+`tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
 (crate layout, "Constructors and loaders live in `safe-cex-registry`"; P4 exit,
 "a tier-1 account on the Rust path behind a flag").
 
@@ -45,6 +46,20 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
     store, so Backpack takes the same three caller inputs as Binance.
 - **Failures:** a host or constructor failure is returned as `ExchangeError`.
   Nothing panics and nothing falls back silently.
+
+## Adding a venue
+
+When a venue lane finishes binding its class, it adds that venue in its own small
+follow-up PR. Expected next: `binancepm`, `binancespot`, `bitget`, `okx`, `blofin`,
+`bitunix` and `bybit`.
+
+Each follow-up does four things:
+- adds one `RUST_VENUES` entry;
+- adds its `RustVenueHost` method (with a dependencies struct if it needs one);
+- adds the literal to the membership test, plus a construction test that calls
+  one trait method;
+- maps the new items as split members on that name's `exchangeRegistry.<name>`
+  row.
 
 ## What still goes through the module host, and until when
 

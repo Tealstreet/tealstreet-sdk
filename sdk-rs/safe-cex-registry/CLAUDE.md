@@ -8,6 +8,10 @@ Descriptors support inspection without invoking hosts. Constructor capabilities
 call supplied factories; concrete venue host/facade assembly is separate.
 The SDK facade is one layer above registry.
 
+`rust_venues` maps bound venue names to Rust constructors, chosen per name by
+`ConstructionPath::Rust`. The default, `ModuleHost`, is today's route, and the
+Rust path never falls back to the module host. See [CONSTRUCTION.md](CONSTRUCTION.md).
+
 `safe-cex-types::gateway` holds the shared gateway wire declarations below all
 venues. `public_data` holds thresholds and candle subscription-key mapping. Provider lifecycle, socket IO, Store writes and delegation are implemented
 against supplied parent/socket/timer hosts; concrete assembly remains separate.
