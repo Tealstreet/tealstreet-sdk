@@ -6,6 +6,7 @@ use crate::{
 };
 use safe_cex_exchange::{
     OwnedOperation,
+    exchange::Exchange,
     runtime::{ExchangeError, ExchangeFuture, ListenerCleanup, LogSeverity},
     websocket::{BaseWebSocket, ReopenResync, WsParent, WsProtocol, WsRuntime},
 };
@@ -113,10 +114,7 @@ impl WsParent for Parent {
         let owner = self.live();
         Box::pin(async move {
             let owner = owner?;
-            owner
-                .base
-                .fetch_and_set_private_snapshot(owner.as_ref(), retries as u32)
-                .await
+            Exchange::fetch_and_set_private_snapshot(owner.as_ref(), retries as u32).await
         })
     }
     fn log(&self, message: &str, severity: LogSeverity) -> Result<(), ExchangeError> {
@@ -1391,7 +1389,7 @@ impl ConnectionHost for Conn {
         let venue = self.socket.venue()?;
         let options = venue.base.options();
         let routing = venue.runtime.transport().ws_routing(
-            venue.base.name(),
+            Exchange::name(venue.as_ref()),
             &safe_cex_transport::RoutingOptions::from(&options),
         );
         Ok(match scope {
@@ -1540,7 +1538,7 @@ impl Socket {
             let runtime = venue.runtime.clone();
             let (clock, nonce, id) = (runtime.clone(), runtime.clone(), runtime.clone());
             let signer = venue.base.signers.remote_signer.clone();
-            let name = venue.base.name().clone();
+            let name = Exchange::name(venue.as_ref()).clone();
             let report = venue.clone();
             let sender = socket.clone();
             crate::websocket_private::send_login(

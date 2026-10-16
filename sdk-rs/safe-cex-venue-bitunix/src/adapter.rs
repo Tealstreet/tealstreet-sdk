@@ -6,7 +6,7 @@ use crate::{
 };
 use safe_cex_exchange::{
     capabilities::ExchangeCapabilities,
-    exchange::BaseExchange,
+    exchange::{BaseExchange, Exchange},
     external::ExternalPublicData,
     http::HttpClient,
     runtime::{ExchangeError, ExchangeFuture, ExchangeTask},
@@ -264,7 +264,7 @@ impl BitunixVenue {
         };
     }
     pub(crate) fn public_only(&self) -> bool {
-        self.base.is_public_data_only(self)
+        Exchange::is_public_data_only(self)
     }
     pub(crate) fn log(&self, message: &str, severity: &str) -> Result<(), ExchangeError> {
         self.base.log(message, severity)
