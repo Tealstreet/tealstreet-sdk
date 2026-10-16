@@ -126,3 +126,8 @@ Their native host inputs retain each API's signing/transport/retry middleware.
 Private MEXC fills must reach the venue emitter; retain the weak callback when
 adjusting constructor inputs. `native_host_kucoin_mexc` verifies each family's
 native request signatures against a local server.
+
+Kraken Futures/Spot native inputs use the shared hosted signer bridge for private
+HTTP and Futures websocket challenges. Both retain the hosted account name with
+empty local secrets. The native witness verifies signed HTTP bytes and challenge
+subscription fields; the account metadata comes from live injected options.
