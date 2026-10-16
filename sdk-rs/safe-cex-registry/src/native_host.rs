@@ -1,6 +1,6 @@
 //! The production `RustVenueHost`: venues share one native runtime and get a
 //! fresh terminal HTTP adapter per construction. Requires a tokio `LocalSet`.
-use crate::rust_venues::{BackpackDependencies, RustVenueHost};
+use crate::rust_venues::{BackpackDependencies, BlofinDependencies, BlofinHttp, RustVenueHost};
 use crate::{
     external_public_data::{
         ExternalPublicDataProvider, GatewayEvent, GatewayHost, GatewayListener, GatewaySocket,
@@ -100,6 +100,24 @@ impl RustVenueHost for NativeVenueHost {
             date_parse: inputs.date_parse,
         })
     }
+    // externalPublicData stays unset: the constructor refuses that option visibly.
+    fn blofin(&self) -> Result<BlofinDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for blofin on the native host",
+            ));
+        }
+        Ok(BlofinDependencies {
+            runtime: self.runtime.clone(),
+            http: venue_http(
+                self.runtime.clone(),
+                self.adapter.clone(),
+                safe_cex_types::ExchangeName::Blofin,
+            ),
+            external_public_data: None,
+            remote_signer_account_name: None,
+        })
+    }
     // externalPublicData stays unset: OkxExchange::new refuses that option visibly.
     fn okx(&self) -> Result<OkxDependencies, ExchangeError> {
         if self.remote.is_some() {
@@ -116,6 +134,48 @@ impl RustVenueHost for NativeVenueHost {
             external_public_data: None,
         })
     }
+}
+
+/// safeCexAxiosCreate over a fresh terminal adapter, for venues whose createAPI
+/// supplies the baseURL and timeout budget and installs its own interceptors.
+fn venue_http(
+    runtime: Rc<dyn WsRuntime>,
+    adapter: AdapterFactory,
+    exchange: safe_cex_types::ExchangeName,
+) -> BlofinHttp {
+    Rc::new(move |options, base_url, budget| {
+        let request = safe_cex_transport::RestRequest {
+            base_url: Some(base_url.to_owned()),
+            timeout_ms: Some(budget),
+            ..Default::default()
+        };
+        let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
+        let client = safe_cex_exchange::http::safe_cex_axios_create(
+            safe_cex_exchange::http::HttpClientOptions {
+                params_serializer: None,
+                response_transform: None,
+                exchange: exchange.clone(),
+                options: options.clone(),
+                request,
+                provider: Some(runtime.transport()),
+                signer: None,
+                account_name: None,
+                adapter: adapter().map_err(|e| e.message)?,
+                host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
+                runtime: exchange_runtime,
+                store: None,
+                stats: None,
+                logs: None,
+                every: vec![],
+                periodic: vec![],
+                next_id: Arc::new(safe_cex_exchange::native::nanoid),
+                signing_now: Arc::new(|| safe_cex_transport::native::wall_clock_ms() as u64),
+            },
+            &safe_cex_transport::TransportRegistry::default(),
+        )
+        .map_err(|e| e.to_string())?;
+        Ok(Rc::new(client) as Rc<dyn RestAdapter>)
+    })
 }
 
 type ExternalFactory =

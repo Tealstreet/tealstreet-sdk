@@ -5,10 +5,13 @@ use crate::module_host::{
 };
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
+    external::ExternalPublicData,
+    js_runtime::base_exchange::ExternalPublicDataFactory,
     runtime::ExchangeError,
     websocket::WsRuntime,
 };
-use safe_cex_types::ExchangeName;
+use safe_cex_transport::RestAdapter;
+use safe_cex_types::{ExchangeName, ExchangeOptions, ExchangeOptionsExternalPublicData};
 use safe_cex_venue_backpack::{
     adapter::{BackpackExchange, DateParser},
     native_http::{BuildHttp, InstallTransport},
@@ -16,6 +19,7 @@ use safe_cex_venue_backpack::{
 use safe_cex_venue_binance::exchange_classes::{
     BinanceExchange, BinancePMExchange, BinanceSpotExchange, ExchangeDependencies,
 };
+use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use std::rc::Rc;
 
@@ -27,12 +31,26 @@ pub struct BackpackDependencies {
     pub date_parse: DateParser,
 }
 
+/// The common HTTP stack BloFin builds each client from: (options, baseURL, timeout budget).
+pub type BlofinHttp =
+    Rc<dyn Fn(&ExchangeOptions, &str, i64) -> Result<Rc<dyn RestAdapter>, String>>;
+
+/// What `BlofinNativeExchange::new` takes besides the BaseExchange the registry builds.
+pub struct BlofinDependencies {
+    pub runtime: Rc<dyn WsRuntime>,
+    pub http: BlofinHttp,
+    /// Required when `options.externalPublicData` is set.
+    pub external_public_data: Option<ExternalPublicDataFactory>,
+    pub remote_signer_account_name: Option<String>,
+}
+
 /// Host inputs for Rust venue construction, requested once per constructed instance.
 pub trait RustVenueHost {
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
     fn okx(&self) -> Result<OkxDependencies, ExchangeError>;
+    fn blofin(&self) -> Result<BlofinDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -51,6 +69,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Binance, binance_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
     (ExchangeName::Binancespot, binancespot_constructor),
+    (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
     (ExchangeName::Okxeu, okx_constructor),
@@ -99,6 +118,41 @@ pub fn binancespot_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstruct
         let exchange = BinanceSpotExchange::new(name, options, store, host.binance()?)
             .map_err(Rc::unwrap_or_clone)?;
         Ok(Rc::new(exchange))
+    })
+}
+
+pub fn blofin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.blofin()?;
+        let external = match deps.external_public_data {
+            Some(factory) => factory,
+            None if options.external_public_data.is_some() => {
+                return Err(ExchangeError::new(
+                    "blofin: externalPublicData is configured but no provider was supplied",
+                ));
+            }
+            None => Rc::new(
+                |_: &ExchangeOptionsExternalPublicData| -> Rc<dyn ExternalPublicData> {
+                    unreachable!("externalPublicData is unset, so BloFin never builds a provider")
+                },
+            ),
+        };
+        let base = BaseExchange::new(
+            name,
+            options,
+            store,
+            deps.runtime.clone(),
+            ExchangeSettings::default(),
+        );
+        let http = deps.http;
+        let exchange = BlofinNativeExchange::new(
+            base,
+            move |options, base_url, budget| http(options, base_url, budget),
+            deps.runtime,
+            move |config| external(config),
+            deps.remote_signer_account_name,
+        )?;
+        Ok(exchange)
     })
 }
 

@@ -126,9 +126,9 @@ note = "CHOSEN: native_bitunix selects the actual source module ./bitunix/bituni
 ts = "exchangeRegistry.blofin"
 kind = "field-fn"
 layer = "adapted"
-rs = "safe-cex-registry/src/loaders.rs::native_blofin"
+rs = [ "safe-cex-registry/src/loaders.rs::native_blofin", "safe-cex-registry/src/rust_venues.rs::blofin_constructor", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::blofin", "safe-cex-registry/src/rust_venues.rs::BlofinDependencies", "safe-cex-registry/src/rust_venues.rs::BlofinHttp" ]
 status = "divergent"
-note = "CHOSEN: native_blofin selects the actual source module ./blofin/blofin.exchange and export BlofinExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_blofin. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: native_blofin selects the actual source module ./blofin/blofin.exchange and export BlofinExchange through the native_load module-host operation. This entry takes the constructor-capability and native caller-executor profile priced, with its rationale, at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice. Concrete venue module-host/facade assembly is separate. Renamed to safe-cex-registry/src/loaders.rs::native_blofin. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split members `safe-cex-registry/src/rust_venues.rs::blofin_constructor`, `safe-cex-registry/src/rust_venues.rs::RustVenueHost::blofin`, `safe-cex-registry/src/rust_venues.rs::BlofinDependencies`, `safe-cex-registry/src/rust_venues.rs::BlofinHttp`; the Rust construction route for this name, selected only by ConstructionPath::Rust: the constructor builds the BaseExchange from the caller's name/options/store and calls BlofinNativeExchange::new with the host's common HTTP builder (options, baseURL, timeout budget), runtime, optional externalPublicData provider (refused visibly when configured without one) and remote-signer account name."
 
 [[symbol]]
 ts = "exchangeRegistry.breakoutprop"
