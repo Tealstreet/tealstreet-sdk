@@ -1,6 +1,6 @@
 {
   "version": 1,
-  "scope": "205 production creator candidates discovered across all potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
+  "scope": "207 reviewed production creator candidates across potentially enabled platform/feature branches; discovery and classifications are not semantic proof of cancellation safety.",
   "owners": [
     {
       "owner": "src/access_token.rs::AccessToken::get_contextual_proxy_token",
@@ -1582,9 +1582,20 @@
         "async-block",
         "await"
       ],
-      "producer_sha256": "555e6b547366e1e19246bf6fcacf2d4d681c263b130a8251c343c921f8b6ffc2",
+      "producer_sha256": "e4a29fc5c563362803c5e8b42f23bf803143c818b03170fc22bca98085755c05",
       "classification": "no-owned-latch",
-      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await."
+      "reason": "JS callbacks delegate snapshot/order/overlay work to existing core owners. Hosted-signer lookup, exchange binding and capability injection are synchronous; no new reservation or RefCell borrow spans an await. Reviewed shared worker-RPC member installation: this factory only installs the callback; its async execution is classified separately as worker_rpc. No factory await or registration changes."
+    },
+    {
+      "owner": "src/js_runtime/base_exchange.rs::worker_rpc",
+      "boundaries": [
+        "async-block",
+        "await"
+      ],
+      "producer_sha256": "a6b0d7009c0cb2ea8817bb822ec16d3619e4b894737150161b628cee955b8487",
+      "classification": "delegated",
+      "delegate": "src/exchange.rs::BaseExchange::call_method_in_worker",
+      "reason": "The runtime-owned Promise keeps local venue/JSON arguments and awaits the existing core worker owner. WorkerReplyGuard owns the exact reply listener and timeout; no second listener, timer or independent latch is installed by this wrapper. Observer loss retains the source eager Promise task. The shared JS runtime test checks successful/error/timeout settlement and completion-hook forwarding."
     },
     {
       "owner": "src/js_runtime/builtins.rs::chain_value",
@@ -1832,6 +1843,15 @@
       "producer_sha256": "9481ea3e677c05ef1e35fc028b027464ab8b632d408f19c0545cb81e25113464",
       "classification": "immediate",
       "reason": "Emits the open event synchronously, then returns a ready future carrying its result."
+    },
+    {
+      "owner": "src/js_runtime/sockets.rs::binary_data",
+      "boundaries": [
+        "opaque-macro-review"
+      ],
+      "producer_sha256": "72f1243b1a76497f8fc93a0b7ccda13213bf74ace64bccaf5184401e99419807",
+      "classification": "immediate",
+      "reason": "Reviewed binary host factory: cfg! selects the native Buffer/browser Blob branch synchronously; the macro constructs no future. The stored arrayBuffer/text accessors return Promise::settled, which initializes its result immediately with no spawned task or registered waiter. Object/byte allocation and Buffer text conversion own no pending latch or cancellation cleanup."
     },
     {
       "owner": "src/js_runtime/value.rs::Js as fmt :: Debug::fmt",

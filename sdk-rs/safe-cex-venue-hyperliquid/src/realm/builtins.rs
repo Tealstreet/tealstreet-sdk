@@ -1854,12 +1854,12 @@ fn install_misc(realm: &mut Realm) {
         7,
         &d,
         Some(|r, _, _| {
-            let t = r.runtime().now_ms();
+            let t = safe_cex_num::js_time_clip(r.runtime().now_ms());
             Ok(Value::str(&iso_string(t)))
         }),
         Some(|r, args, target| {
             let t = match args.first() {
-                None => r.runtime().now_ms(),
+                None => safe_cex_num::js_time_clip(r.runtime().now_ms()),
                 Some(Value::String(u)) => safe_cex_num::js_date_parse_utf16(u, |t| t),
                 Some(v) => {
                     let t = r.to_primitive(v, Hint::Default)?;
@@ -1874,7 +1874,9 @@ fn install_misc(realm: &mut Realm) {
         }),
     );
     def(realm, date.object().unwrap(), "now", 0, |r, _, _| {
-        Ok(Value::Number(r.runtime().now_ms()))
+        Ok(Value::Number(safe_cex_num::js_time_clip(
+            r.runtime().now_ms(),
+        )))
     });
     realm.set_global("Date", date);
 

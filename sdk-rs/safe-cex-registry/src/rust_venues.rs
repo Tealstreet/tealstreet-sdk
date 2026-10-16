@@ -73,9 +73,23 @@ pub trait RustVenueHost {
         ))
     }
 
+    fn cryptocom(
+        &self,
+    ) -> Result<safe_cex_venue_cryptocom::binding::exchange::CryptocomDependencies, ExchangeError>
+    {
+        Err(ExchangeError::new(
+            "cryptocom inputs are unavailable on this host",
+        ))
+    }
+
     /// Optional hosted account capability; no host-local secret is required.
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
+    }
+    fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "BingX dependencies are unavailable on this host",
+        ))
     }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
@@ -87,6 +101,10 @@ pub trait RustVenueHost {
     fn kraken(&self) -> Result<KrakenDependencies, ExchangeError>;
     /// Bitget, Bitget USDC and Bitget inverse share one input set.
     fn bitget(&self) -> Result<BitgetDependencies, ExchangeError>;
+    fn hyperliquid(
+        &self,
+        options: &ExchangeOptions,
+    ) -> Result<safe_cex_venue_hyperliquid::binding::HyperliquidDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -106,11 +124,14 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Binance, binance_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
     (ExchangeName::Binancespot, binancespot_constructor),
+    (ExchangeName::Bingx, bingx_constructor),
     (ExchangeName::Bitget, bitget_constructor),
     (ExchangeName::Bitgetinverse, bitget_constructor),
     (ExchangeName::Bitgetusdc, bitget_constructor),
     (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
+    (ExchangeName::Cryptocom, cryptocom_constructor),
+    (ExchangeName::Hyperliquid, hyperliquid_constructor),
     (ExchangeName::Kraken, kraken_constructor),
     (ExchangeName::Krakenspot, kraken_constructor),
     (ExchangeName::Okx, okx_constructor),
@@ -118,6 +139,15 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxeu, okx_constructor),
     (ExchangeName::Okxeudemo, okx_constructor),
 ];
+
+pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |_, options, store| {
+        let deps = host.hyperliquid(&options)?;
+        let exchange =
+            safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
+        Ok(exchange)
+    })
+}
 
 pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
@@ -127,6 +157,19 @@ pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
                 options,
                 store,
                 host.asterdex()?,
+            )?,
+        )
+    })
+}
+
+pub fn cryptocom_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        Ok(
+            safe_cex_venue_cryptocom::binding::exchange::CryptocomExchange::new(
+                name,
+                options,
+                store,
+                host.cryptocom()?,
             )?,
         )
     })
@@ -321,4 +364,11 @@ pub fn native_constructor(
             .map(|constructor| std::future::ready(Some(constructor)))
             .ok_or_else(|| -> ModuleError { Rc::new(NoRustConstructor(name)) }),
     }
+}
+
+pub fn bingx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        safe_cex_venue_bingx::BingxExchange::new(name, options, store, host.bingx()?)
+            .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
 }

@@ -18,3 +18,6 @@ pub mod stream_subscriptions;
 pub mod ticker;
 pub mod types;
 pub mod websocket;
+
+pub mod binding;
+pub use binding::{BingxDependencies, BingxExchange};
