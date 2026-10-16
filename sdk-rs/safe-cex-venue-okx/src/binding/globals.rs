@@ -374,7 +374,7 @@ fn transport(g: &Js, weak: Weak<OkxShared>) {
     def(
         "markSkipRemoteSigning",
         Js::function("markSkipRemoteSigning", |_, a| {
-            arg(&a, 0).set("__skipRemoteSigning", Js::Bool(true))?;
+            arg(&a, 0).set("safeCexSkipRemoteSigning", Js::Bool(true))?;
             Ok(Js::Undefined)
         }),
     );

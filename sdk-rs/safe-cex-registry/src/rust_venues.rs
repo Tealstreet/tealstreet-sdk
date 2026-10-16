@@ -7,7 +7,7 @@ use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     external::ExternalPublicData,
     http::HttpClient,
-    js_runtime::base_exchange::ExternalPublicDataFactory,
+    js_runtime::base_exchange::{ExternalPublicDataFactory, HostedSigner},
     runtime::ExchangeError,
     websocket::WsRuntime,
 };
@@ -46,6 +46,7 @@ pub struct BitunixDependencies {
     pub install: BitunixInstall,
     /// Required when `options.externalPublicData` is set.
     pub external_public_data: Option<ExternalPublicDataFactory>,
+    pub remote_signer_account_name: Option<String>,
 }
 
 /// The common HTTP stack BloFin builds each client from: (options, baseURL, timeout budget).
@@ -63,6 +64,10 @@ pub struct BlofinDependencies {
 
 /// Host inputs for Rust venue construction, requested once per constructed instance.
 pub trait RustVenueHost {
+    /// Optional hosted account capability; no host-local secret is required.
+    fn hosted_signer(&self) -> Option<HostedSigner> {
+        None
+    }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
@@ -181,14 +186,22 @@ pub fn bitunix_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.bitunix()?;
         let external = external_factory("bitunix", deps.external_public_data, &options)?;
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options,
             store,
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
-        let exchange = BitunixVenue::new(base, deps.build, deps.install, deps.runtime, external)?;
+        base.signers.remote_signer = host.hosted_signer().map(|(signer, _)| signer);
+        let exchange = BitunixVenue::new(
+            base,
+            deps.build,
+            deps.install,
+            deps.runtime,
+            external,
+            deps.remote_signer_account_name,
+        )?;
         Ok(exchange)
     })
 }
@@ -197,13 +210,14 @@ pub fn blofin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.blofin()?;
         let external = external_factory("blofin", deps.external_public_data, &options)?;
-        let base = BaseExchange::new(
+        let mut base = BaseExchange::new(
             name,
             options,
             store,
             deps.runtime.clone(),
             ExchangeSettings::default(),
         );
+        base.signers.remote_signer = host.hosted_signer().map(|(signer, _)| signer);
         let http = deps.http;
         let exchange = BlofinNativeExchange::new(
             base,

@@ -10,9 +10,10 @@ use crate::{
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange, ExchangeSettings},
     external::ExternalPublicData,
-    runtime::{ExchangeRuntime, ListenerCleanup},
+    runtime::{ExchangeRuntime, ListenerCleanup, RemoteSigner},
 };
 use safe_cex_store::Store;
+use safe_cex_transport::signing::RemoteSignerRequest;
 use safe_cex_transport::{
     RestAdapter, TransportError, TransportProvider,
     secondary::{RateLimitWrapper, create_api_with_secondary_key},
@@ -42,6 +43,41 @@ pub struct BaseExchangeParts {
     pub external_public_data: Option<ExternalPublicDataFactory>,
 }
 
+/// exchange-server's browser relay for one account, with that account's name.
+pub type HostedSigner = (Rc<dyn RemoteSigner>, Option<String>);
+
+/// ts: options.remoteSigner, `{ accountName, sign(request) }` over the hosted signer.
+fn js_remote_signer(
+    signer: Rc<dyn RemoteSigner>,
+    account: Option<String>,
+    runtime: Rc<dyn ExchangeRuntime>,
+) -> Js {
+    let sign = Js::function("sign", move |_, a| {
+        let request: RemoteSignerRequest = serde_json::from_value(to_json(&arg(&a, 0))?)
+            .map_err(|e| Thrown::type_error(&e.to_string()))?;
+        let signer = signer.clone();
+        Ok(Js::Promise(Promise::spawn(
+            &runtime,
+            Box::pin(async move {
+                let response = signer
+                    .sign(request)
+                    .await
+                    .map_err(|e| Thrown::error("Error", &e.to_string()))?;
+                let value = serde_json::to_value(&response)
+                    .map_err(|e| Thrown::type_error(&e.to_string()))?;
+                Ok(super::value::from_json(&value))
+            }),
+        )))
+    });
+    Js::object(vec![
+        (
+            "accountName",
+            account.map_or(Js::Undefined, |a| Js::str(&a)),
+        ),
+        ("sign", sign),
+    ])
+}
+
 fn assembled_venue(context: &Weak<JsSocketContext>) -> Result<Rc<dyn Exchange>, Thrown> {
     context
         .upgrade()
@@ -69,13 +105,31 @@ pub fn create(
         ));
     }
     let external_public_data = parts.external_public_data;
-    let base = Rc::new(BaseExchange::new(
+    let mut core = BaseExchange::new(
         parts.name,
         parts.options,
         parts.store,
         runtime.clone(),
         parts.settings,
-    ));
+    );
+    let remote = context
+        .http
+        .borrow()
+        .as_ref()
+        .map(|http| -> Result<Option<HostedSigner>, Thrown> {
+            http.configure_exchange(core.name.clone())?;
+            Ok(http.hosted_signer())
+        })
+        .transpose()?
+        .flatten();
+    if let Some((signer, account)) = remote {
+        core.signers.remote_signer = Some(signer.clone());
+        options.set(
+            "remoteSigner",
+            js_remote_signer(signer, account, runtime.clone()),
+        )?;
+    }
+    let base = Rc::new(core);
     let this = Js::object_with_class(
         "BaseExchange",
         vec![
@@ -515,6 +569,15 @@ pub fn create(
     Ok((this, base))
 }
 
+/// Decode structural options without serializing executable host capabilities.
+/// The source object retains these handles; core receives them from its host.
+pub fn exchange_options(options: &Js) -> Result<ExchangeOptions, Thrown> {
+    let structural = options.spread_object()?;
+    structural.delete(&super::value::utf16("remoteSigner"));
+    structural.delete(&super::value::utf16("payloadSigner"));
+    to_typed(&structural)
+}
+
 type ClientRows = RefCell<Vec<(Arc<dyn RestAdapter>, Js)>>;
 
 /// ts: createApiWithSecondaryKey through the typed `create_api_with_secondary_key`, which
@@ -540,7 +603,7 @@ fn create_xhr_with_secondary_key(
         .map(|url| String::from_utf16_lossy(url));
     let rate_limit = other_member("rateLimit")?;
     let secondary_rate_limit = other_member("secondaryRateLimit")?;
-    let typed: ExchangeOptions = to_typed(&opts)?;
+    let typed: ExchangeOptions = exchange_options(&opts)?;
 
     let rows: ClientRows = RefCell::default();
     let failure: RefCell<Option<Thrown>> = RefCell::default();

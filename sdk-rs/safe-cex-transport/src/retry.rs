@@ -235,6 +235,9 @@ impl RetryPolicy {
     }
 }
 impl WriteRequest {
+    pub fn request(&self) -> &RestRequest {
+        &self.0
+    }
     pub fn execute(self, adapter: &dyn RestAdapter) -> RestFuture<'_, RestResponse> {
         adapter.execute(self.0)
     }

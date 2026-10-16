@@ -231,7 +231,58 @@ impl BingxReadHistory {
             self.report(format!("Market {} not found on BingX", opts.symbol))?;
             return Ok(vec![]);
         };
-        let result=async{let params=json!({"symbol":market.id,"interval":interval,"startTime":json_number(start)?,"endTime":json_number(end)?});let response=self.request(crate::constants::ENDPOINTS[15].1,Some(params)).await?;let rows=response.get("data").and_then(Value::as_array).ok_or_else(||error(match response.get("data"){None=>"Cannot read properties of undefined (reading 'map')",Some(Value::Null)=>"Cannot read properties of null (reading 'map')",Some(_)=>"data.map is not a function"}))?;let mut candles=rows.iter().map(|row|if row.is_null(){Err(error("Cannot destructure property 'time' of 'object null' as it is null."))}else{candle(row)}).collect::<Result<Vec<_>,_>>()?;candles.sort_by(|a,b|(a.timestamp-b.timestamp).partial_cmp(&0.0).unwrap_or(std::cmp::Ordering::Equal));Ok::<_,ExchangeError>(candles)}.await;
+        let result = async {
+            let params = json!({"symbol":market.id,"interval":interval,"startTime":json_number(start)?,"endTime":json_number(end)?});
+            let response = self
+                .request(crate::constants::ENDPOINTS[15].1, Some(params))
+                .await?;
+            if response.is_null() {
+                return Err(error("Cannot read properties of null (reading 'code')"));
+            }
+            let field = |key| response.as_object().and_then(|object| object.get(key));
+            // Strict `code !== undefined && code !== 0`: "0" and null are failures.
+            if let Some(code) = field("code")
+                && code.as_f64() != Some(0.0)
+            {
+                let msg = field("msg");
+                let reason = if js_truthy(msg) {
+                    text(msg)?
+                } else {
+                    format!("code {}", text(Some(code))?)
+                };
+                self.log(
+                    format!("BingX kline request failed: {reason}"),
+                    LogSeverity::Warning,
+                )?;
+                return Ok(vec![]);
+            }
+            let Some(rows) = field("data").and_then(Value::as_array) else {
+                self.log(
+                    format!("BingX kline response did not include candles for {}", opts.symbol),
+                    LogSeverity::Warning,
+                )?;
+                return Ok(vec![]);
+            };
+            let mut candles = rows
+                .iter()
+                .map(|row| {
+                    if row.is_null() {
+                        Err(error(
+                            "Cannot destructure property 'time' of 'object null' as it is null.",
+                        ))
+                    } else {
+                        candle(row)
+                    }
+                })
+                .collect::<Result<Vec<_>, _>>()?;
+            candles.sort_by(|a, b| {
+                (a.timestamp - b.timestamp)
+                    .partial_cmp(&0.0)
+                    .unwrap_or(std::cmp::Ordering::Equal)
+            });
+            Ok::<_, ExchangeError>(candles)
+        }
+        .await;
         match result {
             Ok(v) => Ok(v),
             Err(e) => {

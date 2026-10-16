@@ -71,7 +71,7 @@ fn actual_typescript_api() {
         String::from_utf8_lossy(&out.stderr)
     );
     let corpus: Value = serde_json::from_slice(&out.stdout).unwrap();
-    for (name, floor) in [("factory", 8), ("requests", 17), ("responses", 17)] {
+    for (name, floor) in [("factory", 8), ("requests", 18), ("responses", 19)] {
         assert_eq!(
             corpus[name].as_array().unwrap().len(),
             floor,
@@ -82,7 +82,6 @@ fn actual_typescript_api() {
         let f = &row["fixture"];
         let events = RefCell::new(vec![]);
         let client = Rc::new(());
-        let token = Rc::new(());
         let n = |name, args| note(&events, row, f, name, args);
         let result = api::create_api(
             f["options"]["testnet"] == true,
@@ -91,13 +90,12 @@ fn actual_typescript_api() {
                 n("create", vec![obs(&config)])?;
                 Ok(client.clone())
             },
-            || {
-                n("condition", vec![])?;
-                Ok(token.clone())
-            },
-            |c, r, retries| {
+            |c, condition, retries| {
                 assert!(Rc::ptr_eq(c, &client));
-                assert!(Rc::ptr_eq(&r, &token));
+                assert!(
+                    condition as usize == api::retry_condition as *const () as usize,
+                    "API callable retry condition"
+                );
                 n("retry", vec![obs(&JsJsonValue::Number(retries))])
             },
             |c| {
@@ -187,47 +185,121 @@ fn actual_typescript_api() {
             response["status"] = s.clone();
         }
         let n = |name, args| note(&events, row, &f, name, args);
-        let result = api::receive_response(
-            &response,
-            &mut |name| {
-                n("header", vec![strv(name)])?;
-                let value = if name == "x-tealstreet-suppress-exchange-error" {
-                    if let Some(values) = f.get("headerValues") {
-                        let i = *reads.borrow();
-                        *reads.borrow_mut() += 1;
-                        values.get(i).cloned()
+        let seen = RefCell::new(Vec::<*const Value>::new());
+        let mut resend = |r: &Value| {
+            assert!(
+                std::ptr::eq(r, &response),
+                "API resend receives the response"
+            );
+            n("resend", vec![strv("isBitunixSignatureRejection")])?;
+            Ok((f["resend"] == true).then(|| json!("RESENT")))
+        };
+        let mut seen = |r: &Value| {
+            let first = !seen.borrow().contains(&(r as *const Value));
+            seen.borrow_mut().push(r);
+            !first
+        };
+        let mut receive = || {
+            api::receive_response(
+                &response,
+                &mut |name| {
+                    n("header", vec![strv(name)])?;
+                    let value = if name == "x-tealstreet-suppress-exchange-error" {
+                        if let Some(values) = f.get("headerValues") {
+                            let i = *reads.borrow();
+                            *reads.borrow_mut() += 1;
+                            values.get(i).cloned()
+                        } else {
+                            f.get("headerValue").cloned()
+                        }
                     } else {
-                        f.get("headerValue").cloned()
-                    }
-                } else {
-                    f.get("rateValue").cloned()
-                };
-                Ok(value)
-            },
-            &mut |message, r| {
-                assert!(
-                    std::ptr::eq(r, &response),
-                    "API original response report identity"
-                );
-                n("report", vec![strv(&message)])?;
-                let message = if let Some(s) = r["status"].as_f64().filter(|s| *s >= 400.) {
-                    let status = safe_cex_num::js_number_string(s);
-                    if message.contains(&format!("HTTP {status}")) {
+                        f.get("rateValue").cloned()
+                    };
+                    Ok(value)
+                },
+                &mut |message, r| {
+                    assert!(
+                        std::ptr::eq(r, &response),
+                        "API original response report identity"
+                    );
+                    n("report", vec![strv(&message)])?;
+                    let message = if let Some(s) = r["status"].as_f64().filter(|s| *s >= 400.) {
+                        let status = safe_cex_num::js_number_string(s);
+                        if message.contains(&format!("HTTP {status}")) {
+                            message
+                        } else {
+                            format!("{message} (HTTP {status})")
+                        }
+                    } else {
                         message
-                    } else {
-                        format!("{message} (HTTP {status})")
-                    }
-                } else {
-                    message
-                };
-                n("emit", vec![strv(&message)])
-            },
-        );
+                    };
+                    n("emit", vec![strv(&message)])
+                },
+                &mut resend,
+                &mut seen,
+            )
+        };
+        let mut result = receive();
+        if f["twice"] == true && result.is_ok() {
+            result = receive();
+        }
         outcome(&result, row, &events);
         assert_eq!(
-            result.as_ref().is_ok_and(|r| std::ptr::eq(*r, &response)),
+            result.as_ref().is_ok_and(
+                |r| matches!(r, api::Received::Response(r) if std::ptr::eq(*r, &response))
+            ),
             row["identity"],
             "API native response identity"
         );
+        assert_eq!(
+            result
+                .as_ref()
+                .is_ok_and(|r| matches!(r, api::Received::Resent(v) if v == "RESENT")),
+            row["resent"],
+            "API native response resend"
+        );
     }
+}
+#[test]
+fn signature_rejection_predicate_matches_actual_typescript() {
+    let out = Command::new("node")
+        .arg(format!(
+            "{}/tests/api-oracle.cjs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        out.status.success(),
+        "API actual source {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let corpus: Value = serde_json::from_slice(&out.stdout).unwrap();
+    let expected = [
+        true, true, true, true, true, true, false, false, false, false, false, false,
+    ];
+    let inputs = corpus["signature"]["corpus"].as_array().unwrap();
+    assert_eq!(inputs.len(), expected.len(), "API signature corpus floor");
+    for ((data, rejected), source) in inputs
+        .iter()
+        .zip(expected)
+        .zip(corpus["signature"]["results"].as_array().unwrap())
+    {
+        assert_eq!(
+            api::is_bitunix_signature_rejection(data).unwrap(),
+            rejected,
+            "API native signature predicate {data}"
+        );
+        assert_eq!(
+            *source,
+            json!(rejected),
+            "API source signature predicate {data}"
+        );
+    }
+    let mut network = || Ok(true);
+    let mut signature = || -> Result<bool, String> { panic!("network short-circuits") };
+    assert!(api::retry_condition(&mut network, &mut signature).unwrap());
+    let mut network = || Ok(false);
+    let mut signature = || Ok(true);
+    assert!(api::retry_condition(&mut network, &mut signature).unwrap());
 }

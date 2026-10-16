@@ -22,9 +22,9 @@ note = "CHOSEN: reusable lazy native loader evaluates its callback synchronously
 ts = "exchangeRegistry"
 kind = "const"
 layer = "adapted"
-rs = [ "safe-cex-registry/src/registry.rs::EXCHANGE_REGISTRY", "safe-cex-registry/src/loaders.rs::EXCHANGE_LOADERS", "safe-cex-registry/src/loaders.rs::ExchangeLoaderRegistration" ]
+rs = [ "safe-cex-registry/src/registry.rs::EXCHANGE_REGISTRY", "safe-cex-registry/src/loaders.rs::EXCHANGE_LOADERS", "safe-cex-registry/src/loaders.rs::ExchangeLoaderRegistration", "safe-cex-registry/src/rust_venues.rs::RustVenueHost::hosted_signer" ]
 status = "divergent"
-note = "CHOSEN: this source registry object maps to the ordered descriptor and executable-entry projections, with explicit module and constructor capabilities named by its decomposition targets. The object/host/export/continuation rationale is priced at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice; this local object mapping retains those selected costs. Concrete venue host and facade assembly is separate. Decomposition targets: safe-cex-registry/src/registry.rs::EXCHANGE_REGISTRY safe-cex-registry/src/loaders.rs::EXCHANGE_LOADERS safe-cex-registry/src/loaders.rs::ExchangeLoaderRegistration. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy."
+note = "CHOSEN: this source registry object maps to the ordered descriptor and executable-entry projections, with explicit module and constructor capabilities named by its decomposition targets. The object/host/export/continuation rationale is priced at sdk-rs/parity/MANIFEST-SPEC.md#registry-loader-choice; this local object mapping retains those selected costs. Concrete venue host and facade assembly is separate. Decomposition targets: safe-cex-registry/src/registry.rs::EXCHANGE_REGISTRY safe-cex-registry/src/loaders.rs::EXCHANGE_LOADERS safe-cex-registry/src/loaders.rs::ExchangeLoaderRegistration. Evidence: sdk-rs/parity/REGISTRY_CHOICE_RESOLUTION.md. See sdk-rs/parity/MANIFEST-SPEC.md#divergence-taxonomy. Split member `safe-cex-registry/src/rust_venues.rs::RustVenueHost::hosted_signer` supplies the account capability to typed venue constructors; native HTTP and private websocket auth retain the same account identity."
 
 [[symbol]]
 ts = "exchangeRegistry.apexomni"

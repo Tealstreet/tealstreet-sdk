@@ -121,5 +121,9 @@ api.spotApi.push(
  ...['EAPI:Invalid key','EAPI:Invalid nonce','EAPI:Invalid signature','EGeneral:Permission denied','EOrder:Rate limit exceeded','EOrder:Insufficient funds','other'].map(error=>({options,exchange,clients:1,steps:[success({data:{error:[error,'secondary']}})]})),
  {options,exchange,clients:1,steps:[success({data:{error:'ignored'}})]},
  {options,exchange,clients:1,errorResponse:{status:500,data:{error:'not-array'}},steps:[rejected()]},
+ {options,exchange,clients:1,steps:[success({data:{error:['EAPI:Invalid signature']},config:{url:'/0/private/Balance',method:'post',data:'nonce=1&volume=2'}})]},
+ {options,exchange,clients:1,steps:[success({data:{error:['EAPI:Invalid signature']},config:{url:'/0/private/Balance',safeCexSignatureRetry:true}})]},
+ {options,exchange,clients:1,steps:[success({data:{error:['EGeneral:Invalid arguments','EAPI:Invalid signature in body']}})]},
+ {options,exchange,clients:1,parsed:{volume:'3',nonce:'old',pair:'XBTUSD'},steps:[req({url:'/0/private/AddOrder',method:'post',data:'volume=3&nonce=old&pair=XBTUSD'})]},
 );
 module.exports={trading,api};
