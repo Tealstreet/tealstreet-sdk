@@ -704,6 +704,8 @@ fn table_members_are_exactly_the_bound_venues() {
             ExchangeName::Binance,
             ExchangeName::Binancepm,
             ExchangeName::Binancespot,
+            // BingX is now assembled on js_runtime and tested on the native host.
+            ExchangeName::Bingx,
             ExchangeName::Bitget,
             ExchangeName::Bitgetinverse,
             ExchangeName::Bitgetusdc,

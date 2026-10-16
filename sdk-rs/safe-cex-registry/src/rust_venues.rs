@@ -86,6 +86,11 @@ pub trait RustVenueHost {
     fn hosted_signer(&self) -> Option<HostedSigner> {
         None
     }
+    fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
+        Err(ExchangeError::new(
+            "BingX dependencies are unavailable on this host",
+        ))
+    }
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError>;
     fn backpack(&self) -> Result<BackpackDependencies, ExchangeError>;
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
@@ -119,6 +124,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Binance, binance_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
     (ExchangeName::Binancespot, binancespot_constructor),
+    (ExchangeName::Bingx, bingx_constructor),
     (ExchangeName::Bitget, bitget_constructor),
     (ExchangeName::Bitgetinverse, bitget_constructor),
     (ExchangeName::Bitgetusdc, bitget_constructor),
@@ -134,6 +140,15 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Okxeudemo, okx_constructor),
 ];
 
+pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |_, options, store| {
+        let deps = host.hyperliquid(&options)?;
+        let exchange =
+            safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
+        Ok(exchange)
+    })
+}
+
 pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         Ok(
@@ -144,15 +159,6 @@ pub fn asterdex_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor 
                 host.asterdex()?,
             )?,
         )
-    })
-}
-
-pub fn hyperliquid_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
-    ExchangeConstructor::new(move |_, options, store| {
-        let deps = host.hyperliquid(&options)?;
-        let exchange =
-            safe_cex_venue_hyperliquid::exchange::HyperliquidExchange::new(options, store, deps)?;
-        Ok(exchange)
     })
 }
 
@@ -358,4 +364,11 @@ pub fn native_constructor(
             .map(|constructor| std::future::ready(Some(constructor)))
             .ok_or_else(|| -> ModuleError { Rc::new(NoRustConstructor(name)) }),
     }
+}
+
+pub fn bingx_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        safe_cex_venue_bingx::BingxExchange::new(name, options, store, host.bingx()?)
+            .map(|venue| venue as Rc<dyn safe_cex_exchange::exchange::Exchange>)
+    })
 }

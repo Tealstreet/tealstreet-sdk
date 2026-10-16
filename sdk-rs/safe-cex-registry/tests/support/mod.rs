@@ -37,6 +37,7 @@ pub struct Seen {
     pub method: String,
     pub path: String,
     pub query: String,
+    pub body: String,
     pub headers: HashMap<String, String>,
 }
 
@@ -126,6 +127,8 @@ pub async fn serve_http(listener: TcpListener, handler: Handler, seen: Rc<RefCel
                 method: method.clone(),
                 path: path.into(),
                 query: query.into(),
+                body: String::from_utf8_lossy(&buf[head_end + 4..head_end + 4 + length])
+                    .into_owned(),
                 headers,
             };
             let answer = handler(&request);

@@ -97,6 +97,12 @@ The native JSON account surface forwards journal reads (`fetchHistoricalPosition
 to the venue's declared fold/reported path, preserving account and time bounds.
 It must not inherit a TS wrapper's default rejection for a supported venue method.
 
+BingX is constructed by `rust_constructor` through its shared-js_runtime binding.
+The native host supplies a fresh HTTP host and the common gateway factory; remote
+signer hosts fail visibly until BingX signing is connected.
+`tests/native_host_bingx.rs` starts it on loopback HTTP/WS, verifies a signed order
+payload and caller client ID, and cancels the resulting order.
+
 
 Hyperliquid is constructed through the native Rust table with options-aware
 transport composition. All native host constructors require the same caller-owned

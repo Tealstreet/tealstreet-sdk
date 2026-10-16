@@ -116,40 +116,6 @@ fn kraken_spot_ids() -> Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>> {
 }
 
 impl RustVenueHost for NativeVenueHost {
-    #[expect(clippy::arc_with_non_send_sync)]
-    fn asterdex(
-        &self,
-    ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
-        if self.remote.is_some() {
-            return Err(ExchangeError::new(
-                "remoteSigner is not wired for asterdex on the native host",
-            ));
-        }
-        let runtime = self.runtime.clone();
-        let adapter = self.adapter.clone();
-        Ok(
-            safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies {
-                runtime: self.runtime.clone(),
-                http: Rc::new(move |options| {
-                    if options.remote_signer.is_some() {
-                        return Err(ExchangeError::new(
-                            "remoteSigner is not wired for asterdex on the native host",
-                        ));
-                    }
-                    Ok(safe_cex_exchange::js_runtime::client::rest_http_host(
-                        runtime.clone(),
-                        Arc::new(AsterRest {
-                            runtime: runtime.clone(),
-                            adapter: adapter.clone(),
-                            options: options.clone(),
-                        }),
-                    ))
-                }),
-                external_public_data: Some(gateway_factory(self.runtime.clone())),
-            },
-        )
-    }
-
     #[allow(clippy::arc_with_non_send_sync)]
     fn hyperliquid(
         &self,
@@ -220,8 +186,57 @@ impl RustVenueHost for NativeVenueHost {
             },
         )
     }
+    #[expect(clippy::arc_with_non_send_sync)]
+    fn asterdex(
+        &self,
+    ) -> Result<safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for asterdex on the native host",
+            ));
+        }
+        let runtime = self.runtime.clone();
+        let adapter = self.adapter.clone();
+        Ok(
+            safe_cex_venue_asterdex::native_exchange::AsterDEXDependencies {
+                runtime: self.runtime.clone(),
+                http: Rc::new(move |options| {
+                    if options.remote_signer.is_some() {
+                        return Err(ExchangeError::new(
+                            "remoteSigner is not wired for asterdex on the native host",
+                        ));
+                    }
+                    Ok(safe_cex_exchange::js_runtime::client::rest_http_host(
+                        runtime.clone(),
+                        Arc::new(AsterRest {
+                            runtime: runtime.clone(),
+                            adapter: adapter.clone(),
+                            options: options.clone(),
+                        }),
+                    ))
+                }),
+                external_public_data: Some(gateway_factory(self.runtime.clone())),
+            },
+        )
+    }
+
     fn hosted_signer(&self) -> Option<HostedSigner> {
         self.remote.clone()
+    }
+    fn bingx(&self) -> Result<safe_cex_venue_bingx::BingxDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for bingx on the native host",
+            ));
+        }
+        Ok(safe_cex_venue_bingx::BingxDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                (self.adapter)()?,
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+        })
     }
 
     fn cryptocom(
@@ -360,6 +375,26 @@ impl RustVenueHost for NativeVenueHost {
     }
 }
 
+// ApiClient supplies its source baseURL on every request. The configured client
+// already resolved that baseURL through the selected regional/proxy transport;
+// use its default so the source origin cannot overwrite the resolved route.
+struct HyperliquidHttp(safe_cex_exchange::http::HttpClient);
+impl RestAdapter for HyperliquidHttp {
+    fn execute(
+        &self,
+        request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
+        Box::pin(async move { self.execute_with_receipt(request).await.map(|r| r.response) })
+    }
+    fn execute_with_receipt(
+        &self,
+        mut request: safe_cex_transport::RestRequest,
+    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestExecution> {
+        request.base_url = None;
+        Box::pin(self.0.execute_with_receipt(request))
+    }
+}
+
 // The source API factory supplies its base URL after choosing primary/secondary
 // options. Route the final post-signing request through the shared HTTP stack.
 struct AsterRest {
@@ -395,26 +430,6 @@ impl RestAdapter for AsterRest {
             request.base_url = None;
             client.execute(request).await
         })
-    }
-}
-
-// ApiClient supplies its source baseURL on every request. The configured client
-// already resolved that baseURL through the selected regional/proxy transport;
-// use its default so the source origin cannot overwrite the resolved route.
-struct HyperliquidHttp(safe_cex_exchange::http::HttpClient);
-impl RestAdapter for HyperliquidHttp {
-    fn execute(
-        &self,
-        request: safe_cex_transport::RestRequest,
-    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestResponse> {
-        Box::pin(async move { self.execute_with_receipt(request).await.map(|r| r.response) })
-    }
-    fn execute_with_receipt(
-        &self,
-        mut request: safe_cex_transport::RestRequest,
-    ) -> safe_cex_transport::RestFuture<'_, safe_cex_transport::RestExecution> {
-        request.base_url = None;
-        Box::pin(self.0.execute_with_receipt(request))
     }
 }
 
