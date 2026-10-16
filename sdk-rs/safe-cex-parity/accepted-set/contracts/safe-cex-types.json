@@ -16827,7 +16827,7 @@
   },
   "safe_cex_types::store_model::DisplayedPosition": {
     "shape": "map",
-    "evidence": "Reviewed native decoded field projection; authored distinct fixtures and IEEE f64 bitstrings. No owner serialization. Nested projections are a stated finite floor, not full nested-field coverage.",
+    "evidence": "Reviewed native decoded field projection; authored distinct fixtures and IEEE f64 bitstrings. No owner serialization. Nested projections are a stated finite floor, not full nested-field coverage. Direct raw JSON decimal and signed-zero observations exercise streaming flattened Position decoding; remote serializer metadata remains checked against the public schema.",
     "entrypoints": [],
     "sample": {
       "id": "position-A",
@@ -17310,6 +17310,49 @@
         },
         {
           "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw displayed-position witness\")) { Ok(v) => serde_json::json!({\"ok\":true,\"entryBits\":v.position.entry_price.to_bits().to_string(),\"notionalBits\":v.position.notional.to_bits().to_string(),\"pnlBits\":v.position.unrealized_pnl.to_bits().to_string(),\"contractsBits\":v.position.contracts.to_bits().to_string(),\"oneBits\":v.one_min_upnl.map(|n|n.to_bits().to_string()),\"account\":v.account}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "entryBits",
+        "notionalBits",
+        "pnlBits",
+        "contractsBits",
+        "oneBits",
+        "account"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"A\",\"symbol\":\"P\",\"side\":\"long\",\"entryPrice\":1.25,\"notional\":2.5,\"leverage\":3.75,\"unrealizedPnl\":-4.125,\"contracts\":6.5,\"liquidationPrice\":7.75,\"account\":\"acct-A\",\"oneMinUpnl\":10.25}",
+          "output": {
+            "ok": true,
+            "entryBits": "4608308318706860032",
+            "notionalBits": "4612811918334230528",
+            "pnlBits": "13839702392397889536",
+            "contractsBits": "4619004367821864960",
+            "oneBits": "4621959855077326848",
+            "account": "acct-A"
+          }
+        },
+        {
+          "input": "{\"id\":\"B\",\"symbol\":\"Q\",\"side\":\"short\",\"entryPrice\":-0,\"notional\":1,\"leverage\":2,\"unrealizedPnl\":-0,\"contracts\":-0,\"liquidationPrice\":3,\"account\":\"acct-B\",\"oneMinUpnl\":-0}",
+          "output": {
+            "ok": true,
+            "entryBits": "9223372036854775808",
+            "notionalBits": "4607182418800017408",
+            "pnlBits": "9223372036854775808",
+            "contractsBits": "9223372036854775808",
+            "oneBits": "9223372036854775808",
+            "account": "acct-B"
+          }
+        },
+        {
+          "input": "[]",
           "output": {
             "ok": false
           }
@@ -44330,5 +44373,1572 @@
         "unified"
       ]
     }
+  },
+  "safe_cex_types::OptionTerms": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionTerms: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "underlying": "BTC",
+      "expiry": 101,
+      "strike": 23,
+      "right": "call",
+      "style": "european",
+      "settlement": "cash",
+      "premiumAsset": "USDC",
+      "settleAsset": "USDT"
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let right = match v.right { super::OptionRight::Call => \"call\", super::OptionRight::Put => \"put\" }; let style = match v.style { super::OptionTermsStyle::European => \"european\" }; let settlement = match v.settlement { super::OptionTermsSettlement::Cash => \"cash\" }; serde_json::json!({\"ok\":true,\"underlying\":v.underlying,\"expiry\":format!(\"{:016x}\",v.expiry.to_bits()),\"strike\":format!(\"{:016x}\",v.strike.to_bits()),\"right\":right,\"style\":style,\"settlement\":settlement,\"premiumAsset\":v.premium_asset,\"settleAsset\":v.settle_asset}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "underlying": "BTC",
+            "expiry": 101,
+            "strike": 23,
+            "right": "call",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "USDC",
+            "settleAsset": "USDT"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "BTC",
+            "expiry": "4059400000000000",
+            "strike": "4037000000000000",
+            "right": "call",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "USDC",
+            "settleAsset": "USDT"
+          }
+        },
+        {
+          "input": {
+            "underlying": "ETH",
+            "expiry": 205,
+            "strike": 47,
+            "right": "put",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "ETH",
+            "settleAsset": "USD"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "ETH",
+            "expiry": "4069a00000000000",
+            "strike": "4047800000000000",
+            "right": "put",
+            "style": "european",
+            "settlement": "cash",
+            "premiumAsset": "ETH",
+            "settleAsset": "USD"
+          }
+        },
+        {
+          "input": [
+            "BTC",
+            101,
+            23,
+            "call",
+            "european",
+            "cash",
+            "USDC",
+            "USDT"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionGreeks": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionGreeks: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "delta": 1,
+      "gamma": 2,
+      "vega": 3,
+      "theta": -4,
+      "units": "per-day"
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"ok\":true,\"delta\":format!(\"{:016x}\",v.delta.to_bits()),\"gamma\":format!(\"{:016x}\",v.gamma.to_bits()),\"vega\":format!(\"{:016x}\",v.vega.to_bits()),\"theta\":format!(\"{:016x}\",v.theta.to_bits()),\"units\":v.units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "delta": 1,
+            "gamma": 2,
+            "vega": 3,
+            "theta": -4,
+            "units": "per-day"
+          },
+          "output": {
+            "ok": true,
+            "delta": "3ff0000000000000",
+            "gamma": "4000000000000000",
+            "vega": "4008000000000000",
+            "theta": "c010000000000000",
+            "units": "per-day"
+          }
+        },
+        {
+          "input": {
+            "delta": 5,
+            "gamma": 6,
+            "vega": 7,
+            "theta": -8,
+            "units": "per-year"
+          },
+          "output": {
+            "ok": true,
+            "delta": "4014000000000000",
+            "gamma": "4018000000000000",
+            "vega": "401c000000000000",
+            "theta": "c020000000000000",
+            "units": "per-year"
+          }
+        },
+        {
+          "input": [
+            1,
+            2,
+            3,
+            -4,
+            "per-day"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::MarketLimitsPrice": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts Market.limits.price: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "min": 3
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"ok\":true,\"min\":format!(\"{:016x}\",v.min.to_bits())}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "min": 3
+          },
+          "output": {
+            "ok": true,
+            "min": "4008000000000000"
+          }
+        },
+        {
+          "input": {
+            "min": -5
+          },
+          "output": {
+            "ok": true,
+            "min": "c014000000000000"
+          }
+        },
+        {
+          "input": [
+            3
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::PositionOption": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts Position.option: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "greeks": {
+        "delta": 5,
+        "gamma": 6,
+        "vega": 7,
+        "theta": -8,
+        "units": "per-year"
+      }
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let greeks=v.greeks.map(|g| serde_json::json!({\"delta\":format!(\"{:016x}\",g.delta.to_bits()),\"gamma\":format!(\"{:016x}\",g.gamma.to_bits()),\"vega\":format!(\"{:016x}\",g.vega.to_bits()),\"theta\":format!(\"{:016x}\",g.theta.to_bits()),\"units\":g.units})); serde_json::json!({\"ok\":true,\"greeks\":greeks}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "greeks": null
+          }
+        },
+        {
+          "input": {
+            "greeks": {
+              "delta": 5,
+              "gamma": 6,
+              "vega": 7,
+              "theta": -8,
+              "units": "per-year"
+            }
+          },
+          "output": {
+            "ok": true,
+            "greeks": {
+              "delta": "4014000000000000",
+              "gamma": "4018000000000000",
+              "vega": "401c000000000000",
+              "theta": "c020000000000000",
+              "units": "per-year"
+            }
+          }
+        },
+        {
+          "input": [
+            {
+              "delta": 5,
+              "gamma": 6,
+              "vega": 7,
+              "theta": -8,
+              "units": "per-year"
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionQuote": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionQuote: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "symbol": "ETH-P",
+      "bid": 11,
+      "ask": 12,
+      "mark": 13,
+      "markIv": 14,
+      "bidIv": 15,
+      "askIv": 16,
+      "underlyingPrice": 17,
+      "forwardPrice": 18,
+      "greeks": {
+        "delta": 5,
+        "gamma": 6,
+        "vega": 7,
+        "theta": -8,
+        "units": "per-year"
+      }
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let greeks=v.greeks.map(|g| serde_json::json!({\"delta\":format!(\"{:016x}\",g.delta.to_bits()),\"gamma\":format!(\"{:016x}\",g.gamma.to_bits()),\"vega\":format!(\"{:016x}\",g.vega.to_bits()),\"theta\":format!(\"{:016x}\",g.theta.to_bits()),\"units\":g.units})); serde_json::json!({\"ok\":true,\"symbol\":v.symbol,\"bid\":format!(\"{:016x}\",v.bid.to_bits()),\"ask\":format!(\"{:016x}\",v.ask.to_bits()),\"mark\":format!(\"{:016x}\",v.mark.to_bits()),\"markIv\":format!(\"{:016x}\",v.mark_iv.to_bits()),\"bidIv\":format!(\"{:016x}\",v.bid_iv.to_bits()),\"askIv\":format!(\"{:016x}\",v.ask_iv.to_bits()),\"underlyingPrice\":format!(\"{:016x}\",v.underlying_price.to_bits()),\"forwardPrice\":v.forward_price.map(|n|format!(\"{:016x}\",n.to_bits())),\"greeks\":greeks}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "symbol": "BTC-C",
+            "bid": 1,
+            "ask": 2,
+            "mark": 3,
+            "markIv": 4,
+            "bidIv": 5,
+            "askIv": 6,
+            "underlyingPrice": 7
+          },
+          "output": {
+            "ok": true,
+            "symbol": "BTC-C",
+            "bid": "3ff0000000000000",
+            "ask": "4000000000000000",
+            "mark": "4008000000000000",
+            "markIv": "4010000000000000",
+            "bidIv": "4014000000000000",
+            "askIv": "4018000000000000",
+            "underlyingPrice": "401c000000000000",
+            "forwardPrice": null,
+            "greeks": null
+          }
+        },
+        {
+          "input": {
+            "symbol": "ETH-P",
+            "bid": 11,
+            "ask": 12,
+            "mark": 13,
+            "markIv": 14,
+            "bidIv": 15,
+            "askIv": 16,
+            "underlyingPrice": 17,
+            "forwardPrice": 18,
+            "greeks": {
+              "delta": 5,
+              "gamma": 6,
+              "vega": 7,
+              "theta": -8,
+              "units": "per-year"
+            }
+          },
+          "output": {
+            "ok": true,
+            "symbol": "ETH-P",
+            "bid": "4026000000000000",
+            "ask": "4028000000000000",
+            "mark": "402a000000000000",
+            "markIv": "402c000000000000",
+            "bidIv": "402e000000000000",
+            "askIv": "4030000000000000",
+            "underlyingPrice": "4031000000000000",
+            "forwardPrice": "4032000000000000",
+            "greeks": {
+              "delta": "4014000000000000",
+              "gamma": "4018000000000000",
+              "vega": "401c000000000000",
+              "theta": "c020000000000000",
+              "units": "per-year"
+            }
+          }
+        },
+        {
+          "input": [
+            "ETH-P",
+            11,
+            12,
+            13,
+            14,
+            15,
+            16,
+            17,
+            18,
+            {
+              "delta": 5,
+              "gamma": 6,
+              "vega": 7,
+              "theta": -8,
+              "units": "per-year"
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionChainQuery": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionChainQuery: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "underlying": "ETH",
+      "expiry": 901,
+      "right": "put",
+      "strikeMin": 41,
+      "strikeMax": 99
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let right=v.right.map(|r| match r { super::OptionRight::Call=>\"call\",super::OptionRight::Put=>\"put\" }); serde_json::json!({\"ok\":true,\"underlying\":v.underlying,\"expiry\":v.expiry.map(|n|format!(\"{:016x}\",n.to_bits())),\"right\":right,\"strikeMin\":v.strike_min.map(|n|format!(\"{:016x}\",n.to_bits())),\"strikeMax\":v.strike_max.map(|n|format!(\"{:016x}\",n.to_bits()))}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "underlying": "BTC"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "BTC",
+            "expiry": null,
+            "right": null,
+            "strikeMin": null,
+            "strikeMax": null
+          }
+        },
+        {
+          "input": {
+            "underlying": "ETH",
+            "expiry": 901,
+            "right": "put",
+            "strikeMin": 41,
+            "strikeMax": 99
+          },
+          "output": {
+            "ok": true,
+            "underlying": "ETH",
+            "expiry": "408c280000000000",
+            "right": "put",
+            "strikeMin": "4044800000000000",
+            "strikeMax": "4058c00000000000"
+          }
+        },
+        {
+          "input": [
+            "ETH",
+            901,
+            "put",
+            41,
+            99
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::AccountGreeks": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts AccountGreeks: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "underlying": "BTC",
+      "delta": 1,
+      "gamma": 2,
+      "vega": 3,
+      "theta": -4,
+      "units": "per-day"
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"ok\":true,\"underlying\":v.underlying,\"delta\":format!(\"{:016x}\",v.delta.to_bits()),\"gamma\":format!(\"{:016x}\",v.gamma.to_bits()),\"vega\":format!(\"{:016x}\",v.vega.to_bits()),\"theta\":format!(\"{:016x}\",v.theta.to_bits()),\"units\":v.units}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "underlying": "BTC",
+            "delta": 1,
+            "gamma": 2,
+            "vega": 3,
+            "theta": -4,
+            "units": "per-day"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "BTC",
+            "delta": "3ff0000000000000",
+            "gamma": "4000000000000000",
+            "vega": "4008000000000000",
+            "theta": "c010000000000000",
+            "units": "per-day"
+          }
+        },
+        {
+          "input": {
+            "underlying": "ETH",
+            "delta": 5,
+            "gamma": 6,
+            "vega": 7,
+            "theta": -8,
+            "units": "per-year"
+          },
+          "output": {
+            "ok": true,
+            "underlying": "ETH",
+            "delta": "4014000000000000",
+            "gamma": "4018000000000000",
+            "vega": "401c000000000000",
+            "theta": "c020000000000000",
+            "units": "per-year"
+          }
+        },
+        {
+          "input": [
+            "BTC",
+            1,
+            2,
+            3,
+            -4,
+            "per-day"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionChainRow": {
+    "shape": "map",
+    "evidence": "packages/safe-cex/src/types.ts OptionChainRow: reviewed required fields, literal domains and optional-without-null properties against the private strict object-front decoder. Native/default qualified and trait shape checks plus direct decoded-field observations; no claim that plain Serde replaces the separate numeric-ingress bridge. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "market": {
+        "id": "m1",
+        "symbol": "BTC-C",
+        "base": "BTC",
+        "quote": "USD",
+        "active": true,
+        "precision": {
+          "amount": 1,
+          "price": 2
+        },
+        "limits": {
+          "amount": {
+            "min": 3,
+            "max": 4
+          },
+          "leverage": {
+            "min": 5,
+            "max": 6
+          }
+        }
+      },
+      "quote": {
+        "symbol": "BTC-C",
+        "bid": 1,
+        "ask": 2,
+        "mark": 3,
+        "markIv": 4,
+        "bidIv": 5,
+        "askIv": 6,
+        "underlyingPrice": 7
+      }
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let m=v.market; let q=v.quote; serde_json::json!({\"ok\":true,\"marketId\":m.id,\"marketSymbol\":m.symbol,\"marketBase\":m.base,\"marketQuote\":m.quote,\"marketActive\":m.active,\"amountPrecision\":format!(\"{:016x}\",m.precision.amount.to_bits()),\"pricePrecision\":format!(\"{:016x}\",m.precision.price.to_bits()),\"amountMin\":format!(\"{:016x}\",m.limits.amount.min.to_bits()),\"amountMax\":format!(\"{:016x}\",m.limits.amount.max.to_bits()),\"leverageMin\":format!(\"{:016x}\",m.limits.leverage.min.to_bits()),\"leverageMax\":format!(\"{:016x}\",m.limits.leverage.max.to_bits()),\"quoteSymbol\":q.symbol,\"bid\":format!(\"{:016x}\",q.bid.to_bits()),\"ask\":format!(\"{:016x}\",q.ask.to_bits()),\"mark\":format!(\"{:016x}\",q.mark.to_bits()),\"markIv\":format!(\"{:016x}\",q.mark_iv.to_bits()),\"bidIv\":format!(\"{:016x}\",q.bid_iv.to_bits()),\"askIv\":format!(\"{:016x}\",q.ask_iv.to_bits()),\"underlyingPrice\":format!(\"{:016x}\",q.underlying_price.to_bits()),\"forwardPrice\":q.forward_price.map(|n|format!(\"{:016x}\",n.to_bits())),\"greeks\":q.greeks.map(|g| serde_json::json!({\"delta\":format!(\"{:016x}\",g.delta.to_bits()),\"gamma\":format!(\"{:016x}\",g.gamma.to_bits()),\"vega\":format!(\"{:016x}\",g.vega.to_bits()),\"theta\":format!(\"{:016x}\",g.theta.to_bits()),\"units\":g.units}))}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "market": {
+              "id": "m1",
+              "symbol": "BTC-C",
+              "base": "BTC",
+              "quote": "USD",
+              "active": true,
+              "precision": {
+                "amount": 1,
+                "price": 2
+              },
+              "limits": {
+                "amount": {
+                  "min": 3,
+                  "max": 4
+                },
+                "leverage": {
+                  "min": 5,
+                  "max": 6
+                }
+              }
+            },
+            "quote": {
+              "symbol": "BTC-C",
+              "bid": 1,
+              "ask": 2,
+              "mark": 3,
+              "markIv": 4,
+              "bidIv": 5,
+              "askIv": 6,
+              "underlyingPrice": 7
+            }
+          },
+          "output": {
+            "ok": true,
+            "marketId": "m1",
+            "marketSymbol": "BTC-C",
+            "marketBase": "BTC",
+            "marketQuote": "USD",
+            "marketActive": true,
+            "amountPrecision": "3ff0000000000000",
+            "pricePrecision": "4000000000000000",
+            "amountMin": "4008000000000000",
+            "amountMax": "4010000000000000",
+            "leverageMin": "4014000000000000",
+            "leverageMax": "4018000000000000",
+            "quoteSymbol": "BTC-C",
+            "bid": "3ff0000000000000",
+            "ask": "4000000000000000",
+            "mark": "4008000000000000",
+            "markIv": "4010000000000000",
+            "bidIv": "4014000000000000",
+            "askIv": "4018000000000000",
+            "underlyingPrice": "401c000000000000",
+            "forwardPrice": null,
+            "greeks": null
+          }
+        },
+        {
+          "input": {
+            "market": {
+              "id": "m2",
+              "symbol": "ETH-P",
+              "base": "ETH",
+              "quote": "USDC",
+              "active": false,
+              "precision": {
+                "amount": 7,
+                "price": 8
+              },
+              "limits": {
+                "amount": {
+                  "min": 9,
+                  "max": 10
+                },
+                "leverage": {
+                  "min": 11,
+                  "max": 12
+                }
+              }
+            },
+            "quote": {
+              "symbol": "ETH-P",
+              "bid": 11,
+              "ask": 12,
+              "mark": 13,
+              "markIv": 14,
+              "bidIv": 15,
+              "askIv": 16,
+              "underlyingPrice": 17,
+              "forwardPrice": 18,
+              "greeks": {
+                "delta": 5,
+                "gamma": 6,
+                "vega": 7,
+                "theta": -8,
+                "units": "per-year"
+              }
+            }
+          },
+          "output": {
+            "ok": true,
+            "marketId": "m2",
+            "marketSymbol": "ETH-P",
+            "marketBase": "ETH",
+            "marketQuote": "USDC",
+            "marketActive": false,
+            "amountPrecision": "401c000000000000",
+            "pricePrecision": "4020000000000000",
+            "amountMin": "4022000000000000",
+            "amountMax": "4024000000000000",
+            "leverageMin": "4026000000000000",
+            "leverageMax": "4028000000000000",
+            "quoteSymbol": "ETH-P",
+            "bid": "4026000000000000",
+            "ask": "4028000000000000",
+            "mark": "402a000000000000",
+            "markIv": "402c000000000000",
+            "bidIv": "402e000000000000",
+            "askIv": "4030000000000000",
+            "underlyingPrice": "4031000000000000",
+            "forwardPrice": "4032000000000000",
+            "greeks": {
+              "delta": "4014000000000000",
+              "gamma": "4018000000000000",
+              "vega": "401c000000000000",
+              "theta": "c020000000000000",
+              "units": "per-year"
+            }
+          }
+        },
+        {
+          "input": [
+            {
+              "id": "m1",
+              "symbol": "BTC-C",
+              "base": "BTC",
+              "quote": "USD",
+              "active": true,
+              "precision": {
+                "amount": 1,
+                "price": 2
+              },
+              "limits": {
+                "amount": {
+                  "min": 3,
+                  "max": 4
+                },
+                "leverage": {
+                  "min": 5,
+                  "max": 6
+                }
+              }
+            },
+            {
+              "symbol": "BTC-C",
+              "bid": 1,
+              "ask": 2,
+              "mark": 3,
+              "markIv": 4,
+              "bidIv": 5,
+              "askIv": 6,
+              "underlyingPrice": 7
+            }
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionRight": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/types.ts exact OptionRight union literal domain. Private strict string front guard; native enum variants are matched directly, not serialized to derive expected labels. Raw-text and borrowed qualified calls compare actual enum identity; each valid literal also has explicit tagged-object rejection, alongside gate owned/qualified paths.",
+    "entrypoints": [],
+    "literals": [
+      "call",
+      "put"
+    ],
+    "observation": {
+      "call": "{ match (serde_json::from_str::<$type>(&$value.to_string()), <$type as serde::Deserialize>::deserialize($value)) { (Ok(v), Ok(borrowed)) => { assert_eq!(v,borrowed,\"raw/borrowed native enum identity\"); let literal=match v { $type::Call => \"call\", $type::Put => \"put\" }; serde_json::json!({\"ok\":true,\"literal\":literal}) }, (Err(_), Err(_)) => serde_json::json!({\"ok\":false}), _ => panic!(\"raw/borrowed enum shape admission differs\") } }",
+      "cases": [
+        {
+          "input": "call",
+          "output": {
+            "ok": true,
+            "literal": "call"
+          }
+        },
+        {
+          "input": "put",
+          "output": {
+            "ok": true,
+            "literal": "put"
+          }
+        },
+        {
+          "input": "invalid",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "call": null
+          },
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "put": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionTermsStyle": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/types.ts exact OptionTerms.style literal domain. Private strict string front guard; native enum variants are matched directly, not serialized to derive expected labels. Raw-text and borrowed qualified calls compare actual enum identity; each valid literal also has explicit tagged-object rejection, alongside gate owned/qualified paths.",
+    "entrypoints": [],
+    "literals": [
+      "european"
+    ],
+    "observation": {
+      "call": "{ match (serde_json::from_str::<$type>(&$value.to_string()), <$type as serde::Deserialize>::deserialize($value)) { (Ok(v), Ok(borrowed)) => { assert_eq!(v,borrowed,\"raw/borrowed native enum identity\"); let literal=match v { $type::European => \"european\" }; serde_json::json!({\"ok\":true,\"literal\":literal}) }, (Err(_), Err(_)) => serde_json::json!({\"ok\":false}), _ => panic!(\"raw/borrowed enum shape admission differs\") } }",
+      "cases": [
+        {
+          "input": "european",
+          "output": {
+            "ok": true,
+            "literal": "european"
+          }
+        },
+        {
+          "input": "invalid",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "european": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::OptionTermsSettlement": {
+    "shape": "string",
+    "evidence": "packages/safe-cex/src/types.ts exact OptionTerms.settlement literal domain. Private strict string front guard; native enum variants are matched directly, not serialized to derive expected labels. Raw-text and borrowed qualified calls compare actual enum identity; each valid literal also has explicit tagged-object rejection, alongside gate owned/qualified paths.",
+    "entrypoints": [],
+    "literals": [
+      "cash"
+    ],
+    "observation": {
+      "call": "{ match (serde_json::from_str::<$type>(&$value.to_string()), <$type as serde::Deserialize>::deserialize($value)) { (Ok(v), Ok(borrowed)) => { assert_eq!(v,borrowed,\"raw/borrowed native enum identity\"); let literal=match v { $type::Cash => \"cash\" }; serde_json::json!({\"ok\":true,\"literal\":literal}) }, (Err(_), Err(_)) => serde_json::json!({\"ok\":false}), _ => panic!(\"raw/borrowed enum shape admission differs\") } }",
+      "cases": [
+        {
+          "input": "cash",
+          "output": {
+            "ok": true,
+            "literal": "cash"
+          }
+        },
+        {
+          "input": "invalid",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "cash": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::CurrencyBalance": {
+    "shape": "union",
+    "evidence": "Crypto.com fetchBalance source currencies are exactly available/locked; types.ts Balance uses used/free/total/upnl. Reviewed strict object front and untagged selection retain both native variants without normalization. Exact decoded fields and as_balance result are observed. Typed From<Balance> is separately executed; no arbitrary untyped runtime currency-shape claim. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "positive": [
+      {
+        "used": 2,
+        "free": 9,
+        "total": 11,
+        "upnl": -3
+      },
+      {
+        "available": 9,
+        "locked": 6
+      }
+    ],
+    "negative": [
+      null,
+      "x",
+      [],
+      [
+        9,
+        6
+      ],
+      {
+        "available": 9
+      },
+      {
+        "used": 2,
+        "free": 9
+      }
+    ],
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { let declared=v.as_balance().is_some(); match v { $type::Declared(b)=>serde_json::json!({\"kind\":\"declared\",\"asBalance\":declared,\"used\":format!(\"{:016x}\",b.used.to_bits()),\"free\":format!(\"{:016x}\",b.free.to_bits()),\"total\":format!(\"{:016x}\",b.total.to_bits()),\"upnl\":format!(\"{:016x}\",b.upnl.to_bits())}), $type::AvailableLocked{available,locked}=>serde_json::json!({\"kind\":\"available-locked\",\"asBalance\":declared,\"available\":format!(\"{:016x}\",available.to_bits()),\"locked\":format!(\"{:016x}\",locked.to_bits())}) } }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {
+            "used": 2,
+            "free": 9,
+            "total": 11,
+            "upnl": -3
+          },
+          "output": {
+            "kind": "declared",
+            "asBalance": true,
+            "used": "4000000000000000",
+            "free": "4022000000000000",
+            "total": "4026000000000000",
+            "upnl": "c008000000000000"
+          }
+        },
+        {
+          "input": {
+            "available": 9,
+            "locked": 6
+          },
+          "output": {
+            "kind": "available-locked",
+            "asBalance": false,
+            "available": "4022000000000000",
+            "locked": "4018000000000000"
+          }
+        },
+        {
+          "input": [
+            9,
+            6
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "as_balance",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "safe_cex_types::Balance",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the borrowed declared-row accessor on both actual decoded native variants; available/locked stays absent and is never normalized.",
+        "nativeFields": [
+          "hasBalance",
+          "free"
+        ],
+        "call": "{ let v: $type=serde_json::from_value($value.clone()).expect(\"native currency fixture\"); let b=v.as_balance(); serde_json::json!({\"ok\":true,\"hasBalance\":b.is_some(),\"free\":b.map(|b|format!(\"{:016x}\",b.free.to_bits()))}) }",
+        "cases": [
+          {
+            "input": {
+              "used": 2,
+              "free": 9,
+              "total": 11,
+              "upnl": -3
+            },
+            "output": {
+              "ok": true,
+              "hasBalance": true,
+              "free": "4022000000000000"
+            }
+          },
+          {
+            "input": {
+              "available": 9,
+              "locked": 6
+            },
+            "output": {
+              "ok": true,
+              "hasBalance": false,
+              "free": null
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "conversion",
+          "trait": "core::convert::From",
+          "args": {
+            "angle_bracketed": {
+              "args": [
+                {
+                  "type": {
+                    "resolved_path": {
+                      "path": "safe_cex_types::Balance",
+                      "args": null
+                    }
+                  }
+                }
+              ],
+              "constraints": []
+            }
+          }
+        },
+        "input": "observed",
+        "reason": "Native typed Balance conversion must preserve Declared identity/fields and never construct the REST alternate variant. Fixture parsing constructs only the typed source operand; the actual From implementation is called.",
+        "nativeFields": [
+          "free",
+          "used"
+        ],
+        "call": "{ let source: super::Balance=serde_json::from_value($value.clone()).expect(\"typed Balance fixture\"); let v=$type::from(source); match v { $type::Declared(b)=>serde_json::json!({\"ok\":true,\"used\":format!(\"{:016x}\",b.used.to_bits()),\"free\":format!(\"{:016x}\",b.free.to_bits()),\"total\":format!(\"{:016x}\",b.total.to_bits()),\"upnl\":format!(\"{:016x}\",b.upnl.to_bits())}), $type::AvailableLocked{..}=>panic!(\"typed Balance converted to a REST alternate shape\") } }",
+        "cases": [
+          {
+            "input": {
+              "used": 2,
+              "free": 9,
+              "total": 11,
+              "upnl": -3
+            },
+            "output": {
+              "ok": true,
+              "used": "4000000000000000",
+              "free": "4022000000000000",
+              "total": "4026000000000000",
+              "upnl": "c008000000000000"
+            }
+          },
+          {
+            "input": {
+              "used": 5,
+              "free": 4,
+              "total": 9,
+              "upnl": 6
+            },
+            "output": {
+              "ok": true,
+              "used": "4014000000000000",
+              "free": "4010000000000000",
+              "total": "4022000000000000",
+              "upnl": "4018000000000000"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_types::ExchangeOptionsPolymarket": {
+    "shape": "map",
+    "evidence": "polymarket.types.ts optional polymarket account carrier has five independently optional fields. Shared UTF-8 account carrier is distinct from venue retained UTF-16 source record; typed numeric runtime projection is tested separately. Strict object front and present-null refusal apply; native field observation preserves exact names, optional presence and signerType numeric value. Numeric native field observations use binary64 bit strings so runner JSON number formatting cannot conceal payload identity. Raw-text native field witnesses also explicitly reject an independently authored complete declaration-order positional array; qualified/value decoder paths are probed separately.",
+    "entrypoints": [],
+    "sample": {
+      "apiKey": "key-one",
+      "apiSecret": "secret-two",
+      "apiPassphrase": "pass-three",
+      "signerType": 3,
+      "funderAddress": "funder-four"
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>(&$value.to_string()) { Ok(v) => { serde_json::json!({\"apiKey\":v.api_key,\"apiSecret\":v.api_secret,\"apiPassphrase\":v.api_passphrase,\"signerType\":v.signer_type.map(|n|format!(\"{:016x}\",n.to_bits())),\"funderAddress\":v.funder_address}) }, Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "cases": [
+        {
+          "input": {},
+          "output": {
+            "apiKey": null,
+            "apiSecret": null,
+            "apiPassphrase": null,
+            "signerType": null,
+            "funderAddress": null
+          }
+        },
+        {
+          "input": {
+            "apiKey": "key-one",
+            "apiSecret": "secret-two",
+            "apiPassphrase": "pass-three",
+            "signerType": 3,
+            "funderAddress": "funder-four"
+          },
+          "output": {
+            "apiKey": "key-one",
+            "apiSecret": "secret-two",
+            "apiPassphrase": "pass-three",
+            "signerType": "4008000000000000",
+            "funderAddress": "funder-four"
+          }
+        },
+        {
+          "input": [
+            "key-one",
+            "secret-two",
+            "pass-three",
+            3,
+            "funder-four"
+          ],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_types::store_model::strict_codecs::DisplayedPositionMap": {
+    "shape": "observed",
+    "instantiation": "DisplayedPositionMap<A>",
+    "evidence": "Original-map adapter consumes only DisplayedPosition extension fields, checks duplicates and forwards remaining key/value events into the caller seeds. Bounded direct native witnesses execute supplied String and f64 seeds, observe ordering, exhausted None, extension capture and signed-zero/decimal bits; they do not claim arbitrary Seed or MapAccess implementations. No owner serialization.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::MapAccess",
+          "name": "next_key_seed",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "seed",
+                {
+                  "generic": "K"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "qualified_path": {
+                                        "name": "Value",
+                                        "args": null,
+                                        "self_type": {
+                                          "generic": "K"
+                                        },
+                                        "trait": {
+                                          "path": "",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "K",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::DeserializeSeed",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Select the next non-display field with the actual String seed, consuming display fields from the original map.",
+        "call": "{ struct ReadMap;\nimpl<'de> serde::de::Visitor<'de> for ReadMap {\n type Value = serde_json::Value;\n fn expecting(&self, f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { f.write_str(\"an original numeric map\") }\n fn visit_map<A:serde::de::MapAccess<'de>>(self,map:A)->Result<Self::Value,A::Error> {\n  use serde::de::{MapAccess,DeserializeSeed};\n  struct Key;\n  impl<'de> DeserializeSeed<'de> for Key {type Value=String;fn deserialize<D:serde::Deserializer<'de>>(self,d:D)->Result<String,D::Error>{<String as serde::Deserialize>::deserialize(d)}}\n  struct Number;\n  impl<'de> DeserializeSeed<'de> for Number {type Value=f64;fn deserialize<D:serde::Deserializer<'de>>(self,d:D)->Result<f64,D::Error>{<f64 as serde::Deserialize>::deserialize(d)}}\n  let mut filtered: $type = super::DisplayedPositionMap { map, key:None,account:None,ticker:None,market:None,balance:None,exchange_name:None,one_min_upnl:None,five_min_upnl:None,has_active_chaser:None,has_active_twap:None,is_fake_position:None,chaser_size:None,has_full_stop:None,has_full_tp:None };\n  let first=filtered.next_key_seed(Key)?;\n  let first_number=filtered.next_value_seed(Number)?;\n  let second=filtered.next_key_seed(Key)?;\n  let second_number=filtered.next_value_seed(Number)?;\n  let exhausted=filtered.next_key_seed(Key)?.is_none();\n  Ok(serde_json::json!({\"ok\":true,\"firstKey\":first,\"firstBits\":first_number.to_bits().to_string(),\"secondKey\":second,\"secondBits\":second_number.to_bits().to_string(),\"exhausted\":exhausted,\"key\":filtered.key,\"account\":filtered.account,\"oneBits\":filtered.one_min_upnl.map(|n|n.to_bits().to_string())}))\n }\n}\nlet mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw map seed witness\"));\nmatch serde::Deserializer::deserialize_map(&mut input,ReadMap) {Ok(v)=>v,Err(_)=>serde_json::json!({\"ok\":false})}\n}",
+        "cases": [
+          {
+            "input": "{\"key\":\"dA\",\"oneMinUpnl\":1.25,\"entryPrice\":-0,\"contracts\":4.5,\"account\":\"aA\"}",
+            "output": {
+              "ok": true,
+              "firstKey": "entryPrice",
+              "firstBits": "9223372036854775808",
+              "secondKey": "contracts",
+              "secondBits": "4616752568008179712",
+              "exhausted": true,
+              "key": "dA",
+              "account": "aA",
+              "oneBits": "4608308318706860032"
+            }
+          },
+          {
+            "input": "{\"contracts\":-2.75,\"key\":\"dB\",\"entryPrice\":8.125,\"account\":\"aB\",\"oneMinUpnl\":-0}",
+            "output": {
+              "ok": true,
+              "firstKey": "contracts",
+              "firstBits": "13836746905142427648",
+              "secondKey": "entryPrice",
+              "secondBits": "4620763586426306560",
+              "exhausted": true,
+              "key": "dB",
+              "account": "aB",
+              "oneBits": "9223372036854775808"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::MapAccess",
+          "name": "next_value_seed",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "seed",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::DeserializeSeed",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Forward the original pending numeric value to the actual f64 seed without Content or JSON Value buffering.",
+        "call": "{ struct ReadMap;\nimpl<'de> serde::de::Visitor<'de> for ReadMap {\n type Value = serde_json::Value;\n fn expecting(&self, f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { f.write_str(\"an original numeric map\") }\n fn visit_map<A:serde::de::MapAccess<'de>>(self,map:A)->Result<Self::Value,A::Error> {\n  use serde::de::{MapAccess,DeserializeSeed};\n  struct Key;\n  impl<'de> DeserializeSeed<'de> for Key {type Value=String;fn deserialize<D:serde::Deserializer<'de>>(self,d:D)->Result<String,D::Error>{<String as serde::Deserialize>::deserialize(d)}}\n  struct Number;\n  impl<'de> DeserializeSeed<'de> for Number {type Value=f64;fn deserialize<D:serde::Deserializer<'de>>(self,d:D)->Result<f64,D::Error>{<f64 as serde::Deserialize>::deserialize(d)}}\n  let mut filtered: $type = super::DisplayedPositionMap { map, key:None,account:None,ticker:None,market:None,balance:None,exchange_name:None,one_min_upnl:None,five_min_upnl:None,has_active_chaser:None,has_active_twap:None,is_fake_position:None,chaser_size:None,has_full_stop:None,has_full_tp:None };\n  let first=filtered.next_key_seed(Key)?;\n  let first_number=filtered.next_value_seed(Number)?;\n  let second=filtered.next_key_seed(Key)?;\n  let second_number=filtered.next_value_seed(Number)?;\n  let exhausted=filtered.next_key_seed(Key)?.is_none();\n  Ok(serde_json::json!({\"ok\":true,\"firstKey\":first,\"firstBits\":first_number.to_bits().to_string(),\"secondKey\":second,\"secondBits\":second_number.to_bits().to_string(),\"exhausted\":exhausted,\"key\":filtered.key,\"account\":filtered.account,\"oneBits\":filtered.one_min_upnl.map(|n|n.to_bits().to_string())}))\n }\n}\nlet mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw map seed witness\"));\nmatch serde::Deserializer::deserialize_map(&mut input,ReadMap) {Ok(v)=>v,Err(_)=>serde_json::json!({\"ok\":false})}\n}",
+        "cases": [
+          {
+            "input": "{\"key\":\"dA\",\"oneMinUpnl\":1.25,\"entryPrice\":-0,\"contracts\":4.5,\"account\":\"aA\"}",
+            "output": {
+              "ok": true,
+              "firstKey": "entryPrice",
+              "firstBits": "9223372036854775808",
+              "secondKey": "contracts",
+              "secondBits": "4616752568008179712",
+              "exhausted": true,
+              "key": "dA",
+              "account": "aA",
+              "oneBits": "4608308318706860032"
+            }
+          },
+          {
+            "input": "{\"contracts\":-2.75,\"key\":\"dB\",\"entryPrice\":8.125,\"account\":\"aB\",\"oneMinUpnl\":-0}",
+            "output": {
+              "ok": true,
+              "firstKey": "contracts",
+              "firstBits": "13836746905142427648",
+              "secondKey": "entryPrice",
+              "secondBits": "4620763586426306560",
+              "exhausted": true,
+              "key": "dB",
+              "account": "aB",
+              "oneBits": "9223372036854775808"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_types::store_model::strict_codecs::DisplayedPositionVisitor": {
+    "shape": "observed",
+    "evidence": "Concrete streaming map visitor constructs the private DisplayedPosition companion without Serde Content. Direct native raw-object witnesses inspect Position and display fields plus decimal/signed-zero bits; array refusal remains explicit. Supplied visit_map only, no claim about arbitrary MapAccess implementations. No owner serialization.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "map",
+                {
+                  "generic": "A"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "A"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "A",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::MapAccess",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Construct the companion from original map events, preserving Position decoding and enforcing display-field presence.",
+        "call": "{ let mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw displayed-position visitor witness\")); match serde::Deserializer::deserialize_map(&mut input,$type) { Ok(v) => serde_json::json!({\"ok\":true,\"entryBits\":v.position.entry_price.to_bits().to_string(),\"notionalBits\":v.position.notional.to_bits().to_string(),\"pnlBits\":v.position.unrealized_pnl.to_bits().to_string(),\"contractsBits\":v.position.contracts.to_bits().to_string(),\"oneBits\":v.one_min_upnl.map(|n|n.to_bits().to_string()),\"account\":v.account}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+        "cases": [
+          {
+            "input": "{\"id\":\"A\",\"symbol\":\"P\",\"side\":\"long\",\"entryPrice\":1.25,\"notional\":2.5,\"leverage\":3.75,\"unrealizedPnl\":-4.125,\"contracts\":6.5,\"liquidationPrice\":7.75,\"account\":\"acct-A\",\"oneMinUpnl\":10.25}",
+            "output": {
+              "ok": true,
+              "entryBits": "4608308318706860032",
+              "notionalBits": "4612811918334230528",
+              "pnlBits": "13839702392397889536",
+              "contractsBits": "4619004367821864960",
+              "oneBits": "4621959855077326848",
+              "account": "acct-A"
+            }
+          },
+          {
+            "input": "{\"id\":\"B\",\"symbol\":\"Q\",\"side\":\"short\",\"entryPrice\":-0,\"notional\":1,\"leverage\":2,\"unrealizedPnl\":-0,\"contracts\":-0,\"liquidationPrice\":3,\"account\":\"acct-B\",\"oneMinUpnl\":-0}",
+            "output": {
+              "ok": true,
+              "entryBits": "9223372036854775808",
+              "notionalBits": "4607182418800017408",
+              "pnlBits": "9223372036854775808",
+              "contractsBits": "9223372036854775808",
+              "oneBits": "9223372036854775808",
+              "account": "acct-B"
+            }
+          },
+          {
+            "input": "[]",
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "call": "{ let mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw displayed-position visitor witness\")); match serde::Deserializer::deserialize_map(&mut input,$type) { Ok(v) => serde_json::json!({\"ok\":true,\"entryBits\":v.position.entry_price.to_bits().to_string(),\"notionalBits\":v.position.notional.to_bits().to_string(),\"pnlBits\":v.position.unrealized_pnl.to_bits().to_string(),\"contractsBits\":v.position.contracts.to_bits().to_string(),\"oneBits\":v.one_min_upnl.map(|n|n.to_bits().to_string()),\"account\":v.account}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": "{\"id\":\"A\",\"symbol\":\"P\",\"side\":\"long\",\"entryPrice\":1.25,\"notional\":2.5,\"leverage\":3.75,\"unrealizedPnl\":-4.125,\"contracts\":6.5,\"liquidationPrice\":7.75,\"account\":\"acct-A\",\"oneMinUpnl\":10.25}",
+        "output": {
+          "ok": true,
+          "entryBits": "4608308318706860032",
+          "notionalBits": "4612811918334230528",
+          "pnlBits": "13839702392397889536",
+          "contractsBits": "4619004367821864960",
+          "oneBits": "4621959855077326848",
+          "account": "acct-A"
+        }
+      },
+      {
+        "input": "{\"id\":\"B\",\"symbol\":\"Q\",\"side\":\"short\",\"entryPrice\":-0,\"notional\":1,\"leverage\":2,\"unrealizedPnl\":-0,\"contracts\":-0,\"liquidationPrice\":3,\"account\":\"acct-B\",\"oneMinUpnl\":-0}",
+        "output": {
+          "ok": true,
+          "entryBits": "9223372036854775808",
+          "notionalBits": "4607182418800017408",
+          "pnlBits": "9223372036854775808",
+          "contractsBits": "9223372036854775808",
+          "oneBits": "9223372036854775808",
+          "account": "acct-B"
+        }
+      },
+      {
+        "input": "[]",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
   }
 }

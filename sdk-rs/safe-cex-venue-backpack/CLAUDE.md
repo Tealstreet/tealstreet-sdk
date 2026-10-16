@@ -310,3 +310,10 @@ source-uncancelled work remain live. `BaseWebSocket::close_current_websocket`
 forwards only the current transport close. Three native regressions prove-fail
 against the old adapters and pass against the actual source disposal arrows;
 `tests/disposal_binding.rs` also checks flag timing and close ordering.
+
+Native `native_inputs_signed` shares the account’s hosted HTTP signing capability
+through the common HttpClient bridge and retains public-request bypass. The
+registry also exposes that capability to typed canSign. Private WebSocket auth
+uses the local Ed25519 secret exactly as the source: a missing secret logs the
+original RangeError and sends no subscription, even when HTTP is hosted. See
+[the hosted signer evidence](HOSTED_SIGNER_EVIDENCE.md); no hosted WS path is added.

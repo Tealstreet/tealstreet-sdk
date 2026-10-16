@@ -201,3 +201,6 @@ are already typed after WASM conversion; native JSON u32/string refusals do not
 claim to reproduce JavaScript's modulo conversions. Existing primitive fixtures
 remain unchanged. The separately labeled24-contract npm supplement plus18
 rounding cases pin fields and wire signatures, with immutable artifact hashes.
+The native Contract JSON boundary accepts named objects through a private remote
+companion and the shared object guard. Complete positional arrays are rejected;
+the post-WASM field types and authenticated byte construction stay the same.

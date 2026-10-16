@@ -353,3 +353,15 @@ pub(crate) async fn finish_sync<H: SyncHost>(
     host.store_positions(unique)?;
     host.update(balance, true, true)
 }
+
+#[cfg(test)]
+mod accepted_native_contract {
+    use super::*;
+
+    #[test]
+    fn utf16_encoder_preserves_native_units() {
+        assert_eq!(units(""), Vec::<u16>::new());
+        assert_eq!(units("A🚀\0"), vec![65, 55357, 56960, 0]);
+        assert_eq!(units("é雪"), vec![233, 38634]);
+    }
+}

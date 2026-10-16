@@ -1,4 +1,4 @@
-//! Scripted transport and runtime for driving the production GrvtExchange.
+// Scripted transport and runtime for driving the production GrvtExchange.
 use safe_cex_exchange::js_runtime::{
     client::JsHttpHost,
     promise::JsFuture,

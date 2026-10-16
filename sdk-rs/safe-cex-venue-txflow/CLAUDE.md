@@ -24,3 +24,11 @@ The opt-in Rust registry path constructs this same Phase-0 scaffold through
 support. The native registry witness observes eager rejection and no HTTP/WS IO
 for both network settings; `scripts/registry-control.py` swaps the factory to a
 compiling wrong venue and requires that witness to fail, then restores bytes.
+
+The accepted-set census classifies `TxFlowExchange::new` as typed construction.
+Its contract pins the exact compiler API and its assembly of typed options,
+Store/runtime/HTTP handles and the transport registry. The native witness
+`tests/parity.rs::actual_typescript_constants_factory_and_start` executes that
+constructor and observes its identity and eager single Phase-0 refusal, alongside
+actual-source API factory comparisons. Verify the selected native/default census
+owner with `node safe-cex-parity/scripts/accepted-set.mjs --package=safe-cex-venue-txflow --jobs=1` from `sdk-rs`.
