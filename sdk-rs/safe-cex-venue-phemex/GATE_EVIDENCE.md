@@ -1043,3 +1043,25 @@ all-targets and wasm library Clippy passed. Canonical workspace parity passed
 (7459 rows / 17060 public Rust items) after adding exact binding split targets
 and detached AccountRead mapping; those mapping edits did not change Rust code.
 Registry integration remains to be added in the Phemex PR.
+
+## Registry and source-super disposal integration
+
+Phemex is now in the Rust registry, with native Js HTTP, hosted signing, the
+external-data factory and the shared limiter host API. The native HTTP witness
+checks distinct0.003 amount/0.25 price steps, read purity, user123 and HMAC over
+the actual currency=USDT account query. Its compiling wrong-factory mutation
+fails101 and the exact restored table passes0.
+
+The source Phemex dispose calls super.dispose, unlike Crypto.com. The wrapper
+now delegates once through the bound source body, with no extra early base call.
+The new E2E observes the disposed flag and removed inherited listener; skipping
+SessionHost::base_dispose compiles and fails that regression, then restores green.
+The original source-dispose-call suppression control also fails/restores.
+
+Full scoped suite:92 tests across17 targets, zero ignored;24 binding E2E tests.
+After master185/164 integration,37 binding/helper/private-transport tests and14
+native construction/table tests passed. The shared production dispatch guard
+passed after reviewing21 new Phemex call/reference records; its sole base cleanup
+call is the source-super adapter with explicit source/native evidence.
+The original23 method/helper control checkpoint remains valid; the added skip-super
+control makes24 and the registry factory control is separate.
