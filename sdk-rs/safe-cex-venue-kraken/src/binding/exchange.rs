@@ -50,7 +50,6 @@ pub(crate) fn settings() -> ExchangeSettings {
         tick_interval: Some(500.0),
         positions_supported: None,
         supports_public_only: true,
-        supports_executions_history: false,
         client_order_id_rule: None,
     }
 }

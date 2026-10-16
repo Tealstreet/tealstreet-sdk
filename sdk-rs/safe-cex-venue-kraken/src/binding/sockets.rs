@@ -41,7 +41,7 @@ pub(crate) struct SocketHost {
 }
 
 impl SocketHost {
-    pub fn new(rt: Rt) -> Rc<Self> {
+    pub(crate) fn new(rt: Rt) -> Rc<Self> {
         let host = Rc::new(Self {
             rt,
             conn: RefCell::new(None),
