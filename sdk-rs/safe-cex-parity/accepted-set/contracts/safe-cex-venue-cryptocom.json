@@ -13668,5 +13668,504 @@
     },
     "reason": "Finds receiver.store and its update method, evaluates the field thunk inside the method argument thunk, constructs one native property bag and dispatches update, returning unit after success. This is an outbound state-write adapter, not an incoming raw-record parser; source lookup/argument/error order is part of existing runtime behavior, without a decoder-domain claim.",
     "evidence": "Individually reviewed the actual runtime.rs update body and its callees against its supplied host-operation role. Executed runtime::accepted_runtime_helpers::update_native_contract directly with shared Js/Thrown values: getter/fields/object/invoke order, original Store receiver/field identity and abrupt completion. Its body-specific control compiled, failed the named runtime-helper assertion with exit 101 and passed after exact byte restoration. Fresh native/default compiler classification receipts match this exact API. Compiler metadata is separate from these actual runtime witnesses. This does not classify downstream decoders or claim arbitrary host/Clone behavior, aliases, locals, full-crate or target-matrix closure."
+  },
+  "safe_cex_venue_cryptocom::signing::params_to_string": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "params_to_string",
+      "signature": {
+        "inputs": [
+          [
+            "value",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "borrowed_ref": {
+                            "lifetime": null,
+                            "is_mutable": false,
+                            "type": {
+                              "resolved_path": {
+                                "path": "serde_json::value::Value",
+                                "args": null
+                              }
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "level",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_types::js_coercion::JsCoercionError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Canonical preimage serialization of existing JSON data: it renders primitives, recursively concatenates arrays, sorts object keys by UTF16 and applies the source depth cutoff before traversal. It does not decode a wire record or validate a closed input schema. The existing shared JSON/signing-data boundary remains explicit; downstream raw constructors are not waived.",
+    "evidence": "Executed tests/signing.rs::live_params directly calls the actual serializer for 280 independently admitted live-source comparisons (270 native strings and 10 native coercion errors), retaining exact input/level identities and comparison counts. scripts/signing-role-controls.py corrupts this body's depth cutoff: it compiles, fails params_native_value:array with exit 101, restores exact source bytes and passes. Fresh native/default scripts/signing-role-contracts.mjs checks this exact compiler API among five explicit role classifications with zero failed owners; that receipt is classification-only, separate from the executed runtime evidence. Existing signing-data/string boundaries remain unchanged; no arbitrary JS, downstream decoder, alias, local or target-matrix closure is claimed."
+  },
+  "safe_cex_venue_cryptocom::signing::generate_signature": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "generate_signature",
+      "signature": {
+        "inputs": [
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "id",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "api_key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "api_secret",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "serde_json::value::Value",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "nonce",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "alloc::string::String",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Cryptographic output construction: serializes the already supplied params data, builds a signing preimage and computes HMAC-SHA256 hex. It returns an outbound signature or a coercion error preserving its name and message; it does not admit a decoded DTO. The params serializer and signing-data boundary remain independently reviewed.",
+    "evidence": "Executed tests/auth.rs::live_auth directly exercises this actual public function in 14 independently admitted source cases, observing native signature or coercion error; all 42 auth cases retain input/branch/clock admission. scripts/signing-role-controls.py corrupts this body's params serializer call: it compiles, fails auth_native_signature:0 with exit 101, restores exact source bytes and passes. Fresh native/default scripts/signing-role-contracts.mjs checks this exact compiler API among five explicit role classifications with zero failed owners; that receipt is classification-only, separate from the executed runtime evidence. Existing signing-data/string boundaries remain unchanged; no arbitrary JS, downstream decoder, alias, local or target-matrix closure is claimed."
+  },
+  "safe_cex_venue_cryptocom::signing::signature_from_params": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "signature_from_params",
+      "signature": {
+        "inputs": [
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "id",
+            {
+              "primitive": "f64"
+            }
+          ],
+          [
+            "api_key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "api_secret",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "param_string",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "nonce",
+            {
+              "primitive": "f64"
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "alloc::string::String",
+            "args": null
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Private cryptographic formatter: combines the supplied method, number-rendered id, API key, ALREADY SERIALIZED param string and number-rendered nonce, then computes HMAC hex using the supplied secret. No JSON parsing, raw field validation or typed decoder construction occurs here. It is reviewed individually, not exempted because private.",
+    "evidence": "Executed tests/auth.rs::live_auth runs this actual private formatter in the successful signature/request/WS compositions and compares native HMAC outputs against the unchanged source. It is not waived by the public callers: scripts/signing-role-controls.py separately corrupts this exact private HMAC body; it compiles, fails auth_native_signature:0 with exit 101, restores exact source bytes and passes. Fresh native/default scripts/signing-role-contracts.mjs checks this exact compiler API among five explicit role classifications with zero failed owners; that receipt is classification-only, separate from the executed runtime evidence. Existing signing-data/string boundaries remain unchanged; no arbitrary JS, downstream decoder, alias, local or target-matrix closure is claimed."
+  },
+  "safe_cex_venue_cryptocom::signing::generate_authenticated_request": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "generate_authenticated_request",
+      "signature": {
+        "inputs": [
+          [
+            "method",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "params",
+            {
+              "resolved_path": {
+                "path": "safe_cex_venue_cryptocom::signing_value::SigningValue",
+                "args": null
+              }
+            }
+          ],
+          [
+            "api_key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "api_secret",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "nonce",
+            {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "primitive": "f64"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            }
+          ],
+          [
+            "clock",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_store::virtual_clock::VirtualClock",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_cryptocom::signing::AuthenticatedRequest",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Outbound authenticated-request construction over an already captured SigningValue: reads the clock for id, lazily supplies an absent nonce, serializes params for signing and retains that same params handle in the result. It neither parses raw wire data nor grants decoder admission to SigningValue; that owner remains separately owed.",
+    "evidence": "Executed tests/auth.rs::live_auth directly exercises this actual request builder in 14 independently admitted source cases. Native fields, numeric bits, retained params reference identity, lazy clock counts and coercion error name/message are observed before output-shape checks. scripts/signing-role-controls.py makes this body's nonce fallback eager: it compiles, fails AUTH-EAGER-CLOCK-COUNT with exit 101, restores exact source bytes and passes. Fresh native/default scripts/signing-role-contracts.mjs checks this exact compiler API among five explicit role classifications with zero failed owners; that receipt is classification-only, separate from the executed runtime evidence. Existing signing-data/string boundaries remain unchanged; no arbitrary JS, downstream decoder, alias, local or target-matrix closure is claimed."
+  },
+  "safe_cex_venue_cryptocom::signing::generate_ws_auth_message": {
+    "category": "non-decoder",
+    "api": {
+      "kind": "function",
+      "name": "generate_ws_auth_message",
+      "signature": {
+        "inputs": [
+          [
+            "api_key",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "api_secret",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "primitive": "str"
+                }
+              }
+            }
+          ],
+          [
+            "clock",
+            {
+              "borrowed_ref": {
+                "lifetime": null,
+                "is_mutable": false,
+                "type": {
+                  "resolved_path": {
+                    "path": "safe_cex_store::virtual_clock::VirtualClock",
+                    "args": null
+                  }
+                }
+              }
+            }
+          ]
+        ],
+        "output": {
+          "resolved_path": {
+            "path": "core::result::Result",
+            "args": {
+              "angle_bracketed": {
+                "args": [
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_venue_cryptocom::signing::WsAuthMessage",
+                        "args": null
+                      }
+                    }
+                  },
+                  {
+                    "type": {
+                      "resolved_path": {
+                        "path": "safe_cex_exchange::runtime::ExchangeError",
+                        "args": null
+                      }
+                    }
+                  }
+                ],
+                "constraints": []
+              }
+            }
+          }
+        },
+        "is_c_variadic": false
+      },
+      "generics": {
+        "params": [],
+        "where_predicates": []
+      }
+    },
+    "reason": "Outbound WebSocket auth-message construction: reads id and nonce in source order, signs the fixed public/auth method with empty params and returns the protocol fields. This generates a request rather than decoding an incoming payload. Clock/signing semantics and returned native fields are independently witnessed.",
+    "evidence": "Executed tests/auth.rs::live_auth directly exercises this actual WS builder in 14 independently admitted source cases, observing native fields/signature/numeric bits and the two clock reads. scripts/signing-role-controls.py removes this body's second clock read: it compiles, fails AUTH-EAGER-CLOCK-COUNT with exit 101, restores exact source bytes and passes. Fresh native/default scripts/signing-role-contracts.mjs checks this exact compiler API among five explicit role classifications with zero failed owners; that receipt is classification-only, separate from the executed runtime evidence. Existing signing-data/string boundaries remain unchanged; no arbitrary JS, downstream decoder, alias, local or target-matrix closure is claimed."
   }
 }
