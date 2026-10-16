@@ -4749,6 +4749,879 @@
       ]
     }
   },
+  "safe_cex_venue_hyperliquid::types::HyperliquidUserAbstractionMode": {
+    "shape": "string",
+    "literals": [
+      "unifiedAccount",
+      "portfolioMargin",
+      "disabled",
+      "default",
+      "dexAbstraction",
+      "standard"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines79-80, concrete HyperliquidUserAbstractionMode native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::UnifiedAccount => serde_json::json!({\"ok\":true,\"variant\":\"UnifiedAccount\",\"ordinal\":0}), $type::PortfolioMargin => serde_json::json!({\"ok\":true,\"variant\":\"PortfolioMargin\",\"ordinal\":1}), $type::Disabled => serde_json::json!({\"ok\":true,\"variant\":\"Disabled\",\"ordinal\":2}), $type::Default => serde_json::json!({\"ok\":true,\"variant\":\"Default\",\"ordinal\":3}), $type::DexAbstraction => serde_json::json!({\"ok\":true,\"variant\":\"DexAbstraction\",\"ordinal\":4}), $type::Standard => serde_json::json!({\"ok\":true,\"variant\":\"Standard\",\"ordinal\":5})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"unifiedAccount\"",
+          "output": {
+            "ok": true,
+            "variant": "UnifiedAccount",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"portfolioMargin\"",
+          "output": {
+            "ok": true,
+            "variant": "PortfolioMargin",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"disabled\"",
+          "output": {
+            "ok": true,
+            "variant": "Disabled",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": "\"default\"",
+          "output": {
+            "ok": true,
+            "variant": "Default",
+            "ordinal": 3
+          }
+        },
+        {
+          "input": "\"dexAbstraction\"",
+          "output": {
+            "ok": true,
+            "variant": "DexAbstraction",
+            "ordinal": 4
+          }
+        },
+        {
+          "input": "\"standard\"",
+          "output": {
+            "ok": true,
+            "variant": "Standard",
+            "ordinal": 5
+          }
+        },
+        {
+          "input": " \n\"unifiedAccount\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "UnifiedAccount",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"unifiedAccount\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"portfolioMargin\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"disabled\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"default\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"dexAbstraction\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"standard\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::MetaUniverseItemMarginMode": {
+    "shape": "string",
+    "literals": [
+      "strictIsolated",
+      "noCross"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines104, concrete MetaUniverseItemMarginMode native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::StrictIsolated => serde_json::json!({\"ok\":true,\"variant\":\"StrictIsolated\",\"ordinal\":0}), $type::NoCross => serde_json::json!({\"ok\":true,\"variant\":\"NoCross\",\"ordinal\":1})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"strictIsolated\"",
+          "output": {
+            "ok": true,
+            "variant": "StrictIsolated",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"noCross\"",
+          "output": {
+            "ok": true,
+            "variant": "NoCross",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": " \n\"strictIsolated\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "StrictIsolated",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"strictIsolated\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"noCross\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::MetaUniverseItemGrowthMode": {
+    "shape": "string",
+    "literals": [
+      "enabled",
+      "disabled"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines105, concrete MetaUniverseItemGrowthMode native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Enabled => serde_json::json!({\"ok\":true,\"variant\":\"Enabled\",\"ordinal\":0}), $type::Disabled => serde_json::json!({\"ok\":true,\"variant\":\"Disabled\",\"ordinal\":1})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"enabled\"",
+          "output": {
+            "ok": true,
+            "variant": "Enabled",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"disabled\"",
+          "output": {
+            "ok": true,
+            "variant": "Disabled",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": " \n\"enabled\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Enabled",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"enabled\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"disabled\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::UserFundingDeltaType": {
+    "shape": "string",
+    "literals": [
+      "funding"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines396, concrete UserFundingDeltaType native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Funding => serde_json::json!({\"ok\":true,\"variant\":\"Funding\",\"ordinal\":0})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"funding\"",
+          "output": {
+            "ok": true,
+            "variant": "Funding",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": " \n\"funding\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Funding",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"funding\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::UserNonFundingLedgerDeltaType": {
+    "shape": "string",
+    "literals": [
+      "deposit",
+      "withdraw",
+      "transfer",
+      "liquidation"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines410, concrete UserNonFundingLedgerDeltaType native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Deposit => serde_json::json!({\"ok\":true,\"variant\":\"Deposit\",\"ordinal\":0}), $type::Withdraw => serde_json::json!({\"ok\":true,\"variant\":\"Withdraw\",\"ordinal\":1}), $type::Transfer => serde_json::json!({\"ok\":true,\"variant\":\"Transfer\",\"ordinal\":2}), $type::Liquidation => serde_json::json!({\"ok\":true,\"variant\":\"Liquidation\",\"ordinal\":3})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"deposit\"",
+          "output": {
+            "ok": true,
+            "variant": "Deposit",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"withdraw\"",
+          "output": {
+            "ok": true,
+            "variant": "Withdraw",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"transfer\"",
+          "output": {
+            "ok": true,
+            "variant": "Transfer",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": "\"liquidation\"",
+          "output": {
+            "ok": true,
+            "variant": "Liquidation",
+            "ordinal": 3
+          }
+        },
+        {
+          "input": " \n\"deposit\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Deposit",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"deposit\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"withdraw\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"transfer\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"liquidation\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::WsUserNonFundingLedgerUpdateType": {
+    "shape": "string",
+    "literals": [
+      "deposit",
+      "withdraw",
+      "transfer",
+      "liquidation"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines633, concrete WsUserNonFundingLedgerUpdateType native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Deposit => serde_json::json!({\"ok\":true,\"variant\":\"Deposit\",\"ordinal\":0}), $type::Withdraw => serde_json::json!({\"ok\":true,\"variant\":\"Withdraw\",\"ordinal\":1}), $type::Transfer => serde_json::json!({\"ok\":true,\"variant\":\"Transfer\",\"ordinal\":2}), $type::Liquidation => serde_json::json!({\"ok\":true,\"variant\":\"Liquidation\",\"ordinal\":3})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"deposit\"",
+          "output": {
+            "ok": true,
+            "variant": "Deposit",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"withdraw\"",
+          "output": {
+            "ok": true,
+            "variant": "Withdraw",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": "\"transfer\"",
+          "output": {
+            "ok": true,
+            "variant": "Transfer",
+            "ordinal": 2
+          }
+        },
+        {
+          "input": "\"liquidation\"",
+          "output": {
+            "ok": true,
+            "variant": "Liquidation",
+            "ordinal": 3
+          }
+        },
+        {
+          "input": " \n\"deposit\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Deposit",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"deposit\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"withdraw\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"transfer\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"liquidation\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::Hip3MarketInfoMarginMode": {
+    "shape": "string",
+    "literals": [
+      "strictIsolated",
+      "noCross"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines666, concrete Hip3MarketInfoMarginMode native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::StrictIsolated => serde_json::json!({\"ok\":true,\"variant\":\"StrictIsolated\",\"ordinal\":0}), $type::NoCross => serde_json::json!({\"ok\":true,\"variant\":\"NoCross\",\"ordinal\":1})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"strictIsolated\"",
+          "output": {
+            "ok": true,
+            "variant": "StrictIsolated",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"noCross\"",
+          "output": {
+            "ok": true,
+            "variant": "NoCross",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": " \n\"strictIsolated\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "StrictIsolated",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"strictIsolated\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"noCross\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_hyperliquid::types::Hip3MarketInfoGrowthMode": {
+    "shape": "string",
+    "literals": [
+      "enabled",
+      "disabled"
+    ],
+    "entrypoints": [],
+    "evidence": "Individually reviewed the maintained hyperliquid.types.ts declaration at lines667, concrete Hip3MarketInfoGrowthMode native variants, exact private remote renames and String admission. Native witnesses compare every declared tag to its independently specified enum variant and wire tag; each valid tagged object and seven other invalid values are rejected through text, qualified owned/borrowed Value and all three shared numeric ingress routes. Direct contract observations match native variants and fixed ordinals before serialization. No raw entrypoints are indexed beyond Deserialize. This reviews only this native/default owner; private companions, local helpers, aliases and target/feature matrices retain their obligations.",
+    "nativeObservation": {
+      "nativeFields": [
+        "variant",
+        "ordinal"
+      ],
+      "call": "{ let raw=$value.as_str().expect(\"independently authored enum JSON text\");let input:serde_json::Value=serde_json::from_str(raw).unwrap();let paths=[serde_json::from_str::<$type>(raw),<$type as serde::Deserialize>::deserialize(input.clone()),<$type as serde::Deserialize>::deserialize(&input),safe_cex_num::numeric_ingress::js_from_str::<$type>(raw),safe_cex_num::numeric_ingress::js_from_value::<$type>(input.clone()),safe_cex_num::numeric_ingress::js_from_value_ref::<$type>(&input)];let observations=paths.into_iter().map(|result|match result{Ok(decoded)=>match decoded {$type::Enabled => serde_json::json!({\"ok\":true,\"variant\":\"Enabled\",\"ordinal\":0}), $type::Disabled => serde_json::json!({\"ok\":true,\"variant\":\"Disabled\",\"ordinal\":1})},Err(_)=>serde_json::json!({\"ok\":false})}).collect::<Vec<_>>();for row in &observations[1..]{assert_eq!(row,&observations[0],\"enum decoder paths disagree\");}observations[0].clone() }",
+      "cases": [
+        {
+          "input": "\"enabled\"",
+          "output": {
+            "ok": true,
+            "variant": "Enabled",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "\"disabled\"",
+          "output": {
+            "ok": true,
+            "variant": "Disabled",
+            "ordinal": 1
+          }
+        },
+        {
+          "input": " \n\"enabled\"\t ",
+          "output": {
+            "ok": true,
+            "variant": "Enabled",
+            "ordinal": 0
+          }
+        },
+        {
+          "input": "{\"enabled\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{\"disabled\": null}",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "null",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "true",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "0",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "[]",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"__INVALID__\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "\"\"",
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": "{}",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
   "safe_cex_venue_hyperliquid::types::OrderResponseStatusCase3": {
     "shape": "string",
     "literals": [

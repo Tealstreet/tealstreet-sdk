@@ -3098,5 +3098,1335 @@
       "insufficient_fee_cap",
       "unverified"
     ]
+  },
+  "safe_cex_venue_asterdex::public_subscriptions::BookCallback": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::OrderBook",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_types::OrderBook",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "category": "non-decoder",
+    "reason": "The subscription stores an Rc callback receiving an already-constructed OrderBook snapshot and returning the existing ExchangeError result. It is invoked after order-book mapping, not a JSON/string constructor. Native probes establish actual Deserialize and raw conversion absence; they do not execute a subscriber.",
+    "evidence": "Reviewed safe-cex-venue-asterdex/src/public_subscriptions.rs::BookCallback and its local consumers. The native gate verifies full compiler inventory, all selected external roots against actual check artifacts/sysroot, invariant type equality for fixed generic aliases, and actual Deserialize plus seven raw conversion traits. This is an individual capability classification, with no blanket source/receiver exemption."
+  },
+  "safe_cex_venue_asterdex::public_subscriptions::CandleCallback": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_asterdex::ws_helpers::PublicKlineCandle",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "safe_cex_venue_asterdex::ws_helpers::PublicKlineCandle",
+                                    "args": null
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "category": "non-decoder",
+    "reason": "The kline subscription stores an Rc callback receiving the already-constructed PublicKlineCandle update and returning ExchangeError. It conveys a typed stream result without parsing raw input. Native probes establish actual Deserialize and raw conversion absence; they do not execute a subscriber.",
+    "evidence": "Reviewed safe-cex-venue-asterdex/src/public_subscriptions.rs::CandleCallback and its local consumers. The native gate verifies full compiler inventory, all selected external roots against actual check artifacts/sysroot, invariant type equality for fixed generic aliases, and actual Deserialize plus seven raw conversion traits. This is an individual capability classification, with no blanket source/receiver exemption."
+  },
+  "safe_cex_venue_asterdex::public_subscriptions::BookCleanup": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "tuple": []
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "category": "non-decoder",
+    "reason": "The returned Rc zero-argument closure owns order-book unsubscribe cleanup and propagates ExchangeError. It receives no raw input and is not a serializable cleanup token. Native probes establish actual Deserialize and raw conversion absence without executing cleanup.",
+    "evidence": "Reviewed safe-cex-venue-asterdex/src/public_subscriptions.rs::BookCleanup and its local consumers. The native gate verifies full compiler inventory, all selected external roots against actual check artifacts/sysroot, invariant type equality for fixed generic aliases, and actual Deserialize plus seven raw conversion traits. This is an individual capability classification, with no blanket source/receiver exemption."
+  },
+  "safe_cex_venue_asterdex::builder_approval::ApprovalFuture": {
+    "generics": {
+      "params": [
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_venue_asterdex::builder_approval::ApprovalFailure",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "T"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "resolved_path": {
+                                                                  "path": "safe_cex_venue_asterdex::builder_approval::ApprovalFailure",
+                                                                  "args": null
+                                                                }
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "category": "non-decoder",
+    "reason": "This Pin<Box<dyn Future>> carries the asynchronous result of a builder-wallet operation. Its fixed Value output does not turn a suspended future into a wire decoder. Native probes check the actual fixed future type and trait absence without polling or asserting anything about arbitrary T.",
+    "evidence": "Reviewed safe-cex-venue-asterdex/src/builder_approval.rs::ApprovalFuture and its local consumers. The native gate verifies full compiler inventory, all selected external roots against actual check artifacts/sysroot, invariant type equality for fixed generic aliases, and actual Deserialize plus seven raw conversion traits. This is an individual capability classification, with no blanket source/receiver exemption."
+  },
+  "safe_cex_venue_asterdex::runtime_host::ResultValue": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        },
+        {
+          "name": "T",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": {
+                "generic": "V"
+              },
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "generic": "V"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::result::Result",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "generic": "T"
+                }
+              },
+              {
+                "type": {
+                  "generic": "V"
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "category": "decoder",
+    "shape": "union",
+    "positive": [
+      {
+        "Ok": {
+          "answer": "yes"
+        }
+      },
+      {
+        "Err": false
+      },
+      {
+        "Ok": null
+      },
+      {
+        "Err": [
+          "a",
+          "b"
+        ]
+      }
+    ],
+    "negative": [
+      null,
+      true,
+      3,
+      "Ok",
+      [],
+      {},
+      {
+        "Other": 1
+      },
+      {
+        "Ok": 1,
+        "Err": 2
+      }
+    ],
+    "evidence": "runtime_host.rs ResultValue<V,T=V> is the actual standard Result<T,V>. Its independently reviewed fixed V=serde_json::Value leaves default T=V and genuinely implements Deserialize; it is not exempted as runtime plumbing. Native observations distinguish Ok/Err and payloads through four actual decoder routes. This covers this one fixed JSON-value monomorphization, not arbitrary host V or T, and introduces no venue input API.",
+    "observation": {
+      "call": "{ let observe=|decoded:$type| match decoded { Ok(payload)=>serde_json::json!({\"variant\":\"Ok\",\"payload\":payload}),Err(payload)=>serde_json::json!({\"variant\":\"Err\",\"payload\":payload}) }; let text=$value.to_string(); let mut decoder=serde_json::Deserializer::from_str(&text); match (serde_json::from_value::<$type>($value.clone()),<$type as serde::Deserialize>::deserialize($value),serde_json::from_str::<$type>(&text),<$type as serde::Deserialize>::deserialize(&mut decoder)) { (Ok(owned),Ok(borrowed),Ok(text),Ok(qualified))=>{decoder.end().unwrap();let expected=observe(owned);assert_eq!(expected,observe(borrowed),\"ASTER ResultValue borrowed native variant/payload\");assert_eq!(expected,observe(text),\"ASTER ResultValue text native variant/payload\");assert_eq!(expected,observe(qualified),\"ASTER ResultValue qualified native variant/payload\");expected},(Err(_),Err(_),Err(_),Err(_))=>serde_json::json!({\"error\":true}),_=>panic!(\"ASTER ResultValue route disagreement\") } }",
+      "cases": [
+        {
+          "input": {
+            "Ok": {
+              "answer": "yes"
+            }
+          },
+          "output": {
+            "variant": "Ok",
+            "payload": {
+              "answer": "yes"
+            }
+          }
+        },
+        {
+          "input": {
+            "Err": false
+          },
+          "output": {
+            "variant": "Err",
+            "payload": false
+          }
+        },
+        {
+          "input": {
+            "Ok": null
+          },
+          "output": {
+            "variant": "Ok",
+            "payload": null
+          }
+        },
+        {
+          "input": {
+            "Err": [
+              "a",
+              "b"
+            ]
+          },
+          "output": {
+            "variant": "Err",
+            "payload": [
+              "a",
+              "b"
+            ]
+          }
+        },
+        {
+          "input": null,
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": true,
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": 3,
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": "Ok",
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": {
+            "Other": 1
+          },
+          "output": {
+            "error": true
+          }
+        },
+        {
+          "input": {
+            "Ok": 1,
+            "Err": 2
+          },
+          "output": {
+            "error": true
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_asterdex::runtime_host::Task": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "core::pin::Pin",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "resolved_path": {
+                    "path": "alloc::boxed::Box",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "dyn_trait": {
+                                "traits": [
+                                  {
+                                    "trait": {
+                                      "path": "core::future::future::Future",
+                                      "args": {
+                                        "angle_bracketed": {
+                                          "args": [],
+                                          "constraints": [
+                                            {
+                                              "name": "Output",
+                                              "args": null,
+                                              "binding": {
+                                                "equality": {
+                                                  "type": {
+                                                    "resolved_path": {
+                                                      "path": "core::result::Result",
+                                                      "args": {
+                                                        "angle_bracketed": {
+                                                          "args": [
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            },
+                                                            {
+                                                              "type": {
+                                                                "generic": "V"
+                                                              }
+                                                            }
+                                                          ],
+                                                          "constraints": []
+                                                        }
+                                                      }
+                                                    }
+                                                  }
+                                                }
+                                              }
+                                            }
+                                          ]
+                                        }
+                                      }
+                                    },
+                                    "generic_params": []
+                                  }
+                                ],
+                                "lifetime": null
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "category": "non-decoder",
+    "reason": "The runtime host starts or adopts a pinned boxed future producing its existing ResultValue. A fixed Value output retains task ownership rather than providing a raw JSON entrypoint. Native probes check that actual future monomorphization and trait absence without polling it or claiming every V.",
+    "evidence": "Reviewed safe-cex-venue-asterdex/src/runtime_host.rs::Task and its local consumers. The native gate verifies full compiler inventory, all selected external roots against actual check artifacts/sysroot, invariant type equality for fixed generic aliases, and actual Deserialize plus seven raw conversion traits. This is an individual capability classification, with no blanket source/receiver exemption."
+  },
+  "safe_cex_venue_asterdex::runtime_host::Function": {
+    "generics": {
+      "params": [
+        {
+          "name": "V",
+          "kind": {
+            "type": {
+              "bounds": [],
+              "default": null,
+              "is_synthetic": false
+            }
+          }
+        }
+      ],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "safe_cex_venue_asterdex::runtime_host::ResultValue",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "resolved_path": {
+                                    "path": "alloc::vec::Vec",
+                                    "args": {
+                                      "angle_bracketed": {
+                                        "args": [
+                                          {
+                                            "type": {
+                                              "generic": "V"
+                                            }
+                                          }
+                                        ],
+                                        "constraints": []
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "generic": "V"
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "category": "non-decoder",
+    "reason": "The runtime bridge retains an Rc callable that receives already-bound runtime arguments and returns ResultValue. Its fixed Value signature is a callback capability, not a raw callable decoder. Native probes check the actual callable monomorphization and trait absence without executing arbitrary host code or claiming every V.",
+    "evidence": "Reviewed safe-cex-venue-asterdex/src/runtime_host.rs::Function and its local consumers. The native gate verifies full compiler inventory, all selected external roots against actual check artifacts/sysroot, invariant type equality for fixed generic aliases, and actual Deserialize plus seven raw conversion traits. This is an individual capability classification, with no blanket source/receiver exemption."
+  },
+  "safe_cex_venue_asterdex::native_exchange::AsterDEXHttpFactory": {
+    "generics": {
+      "params": [],
+      "where_predicates": []
+    },
+    "rawTarget": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::ExchangeOptions",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "dyn_trait": {
+                                                          "traits": [
+                                                            {
+                                                              "trait": {
+                                                                "path": "safe_cex_exchange::js_runtime::client::JsHttpHost",
+                                                                "args": null
+                                                              },
+                                                              "generic_params": []
+                                                            }
+                                                          ],
+                                                          "lifetime": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "target": {
+      "resolved_path": {
+        "path": "alloc::rc::Rc",
+        "args": {
+          "angle_bracketed": {
+            "args": [
+              {
+                "type": {
+                  "dyn_trait": {
+                    "traits": [
+                      {
+                        "trait": {
+                          "path": "core::ops::function::Fn",
+                          "args": {
+                            "parenthesized": {
+                              "inputs": [
+                                {
+                                  "borrowed_ref": {
+                                    "lifetime": null,
+                                    "is_mutable": false,
+                                    "type": {
+                                      "resolved_path": {
+                                        "path": "safe_cex_types::ExchangeOptions",
+                                        "args": null
+                                      }
+                                    }
+                                  }
+                                }
+                              ],
+                              "output": {
+                                "resolved_path": {
+                                  "path": "core::result::Result",
+                                  "args": {
+                                    "angle_bracketed": {
+                                      "args": [
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "alloc::rc::Rc",
+                                              "args": {
+                                                "angle_bracketed": {
+                                                  "args": [
+                                                    {
+                                                      "type": {
+                                                        "dyn_trait": {
+                                                          "traits": [
+                                                            {
+                                                              "trait": {
+                                                                "path": "safe_cex_exchange::js_runtime::client::JsHttpHost",
+                                                                "args": null
+                                                              },
+                                                              "generic_params": []
+                                                            }
+                                                          ],
+                                                          "lifetime": null
+                                                        }
+                                                      }
+                                                    }
+                                                  ],
+                                                  "constraints": []
+                                                }
+                                              }
+                                            }
+                                          }
+                                        },
+                                        {
+                                          "type": {
+                                            "resolved_path": {
+                                              "path": "safe_cex_exchange::runtime::ExchangeError",
+                                              "args": null
+                                            }
+                                          }
+                                        }
+                                      ],
+                                      "constraints": []
+                                    }
+                                  }
+                                }
+                              }
+                            }
+                          }
+                        },
+                        "generic_params": []
+                      }
+                    ],
+                    "lifetime": null
+                  }
+                }
+              }
+            ],
+            "constraints": []
+          }
+        }
+      }
+    },
+    "entrypoints": [],
+    "category": "non-decoder",
+    "reason": "The registry-supplied Rc factory receives a typed ExchangeOptions reference and returns an existing JsHttpHost handle or ExchangeError. It constructs a native dependency after options decoding, rather than decoding a JSON/string factory capability. Native probes check actual factory type/trait absence without constructing a client.",
+    "evidence": "Reviewed safe-cex-venue-asterdex/src/native_exchange.rs::AsterDEXHttpFactory and its local consumers. The native gate verifies full compiler inventory, all selected external roots against actual check artifacts/sysroot, invariant type equality for fixed generic aliases, and actual Deserialize plus seven raw conversion traits. This is an individual capability classification, with no blanket source/receiver exemption."
   }
 }
