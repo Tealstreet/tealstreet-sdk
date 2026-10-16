@@ -176,3 +176,11 @@ The native registry supplies the shared default tunnel adapter when requested.
 The registry tunnel witness verifies public/private reads over real rpc.http,
 proxy-token authentication, signed query bytes and zero direct HTTP. Missing
 and no-op installer mutations must compile and fail before exact restoration.
+
+`PhemexApiResponse<T>` streams `code`/`msg` directly from the original map and
+forwards payload fields to `T` through a filtering MapAccess. This avoids Serde
+flatten's intermediate Content buffer, which misreads arbitrary-precision JSON
+number tokens in a typed payload. The flat serialization schema and original
+`T: Deserialize<'de>` bound remain intact, including borrowed payloads. Metadata
+is checked even if a custom payload finishes early. Existing numeric-ingress
+frontdoors retain their ECMAScript Number and nonfinite-output checks.
