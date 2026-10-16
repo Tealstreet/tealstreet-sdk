@@ -1145,3 +1145,12 @@ their separate typed decoder. Other field admission, omission and atomic patch
 validation retain [the Store patch choice](../parity/MANIFEST-SPEC.md#store-typed-patch-choice).
 `tests/js_store_patch_numbers.rs` exercises all five model patch methods, with
 compiled projection and signed-zero controls in the adjacent Python runner.
+
+`BaseWebSocket::last_received` and `set_last_received` expose the raw source
+`lastReceived` scalar without normalization or side effects. Subclasses that
+assign it must synchronize health explicitly in source order. The existing
+`last_message_timestamp` and diagnostics normalize nonpositive/NaN values to
+absence. Native websocket tests check exact numeric bits and the connected
+health/timestamp transition through assignment and reset. The adjacent
+`tests/raw_last_received_controls.py` requires compiled failures when assignment
+is removed or signed zero is erased, with exact restoration after each fault.
