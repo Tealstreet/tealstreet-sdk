@@ -20,8 +20,8 @@ export const families = [
   ['bybit', 'core_snapshot_readers', 'SnapshotHost', 26, 'bybit.exchange', 'BybitExchange.tick', 'set'],
   ['hyperliquid', 'spot_account_reads', 'SpotAccountHost', 26, 'hyperliquidspot.exchange', 'HyperliquidSpotExchange.fetchOHLCV', 'candle_binding'],
   ['backpack', 'public_listeners', 'Host', 23, 'backpack.ws-public', 'BackpackPublicWebSocket.listenOrderBook', 'cancel_throttle'],
-  // array has no production consumer in exchange_runtime; its diagnostic stays required.
-  ['mexc', 'exchange_runtime', 'ExchangeRuntimeHost', 23, 'mexc.exchange', 'MexcExchange.fetchBalanceAndPositions', 'destructure_pair', ['array']],
+  // The inherited array capability is consumed by order_workflow and runtime_assembly.
+  ['mexc', 'exchange_runtime', 'ExchangeRuntimeHost', 23, 'mexc.exchange', 'MexcExchange.fetchBalanceAndPositions', 'destructure_pair'],
   ['orderly', 'ws_controls', 'WsHost', 23, 'orderly.ws-private', 'OrderlyPrivateWebSocket.connectAndSubscribe', 'Error'],
   ['bitrue', 'trading_rest', 'TradingHost', 22, 'bitrue.exchange', 'BitrueExchange#formatCreateOrder', 'uuid'],
   ['orderly', 'runtime_actions', 'RuntimeHost', 22, 'orderly.exchange', 'OrderlyExchange.tick', 'add'],

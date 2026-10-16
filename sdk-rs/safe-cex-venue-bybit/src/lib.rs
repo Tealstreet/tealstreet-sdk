@@ -51,11 +51,10 @@ mod rest_positions;
 
 mod submission;
 
-#[expect(
-    dead_code,
-    reason = "Exchange composition awaits concrete API and protocol factories"
-)]
-mod exchange;
+pub mod binding;
+pub mod exchange;
+pub use binding::BybitDependencies;
+pub use exchange::BybitExchange;
 
 mod json_field;
 
@@ -118,3 +117,8 @@ pub mod private_snapshot_refresh;
 
 pub mod local_order_reconciliation;
 pub mod primary_local_order_writes;
+
+pub mod primary_startup;
+
+pub mod inverse_symbol;
+pub mod options;

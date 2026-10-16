@@ -873,6 +873,7 @@ impl SpotAccountHost for Host {
             "qs" => object(vec![("stringify", N::Builtin("qs".into()))]),
             "MarginType" | "OrderType" | "OrderSide" | "OrderTimeInForce" => get(&self.enums, k),
             "PositionSide" | "PositionMode" | "LogSeverity" => get(&self.enums, k),
+            "hyperliquidClientOrderIdRule" => object(vec![("rule", s("hyperliquid"))]),
             "HyperliquidSpotExchange" => object(vec![
                 ("SPOT_BALANCE_REFRESH_MS", N::Num(10000.)),
                 ("SPOT_BALANCE_FORCE_REFRESH_COOLDOWN_MS", N::Num(1500.)),
@@ -1775,6 +1776,14 @@ impl Host {
                     return Ok(self.ready(Ok(arr(vec![N::Num(99.)]))));
                 }
                 return Ok(N::U);
+            }
+            "mintHyperliquidCloid" => {
+                self.inner
+                    .borrow_mut()
+                    .originals
+                    .push((id.into(), args.to_vec()));
+                self.record(id, args);
+                return Ok(s("0xminted"));
             }
             "resolveCallerClientOrderId" => {
                 self.inner

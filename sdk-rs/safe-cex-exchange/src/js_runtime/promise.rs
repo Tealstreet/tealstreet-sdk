@@ -14,7 +14,9 @@ pub type JsFuture<'a> = Pin<Box<dyn Future<Output = Result<Js, Thrown>> + 'a>>;
 
 struct State {
     result: Option<Result<Js, Thrown>>,
-    waiters: Vec<Waker>,
+    /// One entry per pending `PromiseWait`, removed by that wait's Drop.
+    waiters: Vec<(u64, Waker)>,
+    next_waiter: u64,
     task: Option<Box<dyn ExchangeTask>>,
     runtime: Rc<dyn ExchangeRuntime>,
 }
@@ -35,6 +37,7 @@ impl Promise {
         Self(Rc::new(RefCell::new(State {
             result: None,
             waiters: vec![],
+            next_waiter: 0,
             task: None,
             runtime: runtime.clone(),
         })))
@@ -53,7 +56,7 @@ impl Promise {
             (std::mem::take(&mut state.waiters), state.task.take())
         };
         drop(task);
-        for waiter in waiters {
+        for (_, waiter) in waiters {
             waiter.wake();
         }
     }
@@ -79,18 +82,59 @@ impl Promise {
         }
         promise
     }
-    pub fn wait(&self) -> impl Future<Output = Result<Js, Thrown>> + 'static {
-        let state = self.0.clone();
-        poll_fn(move |cx| {
-            let mut state = state.borrow_mut();
-            if let Some(result) = &state.result {
-                return Poll::Ready(result.clone());
+    pub fn wait(&self) -> PromiseWait {
+        PromiseWait {
+            state: self.0.clone(),
+            registration: None,
+        }
+    }
+}
+
+/// One awaiter of a promise. Dropping it releases its waker without settling
+/// or cancelling the promise, which other awaiters and the runtime still own.
+pub struct PromiseWait {
+    state: Rc<RefCell<State>>,
+    registration: Option<u64>,
+}
+impl Future for PromiseWait {
+    type Output = Result<Js, Thrown>;
+    fn poll(mut self: Pin<&mut Self>, cx: &mut Context<'_>) -> Poll<Self::Output> {
+        let registration = self.registration;
+        let mut state = self.state.borrow_mut();
+        if let Some(result) = &state.result {
+            return Poll::Ready(result.clone());
+        }
+        let replaced = match registration
+            .and_then(|id| state.waiters.iter_mut().find(|(entry, _)| *entry == id))
+        {
+            Some((_, waker)) if waker.will_wake(cx.waker()) => None,
+            Some((_, waker)) => Some(std::mem::replace(waker, cx.waker().clone())),
+            None => {
+                let id = state.next_waiter;
+                state.next_waiter += 1;
+                state.waiters.push((id, cx.waker().clone()));
+                drop(state);
+                self.registration = Some(id);
+                return Poll::Pending;
             }
-            if !state.waiters.iter().any(|w| w.will_wake(cx.waker())) {
-                state.waiters.push(cx.waker().clone());
-            }
-            Poll::Pending
-        })
+        };
+        drop(state);
+        // A replaced host waker is destroyed after the borrow is released.
+        drop(replaced);
+        Poll::Pending
+    }
+}
+impl Drop for PromiseWait {
+    fn drop(&mut self) {
+        let Some(id) = self.registration else {
+            return;
+        };
+        let removed = {
+            let mut state = self.state.borrow_mut();
+            let index = state.waiters.iter().position(|(entry, _)| *entry == id);
+            index.map(|index| state.waiters.swap_remove(index))
+        };
+        drop(removed);
     }
 }
 
@@ -119,6 +163,8 @@ pub async fn all(values: Vec<Js>) -> Result<Js, Thrown> {
     let promises: Vec<Js> = values;
     // A later rejection that settles first must win, so poll every promise each turn.
     let mut results: Vec<Option<Js>> = vec![None; promises.len()];
+    // Each pending promise keeps one wait registered across turns.
+    let mut waits: Vec<Option<PromiseWait>> = promises.iter().map(|_| None).collect();
     poll_fn(|cx| {
         let mut pending = false;
         for (i, value) in promises.iter().enumerate() {
@@ -130,8 +176,8 @@ pub async fn all(values: Vec<Js>) -> Result<Js, Thrown> {
                     Some(Ok(v)) => results[i] = Some(v),
                     Some(Err(e)) => return Poll::Ready(Err(e)),
                     None => {
-                        let mut fut = Box::pin(p.wait());
-                        let _ = fut.as_mut().poll(cx);
+                        let wait = waits[i].get_or_insert_with(|| p.wait());
+                        let _ = Pin::new(wait).poll(cx);
                         pending = true;
                     }
                 },

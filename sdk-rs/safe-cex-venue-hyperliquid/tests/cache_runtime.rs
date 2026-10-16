@@ -22,7 +22,7 @@ fn oracle() -> &'static Vec<Value> {
             String::from_utf8_lossy(&out.stderr)
         );
         let rows: Vec<Value> = serde_json::from_slice(&out.stdout).unwrap();
-        assert_eq!(rows.len(), 27, "independent source case floor");
+        assert_eq!(rows.len(), 56, "independent source case floor");
         rows
     })
 }
@@ -46,6 +46,25 @@ fn setup(row: &Value) -> (Host, CacheModule<N>, N) {
     }
     let module = new_module(&mut h).unwrap();
     let c = new_cache(&mut h, &module).unwrap().value;
+    if let Some(records) = input["records"].as_array() {
+        let map = h.get(&c, "placementRecords").unwrap();
+        for pair in records {
+            let pair = pair.as_array().unwrap();
+            h.invoke(
+                &map,
+                "set",
+                &[Host::decode(&pair[0]), Host::decode(&pair[1])],
+            )
+            .unwrap();
+        }
+    }
+    // After construction, as in the source oracle: the constructor clears these keys.
+    if let Some(stored) = input["stored"].as_object() {
+        for (key, value) in stored {
+            h.set(&h.storage.clone(), &s(key), &s(&value.to_string()))
+                .unwrap();
+        }
+    }
     if let Some(pre) = input["pre"].as_array() {
         let map = h.get(&c, "workerPrePlacementCache").unwrap();
         h.invoke(
@@ -64,9 +83,28 @@ fn compare(h: &mut Host, c: &N, result: &N, row: &Value) {
         ("workerPendingOrdersCache", "pending"),
         ("workerPrePlacementCache", "pre"),
         ("workerSeenFillsSet", "seen"),
+        ("placementRecords", "records"),
     ] {
         let value = h.get(c, field).unwrap();
         assert_native(&value, &row[key], &format!("CACHE {key} {name}"));
+    }
+    if !row["stored"].is_null() {
+        for (field, key) in [
+            ("pre", "tealstreet_hip3_prePlacement"),
+            ("records", "tealstreet_hl_placementRecords"),
+        ] {
+            let native = h.get(&h.storage.clone(), key).unwrap();
+            let expected = &row["stored"][field];
+            match native {
+                N::U | N::Null => assert!(expected.is_null(), "CACHE stored {field} {name}"),
+                N::S(text) => assert_eq!(
+                    numeric(serde_json::from_str(&String::from_utf16_lossy(&text.0)).unwrap()),
+                    numeric(serde_json::from_str(expected.as_str().unwrap()).unwrap()),
+                    "CACHE stored {field} {name}"
+                ),
+                other => panic!("CACHE stored {field} {name}: {other:?}"),
+            }
+        }
     }
     assert_eq!(
         h.messages.len(),
@@ -82,6 +120,85 @@ fn compare(h: &mut Host, c: &N, result: &N, row: &Value) {
         "CACHE global reads {name}"
     );
 }
+/// JSON equality with every number compared as f64 (JS spells 39000, serde 39000.0).
+fn numeric(value: Value) -> Value {
+    match value {
+        Value::Number(n) => Value::from(n.as_f64().unwrap()),
+        Value::Array(a) => Value::Array(a.into_iter().map(numeric).collect()),
+        Value::Object(o) => Value::Object(o.into_iter().map(|(k, v)| (k, numeric(v))).collect()),
+        other => other,
+    }
+}
+fn family(name: &str, count: usize) -> Vec<&'static Value> {
+    let rows = oracle()
+        .iter()
+        .filter(|r| r["family"] == name)
+        .collect::<Vec<_>>();
+    assert_eq!(rows.len(), count, "CACHE {name} family floor");
+    rows
+}
+fn args(row: &Value) -> Vec<N> {
+    row["input"]["args"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .map(Host::decode)
+        .collect()
+}
+#[test]
+fn trigger_matches_only_a_lone_sized_stop_or_take() {
+    for row in family("trigger", 8) {
+        let (mut h, _, c) = setup(row);
+        let result = h
+            .invoke(&c, "matchPrePlacementTrigger", &args(row))
+            .unwrap();
+        compare(&mut h, &c, &result, row);
+    }
+}
+#[test]
+fn remove_by_cloid_consumes_only_that_entry() {
+    for row in family("remove-cloid", 4) {
+        let (mut h, _, c) = setup(row);
+        let result = h
+            .invoke(&c, "removePrePlacementByCloid", &args(row))
+            .unwrap();
+        compare(&mut h, &c, &result, row);
+    }
+}
+#[test]
+fn placement_records_round_trip_memory_and_storage() {
+    for row in family("records", 11) {
+        let (mut h, _, c) = setup(row);
+        let name = row["name"].as_str().unwrap();
+        let record = |placed_at: f64, price: f64| {
+            object(vec![
+                ("type", s("limit")),
+                ("price", N::Num(price)),
+                ("side", s("buy")),
+                ("amount", N::Num(2.)),
+                ("reduceOnly", N::B(false)),
+                ("symbol", s("X")),
+                ("placedAt", N::Num(placed_at)),
+            ])
+        };
+        let result = match name {
+            "records-add" | "records-add-no-storage" => h
+                .invoke(&c, "addPlacementRecord", &[s("0xa"), record(39000., 1.)])
+                .unwrap(),
+            "records-add-evicts-stale" => h
+                .invoke(&c, "addPlacementRecord", &[s("0xa"), record(39500., 1.)])
+                .unwrap(),
+            "records-cap" => h
+                .invoke(&c, "addPlacementRecord", &[s("0xnew"), record(39500., 1.)])
+                .unwrap(),
+            "records-remove-both" | "records-remove-storage-only" => {
+                h.invoke(&c, "removePlacementRecord", &[s("0xa")]).unwrap()
+            }
+            _ => h.invoke(&c, "getPlacementRecord", &[s("0xa")]).unwrap(),
+        };
+        compare(&mut h, &c, &result, row);
+    }
+}
 #[test]
 fn class_descriptors() {
     let row = oracle().iter().find(|r| r["family"] == "class").unwrap();
@@ -96,7 +213,7 @@ fn class_descriptors() {
         panic!("CACHE class prototype")
     };
     let p = p.borrow();
-    assert_eq!(p.fields.len(), 19, "CACHE class independent method floor");
+    assert_eq!(p.fields.len(), 27, "CACHE class independent method floor");
     assert!(p.fields.iter().all(|p| !p.2), "CACHE class nonenumerable");
     assert!(
         eq(&h.get(&m.prototype, "constructor").unwrap(), &m.constructor),
@@ -134,12 +251,12 @@ fn constructor_order() {
         let (mut h, _, c) = setup(row);
         compare(&mut h, &c, &N::U, row);
         assert_eq!(
-            &h.events[..3],
-            ["map", "map", "set"],
+            &h.events[..4],
+            ["map", "map", "set", "map"],
             "CACHE constructor fields before init"
         );
         assert_eq!(
-            &h.events[3..],
+            &h.events[4..],
             row["events"]
                 .as_array()
                 .unwrap()
@@ -156,7 +273,7 @@ fn broadcast_receives() {
         .iter()
         .filter(|r| r["family"] == "receive")
         .collect::<Vec<_>>();
-    assert_eq!(rows.len(), 9);
+    assert_eq!(rows.len(), 13);
     for row in rows {
         let (mut h, _, c) = setup(row);
         let channel = h.get(&c, "orderCacheBroadcast").unwrap();
@@ -202,7 +319,7 @@ fn add_boundaries() {
         .iter()
         .filter(|r| r["family"] == "add")
         .collect::<Vec<_>>();
-    assert_eq!(rows.len(), 3);
+    assert_eq!(rows.len(), 5);
     for row in rows {
         let (mut h, _, c) = setup(row);
         let args = row["input"]["args"]
@@ -272,9 +389,13 @@ fn singleton_identity_and_retry() {
         matches!(h.get(&c, "workerSeenFillsSet").unwrap(), N::Set(_)),
         "CACHE retry seen set"
     );
+    assert!(
+        matches!(h.get(&c, "placementRecords").unwrap(), N::Map(_)),
+        "CACHE retry placement record map"
+    );
     assert_eq!(
         h.events.iter().filter(|e| *e == "map").count(),
-        3,
+        4,
         "CACHE retry reconstructed maps"
     );
     assert!(

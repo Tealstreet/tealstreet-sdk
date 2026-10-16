@@ -121,16 +121,22 @@ fn request_signing_matches_live_interceptor() {
             );
         }
     }
-    assert_eq!(fixtures["statuses"].as_array().unwrap().len(), 9);
+    assert_eq!(fixtures["statuses"].as_array().unwrap().len(), 27);
+    let mut blocked = 0;
     for case in fixtures["statuses"].as_array().unwrap() {
+        let cdn = blocked_by_cdn(&case["body"]);
+        blocked += usize::from(cdn);
         assert_eq!(
             http_failure_message(
                 case["status"].as_u64().unwrap() as u16,
-                case["statusText"].as_str()
+                case["statusText"].as_str(),
+                cdn
             ),
-            case["message"].as_str().unwrap()
+            case["message"].as_str().unwrap(),
+            "status message {case}"
         );
     }
+    assert_eq!(blocked, 18, "CloudFront body cases");
     assert_eq!(fixtures["paths"].as_array().unwrap().len(), 10);
     for case in fixtures["paths"].as_array().unwrap() {
         assert_eq!(

@@ -173,7 +173,7 @@ struct Host {
 impl Host {
     fn new(row: &Value) -> Self {
         let i = &row["input"];
-        Self{input:i.clone(),events:RefCell::new(vec![]),errors:["rawGet","rawSync","rawAsync","disposed","stored","parse","helperGet","helperSync","helperAsync","categories","all","getSync","getAsync","emit"].into_iter().map(|p|(p.into(),Rc::new(json!({"name":format!("{p}Error"),"message":format!("{p} failed"),"code":41})))).collect(),disposed:Cell::new(i["disposed"]==true),helper_tag:RefCell::new("H0".into()),helper_calls:Cell::new(0),raw:from_json(&i.get("raw").cloned().unwrap_or_else(||json!([{"symbol":"BTC","tag":"RAW-17"}]))),stored:from_json(&json!([{"symbol":"BTC","tag":"STORED-29"}])),parsed:from_json(&json!([{"symbol":"BTC","tag":"PARSED-43"}])),data:from_json(&i.get("data").cloned().unwrap_or_else(||json!({"retMsg":"OK","result":{"list":[{"symbol":"BTC","tag":"LIST-53"}]}}))),categories:Rc::new(i.get("categories").cloned().unwrap_or_else(||json!(["inverse"])).as_array().unwrap().iter().map(|v|v.as_str().unwrap().into()).collect()),sets:i.get("sets").cloned().unwrap_or_else(||json!([[{"symbol":"BTC","tag":"SET0"}],[{"symbol":"ETH","tag":"SET1"}]])).as_array().unwrap().iter().map(from_json).collect(),tasks:RefCell::new(vec![])}
+        Self{input:i.clone(),events:RefCell::new(vec![]),errors:["rawGet","rawSync","rawAsync","disposed","stored","parse","helperGet","helperSync","helperAsync","categories","all","getSync","getAsync","emit","inverseEnabled"].into_iter().map(|p|(p.into(),Rc::new(json!({"name":format!("{p}Error"),"message":format!("{p} failed"),"code":41})))).collect(),disposed:Cell::new(i["disposed"]==true),helper_tag:RefCell::new("H0".into()),helper_calls:Cell::new(0),raw:from_json(&i.get("raw").cloned().unwrap_or_else(||json!([{"symbol":"BTC","tag":"RAW-17"}]))),stored:from_json(&json!([{"symbol":"BTC","tag":"STORED-29"}])),parsed:from_json(&json!([{"symbol":"BTC","tag":"PARSED-43"}])),data:from_json(&i.get("data").cloned().unwrap_or_else(||json!({"retMsg":"OK","result":{"list":[{"symbol":"BTC","tag":"LIST-53"}]}}))),categories:Rc::new(i.get("categories").cloned().unwrap_or_else(||json!(["inverse"])).as_array().unwrap().iter().map(|v|v.as_str().unwrap().into()).collect()),sets:i.get("sets").cloned().unwrap_or_else(||json!([[{"symbol":"BTC","tag":"SET0"}],[{"symbol":"ETH","tag":"SET1"}]])).as_array().unwrap().iter().map(from_json).collect(),tasks:RefCell::new(vec![])}
     }
     fn event(&self, phase: &str, e: Value) -> Result<(), Error> {
         self.events.borrow_mut().push(e);
@@ -238,6 +238,10 @@ impl Host {
             Ok(self.data.clone())
         })
     }
+    fn inverse_enabled(&self) -> Result<bool, Error> {
+        self.event("inverseEnabled", json!(["inverseEnabled", true]))?;
+        Ok(self.input["inverse"] == true)
+    }
     fn emit(&self, message: TickerValue) -> Result<(), Error> {
         self.event("emit", json!(["emit", leaves(&message)]))
     }
@@ -295,8 +299,10 @@ impl Host {
                 .and_then(|v| v.get(count))
                 .and_then(Value::as_u64)
                 .unwrap_or(1) as usize,
-            value: if primary {
+            value: if primary && count == 0 {
                 self.raw.clone()
+            } else if primary {
+                self.sets.get(1).cloned().unwrap_or(TickerValue::Undefined)
             } else {
                 self.sets
                     .get(count)
@@ -413,7 +419,7 @@ fn ticker_readers_match_maintained_bodies() {
         String::from_utf8_lossy(&output.stderr)
     );
     let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(rows.len(), 172, "TICKER independent fixture floor");
+    assert_eq!(rows.len(), 179, "TICKER independent fixture floor");
     let mut counts = BTreeMap::<String, usize>::new();
     for (iteration, row) in rows.iter().enumerate() {
         let h = Rc::new(Host::new(row));
@@ -443,6 +449,7 @@ fn ticker_readers_match_maintained_bodies() {
                     let tag = h.bind()?;
                     h.helper(&tag, cat, None, None, true).map(OneTask)
                 },
+                || h.inverse_enabled(),
                 |m| h.emit(m),
                 |m| h.type_error(m),
             )),
@@ -606,7 +613,7 @@ fn ticker_readers_match_maintained_bodies() {
             ("spot/without".into(), 14),
             ("spot/parsed".into(), 14),
             ("spot/helper".into(), 19),
-            ("primary/primaryRaw".into(), 13),
+            ("primary/primaryRaw".into(), 20),
             ("inverse/inverseRaw".into(), 18)
         ]),
         "TICKER independent eleven-symbol floors"

@@ -845,3 +845,184 @@ fn native_order_reads_before_source() {
         )
     }
 }
+const FIND: [&str; 15] = [
+    "store-hit",
+    "store-other-symbol",
+    "no-user",
+    "application-id",
+    "invalid-cloid",
+    "venue-open",
+    "venue-triggered",
+    "venue-filled",
+    "venue-canceled",
+    "venue-unknown",
+    "venue-null-data",
+    "venue-no-row",
+    "mapped-other-symbol",
+    "mapped-undefined",
+    "post-reject",
+];
+const CLOID: &str = "0x0123456789abcdef0123456789abcdef";
+fn find_fixture(scene: &str) -> Host {
+    let mut h = fixture("find", scene);
+    let statuses = get(&h.base.enums, "OrderStatus");
+    for name in ["Open", "Closed", "Canceled"] {
+        h.base.set(&statuses, name, &s(name)).unwrap()
+    }
+    let order = |id: &str, symbol: &str, cloid: &str| {
+        object(vec![
+            ("id", s(id)),
+            ("symbol", s(symbol)),
+            ("clientOrderId", s(cloid)),
+        ])
+    };
+    let orders = arr(vec![
+        order(
+            "s1",
+            "BTC",
+            if scene == "store-hit" {
+                CLOID
+            } else {
+                "0xother"
+            },
+        ),
+        order("s2", "ETH", CLOID),
+    ]);
+    let store = get(&h.e(), "store");
+    h.base.set(&store, "orders", &orders).unwrap();
+    let options = match scene {
+        "no-user" => object(vec![("vault", s("")), ("applicationId", N::U)]),
+        "application-id" => object(vec![("vault", s("")), ("applicationId", s("app"))]),
+        _ => object(vec![("vault", s("vault")), ("applicationId", s("app"))]),
+    };
+    let status = match scene {
+        "venue-triggered" => "triggered",
+        "venue-filled" => "filled",
+        "venue-canceled" => "marginCanceled",
+        _ => "open",
+    };
+    let data = match scene {
+        "venue-null-data" => N::Null,
+        "venue-unknown" => object(vec![("status", s("unknownOid"))]),
+        _ => object(vec![
+            ("status", s("order")),
+            (
+                "order",
+                object(vec![
+                    (
+                        "order",
+                        if scene == "venue-no-row" {
+                            N::Null
+                        } else {
+                            object(vec![("oid", N::Num(9.)), ("coin", s("BTC"))])
+                        },
+                    ),
+                    ("status", s(status)),
+                ]),
+            ),
+        ]),
+    };
+    h.st.borrow_mut().core = data;
+    h.put("options", &options);
+    h.put(
+        "infoXhr",
+        &object(vec![("post", N::Builtin("info-post".into()))]),
+    );
+    h.put("mapOpenOrderRow", &N::Builtin("mapOpenOrderRow".into()));
+    h
+}
+#[test]
+fn native_find_order_by_client_order_id_before_source() {
+    let mut rows = vec![];
+    let mut failures = vec![];
+    for scene in FIND {
+        let outcome = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
+            let h = find_fixture(scene);
+            let e = h.e();
+            let id = if scene == "invalid-cloid" {
+                s(&CLOID.to_uppercase())
+            } else {
+                s(CLOID)
+            };
+            let result = drive(&h, find_order_by_client_order_id(&h, &e, &s("BTC"), &id));
+            assert_eq!(
+                result.is_err(),
+                scene == "post-reject",
+                "native find rejection floor {scene}"
+            );
+            if let Err(error) = &result {
+                assert!(
+                    eq(error, &h.st.borrow().marker),
+                    "native find original post error"
+                );
+            } else {
+                let found = matches!(
+                    scene,
+                    "store-hit"
+                        | "store-other-symbol"
+                        | "application-id"
+                        | "venue-open"
+                        | "venue-triggered"
+                        | "venue-filled"
+                        | "venue-canceled"
+                );
+                let value = result.as_ref().unwrap();
+                assert!(
+                    eq(&get(value, "found"), &N::B(found)),
+                    "native find found floor {scene}"
+                );
+                if scene == "store-hit" {
+                    let first = array(&get(&get(&e, "store"), "orders"))[0].clone();
+                    assert!(
+                        eq(&get(value, "order"), &first),
+                        "native find store order alias"
+                    );
+                }
+            }
+            let effects = h.st.borrow().effects.clone();
+            let failed = result.is_err();
+            let state = object(vec![
+                ("result", result.unwrap_or(N::U)),
+                ("rejected", N::B(failed)),
+                ("effects", arr(effects)),
+            ]);
+            (scene, state)
+        }));
+        match outcome {
+            Ok(row) => rows.push(row),
+            Err(error) => failures.push(format!(
+                "{scene}: {}",
+                error
+                    .downcast_ref::<String>()
+                    .cloned()
+                    .or_else(|| error.downcast_ref::<&str>().map(|s| s.to_string()))
+                    .unwrap_or_default()
+            )),
+        }
+    }
+    assert!(
+        failures.is_empty(),
+        "native find failures before source: {failures:?}"
+    );
+    assert_eq!(rows.len(), 15, "native completed find floor");
+    let output = Command::new("node")
+        .arg(format!(
+            "{}/tests/order-find-oracle.cjs",
+            env!("CARGO_MANIFEST_DIR")
+        ))
+        .output()
+        .unwrap();
+    assert!(
+        output.status.success(),
+        "find source oracle failed {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let value: serde_json::Value = serde_json::from_slice(&output.stdout).unwrap();
+    let source = value["cases"].as_array().unwrap();
+    assert_eq!(source.len(), 15, "independent source find floor");
+    assert_eq!(value["last_index"], 14);
+    for ((scene, native), source) in rows.iter().zip(source) {
+        assert_eq!(source["scene"], *scene);
+        native::assert_value(native, &source["state"], &format!("find source {scene}"))
+    }
+}

@@ -12,7 +12,7 @@ function moduleFrom(relative, dependencies = {}) {
     { exports, require(name) { assert(Object.hasOwn(dependencies, name), `unmapped import ${relative}: ${name}`); return dependencies[name]; }, structuredClone });
   return exports;
 }
-const { createIncrementalFills } = moduleFrom('utils/incrementalFills.ts');
+const { cleanFloat, createIncrementalFills } = moduleFrom('utils/incrementalFills.ts');
 const { clone } = moduleFrom('utils/clone.ts');
 const { DefaultStore } = moduleFrom('store/store.base.ts', {
   'lodash/uniqBy': { default: require('lodash/uniqBy') }, '../types': { OrderStatus: { Closed: 'closed', Canceled: 'canceled' } },
@@ -27,7 +27,7 @@ function subject(side) {
   const names = side === 'private' ? ['incrementalFills', 'onMessage', 'handleOrderTopic', 'handlePositionTopic'] : ['onMessage'];
   const members = names.map(name => { const matches = cls.members.filter(n => n.name?.getText(ast) === name); assert.equal(matches.length, 1, `${className}.${name}`); return matches[0].getText(ast); });
   const trace = [];
-  const globals = { exports: {}, createIncrementalFills, jsonParse() { trace.push('parse'); return globals.parsed; },
+  const globals = { exports: {}, cleanFloat, createIncrementalFills, jsonParse() { trace.push('parse'); return globals.parsed; },
     v: (value, key) => value[key], resolveBybitExecution(value) { trace.push('execution'); return value.execution; },
     OrderStatus: { Closed: 'closed', Canceled: 'canceled' }, virtualClock: { getCurrentTimeMs() { trace.push('clock'); return 1234; } } };
   vm.createContext(globals);
@@ -45,7 +45,7 @@ function orderHost(c, orders) {
   const { owner, trace } = c;
   owner.parent.mapOrder = () => { trace.push('map-order'); return orders; };
   owner.parent.markOrderSeen = id => trace.push(`seen:${id}`);
-  owner.incrementalFills = () => { trace.push('incremental'); return { qty: 5, value: 0.25 }; };
+  owner.incrementalFills = () => { trace.push('incremental'); return { qty: 0.3, value: 0.1 }; };
   owner.emitter = { emit: (_, fill) => { trace.push('fill'); c.fill = fill; } };
   owner.store = { addOrUpdateOrders(rows) { trace.push('store-orders'); assert.equal(rows, orders); } };
 }
@@ -68,7 +68,7 @@ const result = {};
   c.owner.emitter.emit = (...args) => { batch.push(raw('New')); emit(...args); };
   c.owner.handleOrderTopic(batch);
   result.filled = { price: c.fill.price, amount: c.fill.amount, status: orders.map(o => o.status), trace: c.trace };
-  assert.equal(c.fill.price, 20); assert.equal(c.trace.filter(v => v === 'map-order').length, 1, 'source forEach captured length');
+  assert.equal(c.fill.price, 3); assert.equal(c.trace.filter(v => v === 'map-order').length, 1, 'source forEach captured length');
 }
 {
   const c = subject('private'), orders = [mapped('one')]; orderHost(c, orders);

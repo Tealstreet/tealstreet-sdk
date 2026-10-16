@@ -25,7 +25,7 @@ const getters = ['accountType', 'supportsTradeDerivedCandles'].map(name => {
   assert.ok(member, `actual getter ${name}`);
   return member.getText(venue);
 }).join('\n');
-const hooks = ['requiresOrderLinkId', 'validateOrderCapabilities'].map(name => {
+const hooks = ['requiresOrderLinkId', 'validateOrderCapabilities', 'inverseEnabled'].map(name => {
   const member = owner.members.find(n => ts.isMethodDeclaration(n) && n.name.getText(venue) === name);
   assert.ok(member, `actual hook ${name}`);
   return member.getText(venue);
@@ -44,8 +44,9 @@ const margin = types.statements.find(n => ts.isEnumDeclaration(n) && n.name.text
 assert.ok(retry && margin);
 const statusInputs = [null, '1', '1.0', '1e0', '1.00000000000000001', '2', '6', '0', '-0', '1e400', '"1"', 'true', 'null', '[]', '[1]', '{}'];
 const cases = [];
-for (const secondary of [undefined, '', 'read-key']) for (const failAt of [-1, 0, 1, 2]) {
-  const options = {key:'write-key', secret:'write-secret', ...(secondary === undefined ? {} : {secondary_key:secondary, secondary_secret:'read-secret'})};
+for (const inverse of [undefined, 'enabled', 'external']) for (const secondary of [undefined, '', 'read-key']) for (const failAt of [-1, 0, 1, 2]) {
+  const options = {key:'write-key', secret:'write-secret', ...(secondary === undefined ? {} : {secondary_key:secondary, secondary_secret:'read-secret'}),
+    ...(inverse === undefined ? {} : {enableInverseMarkets:true}), ...(inverse === 'external' ? {externalPublicData:{type:'websocket',url:'wss://gateway.invalid',exchangeId:'bybit'}} : {})};
   const trace = []; let count = 0;
   const context = vm.createContext({
     getTransport: () => ({publicCorsProxy: () => undefined}),
@@ -103,5 +104,5 @@ for (const secondary of [undefined, '', 'read-key']) for (const failAt of [-1, 0
   } catch (e) { error = e.message; }
   cases.push({captureArchitecture:process.arch,options, failAt, trace, error, state, statuses, placements, reinitializations});
 }
-assert.equal(cases.length, 12);
+assert.equal(cases.length, 36);
 process.stdout.write(JSON.stringify(cases));

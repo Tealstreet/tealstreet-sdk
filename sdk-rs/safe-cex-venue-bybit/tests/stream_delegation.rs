@@ -26,6 +26,22 @@ struct Host {
     null: Rc<Value>,
     timers: Rc<RefCell<Vec<(String, bool)>>>,
 }
+fn fixture_options(input: &Value) -> Value {
+    let mut options = serde_json::Map::new();
+    options.insert(
+        "symbol".into(),
+        input
+            .get("ohlcvSymbol")
+            .cloned()
+            .unwrap_or_else(|| json!("BTC")),
+    );
+    if let Some(symbols) = input.get("symbols") {
+        options.insert("symbols".into(), symbols.clone());
+    }
+    options.insert("interval".into(), json!("1m"));
+    options.insert("nested".into(), json!({"marker":"OPTS-31"}));
+    Value::Object(options)
+}
 impl Host {
     fn new(row: &Value) -> Self {
         let i = &row["input"];
@@ -33,7 +49,7 @@ impl Host {
             .get("timers")
             .cloned()
             .unwrap_or_else(|| json!(["A", "B"]));
-        Self{input:i.clone(),events:RefCell::new(vec![]),errors:["getPublic","getPrivate","method","invoke","callback","cancelGet","cancel","keys","next","clear","base","publicDispose","privateDispose"].into_iter().map(|p|(p.into(),Rc::new(json!({"name":format!("{p}Error"),"message":format!("{p} failed"),"code":73})))).collect(),tokens:["PUB-A","PUB-B","PRIV-A","PRIV-B"].into_iter().map(|tag|(tag.into(),Rc::new(json!({"tag":tag})))).collect(),public_tag:RefCell::new("PUB-A".into()),private_tag:RefCell::new("PRIV-A".into()),base_disposed:Cell::new(false),cancelled:Cell::new(false),clears:Cell::new(0),options:Rc::new(RefCell::new(json!({"symbol":"BTC","interval":"1m","nested":{"marker":"OPTS-31"}}))),packet:Rc::new(json!({"symbol":"BTC","open":11,"close":17,"time":23})),returned:Rc::new(json!({"marker":"RETURN-61"})),null:Rc::new(Value::Null),timers:Rc::new(RefCell::new(timers.as_array().unwrap().iter().map(|key|(key.as_str().unwrap().into(),true)).collect()))}
+        Self{input:i.clone(),events:RefCell::new(vec![]),errors:["getPublic","getPrivate","method","invoke","callback","cancelGet","cancel","keys","next","clear","base","publicDispose","privateDispose"].into_iter().map(|p|(p.into(),Rc::new(json!({"name":format!("{p}Error"),"message":format!("{p} failed"),"code":73})))).collect(),tokens:["PUB-A","PUB-B","PRIV-A","PRIV-B","PUB-INV"].into_iter().map(|tag|(tag.into(),Rc::new(json!({"tag":tag})))).collect(),public_tag:RefCell::new("PUB-A".into()),private_tag:RefCell::new("PRIV-A".into()),base_disposed:Cell::new(false),cancelled:Cell::new(false),clears:Cell::new(0),options:Rc::new(RefCell::new(fixture_options(i))),packet:Rc::new(json!({"symbol":"BTC","open":11,"close":17,"time":23})),returned:Rc::new(json!({"marker":"RETURN-61"})),null:Rc::new(Value::Null),timers:Rc::new(RefCell::new(timers.as_array().unwrap().iter().map(|key|(key.as_str().unwrap().into(),true)).collect()))}
     }
     fn flag(&self, key: &str) -> bool {
         self.input[key] == true
@@ -58,6 +74,27 @@ impl Host {
             json!(["get", property, tag]),
         )?;
         Ok(Rc::clone(&self.tokens[&tag]))
+    }
+    fn secondary(&self) -> Result<Option<Rc<Value>>, Error> {
+        let tag = (self.input["secondary"] == true).then_some("PUB-INV");
+        self.event("getPublic", json!(["get", "publicWebsocketSecondary", tag]))?;
+        Ok(tag.map(|tag| Rc::clone(&self.tokens[tag])))
+    }
+    fn symbols(&self) -> Result<Vec<String>, Error> {
+        match self.options.borrow().get("symbols") {
+            Some(Value::Array(symbols)) => Ok(symbols
+                .iter()
+                .map(|s| s.as_str().unwrap().to_owned())
+                .collect()),
+            _ => Err(Rc::new(
+                json!({"name":"TypeError","message":"opts.symbols is not iterable"}),
+            )),
+        }
+    }
+    fn with_symbols(&self, symbols: Vec<String>) -> Rc<RefCell<Value>> {
+        let mut options = self.options.borrow().clone();
+        options["symbols"] = json!(symbols);
+        Rc::new(RefCell::new(options))
     }
     fn invoke(
         &self,
@@ -275,7 +312,7 @@ fn stream_delegation_matches_maintained_bodies() {
         String::from_utf8_lossy(&output.stderr)
     );
     let rows: Vec<Value> = serde_json::from_slice(&output.stdout).unwrap();
-    assert_eq!(rows.len(), 139, "STREAM independent fixture floor");
+    assert_eq!(rows.len(), 179, "STREAM independent fixture floor");
     let mut counts = BTreeMap::<String, usize>::new();
     for (iteration, row) in rows.iter().enumerate() {
         let h = Rc::new(Host::new(row));
@@ -307,6 +344,16 @@ fn stream_delegation_matches_maintained_bodies() {
                         |p| h.websocket(p),
                         |s, m, o, c| h.invoke(s, m, Arg::Options(o), c, &callback),
                     )
+                } else if family == "primary" {
+                    let symbol = h.options.borrow()["symbol"].as_str().unwrap().to_owned();
+                    listen_primary_ohlcv(
+                        options,
+                        &symbol,
+                        cb,
+                        |p| h.websocket(p),
+                        || h.secondary(),
+                        |s, m, o, c| h.invoke(s, m, Arg::Options(o), c, &callback),
+                    )
                 } else {
                     listen_ohlcv(
                         options,
@@ -324,13 +371,18 @@ fn stream_delegation_matches_maintained_bodies() {
                         |p| h.websocket(p),
                         |s, m, o, c| h.invoke(s, m, Arg::Options(o), c, &callback),
                     )
-                } else {
-                    listen_ohlcvs(
-                        options,
+                } else if family == "primary" {
+                    listen_primary_ohlcvs(
+                        h.symbols(),
                         cb,
                         |p| h.websocket(p),
+                        || h.secondary(),
+                        Rc::ptr_eq,
+                        |symbols| h.with_symbols(symbols),
                         |s, m, o, c| h.invoke(s, m, Arg::Options(o), c, &callback),
                     )
+                } else {
+                    unreachable!("spot has no bulk OHLCV body")
                 };
                 result.map(|()| None)
             }
@@ -340,6 +392,14 @@ fn stream_delegation_matches_maintained_bodies() {
                         symbol,
                         cb,
                         |p| h.websocket(p),
+                        |s, m, o, c| h.invoke(s, m, Arg::Symbol(o.into()), c, &callback),
+                    )
+                } else if family == "primary" {
+                    listen_primary_order_book(
+                        symbol,
+                        cb,
+                        |p| h.websocket(p),
+                        || h.secondary(),
                         |s, m, o, c| h.invoke(s, m, Arg::Symbol(o.into()), c, &callback),
                     )
                 } else {
@@ -436,16 +496,16 @@ fn stream_delegation_matches_maintained_bodies() {
     assert_eq!(
         counts,
         BTreeMap::from([
-            ("primary/ohlcv".into(), 13),
-            ("primary/book".into(), 13),
-            ("primary/bulk".into(), 13),
+            ("primary/ohlcv".into(), 18),
+            ("primary/book".into(), 18),
+            ("primary/bulk".into(), 18),
             ("primary/dispose".into(), 19),
-            ("inverse/ohlcv".into(), 13),
-            ("inverse/book".into(), 13),
-            ("inverse/bulk".into(), 13),
+            ("inverse/ohlcv".into(), 18),
+            ("inverse/book".into(), 18),
+            ("inverse/bulk".into(), 18),
             ("inverse/dispose".into(), 8),
-            ("spot/ohlcv".into(), 13),
-            ("spot/book".into(), 13),
+            ("spot/ohlcv".into(), 18),
+            ("spot/book".into(), 18),
             ("spot/dispose".into(), 8)
         ]),
         "STREAM independent eleven-symbol floors"

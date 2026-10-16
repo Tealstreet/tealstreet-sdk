@@ -86,3 +86,9 @@ through it; backpack refuses that host visibly until its signing is wired.
 `tests/native_host_remote_signer.rs` verifies the signer's HMAC server-side.
 `tests/native_host_tunnel.rs` runs `tealstreetTunnel` REST over a local tradetunnel
 (rpc.auth with the proxy token, rpc.http frames) with no direct venue request.
+`tests/native_host_binance_family.rs` runs BinancePMExchange (PAPI, listen-key stream)
+and BinanceSpotExchange (signed ws-api user-data subscription) on the native host.
+
+The native JSON account surface forwards journal reads (`fetchHistoricalPositions`)
+to the venue's declared fold/reported path, preserving account and time bounds.
+It must not inherit a TS wrapper's default rejection for a supported venue method.
