@@ -14331,5 +14331,1352 @@
         }
       }
     ]
+  },
+  "safe_cex_venue_grvt::composition::ClientOrderIdRule": {
+    "shape": "observed",
+    "evidence": "Review of composition.rs::ClientOrderIdRule::is_valid and grvt.exchange.ts:71-76: canonical ASCII decimal 1..2^63-1, not a Number/u32 range. All29 independent string witnesses execute the actual native method; actual maintained TS arrow is checked against the same fixed expectations. Inputs are Rust UTF-8 strings under the standing UTF-8 boundary.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "is_valid",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "value",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "primitive": "bool"
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Executes canonical decimal syntax and the reserved signed-63-bit boundary on the actual native rule."
+      }
+    ],
+    "call": "{ let owner = $type; serde_json::json!({\"valid\":owner.is_valid($value.as_str().expect(\"string witness\"))}) }",
+    "cases": [
+      {
+        "input": "1",
+        "output": {
+          "valid": true
+        }
+      },
+      {
+        "input": "9",
+        "output": {
+          "valid": true
+        }
+      },
+      {
+        "input": "10",
+        "output": {
+          "valid": true
+        }
+      },
+      {
+        "input": "4294967296",
+        "output": {
+          "valid": true
+        }
+      },
+      {
+        "input": "9007199254740993",
+        "output": {
+          "valid": true
+        }
+      },
+      {
+        "input": "9223372036854775806",
+        "output": {
+          "valid": true
+        }
+      },
+      {
+        "input": "9223372036854775807",
+        "output": {
+          "valid": true
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "0",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "01",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "00",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "+1",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "-1",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": " 1",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "1 ",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "1\n",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "1\r",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "1 ",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "1\u0000",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "1.0",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "1e3",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "0x10",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "9223372036854775808",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "18446744073709551615",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "18446744073709551616",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "99999999999999999999",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "١",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "１",
+        "output": {
+          "valid": false
+        }
+      },
+      {
+        "input": "1٢",
+        "output": {
+          "valid": false
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::composition::GrvtExchange": {
+    "shape": "observed",
+    "instantiation": "GrvtExchange<std::rc::Rc<std::cell::Cell<i64>>>",
+    "evidence": "Individually reviewed complete composition owner in composition.rs. Exact finite Rc<Cell<i64>> value instantiation (u32 timers and String private fill keys where present), not a generic or arbitrary JS-object claim. Eight native lookup witnesses inspect ordered keys, original values, Rc identity and mutation through the retained alias before JSON projection. Unknown/inherited names return None in the declared owned registry representation; runtime binding/prototype behavior remains separately reviewed. The second API delegates recordNonce from grvt.exchange.ts:204-226 into snapshots::record_nonce; four separately authored native cache witnesses keep both maps, retained Rc handles, ordering and binary64 bits observable.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "member",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual native member lookup, compare Some/None and Rc pointer identity, mutate the returned cell and inspect the stored cell and unrelated native state.",
+        "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"café\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\nlet owner:$type=super::GrvtExchange {base:Rc::new(Cell::new(41i64)),fields,nonce_to_order_id:Rc::new(RefCell::new(indexmap::IndexMap::new())),nonce_creation_times:Rc::new(RefCell::new(indexmap::IndexMap::new())),client_order_id_rule:Rc::new(super::ClientOrderIdRule),methods};\nlet selected=owner.member($value.as_str().expect(\"member name\"));\nlet before=selected.as_ref().map(|v|v.get());\nlet alias=selected.as_ref().map(|v|Rc::ptr_eq(v,owner.methods.get($value.as_str().unwrap()).expect(\"selected native method\")));\nif let Some(value)=&selected {value.set(value.get()+1);}\nserde_json::json!({\"value\":before,\"after\":selected.as_ref().map(|v|v.get()),\"alias\":alias,\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>(),\"keys\":owner.methods.keys().copied().collect::<Vec<_>>(),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"ids\":owner.nonce_to_order_id.borrow().len(),\"times\":owner.nonce_creation_times.borrow().len()}) }",
+        "cases": [
+          {
+            "input": "zero",
+            "output": {
+              "value": 0,
+              "after": 1,
+              "alias": true,
+              "cells": [
+                1,
+                -17,
+                63,
+                9
+              ],
+              "keys": [
+                "zero",
+                "negative",
+                "positive",
+                "café"
+              ],
+              "base": 41,
+              "field": 11,
+              "ids": 0,
+              "times": 0
+            }
+          },
+          {
+            "input": "negative",
+            "output": {
+              "value": -17,
+              "after": -16,
+              "alias": true,
+              "cells": [
+                0,
+                -16,
+                63,
+                9
+              ],
+              "keys": [
+                "zero",
+                "negative",
+                "positive",
+                "café"
+              ],
+              "base": 41,
+              "field": 11,
+              "ids": 0,
+              "times": 0
+            }
+          },
+          {
+            "input": "positive",
+            "output": {
+              "value": 63,
+              "after": 64,
+              "alias": true,
+              "cells": [
+                0,
+                -17,
+                64,
+                9
+              ],
+              "keys": [
+                "zero",
+                "negative",
+                "positive",
+                "café"
+              ],
+              "base": 41,
+              "field": 11,
+              "ids": 0,
+              "times": 0
+            }
+          },
+          {
+            "input": "café",
+            "output": {
+              "value": 9,
+              "after": 10,
+              "alias": true,
+              "cells": [
+                0,
+                -17,
+                63,
+                10
+              ],
+              "keys": [
+                "zero",
+                "negative",
+                "positive",
+                "café"
+              ],
+              "base": 41,
+              "field": 11,
+              "ids": 0,
+              "times": 0
+            }
+          },
+          {
+            "input": "missing",
+            "output": {
+              "value": null,
+              "after": null,
+              "alias": null,
+              "cells": [
+                0,
+                -17,
+                63,
+                9
+              ],
+              "keys": [
+                "zero",
+                "negative",
+                "positive",
+                "café"
+              ],
+              "base": 41,
+              "field": 11,
+              "ids": 0,
+              "times": 0
+            }
+          },
+          {
+            "input": "toString",
+            "output": {
+              "value": null,
+              "after": null,
+              "alias": null,
+              "cells": [
+                0,
+                -17,
+                63,
+                9
+              ],
+              "keys": [
+                "zero",
+                "negative",
+                "positive",
+                "café"
+              ],
+              "base": 41,
+              "field": 11,
+              "ids": 0,
+              "times": 0
+            }
+          },
+          {
+            "input": "__proto__",
+            "output": {
+              "value": null,
+              "after": null,
+              "alias": null,
+              "cells": [
+                0,
+                -17,
+                63,
+                9
+              ],
+              "keys": [
+                "zero",
+                "negative",
+                "positive",
+                "café"
+              ],
+              "base": 41,
+              "field": 11,
+              "ids": 0,
+              "times": 0
+            }
+          },
+          {
+            "input": "",
+            "output": {
+              "value": null,
+              "after": null,
+              "alias": null,
+              "cells": [
+                0,
+                -17,
+                63,
+                9
+              ],
+              "keys": [
+                "zero",
+                "negative",
+                "positive",
+                "café"
+              ],
+              "base": 41,
+              "field": 11,
+              "ids": 0,
+              "times": 0
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "record_nonce",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "nonce",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ],
+              [
+                "real",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "borrowed_ref": {
+                                "lifetime": null,
+                                "is_mutable": false,
+                                "type": {
+                                  "primitive": "str"
+                                }
+                              }
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ],
+              [
+                "time",
+                {
+                  "resolved_path": {
+                    "path": "core::option::Option",
+                    "args": {
+                      "angle_bracketed": {
+                        "args": [
+                          {
+                            "type": {
+                              "primitive": "f64"
+                            }
+                          }
+                        ],
+                        "constraints": []
+                      }
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": null,
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Run the actual composition wrapper over retained native cache Rc handles; inspect earliest positive finite time bits, unknown time, real-ID sentinel handling and paired 200-entry eviction. Native field observations precede projection.",
+        "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"café\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\n let owner:$type=super::GrvtExchange {base:Rc::new(Cell::new(41i64)),fields,nonce_to_order_id:Rc::new(RefCell::new(indexmap::IndexMap::new())),nonce_creation_times:Rc::new(RefCell::new(indexmap::IndexMap::new())),client_order_id_rule:Rc::new(super::ClientOrderIdRule),methods};\n\nlet ids_alias=owner.nonce_to_order_id.clone();let times_alias=owner.nonce_creation_times.clone();\nfor operation in $value[\"operations\"].as_array().expect(\"nonce operations\") {\n let time=operation[\"time\"].as_str().map(|text|text.parse::<f64>().expect(\"fixed native time\"));\n owner.record_nonce(operation[\"nonce\"].as_str().unwrap(),operation[\"real\"].as_str(),time);\n}\nfor index in 0..$value[\"fill\"].as_u64().unwrap_or(0) {owner.record_nonce(&format!(\"n{index}\"),Some(&format!(\"id{index}\")),Some(1000.0+index as f64));}\nlet times=times_alias.borrow();let ids=ids_alias.borrow();\nserde_json::json!({\"times\":times.iter().take(3).map(|(key,value)|serde_json::json!({\"key\":key,\"bits\":value.map(|v|v.to_bits().to_string())})).collect::<Vec<_>>(),\"ids\":ids.iter().take(3).map(|(k,v)|[k.clone(),v.clone()]).collect::<Vec<_>>(),\"time_count\":times.len(),\"id_count\":ids.len(),\"last_time\":times.last().map(|(key,value)|serde_json::json!({\"key\":key,\"bits\":value.map(|v|v.to_bits().to_string())})),\"last_id\":ids.last().map(|(k,v)|[k.clone(),v.clone()]),\"retained_first_two\":[times.contains_key(\"n0\"),times.contains_key(\"n1\"),ids.contains_key(\"n0\"),ids.contains_key(\"n1\")],\"ids_alias\":Rc::ptr_eq(&ids_alias,&owner.nonce_to_order_id),\"times_alias\":Rc::ptr_eq(&times_alias,&owner.nonce_creation_times),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>()}) }",
+        "cases": [
+          {
+            "input": {
+              "operations": [
+                {
+                  "nonce": "same",
+                  "real": "real-old",
+                  "time": "90"
+                },
+                {
+                  "nonce": "same",
+                  "real": "0x0",
+                  "time": "100"
+                },
+                {
+                  "nonce": "later",
+                  "real": null,
+                  "time": "0"
+                },
+                {
+                  "nonce": "same",
+                  "real": "real-next",
+                  "time": "70"
+                },
+                {
+                  "nonce": "same",
+                  "real": null,
+                  "time": "120"
+                }
+              ]
+            },
+            "output": {
+              "times": [
+                {
+                  "key": "same",
+                  "bits": "4634626229029306368"
+                },
+                {
+                  "key": "later",
+                  "bits": null
+                }
+              ],
+              "ids": [
+                [
+                  "same",
+                  "real-next"
+                ]
+              ],
+              "time_count": 2,
+              "id_count": 1,
+              "last_time": {
+                "key": "later",
+                "bits": null
+              },
+              "last_id": [
+                "same",
+                "real-next"
+              ],
+              "retained_first_two": [
+                false,
+                false,
+                false,
+                false
+              ],
+              "ids_alias": true,
+              "times_alias": true,
+              "base": 41,
+              "field": 11,
+              "cells": [
+                0,
+                -17,
+                63,
+                9
+              ]
+            }
+          },
+          {
+            "input": {
+              "operations": [
+                {
+                  "nonce": "unknown",
+                  "real": "0x00",
+                  "time": "NaN"
+                },
+                {
+                  "nonce": "unknown",
+                  "real": "actual",
+                  "time": "20"
+                },
+                {
+                  "nonce": "unknown",
+                  "real": null,
+                  "time": "40"
+                },
+                {
+                  "nonce": "unknown",
+                  "real": "",
+                  "time": "10"
+                },
+                {
+                  "nonce": "unknown",
+                  "real": null,
+                  "time": "30"
+                }
+              ]
+            },
+            "output": {
+              "times": [
+                {
+                  "key": "unknown",
+                  "bits": "4621819117588971520"
+                }
+              ],
+              "ids": [
+                [
+                  "unknown",
+                  "actual"
+                ]
+              ],
+              "time_count": 1,
+              "id_count": 1,
+              "last_time": {
+                "key": "unknown",
+                "bits": "4621819117588971520"
+              },
+              "last_id": [
+                "unknown",
+                "actual"
+              ],
+              "retained_first_two": [
+                false,
+                false,
+                false,
+                false
+              ],
+              "ids_alias": true,
+              "times_alias": true,
+              "base": 41,
+              "field": 11,
+              "cells": [
+                0,
+                -17,
+                63,
+                9
+              ]
+            }
+          },
+          {
+            "input": {
+              "operations": [
+                {
+                  "nonce": "empty",
+                  "real": "0x0",
+                  "time": "-0"
+                },
+                {
+                  "nonce": "empty",
+                  "real": "0x00",
+                  "time": "inf"
+                },
+                {
+                  "nonce": "empty",
+                  "real": "",
+                  "time": "-1"
+                }
+              ]
+            },
+            "output": {
+              "times": [
+                {
+                  "key": "empty",
+                  "bits": null
+                }
+              ],
+              "ids": [],
+              "time_count": 1,
+              "id_count": 0,
+              "last_time": {
+                "key": "empty",
+                "bits": null
+              },
+              "last_id": null,
+              "retained_first_two": [
+                false,
+                false,
+                false,
+                false
+              ],
+              "ids_alias": true,
+              "times_alias": true,
+              "base": 41,
+              "field": 11,
+              "cells": [
+                0,
+                -17,
+                63,
+                9
+              ]
+            }
+          },
+          {
+            "input": {
+              "operations": [],
+              "fill": 202
+            },
+            "output": {
+              "times": [
+                {
+                  "key": "n2",
+                  "bits": "4652024901027233792"
+                },
+                {
+                  "key": "n3",
+                  "bits": "4652033697120256000"
+                },
+                {
+                  "key": "n4",
+                  "bits": "4652042493213278208"
+                }
+              ],
+              "ids": [
+                [
+                  "n2",
+                  "id2"
+                ],
+                [
+                  "n3",
+                  "id3"
+                ],
+                [
+                  "n4",
+                  "id4"
+                ]
+              ],
+              "time_count": 200,
+              "id_count": 200,
+              "last_time": {
+                "key": "n201",
+                "bits": "4652996869306187776"
+              },
+              "last_id": [
+                "n201",
+                "id201"
+              ],
+              "retained_first_two": [
+                false,
+                false,
+                false,
+                false
+              ],
+              "ids_alias": true,
+              "times_alias": true,
+              "base": 41,
+              "field": 11,
+              "cells": [
+                0,
+                -17,
+                63,
+                9
+              ]
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::composition::GrvtPublicWebSocket": {
+    "shape": "observed",
+    "instantiation": "GrvtPublicWebSocket<std::rc::Rc<std::cell::Cell<i64>>,u32>",
+    "evidence": "Individually reviewed complete composition owner in composition.rs. Exact finite Rc<Cell<i64>> value instantiation (u32 timers and String private fill keys where present), not a generic or arbitrary JS-object claim. Eight native lookup witnesses inspect ordered keys, original values, Rc identity and mutation through the retained alias before JSON projection. Unknown/inherited names return None in the declared owned registry representation; runtime binding/prototype behavior remains separately reviewed.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "member",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual native member lookup, compare Some/None and Rc pointer identity, mutate the returned cell and inspect the stored cell and unrelated native state."
+      }
+    ],
+    "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"café\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\nlet owner:$type=super::GrvtPublicWebSocket {base:Rc::new(Cell::new(41i64)),parent:Rc::new(Cell::new(73i64)),fields,state:Rc::new(crate::public_subscriptions::PublicSubscriptions::<u32>::default()),methods};\nlet selected=owner.member($value.as_str().expect(\"member name\"));\nlet before=selected.as_ref().map(|v|v.get());\nlet alias=selected.as_ref().map(|v|Rc::ptr_eq(v,owner.methods.get($value.as_str().unwrap()).expect(\"selected native method\")));\nif let Some(value)=&selected {value.set(value.get()+1);}\nserde_json::json!({\"value\":before,\"after\":selected.as_ref().map(|v|v.get()),\"alias\":alias,\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>(),\"keys\":owner.methods.keys().copied().collect::<Vec<_>>(),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"parent\":owner.parent.get(),\"request_id_bits\":owner.state.request_id.get().to_bits().to_string()}) }",
+    "cases": [
+      {
+        "input": "zero",
+        "output": {
+          "value": 0,
+          "after": 1,
+          "alias": true,
+          "cells": [
+            1,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408"
+        }
+      },
+      {
+        "input": "negative",
+        "output": {
+          "value": -17,
+          "after": -16,
+          "alias": true,
+          "cells": [
+            0,
+            -16,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408"
+        }
+      },
+      {
+        "input": "positive",
+        "output": {
+          "value": 63,
+          "after": 64,
+          "alias": true,
+          "cells": [
+            0,
+            -17,
+            64,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408"
+        }
+      },
+      {
+        "input": "café",
+        "output": {
+          "value": 9,
+          "after": 10,
+          "alias": true,
+          "cells": [
+            0,
+            -17,
+            63,
+            10
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408"
+        }
+      },
+      {
+        "input": "missing",
+        "output": {
+          "value": null,
+          "after": null,
+          "alias": null,
+          "cells": [
+            0,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408"
+        }
+      },
+      {
+        "input": "toString",
+        "output": {
+          "value": null,
+          "after": null,
+          "alias": null,
+          "cells": [
+            0,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408"
+        }
+      },
+      {
+        "input": "__proto__",
+        "output": {
+          "value": null,
+          "after": null,
+          "alias": null,
+          "cells": [
+            0,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408"
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "value": null,
+          "after": null,
+          "alias": null,
+          "cells": [
+            0,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408"
+        }
+      }
+    ]
+  },
+  "safe_cex_venue_grvt::composition::GrvtPrivateWebSocket": {
+    "shape": "observed",
+    "instantiation": "GrvtPrivateWebSocket<std::rc::Rc<std::cell::Cell<i64>>,u32,String>",
+    "evidence": "Individually reviewed complete composition owner in composition.rs. Exact finite Rc<Cell<i64>> value instantiation (u32 timers and String private fill keys where present), not a generic or arbitrary JS-object claim. Eight native lookup witnesses inspect ordered keys, original values, Rc identity and mutation through the retained alias before JSON projection. Unknown/inherited names return None in the declared owned registry representation; runtime binding/prototype behavior remains separately reviewed.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "inherent",
+          "name": "member",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "name",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": false,
+                    "type": {
+                      "primitive": "str"
+                    }
+                  }
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::option::Option",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "generic": "V"
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          }
+        },
+        "input": "observed",
+        "reason": "Execute the actual native member lookup, compare Some/None and Rc pointer identity, mutate the returned cell and inspect the stored cell and unrelated native state."
+      }
+    ],
+    "call": "{ use std::{cell::{Cell,RefCell},rc::Rc};\nlet methods=indexmap::IndexMap::from([(\"zero\",Rc::new(Cell::new(0i64))),(\"negative\",Rc::new(Cell::new(-17i64))),(\"positive\",Rc::new(Cell::new(63i64))),(\"café\",Rc::new(Cell::new(9i64)))]);\nlet fields=Rc::new(RefCell::new(indexmap::IndexMap::from([(\"stable\",Rc::new(Cell::new(11i64)))])));\nlet owner:$type=super::GrvtPrivateWebSocket {base:Rc::new(Cell::new(41i64)),parent:Rc::new(Cell::new(73i64)),fields,state:Rc::new(crate::private_commands::PrivateCommands::<u32,String>::default()),methods};\nlet selected=owner.member($value.as_str().expect(\"member name\"));\nlet before=selected.as_ref().map(|v|v.get());\nlet alias=selected.as_ref().map(|v|Rc::ptr_eq(v,owner.methods.get($value.as_str().unwrap()).expect(\"selected native method\")));\nif let Some(value)=&selected {value.set(value.get()+1);}\nserde_json::json!({\"value\":before,\"after\":selected.as_ref().map(|v|v.get()),\"alias\":alias,\"cells\":owner.methods.values().map(|v|v.get()).collect::<Vec<_>>(),\"keys\":owner.methods.keys().copied().collect::<Vec<_>>(),\"base\":owner.base.get(),\"field\":owner.fields.borrow()[\"stable\"].get(),\"parent\":owner.parent.get(),\"request_id_bits\":owner.state.request_id.get().to_bits().to_string(),\"disposed\":owner.state.is_disposed.get()}) }",
+    "cases": [
+      {
+        "input": "zero",
+        "output": {
+          "value": 0,
+          "after": 1,
+          "alias": true,
+          "cells": [
+            1,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408",
+          "disposed": false
+        }
+      },
+      {
+        "input": "negative",
+        "output": {
+          "value": -17,
+          "after": -16,
+          "alias": true,
+          "cells": [
+            0,
+            -16,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408",
+          "disposed": false
+        }
+      },
+      {
+        "input": "positive",
+        "output": {
+          "value": 63,
+          "after": 64,
+          "alias": true,
+          "cells": [
+            0,
+            -17,
+            64,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408",
+          "disposed": false
+        }
+      },
+      {
+        "input": "café",
+        "output": {
+          "value": 9,
+          "after": 10,
+          "alias": true,
+          "cells": [
+            0,
+            -17,
+            63,
+            10
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408",
+          "disposed": false
+        }
+      },
+      {
+        "input": "missing",
+        "output": {
+          "value": null,
+          "after": null,
+          "alias": null,
+          "cells": [
+            0,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408",
+          "disposed": false
+        }
+      },
+      {
+        "input": "toString",
+        "output": {
+          "value": null,
+          "after": null,
+          "alias": null,
+          "cells": [
+            0,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408",
+          "disposed": false
+        }
+      },
+      {
+        "input": "__proto__",
+        "output": {
+          "value": null,
+          "after": null,
+          "alias": null,
+          "cells": [
+            0,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408",
+          "disposed": false
+        }
+      },
+      {
+        "input": "",
+        "output": {
+          "value": null,
+          "after": null,
+          "alias": null,
+          "cells": [
+            0,
+            -17,
+            63,
+            9
+          ],
+          "keys": [
+            "zero",
+            "negative",
+            "positive",
+            "café"
+          ],
+          "base": 41,
+          "field": 11,
+          "parent": 73,
+          "request_id_bits": "4607182418800017408",
+          "disposed": false
+        }
+      }
+    ]
   }
 }
