@@ -3852,6 +3852,7 @@ dependencies = [
  "base64 0.22.1",
  "getrandom 0.2.17",
  "indexmap 2.14.2",
+ "num-bigint 0.4.6",
  "quote 1.0.47",
  "regex",
  "safe-cex-candle-cache",
