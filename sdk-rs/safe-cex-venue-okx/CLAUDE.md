@@ -108,3 +108,13 @@ region/profile are checked before live-source wire comparisons.
 The journal mapper returns ordered canonical JsJsonValue fields, retaining native
 f64 nonfinites and signed zero. Its tests assert those values before explicit
 js_json_stringify projection; there is no legacy Value-returning mapper path.
+
+Production binding (`src/binding/`): `OkxExchange::new` assembles the OKX class
+graph on the shared js_runtime host, with no second runtime. The JS BaseExchange
+receiver gets OKX class fields and every manifest member as an own property that
+runs its ported body. `ops.rs` adapts the bodies' closure tables, `typed_members.rs`
+the closure-typed bodies, `sockets.rs` the three socket classes, and `globals.rs`
+the okx.types.ts tables, mappers and createAPI collaborators. Generic needs go
+into js_runtime, not here. `tests/exchange_binding.rs` drives every trait method
+over a scripted transport; `tests/exchange_binding_controls.py` mutates each
+dispatch and requires its named test to fail, then passes 14/14 restored.
