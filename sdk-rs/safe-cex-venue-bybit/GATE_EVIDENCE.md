@@ -3980,3 +3980,12 @@ tests. It runs with `SAFE_CEX_TYPESCRIPT_PATH` pointing at the installed compile
 Latest master `efbc4969b6` merges cleanly: the incoming Asterdex inventory reviews
 are preserved alongside the single owned Bybit removal. No Bybit or shared
 runtime production body changes in that integration.
+
+
+The native position control runner bounds every Cargo subprocess to 600 seconds
+and prints an independently created private `tempfile.mkdtemp` directory for its
+logs. An injected TimeoutExpired after the first real source mutation propagated
+through the runner while its finally block restored both Rust files byte for
+byte; the created directory's mode was 0700. The four actual compiled projection
+controls were then caught again and exact restoration passed all 28 binding
+tests. A read-only review of these runner changes reported no findings.

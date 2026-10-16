@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
-"""Compile four former numeric projection faults, then restore exact source bytes."""
+"""Compile four projection faults with bounded Cargo runs and private logs.
+
+The log directory is printed before execution; faults restore exact source bytes.
+"""
 from pathlib import Path
 import os
 import subprocess
+import tempfile
 
 root = Path(__file__).resolve().parents[3]
 controls = root / "sdk-rs/safe-cex-venue-bybit/src/binding/members/controls.rs"
@@ -18,9 +22,12 @@ faults = [
     ("mode", orders, 'store.call_method("addOrUpdatePositions", vec![mapped.clone()])?;', 'store.call_method("addOrUpdatePositions", vec![from_json(&to_json(&mapped)?)])?;', "position_mode_publication_retains_native_nan_and_negative_zero"),
 ]
 
+log_dir = Path(tempfile.mkdtemp(prefix="bybit42-controls-"))
+print(f"Control logs: {log_dir}", flush=True)
+
 def run(label):
-    result = subprocess.run(command, cwd=root, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT)
-    Path("/tmp/bybit42-control-" + label + ".txt").write_text(result.stdout)
+    result = subprocess.run(command, cwd=root, env=env, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, timeout=600)
+    (log_dir / (label + ".txt")).write_text(result.stdout)
     return result
 
 baseline = run("baseline")
