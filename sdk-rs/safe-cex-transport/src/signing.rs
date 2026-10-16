@@ -308,7 +308,7 @@ impl RemoteSigningAdapter {
     }
     pub fn execute_signed(&self, request: SigningRequest) -> crate::RestFuture<'_, RestResponse> {
         Box::pin(async move {
-            self.execute_signed_with_receipt(request)
+            self.execute_signed_with_receipt(request, IndexMap::new())
                 .await
                 .map(|execution| execution.response)
         })
@@ -316,6 +316,7 @@ impl RemoteSigningAdapter {
     fn execute_signed_with_receipt(
         &self,
         request: SigningRequest,
+        config_extensions: IndexMap<String, Value>,
     ) -> crate::RestFuture<'_, crate::RestExecution> {
         let mut original = RestRequest {
             method: request.config.method.clone(),
@@ -329,6 +330,7 @@ impl RemoteSigningAdapter {
             timeout_ms: request.timeout_ms,
             skip_remote_signing: request.skip_remote_signing,
             sign_ms: None,
+            config_extensions: config_extensions.clone(),
         };
         original.merge_axios_headers(&IndexMap::new());
         Box::pin(async move {
@@ -431,6 +433,7 @@ impl RemoteSigningAdapter {
                 skip_remote_signing: request.skip_remote_signing,
                 sign_ms,
                 timeout_ms: request.timeout_ms,
+                config_extensions,
             };
             // The source calls the selected inner adapter directly. Running
             // Axios transformation here would stringify an echoed object again.
@@ -486,20 +489,24 @@ impl RestAdapter for RemoteSigningAdapter {
             }
         };
         let skip_remote_signing = request.skip_remote_signing;
-        self.execute_signed_with_receipt(SigningRequest {
-            body_template: request.body.clone(),
-            skip_remote_signing,
-            timeout_ms: request.timeout_ms,
-            query_profile: request.query_profile,
-            config: SigningConfig {
-                method: request.method,
-                url: request.url,
-                base_url: request.base_url.unwrap_or_default(),
-                headers: request.headers,
-                params: request.params,
-                data,
+        let config_extensions = request.config_extensions;
+        self.execute_signed_with_receipt(
+            SigningRequest {
+                body_template: request.body.clone(),
+                skip_remote_signing,
+                timeout_ms: request.timeout_ms,
+                query_profile: request.query_profile,
+                config: SigningConfig {
+                    method: request.method,
+                    url: request.url,
+                    base_url: request.base_url.unwrap_or_default(),
+                    headers: request.headers,
+                    params: request.params,
+                    data,
+                },
             },
-        })
+            config_extensions,
+        )
     }
 }
 

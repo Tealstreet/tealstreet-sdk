@@ -35,6 +35,10 @@ pub struct ApiDefaults {
 }
 /// Imported Axios factory, qs, HMAC, retry and adapter capabilities.
 pub trait ApiHost {
+    /// Runtime capability corresponding to source options.remoteSigner.
+    fn has_remote_signer(&self) -> bool {
+        false
+    }
     fn create(
         &self,
         defaults: ApiDefaults,
@@ -143,6 +147,7 @@ impl BingxApi {
             return Ok(config);
         }
         if self.options.remote_signer.is_some()
+            || self.host.has_remote_signer()
             || self.options.key.is_empty()
             || self.options.secret.is_empty()
         {

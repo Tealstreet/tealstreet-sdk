@@ -1292,6 +1292,31 @@ The earlier tests missed, respectively, the fixed-to-user composition edge becau
 Pinned read-only sub-agent closure review is appended to FINDINGS_11_REVIEWS.md. Final local gates remain only workspace fmt --check and locked workspace build at the delivered commit, with exits bound in the local receipt. Clippy, wasm, wiring, layers and routing are centrally owned and not run locally; full suites/static/extractor/live/CI checks also are not run. No push.
 
 
+### Production journal fold binding (ddi2il-20)
+
+`Exchange::fetch_historical_positions` now dispatches the existing source arrow,
+whose superclass helper uses the shared `build_records` engine. The engine reads
+the same realm instance's source income-range and historical-fill methods; income
+mapper/pager imports bind to `income.rs`, and asynchronous REST callbacks use the
+existing owned task dispatcher. The shared typed output boundary still applies.
+
+Compiled negative controls used the new round-trip production test: the original
+trait default failed with `no journal records path declared`; enabling only trait
+dispatch failed with `fetchHistoricalPositions is not bound by this realm`. Both
+are runtime failures after successful compilation. The restored implementation
+returns a real closed round trip (PnL1000, fees3) with requested account, bounds
+and market settlement currency. A separate default-window test pins integer
+Date.now, the source30-day range and the shared14-day straddle lookback. A native
+registry test obtains the same closed record through real reqwest HTTP without
+starting sockets. Empty results or bypassing symbol-scoped execution reads fail
+the nonempty-record assertion. The source `deriveClosedPositions` axis remains
+separate from this shared journal fold.
+
+Scoped gates: production binding16/16; native Hyperliquid HTTP2/2; registry
+construction13/13; actual-source core snapshots/core REST/rest helpers11/11;
+Hyperliquid venue-oracle39/39; parity:check0; registry48 names and control1/1;
+layers88/88. Native all-target and wasm library strict clippy plus fmt pass for
+the venue and registry. No fixture or manifest regeneration.
 ### Native external public data binding (ddi2il-20)
 
 `HyperliquidDependencies.external_public_data` accepts the shared provider factory.
@@ -1319,3 +1344,20 @@ Native all-target and wasm library strict clippy cover the venue and registry.
 No manifests or fixture corpora were regenerated. The inherited seed oracle
 hash failure was resolved by merging landed #198, including its one-row
 provenance check, before the passing oracle run.
+
+### Override inventory review after external-data and journal assembly
+
+Reviewed the two `realm/facade_exchange.rs::base_exchange_class` inventory rows.
+`b.dispose()` is the inherited BaseExchange implementation reached by the source
+class's explicit super-dispose path; source override dispatch happens in the
+realm first. `b.name()` serves the inherited name getter over the native account
+name. Neither call newly bypasses a venue override. The external-data hydration/
+disposal test observes the provider released exactly once, and construction/
+native registry tests retain the venue name.
+
+The stale inventory compiled and failed
+`production_callers_do_not_bypass_exchange_override_hooks` before the repair.
+After reviewing the final combined journal/external-data body, only those two
+fingerprints changed to `f16535160061e222`; the same test passes (1/1). No inventory
+regeneration or blanket delegation was used. This final body differs from the
+external-data-only master body's fingerprint because it also binds journal folding.
