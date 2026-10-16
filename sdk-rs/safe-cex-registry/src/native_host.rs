@@ -43,6 +43,8 @@ pub struct NativeVenueHost {
     runtime: Rc<dyn WsRuntime>,
     adapter: AdapterFactory,
     remote: Option<HostedSigner>,
+    kraken_nonces: Rc<safe_cex_venue_kraken::api::FuturesModule>,
+    kraken_spot_ids: Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>>,
 }
 /// Direct transport and real HTTP, as `directTransport` is the TypeScript default.
 pub fn native_venue_host() -> Rc<NativeVenueHost> {
@@ -64,6 +66,8 @@ pub fn native_venue_host_with(
         runtime,
         adapter,
         remote: None,
+        kraken_nonces: Rc::default(),
+        kraken_spot_ids: kraken_spot_ids(),
     })
 }
 /// One account's host whose requests sign through a hosted `remoteSigner`
@@ -78,12 +82,45 @@ pub fn native_venue_host_signed(
         runtime,
         adapter,
         remote: Some((signer, account_name)),
+        kraken_nonces: Rc::default(),
+        kraken_spot_ids: kraken_spot_ids(),
     })
 }
+fn kraken_spot_ids() -> Rc<RefCell<safe_cex_venue_kraken::binding::SpotIds>> {
+    safe_cex_venue_kraken::spot_client_ids(|bytes| {
+        getrandom::getrandom(bytes).map_err(|_| safe_cex_types::js_coercion::JsCoercionError {
+            name: "Error",
+            message: "operating system entropy is unavailable",
+        })
+    })
+}
+
 impl RustVenueHost for NativeVenueHost {
+<<<<<<< HEAD
     fn hosted_signer(&self) -> Option<HostedSigner> {
         self.remote.clone()
     }
+=======
+    fn kraken(&self) -> Result<safe_cex_venue_kraken::KrakenDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for kraken on the native host",
+            ));
+        }
+        Ok(safe_cex_venue_kraken::KrakenDependencies {
+            runtime: self.runtime.clone(),
+            http: safe_cex_exchange::js_runtime::client::rest_http_host(
+                self.runtime.clone(),
+                (self.adapter)()?,
+            ),
+            external_public_data: Some(gateway_factory(self.runtime.clone())),
+            journal: None,
+            futures_nonces: self.kraken_nonces.clone(),
+            spot_client_ids: Some(self.kraken_spot_ids.clone()),
+        })
+    }
+
+>>>>>>> origin/master
     fn binance(&self) -> Result<ExchangeDependencies, ExchangeError> {
         Ok(safe_cex_venue_binance::native_host::native_dependencies(
             self.runtime.clone(),

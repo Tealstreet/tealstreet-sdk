@@ -84,6 +84,19 @@ where
     Ok(())
 }
 
+// ts: BybitExchange#refuseOptionSymbol
+fn refuse_option_symbol(symbol: Option<&str>, what: &str) -> Result<(), Error> {
+    match symbol {
+        Some(symbol) if !symbol.is_empty() && crate::options::is_bybit_option_symbol(symbol) => {
+            Err(error(
+                "Error",
+                format!("Bybit has no {what} for options ({symbol})"),
+            ))
+        }
+        _ => Ok(()),
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub async fn set_leverage<Post, Fetch>(
     symbol: &str,
@@ -100,6 +113,7 @@ where
     Post: Future<Output = Result<Rc<Value>, Error>>,
     Fetch: Future<Output = Result<Positions, Error>>,
 {
+    refuse_option_symbol(Some(symbol), "leverage")?;
     set_leverage_impl(
         symbol,
         input_leverage,
@@ -144,6 +158,22 @@ where
         false,
     )
     .await
+}
+
+/// The bybit connection refuses option and inverse symbols before the shared body.
+pub async fn change_primary_position_mode<F: Future<Output = Result<(), Error>>>(
+    hedged: bool,
+    symbol: Option<&str>,
+    helper: impl FnOnce(bool, &str, &str) -> Result<F, Error>,
+) -> Result<(), Error> {
+    refuse_option_symbol(symbol, "position mode")?;
+    if let Some(symbol) = symbol.filter(|s| crate::inverse_symbol::is_bybit_inverse_symbol(s)) {
+        return Err(error(
+            "Error",
+            format!("Bybit position mode can only be changed on linear markets here ({symbol})"),
+        ));
+    }
+    change_position_mode(hedged, symbol, helper).await
 }
 
 /// Source explicitly clears its symbol argument, including the inverse variant.
@@ -225,9 +255,8 @@ where
         .get("result")
         .and_then(|r| r.get("reasons"))
         .and_then(Value::as_array);
-    // Preserve short-circuit conversion: a rejected message must not coerce retCode.
-    if field(&data, "retMsg")?.and_then(Value::as_str) != Some("OK")
-        || js_number(field(&data, "retCode")?).map_err(|e| error("TypeError", e.message))? != 0.
+    // Success is retCode 0 with no reasons; this endpoint answers "Request accepted", not "OK".
+    if js_number(field(&data, "retCode")?).map_err(|e| error("TypeError", e.message))? != 0.
         || reasons.is_some_and(|r| !r.is_empty())
     {
         let parts = reasons

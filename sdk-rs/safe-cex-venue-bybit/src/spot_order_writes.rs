@@ -119,6 +119,23 @@ pub fn record_recently_placed_order_from_opts<H: SpotOrderHost>(
     opts: H::Value,
     payload: H::Value,
 ) -> Result<(), H::Error> {
+    record_with_remaining(h, r, id, opts, payload, |_, qty, _| {
+        Ok(vec![("remaining", qty)])
+    })
+}
+/// The record body with the `remaining` fields supplied where the object literal evaluates them.
+pub(crate) fn record_with_remaining<H: SpotOrderHost>(
+    h: &H,
+    r: &H::Value,
+    id: H::Value,
+    opts: H::Value,
+    payload: H::Value,
+    remaining: impl FnOnce(
+        &H::Value,
+        H::Value,
+        H::Value,
+    ) -> Result<Vec<(&'static str, H::Value)>, H::Error>,
+) -> Result<(), H::Error> {
     let qty = or(h, parse(h, || p(h, &payload, "qty"))?, || {
         or(h, p(h, &opts, "amount")?, || Ok(h.number(0.)))
     })?;
@@ -141,6 +158,7 @@ pub fn record_recently_placed_order_from_opts<H: SpotOrderHost>(
     let symbol = p(h, &opts, "symbol")?;
     let kind = p(h, &opts, "type")?;
     let side = p(h, &opts, "side")?;
+    let units = remaining(&opts, qty.clone(), price.clone())?;
     let reduce = if is(h, &p(h, &opts, "type")?, "OrderType", "Conditional")? {
         h.boolean(false)
     } else {
@@ -156,23 +174,23 @@ pub fn record_recently_placed_order_from_opts<H: SpotOrderHost>(
         "getCurrentTimeMs",
         vec![]
     );
-    h.apply(
-        f,
-        vec![h.object(vec![
-            ("id", id),
-            ("status", status),
-            ("symbol", symbol),
-            ("type", kind),
-            ("side", side),
-            ("price", price),
-            ("amount", qty.clone()),
-            ("filled", h.number(0.)),
-            ("remaining", qty),
-            ("reduceOnly", reduce),
-            ("timeInForce", tif),
-            ("lastUpdate", now),
-        ])],
-    )?;
+    let mut fields = vec![
+        ("id", id),
+        ("status", status),
+        ("symbol", symbol),
+        ("type", kind),
+        ("side", side),
+        ("price", price),
+        ("amount", qty),
+        ("filled", h.number(0.)),
+    ];
+    fields.extend(units);
+    fields.extend([
+        ("reduceOnly", reduce),
+        ("timeInForce", tif),
+        ("lastUpdate", now),
+    ]);
+    h.apply(f, vec![h.object(fields)])?;
     Ok(())
 }
 // ts: BybitSpotExchange#applyLocalOrderUpdateAfterRestWrite

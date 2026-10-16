@@ -22,15 +22,15 @@ use safe_cex_exchange::{
     },
     error_reporting::ExchangeErrorInput,
     exchange::{BaseExchange, Exchange, ValidatedBatch, ValidatedOrder},
-    external::ExternalPublicData,
+    js_runtime::base_exchange::ExternalPublicDataFactory,
     runtime::{ExchangeError, ExchangeFuture},
 };
 use safe_cex_store::{StoreUpdate, model_patch::ModelPatch};
 use safe_cex_transport::{RestAdapter, RestFailure, RestRequest, RestResponseBody};
 use safe_cex_types::{
-    AccountValidationError, Candle, ExchangeAccount, ExchangeOptionsExternalPublicData, Execution,
-    ExecutionsOptions, FetchedLeverage, MarginType, OHLCVOptions, Order, OrderBook, OrderStatus,
-    PlaceOrderOpts, Position, PositionMode, PositionSide, UpdateOrderOpts, ValidateAccountResult,
+    AccountValidationError, Candle, ExchangeAccount, Execution, ExecutionsOptions, FetchedLeverage,
+    MarginType, OHLCVOptions, Order, OrderBook, OrderStatus, PlaceOrderOpts, Position,
+    PositionMode, PositionSide, UpdateOrderOpts, ValidateAccountResult,
 };
 #[cfg(test)]
 use serde::de::{IgnoredAny, MapAccess, SeqAccess, Visitor};
@@ -47,7 +47,7 @@ use std::{
 // ts: MexcExchange
 pub struct MexcExchange {
     base: Rc<BaseExchange>,
-    external: ExternalFactory,
+    external: ExternalPublicDataFactory,
     capabilities: ExchangeCapabilities,
     xhr: Rc<dyn RestAdapter>,
     local_to_utc: Rc<dyn Fn(f64) -> f64>,
@@ -61,9 +61,6 @@ pub struct MexcExchange {
 }
 #[path = "exchange_binding.rs"]
 mod binding;
-/// ts: BaseExchange#initExternalPublicData's provider, built by the registry host.
-type ExternalFactory =
-    Rc<dyn Fn(&ExchangeOptionsExternalPublicData, Rc<BaseExchange>) -> Rc<dyn ExternalPublicData>>;
 enum OrderKind {
     Regular,
     Plan,
@@ -420,7 +417,7 @@ impl MexcExchange {
         xhr: Rc<dyn RestAdapter>,
         local_to_utc: Rc<dyn Fn(f64) -> f64>,
         sockets: crate::sockets::MexcSocketDependencies,
-        external: ExternalFactory,
+        external: ExternalPublicDataFactory,
     ) -> Rc<Self> {
         let exchange = Rc::new(Self {
             base: Rc::new(base),

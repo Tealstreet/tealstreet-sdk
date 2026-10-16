@@ -51,6 +51,14 @@ for(const symbol of [null,42,0,1e21,1e-7,[],{}, {toString:null}]) {
  let key; try { key=String(symbol); } catch { key='unused'; }
  tickerCases.push({raw:[{symbol,lastPrice:'1'}],markets:[market(key,false)],cached});
 }
+// Inverse markets: volume from turnover24h (coin), quoteVolume from volume24h (USD contracts).
+const inverseMarket={...market('BTCUSD',false),quote:'USD',isInverse:true};
+for(const [volume24h,turnover24h] of [['1000','0.05'],['1000',undefined],[undefined,'0.05'],['1e999','-0'],[null,'1.2x']]) {
+ const raw={symbol:'BTCUSD',...Object.fromEntries(['lastPrice','bid1Price','ask1Price','markPrice','indexPrice','price24hPcnt','openInterest','fundingRate','nextFundingTime'].map(k=>[k,'20000']))};
+ if(volume24h!==undefined) raw.volume24h=volume24h;
+ if(turnover24h!==undefined) raw.turnover24h=turnover24h;
+ tickerCases.push({raw:[raw],markets:[inverseMarket],cached});
+}
 const prototypeStart=tickerCases.length;
 for(const symbol of ['constructor','toString','__proto__']) tickerCases.push({raw:[{symbol,lastPrice:'1'}],markets:[],cached});
 const baseTickerCases = [...tickerCases];
@@ -62,6 +70,8 @@ const tickerExpected = (c, venue)=>{
  return {rows,nonfinite:rows.map(t=>['bid','ask','last','mark','index','percentage','openInterest','fundingRate','fundingTime','volume','quoteVolume'].map(k=>Number.isNaN(t[k])?'NaN':t[k]===Infinity?'Infinity':t[k]===-Infinity?'-Infinity':'finite')),negativeZero:rows.map(t=>['bid','ask','last','mark','index','percentage','openInterest','fundingRate','fundingTime','volume','quoteVolume'].map(k=>Object.is(t[k],-0)))};
 };
 const tickers=tickerCases.map(c=>tickerExpected(c, context.venue));
+const inverseRow=tickers[prototypeStart-5].rows[0];
+assert.deepEqual([inverseRow.volume,inverseRow.quoteVolume],[0.05,1000],'primary inverse volume reads turnover24h');
 for(let i=prototypeStart;i<tickers.length;i++) {
  assert.equal(tickers[i].rows.length,1,'live TS must retain inherited market lookup divergence');
  assert.equal(tickers[i].rows[0].id,undefined);
@@ -74,7 +84,7 @@ for(const variant of ['bybitinverse','bybitspot']) {
  const local=vm.createContext({});
  vm.runInContext(ts.transpileModule(`globalThis.venue = new class { ${method.getText(file)} };`,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,local);
  for(let i=0;i<baseTickerCases.length;i++) {
-  const c={...baseTickerCases[i],spot:variant==='bybitspot'};
+  const c={...baseTickerCases[i],spot:variant==='bybitspot',inverseClass:variant==='bybitinverse'};
   let expected=tickerExpected(c,local.venue);
   if(i>=prototypeStart) {
    assert.equal(expected.rows.length,1,`${variant} inherited-key witness`);
@@ -88,7 +98,7 @@ const expected={positions,tickers};
 // Equivalent JSON spellings exercise JS numeric coercion, including numeric -0.
 const input=JSON.stringify({positions:cases,tickers:tickerCases}).replaceAll('\"symbol\":42,','\"symbol\":42.0,').replaceAll('\"symbol\":0,','\"symbol\":-0.0,');
 assert.equal(cases.length,1041,'EXCHANGE-STATE-CARDINALITY source cases');
-assert.equal(tickerCases.length,3213,'EXCHANGE-STATE-CARDINALITY source tickerCases');
+assert.equal(tickerCases.length,3228,'EXCHANGE-STATE-CARDINALITY source tickerCases');
 const run=spawnSync('cargo',['run','--quiet','--locked','--manifest-path','sdk-rs/Cargo.toml','-p','safe-cex-venue-bybit','--example','exchange-state'],{cwd:root,encoding:'utf8',input,maxBuffer:16*1024*1024});
 assert.equal(run.status,0,run.error?.message??run.stderr);
 // Normalize JSON transport on both sides; separate flags above retain signed-zero evidence.

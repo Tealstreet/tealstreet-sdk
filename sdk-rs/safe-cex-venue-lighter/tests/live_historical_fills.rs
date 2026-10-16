@@ -1776,7 +1776,7 @@ fn actual_historical_fills_native_floor() {
     }
     assert_eq!(rows.len(), 90, "independent authored historical floor");
     assert_eq!(
-        corpus["contentHash"], "b85838e0e041d0cb41bb24a53b2972fbcc274d940942011560f2eeeae66a9387",
+        corpus["contentHash"], "db5841a708d757d39adbc4424796087bda47e416e02b62b3aa9fe03cc841251b",
         "source/import pin after native assertions"
     );
     eprintln!(

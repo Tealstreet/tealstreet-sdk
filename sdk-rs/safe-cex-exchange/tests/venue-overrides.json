@@ -1290,6 +1290,11 @@
     "file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
   },
   {
+    "method": "fetchAccountGreeks",
+    "class": "BybitExchange",
+    "file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
+  },
+  {
     "method": "fetchAndSetPrivateSnapshot",
     "class": "BybitExchange",
     "file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
@@ -1331,6 +1336,16 @@
   },
   {
     "method": "fetchOHLCV",
+    "class": "BybitExchange",
+    "file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
+  },
+  {
+    "method": "fetchOptionChain",
+    "class": "BybitExchange",
+    "file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
+  },
+  {
+    "method": "fetchOptionExpiries",
     "class": "BybitExchange",
     "file": "packages/safe-cex/src/exchanges/bybit/bybit.exchange.ts"
   },
@@ -1991,6 +2006,11 @@
   },
   {
     "method": "fetchPositions",
+    "class": "HyperliquidExchange",
+    "file": "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.exchange.ts"
+  },
+  {
+    "method": "findOrderByClientOrderId",
     "class": "HyperliquidExchange",
     "file": "packages/safe-cex/src/exchanges/hyperliquid/hyperliquid.exchange.ts"
   },
@@ -3233,6 +3253,11 @@
     "method": "validateAccount",
     "class": "PolymarketExchange",
     "file": "packages/safe-cex/src/exchanges/polymarket/polymarket.exchange.ts"
+  },
+  {
+    "method": "start",
+    "class": "TxFlowExchange",
+    "file": "packages/safe-cex/src/exchanges/txflow/txflow.exchange.ts"
   },
   {
     "method": "cancelAllOrders",
