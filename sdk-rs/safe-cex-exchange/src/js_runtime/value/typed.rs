@@ -35,9 +35,12 @@ fn from_input(value: Input) -> Js {
     }
 }
 
-fn capture(value: &Js, depth: usize) -> Result<Input, Thrown> {
+fn capture(value: &Js, depth: usize, present_fields: bool) -> Result<Input, Thrown> {
     if depth >= 128 {
         return Err(Thrown::type_error("typed value recursion limit exceeded"));
+    }
+    if present_fields && value.is_callable() {
+        return Err(Thrown::type_error("callable cannot enter a declared DTO"));
     }
     Ok(match value {
         Js::Undefined | Js::Null | Js::Function(_) | Js::Promise(_) => Input::Null,
@@ -53,19 +56,25 @@ fn capture(value: &Js, depth: usize) -> Result<Input, Thrown> {
                 .borrow()
                 .iter()
                 .map(|value| {
-                    value
-                        .as_ref()
-                        .map_or(Ok(Input::Null), |value| capture(value, depth + 1))
+                    value.as_ref().map_or(Ok(Input::Null), |value| {
+                        capture(value, depth + 1, present_fields)
+                    })
                 })
                 .collect::<Result<_, _>>()?,
         ),
-        Js::Object(_) => {
+        Js::Builtin(reference) if reference.is_callable() => Input::Null,
+        Js::Object(_) | Js::Builtin(_) => {
             let mut fields = vec![];
             for (key, value) in value.own_entries()? {
-                if matches!(value, Js::Undefined | Js::Function(_)) {
+                if !present_fields
+                    && (matches!(value, Js::Undefined | Js::Function(_)) || value.is_callable())
+                {
                     continue;
                 }
-                fields.push((String::from_utf16_lossy(&key), capture(&value, depth + 1)?));
+                fields.push((
+                    String::from_utf16_lossy(&key),
+                    capture(&value, depth + 1, present_fields)?,
+                ));
             }
             Input::Object(fields)
         }
@@ -73,8 +82,11 @@ fn capture(value: &Js, depth: usize) -> Result<Input, Thrown> {
     })
 }
 
-pub(super) fn decode<T: de::DeserializeOwned>(value: &Js) -> Result<T, Thrown> {
-    T::deserialize(NativeInput(capture(value, 0)?)).map_err(fault)
+pub(super) fn decode<T: de::DeserializeOwned>(
+    value: &Js,
+    present_fields: bool,
+) -> Result<T, Thrown> {
+    T::deserialize(NativeInput(capture(value, 0, present_fields)?)).map_err(fault)
 }
 
 struct NativeInput(Input);

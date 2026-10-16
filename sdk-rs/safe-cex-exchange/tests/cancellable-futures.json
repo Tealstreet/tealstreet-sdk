@@ -1867,11 +1867,12 @@
         "opaque-macro-review",
         "opaque-macro-review",
         "opaque-macro-review",
+        "opaque-macro-review",
         "opaque-macro-review"
       ],
-      "producer_sha256": "b9798f457464f9c2ac70ceb92270684184664cab1cbaf400f766dac7833a034a",
+      "producer_sha256": "45732140d3e7a32d79fa0febf3c2f9690a24aad9f3040e9d5e6473f74b7450be",
       "classification": "immediate",
-      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed descriptor value formatting: the new DataDescriptor match arm passes its value to the same synchronous debug-map entry, with no task, waiter, or future."
+      "reason": "std write!/f.debug_* formatting is synchronous; no future is constructed. Reviewed retained Builtin referent arm: reference.js_string() returns an owned string and write! formats it synchronously. Existing DataDescriptor debug-map formatting remains synchronous. No task, waiter, future or cancellation latch is added."
     },
     {
       "owner": "src/js_runtime/value.rs::Thrown as fmt :: Debug::fmt",
