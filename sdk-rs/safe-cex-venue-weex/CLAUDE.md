@@ -43,6 +43,14 @@ The response target checks declared shapes, native fields and depth-150 refusals
 record_boundaries adds differentiated native names/IDs and exact source unit
 observations without treating the aliases as runtime validators.
 
+`tests/accepted_responses.rs` separately inspects the four response owners through
+raw and qualified Deserialize calls: optional fields, object/array variants and
+binary64 bits precede any owner serialization. The accepted-set contracts execute
+additional direct native projections. Run `tests/accepted-response-controls.py`
+alone to remove each object response's guard in turn: a complete valid array in
+Serde field order must fail the named assertion, then restoring the guard must
+pass all four tests. The record union continues to admit arrays.
+
 Seven enum normalizers in `src/utils.rs` mirror their source control flow and use
 the actual shared tables. `WeexUtilityInput` captures its opaque `value` with
 `js_deserialize_passthrough` before constructing Value, with explicit passthrough

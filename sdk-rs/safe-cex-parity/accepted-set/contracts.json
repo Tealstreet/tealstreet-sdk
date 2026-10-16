@@ -125921,5 +125921,361 @@
         "where_predicates": []
       }
     }
+  },
+  "safe_cex_venue_weex::response_types::WeexOrderResult": {
+    "shape": "map",
+    "evidence": "weex.types.ts WeexOrderResult declares five optional fields. response_types.rs retains omission, rejects present null and nonobjects through strict_decode::object before its private remote companion. accepted_responses.rs checks native fields through both trait routes and the complete five-slot array; removing only this owner guard must fail accepted_order_result::object_guard.",
+    "entrypoints": [],
+    "sample": {
+      "orderId": "order-alpha",
+      "clientOrderId": "client-beta",
+      "success": false,
+      "errorCode": "E7",
+      "errorMessage": "denied"
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) {\n Ok(decoded) => serde_json::json!({\"ok\":true,\"order_id\":decoded.order_id,\"client_order_id\":decoded.client_order_id,\"success\":decoded.success,\"error_code\":decoded.error_code,\"error_message\":decoded.error_message}),\n Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "order_id",
+        "client_order_id",
+        "success",
+        "error_code",
+        "error_message"
+      ],
+      "cases": [
+        {
+          "input": {
+            "orderId": "order-alpha",
+            "clientOrderId": "client-beta",
+            "success": false,
+            "errorCode": "E7",
+            "errorMessage": "denied"
+          },
+          "output": {
+            "ok": true,
+            "order_id": "order-alpha",
+            "client_order_id": "client-beta",
+            "success": false,
+            "error_code": "E7",
+            "error_message": "denied"
+          }
+        },
+        {
+          "input": {
+            "clientOrderId": "second-client",
+            "success": true,
+            "ignored": 8
+          },
+          "output": {
+            "ok": true,
+            "order_id": null,
+            "client_order_id": "second-client",
+            "success": true,
+            "error_code": null,
+            "error_message": null
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "order_id": null,
+            "client_order_id": null,
+            "success": null,
+            "error_code": null,
+            "error_message": null
+          }
+        },
+        {
+          "input": [
+            "order-alpha",
+            "client-beta",
+            false,
+            "E7",
+            "denied"
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "success": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_weex::response_types::WeexExchangeInfoResponse": {
+    "shape": "map",
+    "evidence": "weex.types.ts WeexExchangeInfoResponse has optional assets and symbols arrays of Record<string,any>. The Rust object guard precedes its private remote companion; missing differs from present null. Arrays inside each record remain admitted by the separately reviewed record union. accepted_responses.rs checks fields, variants and numeric bits on both trait routes, and a complete valid assets/symbols positional array. Removing only the outer guard must fail accepted_exchange_info::object_guard.",
+    "entrypoints": [],
+    "sample": {
+      "assets": [
+        {
+          "coin": "USD"
+        }
+      ],
+      "symbols": [
+        []
+      ]
+    },
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) {\n Ok(decoded) => { let observe = |rows: Option<Vec<super::WeexExchangeInfoRecord>>| rows.map(|rows| rows.iter().map(|row| match row {\n super::WeexExchangeInfoRecord::Object(fields) => serde_json::json!({\"kind\":\"object\",\"keys\":fields.keys().collect::<Vec<_>>()}),\n super::WeexExchangeInfoRecord::Array(items) => serde_json::json!({\"kind\":\"array\",\"length\":items.len()}) }).collect::<Vec<_>>());\n serde_json::json!({\"ok\":true,\"assets\":observe(decoded.assets),\"symbols\":observe(decoded.symbols)}) },\n Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "assets",
+        "symbols"
+      ],
+      "cases": [
+        {
+          "input": {
+            "assets": [
+              {
+                "coin": "USD"
+              }
+            ],
+            "symbols": [
+              []
+            ]
+          },
+          "output": {
+            "ok": true,
+            "assets": [
+              {
+                "kind": "object",
+                "keys": [
+                  "coin"
+                ]
+              }
+            ],
+            "symbols": [
+              {
+                "kind": "array",
+                "length": 0
+              }
+            ]
+          }
+        },
+        {
+          "input": {
+            "assets": [],
+            "symbols": [
+              {
+                "ticker": "ETHUSD"
+              },
+              {
+                "ticker": "BTCUSD"
+              }
+            ]
+          },
+          "output": {
+            "ok": true,
+            "assets": [],
+            "symbols": [
+              {
+                "kind": "object",
+                "keys": [
+                  "ticker"
+                ]
+              },
+              {
+                "kind": "object",
+                "keys": [
+                  "ticker"
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "assets": null,
+            "symbols": null
+          }
+        },
+        {
+          "input": [
+            [
+              {
+                "asset": "USD"
+              }
+            ],
+            [
+              [
+                "ticker"
+              ]
+            ]
+          ],
+          "output": {
+            "ok": false
+          }
+        },
+        {
+          "input": {
+            "assets": null
+          },
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_weex::response_types::WeexNumberOrString": {
+    "shape": "union",
+    "entrypoints": [],
+    "evidence": "weex.types.ts WeexKlineRow slots0,6,8 are number|string. The private untagged remote enum admits precisely those JSON token kinds; numeric capture precedes matching. Native projections inspect enum variants and binary64 bits, never serialize the owner. accepted_responses.rs additionally witnesses raw -0, wide integer rounding and overflow on both trait routes.",
+    "positive": [
+      3.25,
+      -2.5,
+      "alpha",
+      "9007199254740993"
+    ],
+    "negative": [
+      null,
+      true,
+      [],
+      {}
+    ],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) {\n Ok(decoded) => match decoded {\n $type::Number(number) => serde_json::json!({\"ok\":true,\"kind\":\"number\",\"value\":format!(\"{:016x}\",number.to_bits())}),\n $type::String(text) => serde_json::json!({\"ok\":true,\"kind\":\"string\",\"value\":text}) },\n Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "kind",
+        "value"
+      ],
+      "cases": [
+        {
+          "input": 3.25,
+          "output": {
+            "ok": true,
+            "kind": "number",
+            "value": "400a000000000000"
+          }
+        },
+        {
+          "input": -2.5,
+          "output": {
+            "ok": true,
+            "kind": "number",
+            "value": "c004000000000000"
+          }
+        },
+        {
+          "input": "alpha",
+          "output": {
+            "ok": true,
+            "kind": "string",
+            "value": "alpha"
+          }
+        },
+        {
+          "input": "9007199254740993",
+          "output": {
+            "ok": true,
+            "kind": "string",
+            "value": "9007199254740993"
+          }
+        },
+        {
+          "input": false,
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
+  },
+  "safe_cex_venue_weex::response_types::WeexExchangeInfoRecord": {
+    "shape": "union",
+    "entrypoints": [],
+    "evidence": "The reviewed weex-record-shape-choice admits both objects and arrays for source Record<string,any>; primitives reject. JsNumberInput preserves nested numeric ingress before union matching. Direct native projections read actual enum variants, cardinality and decoded child bits. accepted_responses.rs also checks signed zero and empty object/array variants.",
+    "positive": [
+      {},
+      [],
+      {
+        "alpha": 3.25
+      },
+      [
+        -2.5
+      ],
+      {
+        "opaque": [
+          "USD",
+          null,
+          true
+        ]
+      }
+    ],
+    "negative": [
+      null,
+      true,
+      17,
+      "text"
+    ],
+    "nativeObservation": {
+      "call": "{ match serde_json::from_value::<$type>($value.clone()) {\n Ok(decoded) => match decoded {\n $type::Object(fields) => serde_json::json!({\"ok\":true,\"kind\":\"object\",\"length\":fields.len(),\"numbers\":fields.values().map(|value| format!(\"{:016x}\",value.clone().decode::<f64>().expect(\"reviewed numeric field\").to_bits())).collect::<Vec<_>>()}),\n $type::Array(items) => serde_json::json!({\"ok\":true,\"kind\":\"array\",\"length\":items.len(),\"numbers\":items.iter().map(|value| format!(\"{:016x}\",value.clone().decode::<f64>().expect(\"reviewed numeric element\").to_bits())).collect::<Vec<_>>()}) },\n Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "kind",
+        "length",
+        "numbers"
+      ],
+      "cases": [
+        {
+          "input": {
+            "alpha": 3.25
+          },
+          "output": {
+            "ok": true,
+            "kind": "object",
+            "length": 1,
+            "numbers": [
+              "400a000000000000"
+            ]
+          }
+        },
+        {
+          "input": [
+            -2.5
+          ],
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "length": 1,
+            "numbers": [
+              "c004000000000000"
+            ]
+          }
+        },
+        {
+          "input": {},
+          "output": {
+            "ok": true,
+            "kind": "object",
+            "length": 0,
+            "numbers": []
+          }
+        },
+        {
+          "input": [],
+          "output": {
+            "ok": true,
+            "kind": "array",
+            "length": 0,
+            "numbers": []
+          }
+        },
+        {
+          "input": "text",
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    }
   }
 }
