@@ -6,6 +6,7 @@ use crate::module_host::{
 use safe_cex_exchange::{
     exchange::{BaseExchange, ExchangeSettings},
     external::ExternalPublicData,
+    http::HttpClient,
     js_runtime::base_exchange::ExternalPublicDataFactory,
     runtime::ExchangeError,
     websocket::WsRuntime,
@@ -19,6 +20,7 @@ use safe_cex_venue_backpack::{
 use safe_cex_venue_binance::exchange_classes::{
     BinanceExchange, BinancePMExchange, BinanceSpotExchange, ExchangeDependencies,
 };
+use safe_cex_venue_bitunix::adapter::BitunixVenue;
 use safe_cex_venue_blofin::native_exchange::BlofinNativeExchange;
 use safe_cex_venue_okx::binding::exchange::{OkxDependencies, OkxExchange};
 use std::rc::Rc;
@@ -29,6 +31,19 @@ pub struct BackpackDependencies {
     pub build_http: BuildHttp,
     pub install_transport: InstallTransport,
     pub date_parse: DateParser,
+}
+
+/// Bitunix's createAPI client builder and transport install, per lane.
+pub type BitunixBuild = Rc<dyn Fn(&ExchangeOptions) -> Result<HttpClient, ExchangeError>>;
+pub type BitunixInstall = Rc<dyn Fn(&HttpClient) -> Result<(), ExchangeError>>;
+
+/// What `BitunixVenue::new` takes besides the BaseExchange the registry builds.
+pub struct BitunixDependencies {
+    pub runtime: Rc<dyn WsRuntime>,
+    pub build: BitunixBuild,
+    pub install: BitunixInstall,
+    /// Required when `options.externalPublicData` is set.
+    pub external_public_data: Option<ExternalPublicDataFactory>,
 }
 
 /// The common HTTP stack BloFin builds each client from: (options, baseURL, timeout budget).
@@ -51,6 +66,7 @@ pub trait RustVenueHost {
     /// OKX, OKX Demo, OKX EU and OKX EU Demo share one input set.
     fn okx(&self) -> Result<OkxDependencies, ExchangeError>;
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError>;
+    fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError>;
 }
 
 /// The P4 flag: `ModuleHost` (the default) keeps today's TypeScript-module route.
@@ -69,6 +85,7 @@ pub const RUST_VENUES: &[(ExchangeName, RustConstructorEntry)] = &[
     (ExchangeName::Binance, binance_constructor),
     (ExchangeName::Binancepm, binancepm_constructor),
     (ExchangeName::Binancespot, binancespot_constructor),
+    (ExchangeName::Bitunix, bitunix_constructor),
     (ExchangeName::Blofin, blofin_constructor),
     (ExchangeName::Okx, okx_constructor),
     (ExchangeName::Okxdemo, okx_constructor),
@@ -121,22 +138,51 @@ pub fn binancespot_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstruct
     })
 }
 
+/// The provider factory, or a refusal when `externalPublicData` is set without one.
+fn external_factory(
+    venue: &str,
+    factory: Option<ExternalPublicDataFactory>,
+    options: &ExchangeOptions,
+) -> Result<ExternalPublicDataFactory, ExchangeError> {
+    match factory {
+        Some(factory) => Ok(factory),
+        None if options.external_public_data.is_some() => Err(ExchangeError::new(format!(
+            "{venue}: externalPublicData is configured but no provider was supplied"
+        ))),
+        None => Ok(Rc::new(
+            |_: &ExchangeOptionsExternalPublicData| -> Rc<dyn ExternalPublicData> {
+                unreachable!("externalPublicData is unset, so no provider is built")
+            },
+        )),
+    }
+}
+
+pub fn bitunix_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
+    ExchangeConstructor::new(move |name, options, store| {
+        let deps = host.bitunix()?;
+        let external = external_factory("bitunix", deps.external_public_data, &options)?;
+        let base = BaseExchange::new(
+            name,
+            options,
+            store,
+            deps.runtime.clone(),
+            ExchangeSettings::default(),
+        );
+        let exchange = BitunixVenue::new(
+            base,
+            deps.build,
+            deps.install,
+            deps.runtime,
+            Rc::new(move |config| external(config)),
+        )?;
+        Ok(exchange)
+    })
+}
+
 pub fn blofin_constructor(host: Rc<dyn RustVenueHost>) -> ExchangeConstructor {
     ExchangeConstructor::new(move |name, options, store| {
         let deps = host.blofin()?;
-        let external = match deps.external_public_data {
-            Some(factory) => factory,
-            None if options.external_public_data.is_some() => {
-                return Err(ExchangeError::new(
-                    "blofin: externalPublicData is configured but no provider was supplied",
-                ));
-            }
-            None => Rc::new(
-                |_: &ExchangeOptionsExternalPublicData| -> Rc<dyn ExternalPublicData> {
-                    unreachable!("externalPublicData is unset, so BloFin never builds a provider")
-                },
-            ),
-        };
+        let external = external_factory("blofin", deps.external_public_data, &options)?;
         let base = BaseExchange::new(
             name,
             options,

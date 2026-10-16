@@ -96,6 +96,7 @@ safe-cex-exchange = { path = "safe-cex-exchange" }
 safe-cex-registry = { path = "safe-cex-registry" }
 safe-cex-venue-backpack = { path = "safe-cex-venue-backpack" }
 safe-cex-venue-binance = { path = "safe-cex-venue-binance" }
+safe-cex-venue-bitunix = { path = "safe-cex-venue-bitunix" }
 safe-cex-venue-blofin = { path = "safe-cex-venue-blofin" }
 safe-cex-venue-okx = { path = "safe-cex-venue-okx" }
 safe-cex-candle-cache = { path = "safe-cex-candle-cache" }

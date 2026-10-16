@@ -1,6 +1,8 @@
 //! The production `RustVenueHost`: venues share one native runtime and get a
 //! fresh terminal HTTP adapter per construction. Requires a tokio `LocalSet`.
-use crate::rust_venues::{BackpackDependencies, BlofinDependencies, BlofinHttp, RustVenueHost};
+use crate::rust_venues::{
+    BackpackDependencies, BitunixDependencies, BlofinDependencies, BlofinHttp, RustVenueHost,
+};
 use crate::{
     external_public_data::{
         ExternalPublicDataProvider, GatewayEvent, GatewayHost, GatewayListener, GatewaySocket,
@@ -100,6 +102,46 @@ impl RustVenueHost for NativeVenueHost {
             date_parse: inputs.date_parse,
         })
     }
+    fn bitunix(&self) -> Result<BitunixDependencies, ExchangeError> {
+        if self.remote.is_some() {
+            return Err(ExchangeError::new(
+                "remoteSigner is not wired for bitunix on the native host",
+            ));
+        }
+        // createAPI builds a lane's client, then installs its transport; the
+        // install sees the options of the lane just built.
+        let built = Rc::new(RefCell::new(None::<safe_cex_types::ExchangeOptions>));
+        let (runtime, adapter, record) =
+            (self.runtime.clone(), self.adapter.clone(), built.clone());
+        let install_runtime = self.runtime.clone();
+        Ok(BitunixDependencies {
+            runtime: self.runtime.clone(),
+            build: Rc::new(move |options| {
+                *record.borrow_mut() = Some(options.clone());
+                native_client(
+                    &runtime,
+                    &adapter,
+                    safe_cex_types::ExchangeName::Bitunix,
+                    options,
+                    safe_cex_transport::RestRequest::default(),
+                )
+            }),
+            install: Rc::new(move |client| {
+                let options = built.borrow().clone().ok_or_else(|| {
+                    ExchangeError::new("bitunix transport install before its client was built")
+                })?;
+                safe_cex_exchange::http::install_transport_adapter(
+                    client,
+                    &safe_cex_transport::TransportRegistry::default(),
+                    &options,
+                    Some(&install_runtime.transport()),
+                    safe_cex_transport::RestAdapterVariant::Default,
+                );
+                Ok(())
+            }),
+            external_public_data: None,
+        })
+    }
     // externalPublicData stays unset: the constructor refuses that option visibly.
     fn blofin(&self) -> Result<BlofinDependencies, ExchangeError> {
         if self.remote.is_some() {
@@ -109,11 +151,7 @@ impl RustVenueHost for NativeVenueHost {
         }
         Ok(BlofinDependencies {
             runtime: self.runtime.clone(),
-            http: venue_http(
-                self.runtime.clone(),
-                self.adapter.clone(),
-                safe_cex_types::ExchangeName::Blofin,
-            ),
+            http: blofin_http(self.runtime.clone(), self.adapter.clone()),
             external_public_data: None,
             remote_signer_account_name: None,
         })
@@ -136,44 +174,58 @@ impl RustVenueHost for NativeVenueHost {
     }
 }
 
-/// safeCexAxiosCreate over a fresh terminal adapter, for venues whose createAPI
-/// supplies the baseURL and timeout budget and installs its own interceptors.
-fn venue_http(
-    runtime: Rc<dyn WsRuntime>,
-    adapter: AdapterFactory,
+/// safeCexAxiosCreate over a fresh terminal adapter; the venue's createAPI then
+/// supplies its own baseURL, timeout and interceptors.
+fn native_client(
+    runtime: &Rc<dyn WsRuntime>,
+    adapter: &AdapterFactory,
     exchange: safe_cex_types::ExchangeName,
-) -> BlofinHttp {
+    options: &safe_cex_types::ExchangeOptions,
+    request: safe_cex_transport::RestRequest,
+) -> Result<safe_cex_exchange::http::HttpClient, ExchangeError> {
+    let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
+    safe_cex_exchange::http::safe_cex_axios_create(
+        safe_cex_exchange::http::HttpClientOptions {
+            params_serializer: None,
+            response_transform: None,
+            exchange,
+            options: options.clone(),
+            request,
+            provider: Some(runtime.transport()),
+            signer: None,
+            account_name: None,
+            adapter: adapter()?,
+            host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
+            runtime: exchange_runtime,
+            store: None,
+            stats: None,
+            logs: None,
+            every: vec![],
+            periodic: vec![],
+            next_id: Arc::new(safe_cex_exchange::native::nanoid),
+            signing_now: Arc::new(|| safe_cex_transport::native::wall_clock_ms() as u64),
+        },
+        &safe_cex_transport::TransportRegistry::default(),
+    )
+    .map_err(|e| ExchangeError::new(e.to_string()))
+}
+
+/// BloFin's common HTTP builder: (options, baseURL, timeout budget) -> adapter.
+fn blofin_http(runtime: Rc<dyn WsRuntime>, adapter: AdapterFactory) -> BlofinHttp {
     Rc::new(move |options, base_url, budget| {
         let request = safe_cex_transport::RestRequest {
             base_url: Some(base_url.to_owned()),
             timeout_ms: Some(budget),
             ..Default::default()
         };
-        let exchange_runtime: Rc<dyn safe_cex_exchange::runtime::ExchangeRuntime> = runtime.clone();
-        let client = safe_cex_exchange::http::safe_cex_axios_create(
-            safe_cex_exchange::http::HttpClientOptions {
-                params_serializer: None,
-                response_transform: None,
-                exchange: exchange.clone(),
-                options: options.clone(),
-                request,
-                provider: Some(runtime.transport()),
-                signer: None,
-                account_name: None,
-                adapter: adapter().map_err(|e| e.message)?,
-                host: Rc::new(safe_cex_exchange::native::NativeHttpHost),
-                runtime: exchange_runtime,
-                store: None,
-                stats: None,
-                logs: None,
-                every: vec![],
-                periodic: vec![],
-                next_id: Arc::new(safe_cex_exchange::native::nanoid),
-                signing_now: Arc::new(|| safe_cex_transport::native::wall_clock_ms() as u64),
-            },
-            &safe_cex_transport::TransportRegistry::default(),
+        let client = native_client(
+            &runtime,
+            &adapter,
+            safe_cex_types::ExchangeName::Blofin,
+            options,
+            request,
         )
-        .map_err(|e| e.to_string())?;
+        .map_err(|e| e.message)?;
         Ok(Rc::new(client) as Rc<dyn RestAdapter>)
     })
 }

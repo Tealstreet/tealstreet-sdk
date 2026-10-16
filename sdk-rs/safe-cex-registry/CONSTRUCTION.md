@@ -1,6 +1,6 @@
 # Rust venue construction through the registry
 
-Status: implemented for `backpack`, `blofin`, the Binance family (`binance`, `binancepm`,
+Status: implemented for `backpack`, `bitunix`, `blofin`, the Binance family (`binance`, `binancepm`,
 `binancespot`) and the OKX family (`okx`, `okxdemo`,
 `okxeu`, `okxeudemo`), 2026-10-16 (`src/rust_venues.rs`,
 `tests/rust_venues.rs`). Plan reference: `docs/plans/SAFE_CEX_RUST_PORT_v1.md`
@@ -21,6 +21,9 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 - **Initial members:**
   - `backpack`, built with `BackpackExchange::new`.
   - `binance`, built with `BinanceExchange::new`.
+  - `bitunix`, built with `BitunixVenue::new` from a registry-built `BaseExchange`
+    and `BitunixDependencies` (runtime, per-lane client builder and transport
+    install, optional externalPublicData provider).
   - `blofin`, built with `BlofinNativeExchange::new` from a registry-built
     `BaseExchange` and `BlofinDependencies` (runtime, the common HTTP builder,
     optional externalPublicData provider, remote-signer account name).
@@ -61,8 +64,8 @@ A new module `rust_venues.rs` holds a fixed, ordered table of bound venues:
 ## Adding a venue
 
 When a venue lane finishes binding its class, it adds that venue in its own small
-follow-up PR. Expected next: `bitget`,
-`bitunix` and `bybit`.
+follow-up PR. Expected next: `bitget`, `bybit`, `kraken`, `kucoin`, `mexc`, `lighter`
+and `woo`.
 
 Each follow-up does four things:
 - adds one `RUST_VENUES` entry;
