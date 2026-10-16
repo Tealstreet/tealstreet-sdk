@@ -69,6 +69,11 @@ pub fn start_callback<H: SnapshotHost>(
                 "connectAndSubscribe",
                 vec![],
             )?;
+            let inverse = h.get(&owner, "inversePublicWebsocket")?;
+            let null = h.intrinsic("null", vec![])?;
+            if !h.equal(&inverse, &h.undefined()) && !h.equal(&inverse, &null) {
+                call(h.as_ref(), inverse, "connectAndSubscribe", vec![])?;
+            }
             Ok(markets)
         }
         "start_probe_success" => Ok(h.undefined()),
@@ -113,10 +118,15 @@ pub fn start<H: SnapshotHost>(h: Rc<H>, owner: H::Value) -> H::Value {
         }
         let external = call(h.as_ref(), owner.clone(), "initExternalPublicData", vec![])?;
         let external = h.wait(external).await?;
-        let margin = if h.truthy(&public_only) {
+        // The probe's handlers attach at creation: a rejection must never sit unhandled.
+        let probe = if h.truthy(&public_only) {
             h.intrinsic("null", vec![])?
         } else {
-            call(h.as_ref(), owner.clone(), "fetchMarginAccountInfos", vec![])?
+            let margin = call(h.as_ref(), owner.clone(), "fetchMarginAccountInfos", vec![])?;
+            let then = h.select(margin, "then")?;
+            let ignore = h.callback(owner.clone(), "start_probe_success", vec![])?;
+            let failure = h.callback(owner.clone(), "start_probe_rejection", vec![])?;
+            h.apply(then, vec![ignore, failure])?
         };
         if !h.truthy(&public_only) {
             let cache = call(h.as_ref(), owner.clone(), "fetchAndCacheApiKeyInfo", vec![])?;
@@ -151,14 +161,8 @@ pub fn start<H: SnapshotHost>(h: Rc<H>, owner: H::Value) -> H::Value {
             }
             loaded(h.as_ref(), &owner, vec![("tickers", tickers)], &["tickers"])?;
         }
-        let probe = if h.truthy(&margin) {
-            let then = h.select(margin, "then")?;
-            let ignore = h.callback(owner.clone(), "start_probe_success", vec![])?;
-            let margin = h.apply(then, vec![ignore])?;
-            let catch = h.select(margin, "catch")?;
-            let failure = h.callback(owner.clone(), "start_probe_rejection", vec![])?;
-            let margin = h.apply(catch, vec![failure])?;
-            h.wait(margin).await?
+        let probe = if h.truthy(&probe) {
+            h.wait(probe).await?
         } else {
             h.undefined()
         };

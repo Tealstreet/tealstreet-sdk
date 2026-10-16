@@ -485,9 +485,11 @@ parseFloat lookup captures the raw callable before evaluating its argument, then
 invokes it without a global receiver. Concrete class binding remains pending.
 
 
-primary_startup is an unaccepted startup extraction over SnapshotHost; the
-manifest row remains pending. It retains cached public-only mode, eager margin
-probe/cache launch and post-market parser ordering. Its detached cache rejection
-callback reports the original value instead of the source empty continuation.
-This deliberate visible-error correction requires a separate source/native
-witness before any divergent annotation; concrete startup binding is pending.
+primary_startup is the BybitExchange.start body over SnapshotHost. It retains
+cached public-only mode, the margin probe's then(ok, fail) attached at creation,
+the eager cache launch, the optional inverse public socket connect and
+post-market parser ordering. Its detached cache rejection reports the original
+value instead of the source's empty continuation (CHOSEN, divergent row).
+tests/primary_startup.rs compares 22 scenarios with the executed source member;
+that report is the only native-only effect it removes before comparison.
+Concrete binding to the Exchange trait is pending, as for every SnapshotHost body.
