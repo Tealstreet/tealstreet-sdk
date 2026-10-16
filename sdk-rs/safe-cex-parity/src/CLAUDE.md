@@ -191,6 +191,17 @@ DeserializeOwned or bypass the existing borrowed-alias refusal. Decoder
 classifications and borrowed production-path coverage remain separate obligations.
 
 
+The transport provider's `TransportFuture<'static,bool>` and
+`RestFuture<'static,bool>` have separate finite identities in
+`../accepted-set/generic-aliases.json`. Their exact raw/expanded compiler ASTs
+retain `Result<bool,TransportError>` and `Result<bool,RestFailure>` respectively,
+including the original lifetime/type parameters. The existing reviewed alias
+path emits invariant equality against independently authored native Rust types
+and runs ordinary Serde/conversion checks. This establishes the selected
+capability identities, not future polling, transport execution, other generic
+arguments or a decoder exemption; ordinary contract review remains required.
+
+
 The separate `secondary::RateLimitWrapper<'static>` registry entry retains its
 actual unsized `dyn Fn(Arc<dyn RestAdapter>)->Arc<dyn RestAdapter>` target. Its
 existing unsized alias path requires invariant native function/pointer type

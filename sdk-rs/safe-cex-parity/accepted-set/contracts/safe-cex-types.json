@@ -16827,7 +16827,7 @@
   },
   "safe_cex_types::store_model::DisplayedPosition": {
     "shape": "map",
-    "evidence": "Reviewed native decoded field projection; authored distinct fixtures and IEEE f64 bitstrings. No owner serialization. Nested projections are a stated finite floor, not full nested-field coverage.",
+    "evidence": "Reviewed native decoded field projection; authored distinct fixtures and IEEE f64 bitstrings. No owner serialization. Nested projections are a stated finite floor, not full nested-field coverage. Direct raw JSON decimal and signed-zero observations exercise streaming flattened Position decoding; remote serializer metadata remains checked against the public schema.",
     "entrypoints": [],
     "sample": {
       "id": "position-A",
@@ -17310,6 +17310,49 @@
         },
         {
           "input": [],
+          "output": {
+            "ok": false
+          }
+        }
+      ]
+    },
+    "observation": {
+      "call": "{ match serde_json::from_str::<$type>($value.as_str().expect(\"raw displayed-position witness\")) { Ok(v) => serde_json::json!({\"ok\":true,\"entryBits\":v.position.entry_price.to_bits().to_string(),\"notionalBits\":v.position.notional.to_bits().to_string(),\"pnlBits\":v.position.unrealized_pnl.to_bits().to_string(),\"contractsBits\":v.position.contracts.to_bits().to_string(),\"oneBits\":v.one_min_upnl.map(|n|n.to_bits().to_string()),\"account\":v.account}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+      "nativeFields": [
+        "entryBits",
+        "notionalBits",
+        "pnlBits",
+        "contractsBits",
+        "oneBits",
+        "account"
+      ],
+      "cases": [
+        {
+          "input": "{\"id\":\"A\",\"symbol\":\"P\",\"side\":\"long\",\"entryPrice\":1.25,\"notional\":2.5,\"leverage\":3.75,\"unrealizedPnl\":-4.125,\"contracts\":6.5,\"liquidationPrice\":7.75,\"account\":\"acct-A\",\"oneMinUpnl\":10.25}",
+          "output": {
+            "ok": true,
+            "entryBits": "4608308318706860032",
+            "notionalBits": "4612811918334230528",
+            "pnlBits": "13839702392397889536",
+            "contractsBits": "4619004367821864960",
+            "oneBits": "4621959855077326848",
+            "account": "acct-A"
+          }
+        },
+        {
+          "input": "{\"id\":\"B\",\"symbol\":\"Q\",\"side\":\"short\",\"entryPrice\":-0,\"notional\":1,\"leverage\":2,\"unrealizedPnl\":-0,\"contracts\":-0,\"liquidationPrice\":3,\"account\":\"acct-B\",\"oneMinUpnl\":-0}",
+          "output": {
+            "ok": true,
+            "entryBits": "9223372036854775808",
+            "notionalBits": "4607182418800017408",
+            "pnlBits": "9223372036854775808",
+            "contractsBits": "9223372036854775808",
+            "oneBits": "9223372036854775808",
+            "account": "acct-B"
+          }
+        },
+        {
+          "input": "[]",
           "output": {
             "ok": false
           }
@@ -45421,5 +45464,481 @@
         }
       ]
     }
+  },
+  "safe_cex_types::store_model::strict_codecs::DisplayedPositionMap": {
+    "shape": "observed",
+    "instantiation": "DisplayedPositionMap<A>",
+    "evidence": "Original-map adapter consumes only DisplayedPosition extension fields, checks duplicates and forwards remaining key/value events into the caller seeds. Bounded direct native witnesses execute supplied String and f64 seeds, observe ordering, exhausted None, extension capture and signed-zero/decimal bits; they do not claim arbitrary Seed or MapAccess implementations. No owner serialization.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::MapAccess",
+          "name": "next_key_seed",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "seed",
+                {
+                  "generic": "K"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "resolved_path": {
+                            "path": "core::option::Option",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "type": {
+                                      "qualified_path": {
+                                        "name": "Value",
+                                        "args": null,
+                                        "self_type": {
+                                          "generic": "K"
+                                        },
+                                        "trait": {
+                                          "path": "",
+                                          "args": null
+                                        }
+                                      }
+                                    }
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "K",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::DeserializeSeed",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Select the next non-display field with the actual String seed, consuming display fields from the original map.",
+        "call": "{ struct ReadMap;\nimpl<'de> serde::de::Visitor<'de> for ReadMap {\n type Value = serde_json::Value;\n fn expecting(&self, f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { f.write_str(\"an original numeric map\") }\n fn visit_map<A:serde::de::MapAccess<'de>>(self,map:A)->Result<Self::Value,A::Error> {\n  use serde::de::{MapAccess,DeserializeSeed};\n  struct Key;\n  impl<'de> DeserializeSeed<'de> for Key {type Value=String;fn deserialize<D:serde::Deserializer<'de>>(self,d:D)->Result<String,D::Error>{<String as serde::Deserialize>::deserialize(d)}}\n  struct Number;\n  impl<'de> DeserializeSeed<'de> for Number {type Value=f64;fn deserialize<D:serde::Deserializer<'de>>(self,d:D)->Result<f64,D::Error>{<f64 as serde::Deserialize>::deserialize(d)}}\n  let mut filtered: $type = super::DisplayedPositionMap { map, key:None,account:None,ticker:None,market:None,balance:None,exchange_name:None,one_min_upnl:None,five_min_upnl:None,has_active_chaser:None,has_active_twap:None,is_fake_position:None,chaser_size:None,has_full_stop:None,has_full_tp:None };\n  let first=filtered.next_key_seed(Key)?;\n  let first_number=filtered.next_value_seed(Number)?;\n  let second=filtered.next_key_seed(Key)?;\n  let second_number=filtered.next_value_seed(Number)?;\n  let exhausted=filtered.next_key_seed(Key)?.is_none();\n  Ok(serde_json::json!({\"ok\":true,\"firstKey\":first,\"firstBits\":first_number.to_bits().to_string(),\"secondKey\":second,\"secondBits\":second_number.to_bits().to_string(),\"exhausted\":exhausted,\"key\":filtered.key,\"account\":filtered.account,\"oneBits\":filtered.one_min_upnl.map(|n|n.to_bits().to_string())}))\n }\n}\nlet mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw map seed witness\"));\nmatch serde::Deserializer::deserialize_map(&mut input,ReadMap) {Ok(v)=>v,Err(_)=>serde_json::json!({\"ok\":false})}\n}",
+        "cases": [
+          {
+            "input": "{\"key\":\"dA\",\"oneMinUpnl\":1.25,\"entryPrice\":-0,\"contracts\":4.5,\"account\":\"aA\"}",
+            "output": {
+              "ok": true,
+              "firstKey": "entryPrice",
+              "firstBits": "9223372036854775808",
+              "secondKey": "contracts",
+              "secondBits": "4616752568008179712",
+              "exhausted": true,
+              "key": "dA",
+              "account": "aA",
+              "oneBits": "4608308318706860032"
+            }
+          },
+          {
+            "input": "{\"contracts\":-2.75,\"key\":\"dB\",\"entryPrice\":8.125,\"account\":\"aB\",\"oneMinUpnl\":-0}",
+            "output": {
+              "ok": true,
+              "firstKey": "contracts",
+              "firstBits": "13836746905142427648",
+              "secondKey": "entryPrice",
+              "secondBits": "4620763586426306560",
+              "exhausted": true,
+              "key": "dB",
+              "account": "aB",
+              "oneBits": "9223372036854775808"
+            }
+          }
+        ]
+      },
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::MapAccess",
+          "name": "next_value_seed",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "borrowed_ref": {
+                    "lifetime": null,
+                    "is_mutable": true,
+                    "type": {
+                      "generic": "Self"
+                    }
+                  }
+                }
+              ],
+              [
+                "seed",
+                {
+                  "generic": "V"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "V"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "V",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::DeserializeSeed",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Forward the original pending numeric value to the actual f64 seed without Content or JSON Value buffering.",
+        "call": "{ struct ReadMap;\nimpl<'de> serde::de::Visitor<'de> for ReadMap {\n type Value = serde_json::Value;\n fn expecting(&self, f:&mut std::fmt::Formatter<'_>)->std::fmt::Result { f.write_str(\"an original numeric map\") }\n fn visit_map<A:serde::de::MapAccess<'de>>(self,map:A)->Result<Self::Value,A::Error> {\n  use serde::de::{MapAccess,DeserializeSeed};\n  struct Key;\n  impl<'de> DeserializeSeed<'de> for Key {type Value=String;fn deserialize<D:serde::Deserializer<'de>>(self,d:D)->Result<String,D::Error>{<String as serde::Deserialize>::deserialize(d)}}\n  struct Number;\n  impl<'de> DeserializeSeed<'de> for Number {type Value=f64;fn deserialize<D:serde::Deserializer<'de>>(self,d:D)->Result<f64,D::Error>{<f64 as serde::Deserialize>::deserialize(d)}}\n  let mut filtered: $type = super::DisplayedPositionMap { map, key:None,account:None,ticker:None,market:None,balance:None,exchange_name:None,one_min_upnl:None,five_min_upnl:None,has_active_chaser:None,has_active_twap:None,is_fake_position:None,chaser_size:None,has_full_stop:None,has_full_tp:None };\n  let first=filtered.next_key_seed(Key)?;\n  let first_number=filtered.next_value_seed(Number)?;\n  let second=filtered.next_key_seed(Key)?;\n  let second_number=filtered.next_value_seed(Number)?;\n  let exhausted=filtered.next_key_seed(Key)?.is_none();\n  Ok(serde_json::json!({\"ok\":true,\"firstKey\":first,\"firstBits\":first_number.to_bits().to_string(),\"secondKey\":second,\"secondBits\":second_number.to_bits().to_string(),\"exhausted\":exhausted,\"key\":filtered.key,\"account\":filtered.account,\"oneBits\":filtered.one_min_upnl.map(|n|n.to_bits().to_string())}))\n }\n}\nlet mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw map seed witness\"));\nmatch serde::Deserializer::deserialize_map(&mut input,ReadMap) {Ok(v)=>v,Err(_)=>serde_json::json!({\"ok\":false})}\n}",
+        "cases": [
+          {
+            "input": "{\"key\":\"dA\",\"oneMinUpnl\":1.25,\"entryPrice\":-0,\"contracts\":4.5,\"account\":\"aA\"}",
+            "output": {
+              "ok": true,
+              "firstKey": "entryPrice",
+              "firstBits": "9223372036854775808",
+              "secondKey": "contracts",
+              "secondBits": "4616752568008179712",
+              "exhausted": true,
+              "key": "dA",
+              "account": "aA",
+              "oneBits": "4608308318706860032"
+            }
+          },
+          {
+            "input": "{\"contracts\":-2.75,\"key\":\"dB\",\"entryPrice\":8.125,\"account\":\"aB\",\"oneMinUpnl\":-0}",
+            "output": {
+              "ok": true,
+              "firstKey": "contracts",
+              "firstBits": "13836746905142427648",
+              "secondKey": "entryPrice",
+              "secondBits": "4620763586426306560",
+              "exhausted": true,
+              "key": "dB",
+              "account": "aB",
+              "oneBits": "9223372036854775808"
+            }
+          }
+        ]
+      }
+    ]
+  },
+  "safe_cex_types::store_model::strict_codecs::DisplayedPositionVisitor": {
+    "shape": "observed",
+    "evidence": "Concrete streaming map visitor constructs the private DisplayedPosition companion without Serde Content. Direct native raw-object witnesses inspect Position and display fields plus decimal/signed-zero bits; array refusal remains explicit. Supplied visit_map only, no claim about arbitrary MapAccess implementations. No owner serialization.",
+    "entrypoints": [
+      {
+        "api": {
+          "kind": "trait",
+          "trait": "serde_core::de::Visitor",
+          "name": "visit_map",
+          "signature": {
+            "inputs": [
+              [
+                "self",
+                {
+                  "generic": "Self"
+                }
+              ],
+              [
+                "map",
+                {
+                  "generic": "A"
+                }
+              ]
+            ],
+            "output": {
+              "resolved_path": {
+                "path": "core::result::Result",
+                "args": {
+                  "angle_bracketed": {
+                    "args": [
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Value",
+                            "args": null,
+                            "self_type": {
+                              "generic": "Self"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      },
+                      {
+                        "type": {
+                          "qualified_path": {
+                            "name": "Error",
+                            "args": null,
+                            "self_type": {
+                              "generic": "A"
+                            },
+                            "trait": {
+                              "path": "",
+                              "args": null
+                            }
+                          }
+                        }
+                      }
+                    ],
+                    "constraints": []
+                  }
+                }
+              }
+            },
+            "is_c_variadic": false
+          },
+          "generics": {
+            "params": [
+              {
+                "name": "A",
+                "kind": {
+                  "type": {
+                    "bounds": [
+                      {
+                        "trait_bound": {
+                          "trait": {
+                            "path": "serde_core::de::MapAccess",
+                            "args": {
+                              "angle_bracketed": {
+                                "args": [
+                                  {
+                                    "lifetime": "'de"
+                                  }
+                                ],
+                                "constraints": []
+                              }
+                            }
+                          },
+                          "generic_params": [],
+                          "modifier": "none"
+                        }
+                      }
+                    ],
+                    "default": null,
+                    "is_synthetic": false
+                  }
+                }
+              }
+            ],
+            "where_predicates": []
+          }
+        },
+        "input": "observed",
+        "reason": "Construct the companion from original map events, preserving Position decoding and enforcing display-field presence.",
+        "call": "{ let mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw displayed-position visitor witness\")); match serde::Deserializer::deserialize_map(&mut input,$type) { Ok(v) => serde_json::json!({\"ok\":true,\"entryBits\":v.position.entry_price.to_bits().to_string(),\"notionalBits\":v.position.notional.to_bits().to_string(),\"pnlBits\":v.position.unrealized_pnl.to_bits().to_string(),\"contractsBits\":v.position.contracts.to_bits().to_string(),\"oneBits\":v.one_min_upnl.map(|n|n.to_bits().to_string()),\"account\":v.account}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+        "cases": [
+          {
+            "input": "{\"id\":\"A\",\"symbol\":\"P\",\"side\":\"long\",\"entryPrice\":1.25,\"notional\":2.5,\"leverage\":3.75,\"unrealizedPnl\":-4.125,\"contracts\":6.5,\"liquidationPrice\":7.75,\"account\":\"acct-A\",\"oneMinUpnl\":10.25}",
+            "output": {
+              "ok": true,
+              "entryBits": "4608308318706860032",
+              "notionalBits": "4612811918334230528",
+              "pnlBits": "13839702392397889536",
+              "contractsBits": "4619004367821864960",
+              "oneBits": "4621959855077326848",
+              "account": "acct-A"
+            }
+          },
+          {
+            "input": "{\"id\":\"B\",\"symbol\":\"Q\",\"side\":\"short\",\"entryPrice\":-0,\"notional\":1,\"leverage\":2,\"unrealizedPnl\":-0,\"contracts\":-0,\"liquidationPrice\":3,\"account\":\"acct-B\",\"oneMinUpnl\":-0}",
+            "output": {
+              "ok": true,
+              "entryBits": "9223372036854775808",
+              "notionalBits": "4607182418800017408",
+              "pnlBits": "9223372036854775808",
+              "contractsBits": "9223372036854775808",
+              "oneBits": "9223372036854775808",
+              "account": "acct-B"
+            }
+          },
+          {
+            "input": "[]",
+            "output": {
+              "ok": false
+            }
+          }
+        ]
+      }
+    ],
+    "call": "{ let mut input=serde_json::Deserializer::from_str($value.as_str().expect(\"raw displayed-position visitor witness\")); match serde::Deserializer::deserialize_map(&mut input,$type) { Ok(v) => serde_json::json!({\"ok\":true,\"entryBits\":v.position.entry_price.to_bits().to_string(),\"notionalBits\":v.position.notional.to_bits().to_string(),\"pnlBits\":v.position.unrealized_pnl.to_bits().to_string(),\"contractsBits\":v.position.contracts.to_bits().to_string(),\"oneBits\":v.one_min_upnl.map(|n|n.to_bits().to_string()),\"account\":v.account}), Err(_) => serde_json::json!({\"ok\":false}) } }",
+    "cases": [
+      {
+        "input": "{\"id\":\"A\",\"symbol\":\"P\",\"side\":\"long\",\"entryPrice\":1.25,\"notional\":2.5,\"leverage\":3.75,\"unrealizedPnl\":-4.125,\"contracts\":6.5,\"liquidationPrice\":7.75,\"account\":\"acct-A\",\"oneMinUpnl\":10.25}",
+        "output": {
+          "ok": true,
+          "entryBits": "4608308318706860032",
+          "notionalBits": "4612811918334230528",
+          "pnlBits": "13839702392397889536",
+          "contractsBits": "4619004367821864960",
+          "oneBits": "4621959855077326848",
+          "account": "acct-A"
+        }
+      },
+      {
+        "input": "{\"id\":\"B\",\"symbol\":\"Q\",\"side\":\"short\",\"entryPrice\":-0,\"notional\":1,\"leverage\":2,\"unrealizedPnl\":-0,\"contracts\":-0,\"liquidationPrice\":3,\"account\":\"acct-B\",\"oneMinUpnl\":-0}",
+        "output": {
+          "ok": true,
+          "entryBits": "9223372036854775808",
+          "notionalBits": "4607182418800017408",
+          "pnlBits": "9223372036854775808",
+          "contractsBits": "9223372036854775808",
+          "oneBits": "9223372036854775808",
+          "account": "acct-B"
+        }
+      },
+      {
+        "input": "[]",
+        "output": {
+          "ok": false
+        }
+      }
+    ]
   }
 }
