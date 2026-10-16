@@ -64,18 +64,18 @@ const getV=vm.runInNewContext(ts.transpileModule('function make(){return ('+decl
 const precision=load(path.join(src,'utils/ccxt_helpers/precision.ts'));
 const fills=load(path.join(src,'exchanges/kraken/kraken.fills.ts'));
 const actualAdjust=load(path.join(src,'utils/safe-math.ts')).adjust;
+const signatureRejection=load(path.join(src,'utils/signatureRejection.ts'));
 const configs=require('./trading-fixtures.cjs');
 const triggerText=fs.readFileSync(futuresFile,'utf8'),triggerAst=ts.createSourceFile(futuresFile,triggerText,ts.ScriptTarget.Latest,true);
 const triggerDecl=triggerAst.statements.filter(ts.isVariableStatement).flatMap(s=>[...s.declarationList.declarations]).filter(d=>d.name.getText(triggerAst)==='parseTriggerSignal');assert.equal(triggerDecl.length,1);
 const parseSignal=vm.runInNewContext(ts.transpileModule('('+triggerDecl[0].initializer.getText(triggerAst)+')',{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText,{OrderStopTriggerType:types.OrderStopTriggerType});
 function err(e,original,response){return {identity:e===original,name:e.name,message:e.message,responseIdentity:e.response===response,causeIdentity:e.cause===original};}
-const qsReal=require(require.resolve('qs',{paths:[path.join(src,'..','..','..','node_modules')]}));
 function apiDeclaration(file,bindings){
  const source=fs.readFileSync(file,'utf8');hashes[path.basename(file)]=crypto.createHash('sha256').update(source).digest('hex');
  const ast=ts.createSourceFile(file,source,ts.ScriptTarget.Latest,true);
- const names=new Set(['sort','nonceCounter','createKrakenApiError','createAPI','unsignedFormParams','isKrakenSpotSignatureRejection']);const picked=ast.statements.filter(s=>ts.isVariableStatement(s)&&[...s.declarationList.declarations].some(d=>names.has(d.name.getText(ast))));
+ const names=new Set(['sort','nonceCounter','createKrakenApiError','unsignedFormParams','isKrakenSpotSignatureRejection','createAPI']);const picked=ast.statements.filter(s=>ts.isVariableStatement(s)&&[...s.declarationList.declarations].some(d=>names.has(d.name.getText(ast))));
  assert.equal(picked.filter(s=>[...s.declarationList.declarations].some(d=>d.name.getText(ast)==='createAPI')).length,1);
- const code='function make(){'+picked.map(s=>s.getText(ast).replace(/^export\s+/, '')).join('\n')+';return {createAPI'+(file.endsWith('/kraken.api.ts')?',counter:()=>nonceCounter,setCounter:n=>nonceCounter=n':'')+(file.endsWith('/krakenspot.api.ts')?',isKrakenSpotSignatureRejection':'')+'};}';
+ const code='function make(){'+picked.map(s=>s.getText(ast).replace(/^export\s+/, '')).join('\n')+';return {createAPI'+(file.endsWith('/kraken.api.ts')?',counter:()=>nonceCounter,setCounter:n=>nonceCounter=n':'')+'};}';
  return vm.runInNewContext(ts.transpileModule(code,{compilerOptions:{target:ts.ScriptTarget.ES2022}}).outputText+';make()',bindings,{filename:file});
 }
 (async()=>{
@@ -118,14 +118,13 @@ function apiDeclaration(file,bindings){
    const clients=[];
    const spot=family==='spotApi';const constants=spot?spotTypes:futuresTypes;
    const bindings={...constants,Buffer:{from(value,encoding){if(encoding==='base64'){events.push({kind:'secret',value});return 'SECRET';}return value;},concat(parts){events.push({kind:'pathHash',path:parts[0],hash:parts[1]});return 'PATH_HASH';}},
-    safeCexAxiosCreate(config,options,exchange){events.push({kind:'create',config,optionsIdentity:options===cfg.options,exchangeIdentity:exchange===cfg.exchange});if(cfg.createFail)throw original;const c={id:'client',interceptors:{request:{use(fn){events.push({kind:'requestUse'});c.request=fn;}},response:{use(success,rejected){events.push({kind:'responseUse'});c.success=success;c.rejected=rejected;}}}};clients.push(c);return c;},
-    retry(client,config){events.push({kind:'retry',config});if(cfg.retryFail)throw original;},
+    safeCexAxiosCreate(config,options,exchange){events.push({kind:'create',config,optionsIdentity:options===cfg.options,exchangeIdentity:exchange===cfg.exchange});if(cfg.createFail)throw original;const c={id:'client',request(config){events.push({kind:'resend',config});return 'RESENT';},interceptors:{request:{use(fn){events.push({kind:'requestUse'});c.interceptRequest=fn;}},response:{use(success,rejected){events.push({kind:'responseUse'});c.success=success;c.rejected=rejected;}}}};clients.push(c);return c;},
+    retry(client,config){events.push({kind:'retry',config:typeof config.retryCondition==='function'?{...config,retryCondition:'spotCondition'}:config});if(cfg.retryFail)throw original;},
+    resendOnSignatureRejection:signatureRejection.resendOnSignatureRejection,signatureRejectedResponse:signatureRejection.signatureRejectedResponse,
     networkErrorOnRead(posted){events.push({kind:'network',posted});return 'condition';},readsAndPosted(...posted){return posted;},
-    signatureRejectedResponse(){events.push({kind:'signatureCondition'});return ()=>false;},
-    resendOnSignatureRejection(client,response,predicate){events.push({kind:'resend',predicate:predicate.name});return cfg.resend?'RESENT':undefined;},
     installTransportAdapter(client,options,name){events.push({kind:'transport',name});},markSkipRemoteSigning(config){events.push({kind:'skip'});},
     virtualClock:{getCurrentTimeMs:()=>cfg.clock??1723638896789},
-    qs:{parse(value){events.push({kind:'qsParse',value});return qsReal.parse(value);},stringify(value,options){events.push({kind:'qs',value,form:options.format==='RFC1738'&&typeof options.sort==='function'?'sorted1738':'repeat'});if(cfg.qsFail)throw original;return 'qs-result';}},
+    qs:{parse(value){events.push({kind:'qsParse',value});return structuredClone(cfg.parsed??{nonce:'previous',volume:'17.25'});},stringify(value,options){events.push({kind:'qs',value,form:options.format==='RFC1738'&&typeof options.sort==='function'?'sorted1738':'repeat'});if(cfg.qsFail)throw original;return 'qs-result';}},
     JSON:{stringify(value){events.push({kind:'json',value});return 'JSON';}},encodeURIComponent(value){events.push({kind:'encode',value});return 'ENCODED';},
     createHash(algorithm){assert.equal(algorithm,'sha256');return {update(value,encoding){assert.equal(encoding,'utf8');events.push({kind:'sha256',value});if(cfg.hashFail)throw original;return this;},digest(){return 'HASH';}};},
     createHmac(algorithm,secret){assert.equal(algorithm,'sha512');return {update(payload){events.push({kind:'hmac512',secret,payload});return this;},digest(encoding){assert.equal(encoding,'base64');return 'SIGNATURE';}};},v:getV
@@ -135,14 +134,12 @@ function apiDeclaration(file,bindings){
    const steps=[];
    if(!error)for(const step of cfg.steps){const input=step.kind==='rejected'?(cfg.errorResponse??step.input):step.input;Object.assign(cfg.options,step.options||{});const client=step.client??0;let result,error;
     const beforeInput=structuredClone(input);
-    try{result=await clients[client][step.kind](step.kind==='rejected'?original:input);}catch(e){error=err(e,original,input);}
-    steps.push({kind:step.kind,client,input:capture(beforeInput),after:capture(input),result:capture(result),error,identity:result===input,counter:capture(spot?undefined:module.counter()),options:capture(step.options),qsCalls:events.filter(e=>e.kind==='qs').length-steps.reduce((n,s)=>n+s.qsCalls,0)});
+    const before=events.length;let syncEvents=0;
+    try{const pending=clients[client][step.kind==='request'?'interceptRequest':step.kind](step.kind==='rejected'?original:input);syncEvents=events.length-before;result=await pending;}catch(e){syncEvents=events.length-before;error=err(e,original,input);}
+    steps.push({kind:step.kind,client,input:capture(beforeInput),after:capture(input),result:capture(result),error,identity:result===input,counter:capture(spot?undefined:module.counter()),options:capture(step.options),qsCalls:events.filter(e=>e.kind==='qs').length-steps.reduce((n,s)=>n+s.qsCalls,0),syncEvents});
    }
    api[family].push({cfg:capture(raw),error,steps,events:capture(events)});
   }
  }
- const spotModule=apiDeclaration(path.join(src,'exchanges/kraken/krakenspot.api.ts'),{qs:qsReal});
- const signatureCorpus=[{error:['EAPI:Invalid signature']},{error:['x','EAPI:Invalid signature; retry']},{error:['EAPI:Invalid key']},{error:'EAPI:Invalid signature'},{error:[]},{},null,'EAPI:Invalid signature',{error:[17,null]}];
- const signature={corpus:signatureCorpus,results:signatureCorpus.map(data=>spotModule.isKrakenSpotSignatureRejection(data))};
- process.stdout.write(JSON.stringify({header:{hashes,tz:process.env.TZ},trading,api,signature}));
+ process.stdout.write(JSON.stringify({header:{hashes,tz:process.env.TZ},trading,api}));
 })().catch(e=>{console.error(e);process.exitCode=1});
